@@ -31,8 +31,9 @@
 **Current status (corrected):**
 - ✅ Platform foundation + all 18 universal live games are running.
 - ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette, Dice, sound engine).
-- ⚠️ **P0 regression:** Card games (Teen Patti/Poker/Champion Poker) reported “unsmooth”/buggy; previous edits attempted but not verified.
-- ⏳ Slot redesigns + win confetti polish not started.
+- ✅ **Card games bug fixed + verified** (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
+- 🔥 Slot redesigns are next (P0).
+- ⏳ Win confetti polish not started.
 
 ---
 
@@ -124,9 +125,11 @@
 ### Phase LIVE‑4: Testing, Hardening, and Fixes
 **Goal:** Stabilize the live platform across all games.
 
-**Status:** ⚠️ PARTIAL / NEEDS UPDATE
-- A previous test report exists (`/app/test_reports/iteration_4.json`), but the **card-game bug fix was not verified** with the mandatory testing agent after subsequent edits.
-- This phase must be re-opened specifically for the reported card-game regression.
+**Status:** ✅ UPDATED / CARD-GAME REGRESSION CLOSED
+- New test report created: **`/app/test_reports/iteration_5.json`**.
+- Card game regression fixed and verified with mandatory testing agent:
+  - Backend: 100% (15/15)
+  - Frontend: 100% (all 5 card games verified smooth, bets work, no console errors)
 
 ---
 
@@ -150,51 +153,43 @@
 ### Phase LIVE‑6: Card Games — Bug Fix + Smoothing (Teen Patti / Poker / Champion Poker)
 **Goal (P0):** Fix the user-reported “unsmooth gameplay”/buggy flow by preventing polling updates from interrupting flip/deal animations and by ensuring server phase timings align with the frontend reveal timeline.
 
-**Status:** 🔥 IN PROGRESS (must be verified)
+**Status:** ✅ COMPLETED + VERIFIED
 
-**Primary suspected root cause**
-- `useLiveRound.js` polling (≈1s) may be overwriting animation state mid-reveal, causing:
-  - flicker/jumps
-  - cards “re-dealing”
-  - abrupt state resets
+**Root cause (confirmed)**
+- `useLiveRound.js` was re-anchoring the countdown deadline on every poll. Network jitter caused `countdown` to jump, making derived `elapsed` time non-monotonic. This **un-triggered** `FlipCard` deal/flip thresholds (cards appearing/disappearing, flipping back, re-dealing flicker).
 
-**Work items**
-1. **Frontend smoothing / state management**
-   - Audit and update:
-     - `/app/frontend/src/pages/play/CardDuelGame.js`
-     - `/app/frontend/src/pages/play/VideoPokerGame.js`
+**Fix (implemented)**
+1. **Anchored deadlines per phase**
+   - Deadline now anchors once per `(round_number, phase)` and only re-syncs if drift exceeds ~450ms.
+2. **Monotonic reveal clock**
+   - New `revealElapsed` is monotonic inside a reveal phase.
+   - `revealProgress` now derived from the monotonic clock (helps games like Bingo/Keno/Checker too).
+3. **Tight phase transition**
+   - Instant boundary poll fires when countdown hits zero to reduce “late phase switch” feel.
+4. **Consumers updated**
+   - Updated to consume `revealElapsed`:
+     - `/app/frontend/src/pages/play/CardDuelGame.js` (Teen Patti + Poker)
+     - `/app/frontend/src/pages/play/VideoPokerGame.js` (No-Hold)
      - `/app/frontend/src/pages/play/ChampionPokerGame.js`
-     - `/app/frontend/src/lib/useLiveRound.js`
-   - Implement an animation-safe strategy (one or more):
-     - derive card-reveal progress purely from server `phase` + `countdown` (no local re-deal state)
-     - freeze per-round “presentation state” keyed by `round_number` until phase changes
-     - ignore mid-phase outcome refreshes unless `round_number` advances
-   - Ensure `FlipCard` usage does not re-mount unexpectedly (stable keys and stable layout slots).
+     - `/app/frontend/src/pages/play/AndarBaharGame.js`
 
-2. **Backend/Timing validation**
-   - Confirm `/app/backend/live_engines.py` card-game phase durations match frontend flip cadence.
-   - Ensure state payloads are stable within a phase (no unnecessary reshaping that triggers re-render thrash).
-
-3. **MANDATORY verification (immediately after fix)**
-   - Run **testing agent** for both:
-     - Backend: live endpoints + phase correctness
-     - Frontend: card pages load + stable animations (no console errors)
-   - Save a new test report under `/app/test_reports/` (next iteration number).
+**Mandatory verification (completed)**
+- Testing agent run and recorded in **`/app/test_reports/iteration_5.json`** (backend + frontend).
 
 **Exit criteria**
-- Teen Patti / Poker / Champion Poker deal and flip smoothly with no flicker.
-- No state desync between server phase and presented cards.
-- Testing agent confirms green.
+- ✅ Teen Patti / Poker / Champion Poker deal and flip smoothly with no flicker.
+- ✅ No state desync between server phase and presented cards.
+- ✅ Testing agent confirms green.
 
 ---
 
 ### Phase LIVE‑7: Slot Games Redesign (3 Distinct Experiences)
 **Goal (P0):** Make 777 Triple Fun, Joker Bonus, Lucky 8 Line visually and structurally different, inspired by real casino slots (without copying protected art).
 
-**Status:** ⏳ NOT STARTED
+**Status:** 🔥 IN PROGRESS (NEXT)
 
 **Approach**
-- Create **separate components** (recommended) instead of a single `SlotGame.js` skin:
+- Create **separate components** instead of a single `SlotGame.js` skin:
   - `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
   - `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
   - `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
@@ -241,15 +236,13 @@
 ---
 
 ## 3) Next Actions
-1. **P0: Fix card games regression (Teen Patti / Poker / Champion Poker)**
-   - Implement animation-safe state + timing alignment.
-   - **Run mandatory testing agent (frontend + backend)** and publish new test report.
-2. **P0: Redesign 3 slot games into distinct components**
-   - Implement themes + unique symbols/sounds/win animations.
-   - Run frontend test pass.
-3. **P1: Confetti/coin burst for wins**
+1. **P0: Slot redesigns into distinct components**
+   - Implement 3 new slot UIs/components + unique reels/symbols/SFX.
+   - Ensure each feels like a different real casino cabinet.
+   - Run frontend testing agent and store new test report.
+2. **P1: Confetti/coin burst for wins**
    - Update `ResultBanner.js` and verify across a sample of games.
-4. **Backlog (blocked by user inputs / priority):**
+3. **Backlog (blocked by user inputs / priority):**
    - SMTP/SendGrid integration (credentials pending).
    - Master Prompt 1 enterprise admin/RBAC restructure (after games).
 
@@ -270,8 +263,8 @@
   - ✅ Premium flagship visuals: Aviator plane, Roulette realism, Dice realism.
   - ✅ Sound enabled for all games with global mute.
 - Card games (P0):
-  - ⏳ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
-  - ⏳ Verified by **mandatory testing agent** after fix.
+  - ✅ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
+  - ✅ Verified by **mandatory testing agent** after fix (**iteration_5.json**).
 - Slots (P0):
   - ⏳ 777 Triple Fun, Joker Bonus, Lucky 8 Line are clearly differentiated in theme, layout, symbols, sounds, and win animations.
 - Win polish (P1):
@@ -288,8 +281,8 @@
 - ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
 - ✅ Dice games upgraded with real dice visuals + rolling effects.
 - ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
-- 🔥 **IN PROGRESS:** Fix card-game “unsmooth” bug (Teen Patti/Poker/Champion Poker) + **mandatory testing agent** verification.
-- ⏳ NOT STARTED: 3 slot redesigns (777 Triple Fun / Joker Bonus / Lucky 8 Line) into distinct components.
+- ✅ **Card games regression fixed + verified** (deadline anchoring + monotonic revealElapsed + boundary poll). Test report: **`/app/test_reports/iteration_5.json`**.
+- 🔥 **IN PROGRESS (NEXT):** 3 slot redesigns (777 Triple Fun / Joker Bonus / Lucky 8 Line) into distinct components.
 - ⏳ NOT STARTED: Confetti/coin burst win polish.
 - ⏸️ BACKLOG/BLOCKED: Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
 - ⏸️ PENDING: Real email provider integration (SendGrid/SMTP creds at end).

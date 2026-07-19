@@ -1,18 +1,22 @@
 [
   {
-    "content": "Audit useLiveRound.js polling + card games for animation/state clash",
+    "content": "Fix card games bug + verify with testing agent (iteration_5: 100% pass)",
     "status": "completed"
   },
   {
-    "content": "Implement animation-safe fix (monotonic revealElapsed + anchored deadline + boundary poll)",
+    "content": "Build 3 distinct slot cabinets (777 Vegas / Joker neon / Lucky 8 fortune)",
     "status": "completed"
   },
   {
-    "content": "Verify backend live_engines.py card phase timings align with frontend reveal timeline",
+    "content": "Fix revealElapsed stale-countdown bug found during slot verification",
     "status": "completed"
   },
   {
-    "content": "Run mandatory testing_agent (backend + frontend) for card games fix",
+    "content": "Add confetti/coin-burst win celebrations to ResultBanner",
+    "status": "completed"
+  },
+  {
+    "content": "Run testing agent for slot redesigns + confetti polish",
     "status": "in_progress"
   }
 ]

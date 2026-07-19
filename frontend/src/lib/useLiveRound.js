@@ -66,6 +66,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
         const base = {
           key: `r-${s.round_number}`,
           win: s.payout > 0,
+          big: s.payout > 0 && s.payout >= s.total_bet * 5,
           payout: s.payout,
           title: s.payout > 0 ? "You won!" : "Not this time",
         };
@@ -154,8 +155,11 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   const revealSecs = state?.timings?.reveal || 4;
   /* Monotonic reveal clock: within one round's REVEAL phase this value can
      only move forward, so deal/flip animations can never un-trigger even if
-     the countdown gets a small network-latency correction. */
-  const rawElapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+     the countdown gets a small network-latency correction. Read the deadline
+     ref directly (it is anchored synchronously when the phase flips) so the
+     first REVEAL render never sees a stale betting-phase countdown. */
+  const liveCd = deadlineRef.current > 0 ? Math.max(0, (deadlineRef.current - Date.now()) / 1000) : 0;
+  const rawElapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - liveCd) : 0;
   const monoKey = `${state?.round_number ?? "-"}:${phase ?? "-"}`;
   if (monoRef.current.key !== monoKey) {
     monoRef.current = { key: monoKey, val: rawElapsed };

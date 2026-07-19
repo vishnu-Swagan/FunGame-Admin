@@ -229,6 +229,51 @@ export const sfx = {
     sfx.cheer(true);
     sfx.clap(true);
   },
+
+  /* ---- slot cabinets (distinct per machine) ---- */
+  lever: () => {
+    // mechanical arm pull: clunk + spring + latch
+    noise({ dur: 0.09, vol: 0.18, freq: 650, filter: "lowpass" });
+    tone({ freq: 230, dur: 0.14, type: "square", vol: 0.07, when: 0.05, slideTo: 110 });
+    noise({ dur: 0.06, vol: 0.13, when: 0.18, freq: 1500, q: 2 });
+  },
+  reelStop: () => {
+    noise({ dur: 0.05, vol: 0.2, freq: 900, filter: "lowpass" });
+    tone({ freq: 330, dur: 0.05, type: "square", vol: 0.09 });
+  },
+  slotBell: () => {
+    // classic Vegas payout bell
+    [1568, 1568, 2093].forEach((f, i) => tone({ freq: f, dur: 0.38, type: "triangle", vol: 0.16, when: i * 0.17 }));
+  },
+  lever777: () => {
+    sfx.lever();
+    for (let i = 0; i < 16; i++) tone({ freq: 300 + (i % 3) * 80, dur: 0.03, type: "square", vol: 0.05, when: 0.25 + i * 0.09 });
+  },
+  jokerLaugh: () => {
+    // sneering descending "ha-ha-ha-ha"
+    [659, 587, 523, 440].forEach((f, i) =>
+      tone({ freq: f, dur: 0.17, type: "sawtooth", vol: 0.06, when: i * 0.16, slideTo: f * 0.8 })
+    );
+  },
+  jokerSpin: () => {
+    for (let i = 0; i < 14; i++) tone({ freq: 520 + (i % 4) * 140, dur: 0.035, type: "square", vol: 0.04, when: i * 0.09 });
+    noise({ dur: 1.2, vol: 0.03, freq: 1700, q: 0.8 });
+  },
+  gong: () => {
+    tone({ freq: 196, dur: 1.7, type: "sine", vol: 0.2 });
+    tone({ freq: 294, dur: 1.25, type: "sine", vol: 0.09, when: 0.02 });
+    tone({ freq: 392, dur: 0.9, type: "triangle", vol: 0.05, when: 0.05 });
+    noise({ dur: 0.22, vol: 0.08, freq: 2600, q: 0.8 });
+  },
+  coinShower: () => {
+    for (let i = 0; i < 11; i++)
+      tone({ freq: 2100 + Math.random() * 1500, dur: 0.05, type: "triangle", vol: 0.07, when: i * 0.06 + Math.random() * 0.03 });
+  },
+  luckySpin: () => {
+    // pentatonic pluck run (guzheng-like)
+    [523, 587, 659, 784, 880].forEach((f, i) => tone({ freq: f * 2, dur: 0.1, type: "triangle", vol: 0.055, when: i * 0.13 }));
+    noise({ dur: 1.1, vol: 0.028, freq: 1300, q: 0.7 });
+  },
 };
 
 /* ---------------- Ambient casino music (generative, no files) ---------------- */

@@ -100,3 +100,44 @@
   -webkit-backface-visibility: hidden;
 }
 
+
+/* ---------- slot cabinets ---------- */
+@keyframes fg-reel-scroll {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+.fg-reel-spin-strip {
+  animation: fg-reel-scroll 0.38s linear infinite;
+  filter: blur(1.5px);
+  will-change: transform;
+}
+@keyframes fg-bulb-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+.fg-bulb { animation: fg-bulb-blink 1.1s ease-in-out infinite; }
+.fg-bulb-fast { animation-duration: 0.32s; }
+@keyframes fg-neon-flicker {
+  0%, 100% { opacity: 1; }
+  7% { opacity: 0.55; }
+  9% { opacity: 1; }
+  53% { opacity: 0.85; }
+  55% { opacity: 1; }
+}
+.fg-neon { animation: fg-neon-flicker 3.4s linear infinite; }
+@keyframes fg-lantern-sway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.fg-lantern { transform-origin: top center; animation: fg-lantern-sway 3.6s ease-in-out infinite; }
+@keyframes fg-line-flash {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.fg-line-flash { animation: fg-line-flash 0.55s ease-in-out infinite; }
+@keyframes fg-win-glow {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 199, 64, 0.25); }
+  50% { box-shadow: 0 0 26px rgba(255, 199, 64, 0.6); }
+}
+.fg-win-glow { animation: fg-win-glow 0.8s ease-in-out infinite; }
+
