@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { Timer, RotateCcw, Repeat } from "lucide-react";
+import { FitWidth } from "@/components/FitWidth";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
@@ -247,6 +248,8 @@ export default function RouletteGame({ game }) {
   const [countdown, setCountdown] = useState(0);
   const [wheelRot, setWheelRot] = useState(0);
   const [spinningAnim, setSpinningAnim] = useState(false);
+  const [cameraZoom, setCameraZoom] = useState(false);
+  const camTimerRef = useRef(null);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [placing, setPlacing] = useState(false);
@@ -322,6 +325,11 @@ export default function RouletteGame({ game }) {
       const next = prev - delta;
       wheelRotRef.current = next;
       setSpinningAnim(true);
+      // cinematic camera: dolly in on the numbers for the spin, pull back
+      // once the ball has landed and the result is showing
+      setCameraZoom(true);
+      clearTimeout(camTimerRef.current);
+      camTimerRef.current = setTimeout(() => setCameraZoom(false), 5600);
       setWheelRot(next);
       sfx.ballSpin();
       animateBall();
@@ -346,6 +354,7 @@ export default function RouletteGame({ game }) {
       }
       if (data.phase === "BETTING") {
         setSpinningAnim(false);
+        setCameraZoom(false);
       }
       // Show settlement result once
       if (data.settled && settledShownRef.current !== data.settled.round_number) {
@@ -389,6 +398,7 @@ export default function RouletteGame({ game }) {
     return () => {
       clearInterval(pollRef.current);
       clearInterval(tickRef.current);
+      clearTimeout(camTimerRef.current);
       cancelAnimationFrame(ballAnimRef.current);
     };
   }, [poll, loadHistory]);
@@ -477,16 +487,30 @@ export default function RouletteGame({ game }) {
         </div>
       )}
 
-      {/* 3D Wheel */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-2">
-        <div className="relative h-[212px] w-[264px]" data-testid="roulette-wheel">
+      {/* 3D Wheel with cinematic camera: dollies in on the numbers while the
+          ball is spinning, pulls back out once the result lands */}
+      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-2 overflow-hidden">
+        <div
+          className="relative h-[212px] w-[264px] z-10"
+          data-testid="roulette-wheel"
+          style={{
+            transform: cameraZoom ? "scale(1.34)" : "scale(1)",
+            transformOrigin: "50% 34%",
+            transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+            willChange: "transform",
+          }}
+        >
           {/* screen-space pointer above the far edge of the tilted wheel */}
           <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
           {/* perspective scene */}
           <div className="absolute inset-0" style={{ perspective: "860px" }}>
             <div
               className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
-              style={{ transform: "rotateX(52deg)", transformStyle: "preserve-3d" }}
+              style={{
+                transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
+                transformStyle: "preserve-3d",
+                transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+              }}
             >
               {/* extruded wooden bowl + ground shadow */}
               <RimWall3D />
@@ -531,13 +555,14 @@ export default function RouletteGame({ game }) {
 
       <ResultBanner result={result} />
 
-      {/* Classic European table — swipe sideways on small screens */}
+      {/* Classic European table — auto-fits any screen width */}
       <div
-        className="rounded-2xl border-2 border-[#c9a227]/50 p-2.5 overflow-x-auto"
+        className="rounded-2xl border-2 border-[#c9a227]/50 p-2.5"
         style={{ background: "radial-gradient(130% 140% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%)" }}
         data-testid="roulette-board"
       >
-        <div className="min-w-[600px] select-none">
+        <FitWidth>
+          <div className="w-[600px] select-none">
           <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "44px 44px 44px 42px 42px" }}>
             {/* zero wedge */}
             <BoardCell
@@ -638,8 +663,9 @@ export default function RouletteGame({ game }) {
             <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={FELT_CELL} />
             <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={FELT_CELL} />
           </div>
-        </div>
-        <p className="text-[10px] text-white/50 mt-1.5 sm:hidden">Swipe the table sideways to reach every bet</p>
+          </div>
+        </FitWidth>
+        <p className="text-[10px] text-white/50 mt-1.5">The table auto-fits your screen — every bet is always reachable</p>
       </div>
 
       {/* Chip selector + actions */}

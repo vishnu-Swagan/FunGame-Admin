@@ -4,6 +4,7 @@ import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { FlipCard } from "@/components/play/FlipCard";
+import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
 
 /**
@@ -68,16 +69,18 @@ export default function ChampionPokerGame({ game }) {
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "HOLD & DRAW…" }} />
 
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
-        <div className="flex gap-1.5 justify-center">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex flex-col items-center gap-1">
-              <FlipCard code={cardCode(i)} dealt={dealt(i)} flipped={cardFlipped(i)} highlight={showHolds && !showHand && holds[i]} />
-              <span className={`text-[9px] font-bold tracking-wider min-h-[12px] ${showHolds && !showHand ? (holds[i] ? "text-primary" : "text-white/35") : "text-transparent"}`}>
-                {showHolds && !showHand ? (holds[i] ? "HELD" : "DRAW") : "·"}
-              </span>
-            </div>
-          ))}
-        </div>
+        <FitWidth>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex flex-col items-center gap-1">
+                <FlipCard code={cardCode(i)} dealt={dealt(i)} flipped={cardFlipped(i)} highlight={showHolds && !showHand && holds[i]} />
+                <span className={`text-[9px] font-bold tracking-wider min-h-[12px] ${showHolds && !showHand ? (holds[i] ? "text-primary" : "text-white/35") : "text-transparent"}`}>
+                  {showHolds && !showHand ? (holds[i] ? "HELD" : "DRAW") : "·"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </FitWidth>
         {showHand && (
           <p className="text-center text-sm font-bold text-white/85 mt-1" data-testid="champion-hand">
             {outcome.hand}

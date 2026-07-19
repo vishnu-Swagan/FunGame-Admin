@@ -276,6 +276,134 @@ export const sfx = {
   },
 };
 
+/* ---------------- Aviator flight engine (continuous, real plane feel) ----------------
+   Twin detuned sawtooth "pistons" through a lowpass + looped air noise + a prop
+   LFO throbbing the volume. Pitch/brightness rise with the multiplier; on crash
+   the plane "flies away" with a doppler pitch drop and a long fade. */
+let flightNodes = null;
+
+export const flight = {
+  start() {
+    if (muted || flightNodes) return;
+    const c = ac();
+    if (!c) return;
+    try {
+      const out = c.createGain();
+      out.gain.setValueAtTime(0.0001, c.currentTime);
+      out.connect(bus(c));
+
+      // engine core
+      const o1 = c.createOscillator();
+      o1.type = "sawtooth";
+      o1.frequency.value = 84;
+      const o2 = c.createOscillator();
+      o2.type = "sawtooth";
+      o2.frequency.value = 86.5; // slight detune = engine growl
+      const lp = c.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 260;
+      lp.Q.value = 0.9;
+      o1.connect(lp);
+      o2.connect(lp);
+      lp.connect(out);
+
+      // air rushing past the fuselage
+      const len = c.sampleRate * 2;
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      const air = c.createBufferSource();
+      air.buffer = buf;
+      air.loop = true;
+      const airF = c.createBiquadFilter();
+      airF.type = "bandpass";
+      airF.frequency.value = 950;
+      airF.Q.value = 0.5;
+      const airG = c.createGain();
+      airG.gain.value = 0.16;
+      air.connect(airF).connect(airG).connect(out);
+
+      // propeller throb
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 12;
+      const lfoG = c.createGain();
+      lfoG.gain.value = 0.05;
+      lfo.connect(lfoG);
+      lfoG.connect(out.gain);
+
+      // spool up like a real takeoff
+      out.gain.exponentialRampToValueAtTime(0.2, c.currentTime + 1.4);
+      o1.start();
+      o2.start();
+      air.start();
+      lfo.start();
+      flightNodes = { c, out, o1, o2, lp, air, lfo };
+    } catch (e) {
+      flightNodes = null;
+    }
+  },
+  /* climb: pitch + brightness follow the multiplier */
+  set(mult) {
+    if (!flightNodes) return;
+    try {
+      const { c, o1, o2, lp, lfo } = flightNodes;
+      const m = Math.min(10, Math.max(1, mult));
+      const f = 84 + (m - 1) * 13;
+      o1.frequency.setTargetAtTime(f, c.currentTime, 0.25);
+      o2.frequency.setTargetAtTime(f * 1.03, c.currentTime, 0.25);
+      lp.frequency.setTargetAtTime(260 + (m - 1) * 110, c.currentTime, 0.3);
+      lfo.frequency.setTargetAtTime(12 + (m - 1) * 1.5, c.currentTime, 0.4);
+    } catch (e) {
+      /* ignore */
+    }
+  },
+  /* the plane flew away: doppler pitch drop + long fade into the distance */
+  flyAway() {
+    if (!flightNodes) return;
+    try {
+      const { c, out, o1, o2, lp } = flightNodes;
+      const t = c.currentTime;
+      o1.frequency.setTargetAtTime(58, t, 0.55);
+      o2.frequency.setTargetAtTime(59, t, 0.55);
+      lp.frequency.setTargetAtTime(140, t, 0.5);
+      out.gain.setTargetAtTime(0.0001, t + 0.15, 0.6);
+    } catch (e) {
+      /* ignore */
+    }
+    const nodes = flightNodes;
+    flightNodes = null;
+    setTimeout(() => flight._kill(nodes), 2800);
+  },
+  stop() {
+    if (!flightNodes) return;
+    const nodes = flightNodes;
+    flightNodes = null;
+    try {
+      nodes.out.gain.setTargetAtTime(0.0001, nodes.c.currentTime, 0.08);
+    } catch (e) {
+      /* ignore */
+    }
+    setTimeout(() => flight._kill(nodes), 400);
+  },
+  _kill(nodes) {
+    if (!nodes) return;
+    try {
+      nodes.o1.stop();
+      nodes.o2.stop();
+      nodes.air.stop();
+      nodes.lfo.stop();
+      nodes.out.disconnect();
+    } catch (e) {
+      /* ignore */
+    }
+  },
+};
+
+// stop the engine immediately if the player mutes mid-flight
+listeners.add((m) => {
+  if (m) flight.stop();
+});
+
 /* ---------------- Ambient casino music (generative, no files) ---------------- */
 const CHORDS = [
   [220.0, 261.63, 329.63], // Am

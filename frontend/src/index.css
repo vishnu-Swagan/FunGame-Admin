@@ -9,6 +9,7 @@ body {
     font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden; /* game boards auto-scale; never allow sideways drift on small phones */
 }
 
 @layer base {

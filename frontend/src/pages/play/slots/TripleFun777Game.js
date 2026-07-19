@@ -7,6 +7,7 @@ import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
+import { FitWidth } from "@/components/FitWidth";
 
 /**
  * 777 TRIPLE FUN - classic Vegas cabinet: red + gold marquee with blinking
@@ -165,7 +166,9 @@ export default function TripleFun777Game({ game }) {
         </div>
 
         {/* reels + lever */}
-        <div className="p-4 flex items-center gap-3">
+        <div className="p-4">
+          <FitWidth>
+            <div className="flex items-center gap-3">
           <div
             className={`rounded-xl p-1.5 mx-auto w-fit ${isWin ? "fg-win-glow" : ""}`}
             style={{ background: "linear-gradient(180deg, #cbd5e1, #64748b 45%, #94a3b8)" }}
@@ -199,6 +202,8 @@ export default function TripleFun777Game({ game }) {
               <div className="h-3 w-6 rounded-sm mt-auto" style={{ background: "#475569" }} />
             </div>
           </div>
+            </div>
+          </FitWidth>
         </div>
 
         {/* result plate */}

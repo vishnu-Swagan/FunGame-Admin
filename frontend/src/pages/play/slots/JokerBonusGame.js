@@ -6,6 +6,7 @@ import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
+import { FitWidth } from "@/components/FitWidth";
 
 /**
  * JOKER BONUS - dark jester cabinet: violet neon, harlequin diamond backdrop,
@@ -150,21 +151,25 @@ export default function JokerBonusGame({ game }) {
           </div>
 
           {/* neon reels */}
-          <div className="p-4 flex gap-2.5 justify-center" data-testid="joker-reels">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className={`w-[86px] rounded-xl overflow-hidden border ${isWin ? "fg-win-glow" : ""}`}
-                style={{
-                  borderColor: i < stoppedCount && outcome?.reels[i] === "joker" ? "#facc15aa" : `${NEON}44`,
-                  background: "linear-gradient(180deg, #1a0b2e, #0d0518 50%, #1a0b2e)",
-                  boxShadow: `inset 0 8px 12px rgba(0,0,0,0.6), inset 0 -8px 12px rgba(0,0,0,0.6), 0 0 12px ${NEON}22`,
-                }}
-                data-testid={`joker-reel-${i}`}
-              >
-                {reelCell(i)}
+          <div className="p-4">
+            <FitWidth>
+              <div className="flex gap-2.5" data-testid="joker-reels">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className={`w-[86px] rounded-xl overflow-hidden border ${isWin ? "fg-win-glow" : ""}`}
+                    style={{
+                      borderColor: i < stoppedCount && outcome?.reels[i] === "joker" ? "#facc15aa" : `${NEON}44`,
+                      background: "linear-gradient(180deg, #1a0b2e, #0d0518 50%, #1a0b2e)",
+                      boxShadow: `inset 0 8px 12px rgba(0,0,0,0.6), inset 0 -8px 12px rgba(0,0,0,0.6), 0 0 12px ${NEON}22`,
+                    }}
+                    data-testid={`joker-reel-${i}`}
+                  >
+                    {reelCell(i)}
+                  </div>
+                ))}
               </div>
-            ))}
+            </FitWidth>
           </div>
 
           {/* joker meter */}

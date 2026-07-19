@@ -2,22 +2,15 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
-import { isMuted, toggleMuted, onMuteChange, music } from "@/lib/sound";
+import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 
 export const PlayShell = ({ game, balance, children }) => {
   const navigate = useNavigate();
   const [muted, setMutedState] = useState(isMuted());
   useEffect(() => {
-    const off = onMuteChange((m) => {
-      setMutedState(m);
-      if (m) music.stop();
-      else music.start();
-    });
-    music.start(); // ambient casino music while on a game table (respects mute)
-    return () => {
-      off();
-      music.stop();
-    };
+    // Background casino music disabled by user request - only game SFX play.
+    const off = onMuteChange((m) => setMutedState(m));
+    return () => off();
   }, []);
   return (
     <div className="space-y-4" data-testid="game-play-page">

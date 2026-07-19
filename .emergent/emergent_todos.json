@@ -1,22 +1,26 @@
 [
   {
-    "content": "Fix card games bug + verify with testing agent (iteration_5: 100% pass)",
+    "content": "Create FitWidth auto-scale component + viewport-fit/overflow guards",
     "status": "completed"
   },
   {
-    "content": "Build 3 distinct slot cabinets (777 Vegas / Joker neon / Lucky 8 fortune)",
+    "content": "Apply FitWidth to roulette board, 3 slot cabinets, 3 card game rows",
     "status": "completed"
   },
   {
-    "content": "Fix revealElapsed stale-countdown bug found during slot verification",
+    "content": "Roulette camera zoom: dolly-in during spin, pull back after result (verified via computed transforms)",
     "status": "completed"
   },
   {
-    "content": "Add confetti/coin-burst win celebrations to ResultBanner",
+    "content": "Disable background casino music (keep SFX + mute toggle)",
     "status": "completed"
   },
   {
-    "content": "Run testing agent for slot redesigns + confetti polish (iteration_6: 100% pass)",
+    "content": "Aviator: flight engine sound only (rise with multiplier + doppler fly-away)",
     "status": "completed"
+  },
+  {
+    "content": "Run testing agent regression pass across affected games",
+    "status": "in_progress"
   }
 ]

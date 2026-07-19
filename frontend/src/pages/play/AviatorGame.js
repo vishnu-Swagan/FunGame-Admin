@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Users, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
-import { sfx } from "@/lib/sound";
+import { flight } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -266,17 +266,13 @@ export default function AviatorGame({ game }) {
         if (data.phase === "CRASHED") setMult(data.crash_point);
         if (data.phase === "BETTING") setMult(1.0);
       }
-      // phase-transition sounds (universal round, heard by everyone watching)
+      // flight engine: the ONLY sound in Aviator (user request) - real plane
+      // engine while flying, doppler fly-away when it crashes
       if (prev && prev.phase !== data.phase) {
-        if (data.phase === "FLYING") sfx.takeoff();
-        if (data.phase === "CRASHED" && prev.phase === "FLYING") {
-          sfx.crash();
-          // crowd reacts to MY outcome
-          const lostBet = (data.my_bets || []).some((b) => b.status === "LOST");
-          const cashedBet = (data.my_bets || []).some((b) => b.status === "CASHED");
-          if (lostBet) sfx.aww();
-          else if (cashedBet) sfx.clap(false);
-        }
+        if (data.phase === "FLYING") flight.start();
+        if (data.phase === "CRASHED" && prev.phase === "FLYING") flight.flyAway();
+      } else if (!prev && data.phase === "FLYING") {
+        flight.start(); // joined mid-flight
       }
       // refresh my history when a round I was in finishes
       if (prev && prev.phase !== "CRASHED" && data.phase === "CRASHED" && (prev.my_bets || []).length > 0) {
@@ -295,7 +291,9 @@ export default function AviatorGame({ game }) {
       const s = stRef.current;
       if (s?.phase === "FLYING" && flyStartRef.current) {
         const elapsed = (Date.now() - flyStartRef.current) / 1000;
-        setMult(Math.max(1, Math.exp(growthRef.current * elapsed)));
+        const m = Math.max(1, Math.exp(growthRef.current * elapsed));
+        setMult(m);
+        flight.set(m); // engine pitch climbs with the plane
       } else {
         setCountdown(Math.max(0, (deadlineRef.current - Date.now()) / 1000));
       }
@@ -303,6 +301,7 @@ export default function AviatorGame({ game }) {
     return () => {
       clearInterval(p);
       clearInterval(anim);
+      flight.stop(); // leaving the page cuts the engine
     };
   }, [poll, loadHistory]);
 
@@ -313,7 +312,6 @@ export default function AviatorGame({ game }) {
       if (auto) body.auto_cashout = parseFloat(auto);
       const { data } = await api.post("/live/aviator/bets", body);
       setBalance(data.balance);
-      sfx.chip();
       toast.success(data.queued ? "Bet queued for the next round" : "Bet placed — good luck!");
       await poll();
     } catch (e) {
@@ -343,12 +341,8 @@ export default function AviatorGame({ game }) {
       const { data } = await api.post("/live/aviator/cashout", { bet_id: betId });
       setBalance(data.balance);
       if (data.result === "cashed_out") {
-        sfx.cashout();
-        (data.multiplier >= 5 ? sfx.bigWinCelebration : sfx.winCelebration)();
         toast.success(`Cashed out at ${data.multiplier}x — +${formatChips(data.payout)} chips`);
       } else {
-        sfx.lose();
-        sfx.aww();
         toast.error(`Too late — crashed at ${data.crash_point}x`);
       }
       await poll();

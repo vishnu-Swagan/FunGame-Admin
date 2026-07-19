@@ -4,6 +4,7 @@ import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { FlipCard } from "@/components/play/FlipCard";
+import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
@@ -32,18 +33,20 @@ const SeatRow = ({ label, seat, cards, hand, nCards, outcome, showHands, winner,
           </span>
         )}
       </div>
-      <div className="flex gap-1.5">
-        {Array.from({ length: nCards }, (_, i) => (
-          <FlipCard
-            key={i}
-            code={outcome ? cards[i] : null}
-            size={nCards === 3 ? "lg" : "md"}
-            dealt={dealtFn(i)}
-            flipped={flipFn(i)}
-            dim={isLoser}
-          />
-        ))}
-      </div>
+      <FitWidth>
+        <div className="flex gap-1.5">
+          {Array.from({ length: nCards }, (_, i) => (
+            <FlipCard
+              key={i}
+              code={outcome ? cards[i] : null}
+              size={nCards === 3 ? "lg" : "md"}
+              dealt={dealtFn(i)}
+              flipped={flipFn(i)}
+              dim={isLoser}
+            />
+          ))}
+        </div>
+      </FitWidth>
     </div>
   );
 };

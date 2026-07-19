@@ -6,6 +6,7 @@ import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
+import { FitWidth } from "@/components/FitWidth";
 
 /**
  * LUCKY 8 LINE - Asian fortune cabinet: crimson + gold, swaying lanterns,
@@ -179,7 +180,9 @@ export default function Lucky8LineGame({ game }) {
         </div>
 
         {/* 3x3 grid + 8 line lamps */}
-        <div className="p-3.5 flex items-center justify-center gap-2">
+        <div className="p-3.5">
+          <FitWidth>
+            <div className="flex items-center gap-2">
           <div className="flex flex-col gap-1.5" aria-hidden="true">
             {[1, 2, 3, 4].map((n) => <Lamp key={n} n={n} />)}
           </div>
@@ -203,6 +206,8 @@ export default function Lucky8LineGame({ game }) {
           <div className="flex flex-col gap-1.5" aria-hidden="true">
             {[5, 6, 7, 8].map((n) => <Lamp key={n} n={n} />)}
           </div>
+            </div>
+          </FitWidth>
         </div>
 
         {/* center line marker + status */}
