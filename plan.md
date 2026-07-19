@@ -3,8 +3,8 @@
 ## 1) Objectives
 - Deliver a **play‑chip‑only** FunGame PWA‑style web app (React + FastAPI + MongoDB) with premium, original UI and the disclaimer: **“PLAY CHIPS — NO CASH VALUE”**.
 - Maintain the **core foundation** already built:
-  - Auth + onboarding approval flow (legacy)
-  - Admin console (basic)
+  - Auth + onboarding approval flow
+  - Admin console
   - Server-authoritative chip ledger
   - Game catalog (18 games)
   - Player app UX (mobile‑first)
@@ -26,24 +26,36 @@
   - Lucky 8 Line → Asian fortune red/gold theme with **8‑line win display**
   - Each gets its **own component** and bespoke animations/sounds.
 - **Win celebration polish (P1):** add modern, satisfying win feedback (confetti/coin burst) across games.
-- Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after game polish is complete (confirmed).
+- Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after current P0s are complete.
 - **Email delivery (P1):** use a real transactional email provider for password resets and system notifications.
   - Resend is integrated.
   - Note: `onboarding@resend.dev` is **Resend TEST MODE** sender; real-user deliverability requires domain verification + updating `SENDER_EMAIL`.
 
-### NEW Objectives (P0) — Account Provisioning + Points Economy
+### NEW Objectives (P0) — Provisioning + Sessions + Economy Controls + Admin Audit
 - **Admin‑provisioned accounts (P0):** new users do **NOT** receive a password at signup.
   - New users submit a **signup request** with: **Full Name, Email ID, Date of Birth, Phone Number (with country code)**.
   - Admin verifies and **assigns unique Login ID (username) + password**.
   - Login accepts **username OR email** (legacy accounts keep email login).
-  - Signup no longer depends on email verification for onboarding; admin-created users are **pre‑verified**.
+  - Admin-created users are **pre‑verified**.
   - Resend remains for **password reset**.
-- **Chips ⇄ Points conversion (P0):**
-  - Users can **sell chips to admin and receive points instantly**.
-  - **Minimum conversion amount: 500**.
-  - **Rate: 1 chip = 1 point**.
-  - **Bidirectional** conversion supported (**points → chips** also allowed, same rate).
-  - Points are shown on profile/admin and have their own transaction log.
+- **Single active login session per Login ID (P0):**
+  - **Same Login ID/password cannot be used on another device at the same time.**
+  - Enforce by storing `active_session_id` on the user doc and embedding `sid` in JWT.
+  - If another device logs in, older tokens are rejected on their next API call with **401** + code **`SESSION_REPLACED`**.
+  - Add `POST /api/auth/logout` to release the session.
+  - Frontend shows a clear “logged in on another device” message on the login screen.
+- **Chips → Points conversion (P0): Admin-approved SELL requests (no instant conversion)**
+  - Players submit a **SELL** request instead of converting instantly.
+  - **Rate: 1 chip = 1 point.**
+  - **Deduct chips ONLY on admin approval** (user-confirmed choice).
+  - If user lacks chips at approval time, approval fails and request remains **PENDING**.
+  - Continue to support **Points → Chips instant conversion** (unchanged).
+  - Reuse `chip_requests` collection with a **`type` field: `BUY` | `SELL`**.
+- **Admin audit visibility (P1):** Admin Users view shows:
+  - Current chip balance, points balance
+  - Total deposits (chip credits from approved BUY requests + welcome/provision credits)
+  - Total winning chips (credits from game wins/cashouts)
+  - Total loss chips (debits from bets; excluding refunds/cancel credits)
 
 **Current status (corrected):**
 - ✅ Platform foundation + all 18 universal live games are running.
@@ -51,11 +63,11 @@
 - ✅ Card games bug fixed + verified (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
 - ✅ Slot redesigns completed + verified (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
 - ✅ Win confetti/coin burst completed + verified (ResultBanner).
-- ✅ Roulette betting UX upgraded: chips now land centered on bet spots; split/corner bet hit‑zones + backend validation.
-- ✅ 2026 polish additions: auto-fit rendering on any mobile device (FitWidth), roulette cinematic camera zoom during spin, background music disabled, Aviator sound set to flight-engine only.
-- ✅ Resend email integration completed + verified (verification/reset email delivery; demo mode replaced).
-- ✅ **LIVE‑10 completed + verified 100%:** points economy + admin-provisioned accounts.
-- ⏸️ Remaining backlog: Resend domain verification for real deliverability + enterprise admin restructure.
+- ✅ Roulette betting UX upgraded: split/corner hit‑zones + backend validation.
+- ✅ 2026 polish additions: auto-fit rendering (FitWidth), roulette cinematic camera zoom, background music disabled, Aviator sound set to flight-engine only.
+- ✅ Resend email integration completed + verified.
+- ✅ LIVE‑10 completed + verified 100%: points economy + admin-provisioned accounts.
+- 🔄 **NEW (IN PROGRESS):** single-session enforcement + SELL request flow + admin user ledger stats.
 
 ---
 
@@ -196,7 +208,7 @@
   - Dolly-in zoom (scale ~1.34) during spin; pull-back after result.
 - **Sound changes**
   - Background casino music disabled.
-  - Aviator uses **flight engine only** (multiplier-driven pitch climb + doppler fly-away); all other Aviator sounds disabled.
+  - Aviator uses **flight engine only**.
 
 **Verification**
 - Frontend regression report: **`/app/test_reports/iteration_8.json`**.
@@ -209,72 +221,145 @@
 **Status:** ✅ COMPLETED + VERIFIED (100%)
 - Verification: **`/app/test_reports/iteration_9.json`** (backend 24/24 + full frontend flows)
 
-#### LIVE‑10A — Chips ⇄ Points conversion (instant)
-**Backend (delivered)**
-- Data model:
-  - Added `points_balance: int` to `users` (default 0) and backfilled existing users.
-  - New collection `points_transactions` as a ledger-style log.
-- Endpoints:
-  - `POST /api/chips/convert`
-    - Body: `{ direction: 'CHIPS_TO_POINTS'|'POINTS_TO_CHIPS', amount: int }`
-    - Enforces **min amount 500**.
-    - Atomic balance checks and updates.
-    - Writes to chip ledger and points ledger.
-  - `GET /api/chips/balance` now includes `{ balance, points }`.
-  - `GET /api/points/transactions` returns points transaction history.
-- Admin:
-  - `POST /api/admin/users/{id}/points` to adjust points (over-deduct guarded).
-
-**Frontend (delivered)**
-- Player:
-  - Chips page: **Points wallet card** + direction toggle + converter UI.
-  - Profile: shows points and `@username` when available.
-- Admin:
-  - Users list: Points column + adjust dialog.
+#### LIVE‑10A — Points economy baseline
+**Status:** ✅ DELIVERED
+- Users have `points_balance`.
+- `points_transactions` ledger exists.
+- Admin can adjust points with safeguards.
 
 #### LIVE‑10B — Signup request + admin assigned login/password
-**Flow (delivered)**
-1. Player submits **Signup Request**:
-   - Full Name, Email, Date of Birth, Phone with country code.
-2. Admin reviews request, then **assigns unique Login ID + password**.
-3. User logs in with **Login ID (preferred)** or email (legacy).
+**Status:** ✅ DELIVERED
+- Public signup disabled.
+- Signup requests + admin approval provisioning flow implemented.
+- Login accepts username OR email.
 
-**Backend (delivered)**
-- Public signup disabled:
-  - `/api/auth/register` → **410 Gone** with instruction to submit a signup request.
-- Public request endpoint:
-  - `POST /api/auth/signup-request` validates DOB (`YYYY-MM-DD`) and phone (`+<countrycode><number>`).
-- Admin request management:
-  - `GET /api/admin/signup-requests` (+ status filter)
-  - `POST /api/admin/signup-requests/{id}/approve` with atomic PENDING guard + unique username check
-    - creates ACTIVE, pre-verified user with optional `starting_chips` (credited via chip ledger)
-  - `POST /api/admin/signup-requests/{id}/reject`
-- Login updated:
-  - Login field accepts **username OR email** (case-insensitive for username).
-  - Legacy email accounts remain unaffected.
-- Admin stats:
-  - `/api/admin/stats` includes `pending_signups`.
+---
 
-**Frontend (delivered)**
-- Replaced Register page with **Request an account** form.
-- Updated Welcome CTA to "Request an account".
-- Updated Login label and input to accept **Login ID or Email**.
-- Admin:
-  - New **Admin → Signups** page (`/admin/signups`) with:
-    - Tabs: PENDING / APPROVED / REJECTED / ALL
-    - Verify & assign dialog with suggested username + crypto-random password generator
-    - Credentials card with copy-to-clipboard
-    - Reject action
-  - Admin dashboard stat card includes pending signups.
+### Phase LIVE‑11 (NEW): Session Management + Manual Chip Selling + Admin Ledger Stats
+**Goal (P0/P1):** Enforce single-session logins, shift chips→points to admin-approved SELL requests, and provide admin-wide aggregated user stats.
+
+**Status:** 🔄 IN PROGRESS
+
+#### LIVE‑11A (P0) — Single active login session per user (kick-out model)
+**Backend changes**
+- Data model:
+  - Add `active_session_id: str | null` to `users`.
+- JWT changes:
+  - `create_access_token(user_id, role, sid)` includes a `sid` claim.
+- Login behavior (`POST /api/auth/login`):
+  - On successful login generate new `sid` (UUID).
+  - Persist to `users.active_session_id`.
+  - Return JWT with `sid` claim.
+  - This invalidates previous sessions for that user.
+- Auth validation (`get_current_user` in `auth_utils.py`):
+  - Decode JWT.
+  - Load user.
+  - Verify `payload.sid == user.active_session_id`.
+  - If mismatch: raise **401** with detail `{code: 'SESSION_REPLACED', message: 'Logged in on another device'}`.
+- Logout endpoint:
+  - `POST /api/auth/logout` clears `active_session_id` if it matches current token’s `sid` (safe, idempotent).
+
+**Frontend changes**
+- Axios interceptor (`frontend/src/lib/api.js`):
+  - On 401 with `detail.code === 'SESSION_REPLACED'`:
+    - Clear token.
+    - Redirect to `/login?reason=session_replaced`.
+- Login page (`Login.js`):
+  - If `reason=session_replaced`, show message: “You were logged out because this Login ID was used on another device.”
+- Optional: on manual logout in UI, call `/auth/logout` before clearing token.
+
+**Acceptance criteria**
+- Same Login ID cannot be active simultaneously on two devices.
+- First device gets logged out on next API call after second login.
+
+Files
+- Backend: `/app/backend/auth_utils.py`, `/app/backend/routes_auth.py`, `/app/backend/models.py`
+- Frontend: `/app/frontend/src/lib/api.js`, `/app/frontend/src/context/AuthContext.js`, `/app/frontend/src/pages/auth/Login.js`
+
+---
+
+#### LIVE‑11B (P0) — Chips → Points becomes admin-approved SELL request (1:1)
+**Core rules (confirmed)**
+- **1 chip = 1 point**
+- **Deduct chips only on admin approval**
+- If user lacks chips at approval time: approval fails; request stays **PENDING**
+- **Points → Chips remains instant**
+
+**Backend changes**
+- Data model:
+  - Extend `chip_requests` documents with `type: 'BUY' | 'SELL'`.
+  - Backfill existing chip requests as `type='BUY'`.
+- Player flow:
+  - Replace `POST /api/chips/convert` for `CHIPS_TO_POINTS` with `POST /api/chips/request` using `type='SELL'`.
+  - Keep `POINTS_TO_CHIPS` conversion route intact (either same endpoint direction or a dedicated points->chips route).
+  - Deprecate or restrict `CHIPS_TO_POINTS` instant conversion in `routes_player.py` (return 410/400 with clear message).
+- Admin flow:
+  - Update `POST /api/admin/chip-requests/{id}/approve`:
+    - If `type=='BUY'`: existing behavior (credit chips).
+    - If `type=='SELL'`: attempt atomic `debit_chips(user_id, amount, note='Sold X chips for points', ref=request_id)`.
+      - If insufficient chips: error and keep request PENDING.
+      - If success: credit points (`$inc points_balance`) and create `points_transactions` CREDIT entry.
+  - Update deny endpoint to work for both types.
+
+**Frontend changes**
+- Player Chips page (`ChipsPage.js`):
+  - Remove/disable “Sell chips → points” instant converter.
+  - Add a **Sell chips request** UI that creates a `type='SELL'` chip request.
+  - Keep “Points → chips” converter intact.
+- Admin Chip Requests (`AdminChipRequests.js`):
+  - Add a **Type** column and type-aware confirmation copy.
+  - Approval button triggers chip credit for BUY, points credit for SELL.
+
+Files
+- Backend: `/app/backend/routes_player.py`, `/app/backend/routes_admin.py`, `/app/backend/models.py`, `/app/backend/ledger.py`
+- Frontend: `/app/frontend/src/pages/app/ChipsPage.js`, `/app/frontend/src/pages/admin/AdminChipRequests.js`
+
+---
+
+#### LIVE‑11C (P1) — Admin detailed user stats (deposits / won / lost)
+**Backend changes**
+- Update `GET /api/admin/users` to return per-user aggregates from `chip_transactions`:
+  - Use Mongo aggregation with `$group` per user.
+  - Categorize via `note` patterns using `$regexMatch` (as per current ledger notes used by games/admin flows):
+    - **Deposits**: chip credits from “Chip request approved”, “Welcome play chips”, “account provisioned by admin”
+    - **Winning chips**: credits containing “win (round”, “cashout”, or known win notes
+    - **Loss chips**: sum of **DEBIT** bets (exclude refund/cancel credits such as “refunded”, “cancelled”)
+  - Return these alongside base user fields.
+
+**Frontend changes**
+- Update Admin Users table (`AdminUsers.js`) to add columns:
+  - Deposits, Won, Lost
+  - Keep existing chip balance + points balance.
+
+Files
+- Backend: `/app/backend/routes_admin.py` (aggregation), ensure uses `chip_transactions`
+- Frontend: `/app/frontend/src/pages/admin/AdminUsers.js`
+
+---
+
+#### LIVE‑11D — Testing & Verification (MANDATORY)
+- Backend testing agent:
+  - Validate session invalidation behavior (sid mismatch → 401 SESSION_REPLACED).
+  - Validate SELL request approval behavior (insufficient chips keeps PENDING; successful approval debits chips + credits points + logs ledgers).
+  - Validate `/admin/users` aggregation outputs sane values.
+- Frontend testing agent:
+  - Login multi-device simulation (token A invalid after login B).
+  - Chips page: SELL request submission + history.
+  - Admin chip requests: approve SELL updates points; approve BUY credits chips.
+  - Admin users page shows new columns.
 
 ---
 
 ## 3) Next Actions
-1. **P1: Resend production deliverability**
+1. **P0: LIVE‑11A — Single active session enforcement** (backend + frontend handling)
+2. **P0: LIVE‑11B — Chips→Points via admin-approved SELL requests** (remove instant CHIPS→POINTS)
+3. **P1: LIVE‑11C — Admin user ledger aggregates (deposits/won/lost)**
+4. **Run full backend + frontend testing agent** and write new report.
+5. **P1: Resend production deliverability**
    - Verify sending domain in Resend.
    - Update `SENDER_EMAIL`.
    - Smoke test password reset emails.
-2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
+6. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
    - Strict RBAC, maker-checker workflows, TOTP.
 
 ---
@@ -293,15 +378,21 @@
   - ✅ Roulette cinematic camera.
   - ✅ Background music disabled.
   - ✅ Aviator sound = flight engine only.
-- Economy:
-  - ✅ Chips ⇄ points conversion works instantly, min 500, 1:1, bidirectional, with transaction logs.
-  - ✅ Admin can adjust points with safeguards.
 - Account provisioning:
   - ✅ Signup request → admin assigns login/password → user logs in via login ID.
   - ✅ Legacy accounts can still log in via email.
+- Sessions (NEW):
+  - ✅ **One active session per Login ID**; second login invalidates previous.
+  - ✅ Previous session receives 401 `SESSION_REPLACED` on next API call and is redirected to login.
+  - ✅ Logout clears the current session.
+- Economy (UPDATED):
+  - ✅ Chips → Points only through **admin-approved SELL requests** (1:1).
+  - ✅ Chips deducted **only on approval**; insufficient chips prevents approval and request stays PENDING.
+  - ✅ Points → Chips still instant.
+- Admin auditing (NEW):
+  - ✅ Admin Users shows per-user: balance, deposits, won, lost.
 - Testing:
-  - ✅ Mandatory testing agent run after LIVE‑10 changes:
-    - Report: **`/app/test_reports/iteration_9.json`**.
+  - ✅ Mandatory testing agent run after LIVE‑11 changes and report saved.
 
 ---
 
@@ -314,8 +405,8 @@
 - ✅ Slot redesigns verified (**iteration_6.json**).
 - ✅ Resend integration verified (**iteration_7.json**).
 - ✅ Responsive + roulette camera + sound changes verified (**iteration_8.json**).
-- ✅ **LIVE‑10 completed:** points economy + admin-provisioned accounts verified (**iteration_9.json**).
-- ⏸️ Backlog: Resend domain verification, enterprise admin restructure.
+- ✅ LIVE‑10 completed: points economy + admin-provisioned accounts verified (**iteration_9.json**).
+- 🔄 LIVE‑11 started: single-session auth + SELL requests + admin aggregates (pending implementation + testing).
 
 **Test credentials**
 - Admin: `admin@fungame.app` / `FunGame@Admin2025`

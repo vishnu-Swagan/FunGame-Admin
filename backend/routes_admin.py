@@ -8,6 +8,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
                     AdminSignupApprove, AdminPointsAdjust)
 from auth_utils import require_admin, hash_password
+from ledger import debit_chips, InsufficientChips
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -64,12 +65,50 @@ async def stats(admin: dict = Depends(require_admin)):
 
 
 # ---------- Users ----------
+DEPOSIT_NOTE_RE = 'Chip request approved|Welcome play chips|provisioned by admin'
+WIN_NOTE_RE = 'win \\(round|cashout'
+BET_NOTE_RE = 'bet \\(round|Live bet'
+REFUND_NOTE_RE = 'refund|cancelled'
+
+
+async def _user_ledger_stats() -> dict:
+    """Aggregate chip_transactions per user into deposits / winning chips / loss chips."""
+    def _cond(tx_type: str, regex: str):
+        return {'$sum': {'$cond': [
+            {'$and': [
+                {'$eq': ['$type', tx_type]},
+                {'$regexMatch': {'input': {'$ifNull': ['$note', '']}, 'regex': regex, 'options': 'i'}},
+            ]}, '$amount', 0]}}
+    pipeline = [
+        {'$group': {
+            '_id': '$user_id',
+            'total_deposits': _cond('CREDIT', DEPOSIT_NOTE_RE),
+            'winning_chips': _cond('CREDIT', WIN_NOTE_RE),
+            'bet_debits': _cond('DEBIT', BET_NOTE_RE),
+            'refund_credits': _cond('CREDIT', REFUND_NOTE_RE),
+        }},
+    ]
+    stats = {}
+    async for row in db.chip_transactions.aggregate(pipeline):
+        loss = max(0, row.get('bet_debits', 0) - row.get('refund_credits', 0))
+        stats[row['_id']] = {
+            'total_deposits': row.get('total_deposits', 0),
+            'winning_chips': row.get('winning_chips', 0),
+            'loss_chips': loss,
+        }
+    return stats
+
+
 @router.get('/users')
 async def list_users(status: str = Query(default=None), admin: dict = Depends(require_admin)):
     query = {'role': 'PLAYER'}
     if status:
         query['status'] = status
-    users = await db.users.find(query, {'_id': 0, 'password_hash': 0, 'verification_code_hash': 0, 'reset_code_hash': 0}).sort('created_at', -1).to_list(500)
+    users = await db.users.find(query, {'_id': 0, 'password_hash': 0, 'verification_code_hash': 0, 'reset_code_hash': 0, 'active_session_id': 0}).sort('created_at', -1).to_list(500)
+    stats = await _user_ledger_stats()
+    empty = {'total_deposits': 0, 'winning_chips': 0, 'loss_chips': 0}
+    for u in users:
+        u['stats'] = stats.get(u.get('id'), empty)
     return {'users': serialize_doc(users)}
 
 
@@ -239,13 +278,40 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
     if req.get('status') != 'PENDING':
         raise HTTPException(status_code=400, detail='Request already resolved')  # idempotent settlement guard
     note = (body.note if body else None)
-    # Mark resolved FIRST (atomically) to guarantee idempotency, then credit
+    req_type = req.get('type', 'BUY')
+    # Mark resolved FIRST (atomically) to guarantee idempotency, then settle
     result = await db.chip_requests.update_one(
         {'id': request_id, 'status': 'PENDING'},
         {'$set': {'status': 'APPROVED', 'admin_note': note, 'resolved_at': _now(), 'resolved_by': admin['id']}},
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=400, detail='Request already resolved')
+
+    if req_type == 'SELL':
+        # Chips -> points (1:1). Chips are deducted only now, on approval.
+        try:
+            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Sold {req['amount']} chips for points (1:1) — approved by operator", ref=request_id)
+        except InsufficientChips:
+            # Revert so the admin can retry or deny with a note
+            await db.chip_requests.update_one(
+                {'id': request_id},
+                {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}},
+            )
+            raise HTTPException(status_code=400, detail='Player no longer has enough chips to cover this sale. Ask them to top up or deny the request.')
+        updated = await db.users.find_one_and_update(
+            {'id': req['user_id']}, {'$inc': {'points_balance': req['amount']}}, return_document=True,
+        )
+        points_balance = updated.get('points_balance', 0) if updated else req['amount']
+        await db.points_transactions.insert_one({
+            'id': str(uuid.uuid4()), 'user_id': req['user_id'], 'type': 'CREDIT', 'amount': req['amount'],
+            'balance_after': points_balance, 'note': f"Sold {req['amount']} chips for points (1:1) — approved by operator",
+            'ref': request_id, 'created_at': _now(),
+        })
+        await _notify(req['user_id'], 'Sell request approved!',
+                      f"Your request to sell {req['amount']} chips was approved. {req['amount']} points credited (new points balance: {points_balance}). PLAY CHIPS — NO CASH VALUE.", 'POINTS')
+        return {'message': 'Sell request approved — chips deducted and points credited', 'chip_balance': chip_balance, 'points_balance': points_balance}
+
+    # BUY (default): credit chips
     balance = await _credit_chips(req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)", ref=request_id)
     await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}. PLAY CHIPS — NO CASH VALUE.", 'CHIPS')
     return {'message': 'Request approved and chips credited', 'balance_after': balance}
@@ -265,7 +331,10 @@ async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=400, detail='Request already resolved')
-    await _notify(req['user_id'], 'Chip request update', f"Your request for {req['amount']} play chips was denied. Note: {note}", 'CHIPS')
+    if req.get('type') == 'SELL':
+        await _notify(req['user_id'], 'Sell request update', f"Your request to sell {req['amount']} chips was denied. Your chips were not deducted. Note: {note}", 'POINTS')
+    else:
+        await _notify(req['user_id'], 'Chip request update', f"Your request for {req['amount']} play chips was denied. Note: {note}", 'CHIPS')
     return {'message': 'Request denied'}
 
 

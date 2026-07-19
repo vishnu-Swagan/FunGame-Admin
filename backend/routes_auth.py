@@ -89,7 +89,9 @@ async def verify_email(body: VerifyEmailRequest):
         '$unset': {'verification_code_hash': '', 'verification_expires_at': ''},
     })
     user = await db.users.find_one({'email': email})
-    token = create_access_token(user['id'], user['role'])
+    session_id = str(uuid.uuid4())
+    await db.users.update_one({'id': user['id']}, {'$set': {'active_session_id': session_id}})
+    token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {'message': 'Email verified! Continue with onboarding.', 'access_token': token, 'user': _user_public(user)}
 
 
@@ -126,8 +128,22 @@ async def login(body: LoginRequest):
         raise HTTPException(status_code=401, detail='Invalid login ID or password')
     if not user.get('email_verified'):
         raise HTTPException(status_code=403, detail={'code': 'EMAIL_NOT_VERIFIED', 'message': 'Please verify your email first.', 'email': user.get('email')})
-    token = create_access_token(user['id'], user['role'])
+    # Single active session per Login ID: a new login replaces any previous session.
+    session_id = str(uuid.uuid4())
+    await db.users.update_one({'id': user['id']}, {'$set': {
+        'active_session_id': session_id,
+        'last_login_at': _now().isoformat(),
+    }})
+    token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {'access_token': token, 'user': _user_public(user)}
+
+
+@router.post('/logout')
+async def logout(user: dict = Depends(get_current_user)):
+    """Release the active session so the Login ID can be used elsewhere.
+    Sets a revoked marker so every outstanding token becomes invalid."""
+    await db.users.update_one({'id': user['id']}, {'$set': {'active_session_id': f'revoked-{uuid.uuid4()}'}})
+    return {'message': 'Logged out'}
 
 
 @router.post('/forgot-password')

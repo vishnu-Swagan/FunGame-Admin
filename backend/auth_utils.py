@@ -25,13 +25,15 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id: str, role: str, session_id: str = None) -> str:
     payload = {
         'sub': user_id,
         'role': role,
         'iat': datetime.now(timezone.utc),
         'exp': datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_DAYS),
     }
+    if session_id:
+        payload['sid'] = session_id
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
@@ -48,6 +50,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await db.users.find_one({'id': payload.get('sub')})
     if not user:
         raise HTTPException(status_code=401, detail='User not found')
+    # Single active session per user: a newer login replaces the previous session.
+    active_sid = user.get('active_session_id')
+    if active_sid and payload.get('sid') != active_sid:
+        raise HTTPException(status_code=401, detail={
+            'code': 'SESSION_REPLACED',
+            'message': 'You were signed out because this Login ID was used on another device.',
+        })
     return user
 
 

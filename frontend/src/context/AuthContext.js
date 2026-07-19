@@ -55,6 +55,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Best-effort: release the single active session on the server
+    api.post("/auth/logout").catch(() => {});
     localStorage.removeItem("fg_token");
     setUser(null);
   }, []);

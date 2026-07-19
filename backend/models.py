@@ -104,6 +104,13 @@ class ChipRequestCreate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=280)
 
 
+class SellChipsRequestCreate(BaseModel):
+    """Player asks the operator to sell chips for points (1 chip = 1 point, min 500).
+    Chips are deducted only when the admin approves the request."""
+    amount: int = Field(ge=500, le=1_000_000)
+    note: Optional[str] = Field(default=None, max_length=280)
+
+
 class ConvertRequest(BaseModel):
     """Instant chips <-> points conversion (1 chip = 1 point, minimum 500)."""
     direction: str  # CHIPS_TO_POINTS | POINTS_TO_CHIPS

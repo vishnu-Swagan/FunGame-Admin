@@ -22,6 +22,9 @@ api.interceptors.response.use(
     const detail = error?.response?.data?.detail;
     const path = window.location.pathname;
     if (status === 401 && !PUBLIC_PATHS.includes(path)) {
+      if (detail && detail.code === "SESSION_REPLACED") {
+        localStorage.setItem("fg_logout_reason", detail.message || "You were signed out because this Login ID was used on another device.");
+      }
       localStorage.removeItem("fg_token");
       window.location.assign("/login");
       return Promise.reject(error);

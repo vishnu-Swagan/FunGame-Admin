@@ -49,7 +49,13 @@ export default function AdminChipRequests() {
     setBusy(true);
     try {
       await api.post(`/admin/chip-requests/${action.req.id}/${action.type}`, { note: note || null });
-      toast.success(action.type === "approve" ? "Chips credited to player" : "Request denied");
+      toast.success(
+        action.type !== "approve"
+          ? "Request denied"
+          : action.req?.type === "SELL"
+            ? "Chips deducted — points credited to player"
+            : "Chips credited to player"
+      );
       setAction(null);
       setNote("");
       await load(filter);
@@ -89,6 +95,7 @@ export default function AdminChipRequests() {
             <TableHeader>
               <TableRow className="border-white/10 hover:bg-transparent">
                 <TableHead className="text-white/50">Player</TableHead>
+                <TableHead className="text-white/50">Type</TableHead>
                 <TableHead className="text-white/50 text-right">Amount</TableHead>
                 <TableHead className="text-white/50">Note</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
@@ -102,6 +109,19 @@ export default function AdminChipRequests() {
                   <TableCell>
                     <p className="font-semibold text-sm">{r.user_display_name || "—"}</p>
                     <p className="text-[11px] text-white/45">{r.user_email}</p>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      data-testid="admin-chip-request-type-badge"
+                      variant="outline"
+                      className={`rounded-full border text-[10px] font-bold px-2.5 py-1 ${
+                        r.type === "SELL"
+                          ? "border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.1)] text-[hsl(var(--magenta))]"
+                          : "border-primary/35 bg-primary/10 text-primary"
+                      }`}
+                    >
+                      {r.type === "SELL" ? "SELL → POINTS" : "BUY"}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-bold text-primary">{formatChips(r.amount)}</TableCell>
                   <TableCell className="text-xs text-white/60 max-w-[180px] truncate">{r.note || "—"}</TableCell>
@@ -144,11 +164,19 @@ export default function AdminChipRequests() {
       <Dialog open={!!action} onOpenChange={(o) => !o && setAction(null)}>
         <DialogContent className="rounded-2xl border-white/10 bg-card">
           <DialogHeader>
-            <DialogTitle>{action?.type === "approve" ? "Approve chip request" : "Deny chip request"}</DialogTitle>
+            <DialogTitle>
+              {action?.type === "approve"
+                ? action?.req?.type === "SELL" ? "Approve sell request" : "Approve chip request"
+                : action?.req?.type === "SELL" ? "Deny sell request" : "Deny chip request"}
+            </DialogTitle>
             <DialogDescription>
               {action?.type === "approve"
-                ? `Credit ${formatChips(action?.req?.amount)} play chips to ${action?.req?.user_email}. This settles the request permanently.`
-                : `Deny the ${formatChips(action?.req?.amount)} chip request from ${action?.req?.user_email}.`}
+                ? action?.req?.type === "SELL"
+                  ? `Deduct ${formatChips(action?.req?.amount)} chips from ${action?.req?.user_email} and credit ${formatChips(action?.req?.amount)} points (1:1). This settles the request permanently.`
+                  : `Credit ${formatChips(action?.req?.amount)} play chips to ${action?.req?.user_email}. This settles the request permanently.`
+                : action?.req?.type === "SELL"
+                  ? `Deny the request to sell ${formatChips(action?.req?.amount)} chips from ${action?.req?.user_email}. No chips will be deducted.`
+                  : `Deny the ${formatChips(action?.req?.amount)} chip request from ${action?.req?.user_email}.`}
             </DialogDescription>
           </DialogHeader>
           <Textarea

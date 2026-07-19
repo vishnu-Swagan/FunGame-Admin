@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,15 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState("");
+
+  useEffect(() => {
+    const reason = localStorage.getItem("fg_logout_reason");
+    if (reason) {
+      setSessionNotice(reason);
+      localStorage.removeItem("fg_logout_reason");
+    }
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -45,6 +54,12 @@ export default function Login() {
 
   return (
     <AuthShell title="Welcome back" subtitle="Log in to enter the FunGame lounge.">
+      {sessionNotice && (
+        <div data-testid="session-replaced-notice" className="mb-4 flex items-start gap-2.5 rounded-xl border border-primary/35 bg-primary/10 p-3 text-sm text-primary">
+          <MonitorSmartphone className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{sessionNotice}</span>
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">Login ID or Email</Label>

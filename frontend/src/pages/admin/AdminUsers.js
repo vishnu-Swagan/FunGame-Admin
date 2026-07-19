@@ -123,6 +123,9 @@ export default function AdminUsers() {
                 <TableHead className="text-white/50">Status</TableHead>
                 <TableHead className="text-white/50 text-right">Chips</TableHead>
                 <TableHead className="text-white/50 text-right">Points</TableHead>
+                <TableHead className="text-white/50 text-right">Deposits</TableHead>
+                <TableHead className="text-white/50 text-right">Won</TableHead>
+                <TableHead className="text-white/50 text-right">Lost</TableHead>
                 <TableHead className="text-white/50">Joined</TableHead>
                 <TableHead className="text-white/50 text-right">Actions</TableHead>
               </TableRow>
@@ -155,6 +158,15 @@ export default function AdminUsers() {
                     >
                       <Star className="h-3 w-3 text-primary/70" /> {formatChips(u.points_balance || 0)}
                     </button>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm text-white/70" data-testid="admin-user-deposits">
+                    {formatChips(u.stats?.total_deposits || 0)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-semibold text-[hsl(var(--emerald))]" data-testid="admin-user-won">
+                    {formatChips(u.stats?.winning_chips || 0)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm font-semibold text-red-400" data-testid="admin-user-lost">
+                    {formatChips(u.stats?.loss_chips || 0)}
                   </TableCell>
                   <TableCell className="text-xs text-white/50">{timeAgo(u.created_at)}</TableCell>
                   <TableCell className="text-right">

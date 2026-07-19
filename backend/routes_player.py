@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
-from models import OnboardingProfileRequest, ChipRequestCreate, SettingsUpdate, ConvertRequest
+from models import OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate, ConvertRequest
 from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
 from ledger import credit_chips, debit_chips, InsufficientChips
 
@@ -130,40 +130,31 @@ async def chip_balance(user: dict = Depends(require_active_player)):
 
 @router.post('/chips/convert')
 async def convert_chips_points(body: ConvertRequest, user: dict = Depends(require_active_player)):
-    """Instant chips <-> points conversion. 1 chip = 1 point, minimum 500."""
+    """Points -> chips is instant (1:1, minimum 500).
+    Chips -> points now requires an admin-approved SELL request."""
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not convert chips')
     uid = user['id']
     if body.direction == 'CHIPS_TO_POINTS':
-        try:
-            chip_balance = await debit_chips(uid, body.amount, f'Sold {body.amount} chips for points (1:1)', ref='convert')
-        except InsufficientChips:
-            raise HTTPException(status_code=400, detail='Not enough chips — you need at least the amount you are selling')
-        result = await db.users.find_one_and_update(
-            {'id': uid}, {'$inc': {'points_balance': body.amount}}, return_document=True,
+        raise HTTPException(
+            status_code=400,
+            detail='Selling chips for points now requires operator approval. Please submit a sell request instead.',
         )
-        points_balance = result.get('points_balance', 0) if result else body.amount
-        await db.points_transactions.insert_one({
-            'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'CREDIT', 'amount': body.amount,
-            'balance_after': points_balance, 'note': f'Sold {body.amount} chips for points (1:1)',
-            'ref': 'convert', 'created_at': _now(),
-        })
-        message = f'Sold {body.amount} chips — {body.amount} points credited.'
-    else:  # POINTS_TO_CHIPS
-        result = await db.users.find_one_and_update(
-            {'id': uid, 'points_balance': {'$gte': body.amount}},
-            {'$inc': {'points_balance': -body.amount}}, return_document=True,
-        )
-        if result is None:
-            raise HTTPException(status_code=400, detail='Not enough points — you need at least the amount you are converting')
-        points_balance = result.get('points_balance', 0)
-        await db.points_transactions.insert_one({
-            'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'DEBIT', 'amount': body.amount,
-            'balance_after': points_balance, 'note': f'Converted {body.amount} points to chips (1:1)',
-            'ref': 'convert', 'created_at': _now(),
-        })
-        chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert')
-        message = f'Converted {body.amount} points — {body.amount} chips credited.'
+    # POINTS_TO_CHIPS (instant)
+    result = await db.users.find_one_and_update(
+        {'id': uid, 'points_balance': {'$gte': body.amount}},
+        {'$inc': {'points_balance': -body.amount}}, return_document=True,
+    )
+    if result is None:
+        raise HTTPException(status_code=400, detail='Not enough points — you need at least the amount you are converting')
+    points_balance = result.get('points_balance', 0)
+    await db.points_transactions.insert_one({
+        'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'DEBIT', 'amount': body.amount,
+        'balance_after': points_balance, 'note': f'Converted {body.amount} points to chips (1:1)',
+        'ref': 'convert', 'created_at': _now(),
+    })
+    chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert')
+    message = f'Converted {body.amount} points — {body.amount} chips credited.'
     return {'message': message, 'chip_balance': chip_balance, 'points_balance': points_balance}
 
 
@@ -177,17 +168,42 @@ async def my_points_transactions(user: dict = Depends(require_active_player)):
 async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(require_active_player)):
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not request chips')
-    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING'})
+    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': {'$ne': 'SELL'}})
     if pending >= 3:
         raise HTTPException(status_code=429, detail='You already have 3 pending requests. Please wait for review.')
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
         'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        'type': 'BUY',
         'amount': body.amount, 'note': body.note, 'status': 'PENDING',
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
     await db.chip_requests.insert_one(req)
     return {'message': 'Chip request submitted for review.', 'request': serialize_doc(req)}
+
+
+@router.post('/chips/sell-request')
+async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends(require_active_player)):
+    """Player asks the operator to sell chips for points (1:1).
+    Chips stay in the balance until the admin approves the request."""
+    if user.get('role') == 'ADMIN':
+        raise HTTPException(status_code=400, detail='Admins do not sell chips')
+    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'SELL'})
+    if pending >= 3:
+        raise HTTPException(status_code=429, detail='You already have 3 pending sell requests. Please wait for review.')
+    fresh = await db.users.find_one({'id': user['id']})
+    balance = fresh.get('chip_balance', 0) if fresh else 0
+    if balance < body.amount:
+        raise HTTPException(status_code=400, detail='Not enough chips — you can only sell up to your current balance.')
+    req = {
+        'id': str(uuid.uuid4()), 'user_id': user['id'],
+        'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        'type': 'SELL',
+        'amount': body.amount, 'note': body.note, 'status': 'PENDING',
+        'admin_note': None, 'created_at': _now(), 'resolved_at': None,
+    }
+    await db.chip_requests.insert_one(req)
+    return {'message': 'Sell request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
 
 
 @router.get('/chips/requests')

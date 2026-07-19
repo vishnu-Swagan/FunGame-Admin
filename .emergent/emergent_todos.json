@@ -1,18 +1,38 @@
 [
   {
-    "content": "Backend: models, auth (register 410, signup-request, username login), admin (signups, points), player convert",
+    "content": "Backend: sid claim in JWT + session check + login sets active_session_id + /auth/logout",
     "status": "completed"
   },
   {
-    "content": "Frontend: Request Account form, Login ID label, ChipsPage points converter, Profile username/points",
+    "content": "Backend: SELL chip requests + block instant CHIPS_TO_POINTS + type field on BUY",
     "status": "completed"
   },
   {
-    "content": "Frontend: AdminSignups page + nav + route + dashboard stat, AdminUsers points column + adjust dialog",
+    "content": "Backend: admin approve/deny handles SELL (debit chips + credit points on approval)",
     "status": "completed"
   },
   {
-    "content": "Run mandatory testing agent (auth + economy changes) - iteration_9: 100% pass",
+    "content": "Backend: /admin/users aggregation — deposits, wins, losses per user",
     "status": "completed"
+  },
+  {
+    "content": "Frontend: api.js SESSION_REPLACED handling + AuthContext logout calls /auth/logout + Login.js message",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: ChipsPage.js — sell via request flow, keep points→chips instant, type badges in history",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: AdminChipRequests.js type column + type-aware dialogs; AdminUsers.js stats columns",
+    "status": "completed"
+  },
+  {
+    "content": "Build check + screenshot verification",
+    "status": "completed"
+  },
+  {
+    "content": "Run testing agent (backend + frontend) and fix all reported issues",
+    "status": "in_progress"
   }
 ]

@@ -32,7 +32,7 @@ export default function ChipsPage() {
   const [busy, setBusy] = useState(false);
   const [requests, setRequests] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  // chips <-> points converter (instant, 1:1, min 500)
+  // chips -> points: admin-approved sell request | points -> chips: instant (1:1, min 500)
   const [convertDir, setConvertDir] = useState("CHIPS_TO_POINTS");
   const [convertAmt, setConvertAmt] = useState("");
   const [convertBusy, setConvertBusy] = useState(false);
@@ -85,17 +85,27 @@ export default function ChipsPage() {
     e.preventDefault();
     const amt = parseInt(convertAmt, 10);
     if (!amt || amt < 500) {
-      toast.error("Minimum conversion is 500");
+      toast.error("Minimum amount is 500");
       return;
     }
     setConvertBusy(true);
     try {
-      const { data } = await api.post("/chips/convert", { direction: convertDir, amount: amt });
-      setBalance(data.chip_balance);
-      setPoints(data.points_balance);
-      setConvertAmt("");
-      toast.success(data.message);
-      await refreshUser();
+      if (convertDir === "CHIPS_TO_POINTS") {
+        // Selling chips requires operator approval — chips are deducted only when approved.
+        const { data } = await api.post("/chips/sell-request", { amount: amt });
+        toast.success(data.message || "Sell request submitted — an operator will review it.");
+        setConvertAmt("");
+        await load();
+        setTab("history");
+        navigate("/chips/history", { replace: true });
+      } else {
+        const { data } = await api.post("/chips/convert", { direction: "POINTS_TO_CHIPS", amount: amt });
+        setBalance(data.chip_balance);
+        setPoints(data.points_balance);
+        setConvertAmt("");
+        toast.success(data.message);
+        await refreshUser();
+      }
     } catch (err) {
       toast.error(errMsg(err));
     } finally {
@@ -175,12 +185,17 @@ export default function ChipsPage() {
             disabled={convertBusy || !convertAmt || parseInt(convertAmt, 10) < 500}
             className="h-11 rounded-xl font-bold shrink-0 hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150"
           >
-            <ArrowLeftRight className="h-4 w-4 mr-1.5" /> {convertBusy ? "Converting…" : "Convert"}
+            <ArrowLeftRight className="h-4 w-4 mr-1.5" />
+            {convertBusy
+              ? "Working…"
+              : convertDir === "CHIPS_TO_POINTS"
+                ? "Request sale"
+                : "Convert"}
           </Button>
         </form>
         <p className="text-[11px] text-white/40">
           {convertDir === "CHIPS_TO_POINTS"
-            ? "Sell chips to the house and receive points instantly. Minimum 500 chips."
+            ? "Sell requests are reviewed by an operator. Chips are deducted only when your request is approved (1 chip = 1 point, minimum 500)."
             : "Convert points back into play chips instantly. Minimum 500 points."}
         </p>
       </div>
@@ -253,10 +268,21 @@ export default function ChipsPage() {
                 {requests.map((r) => {
                   const S = REQ_STATUS[r.status] || REQ_STATUS.PENDING;
                   const SIcon = S.icon;
+                  const isSell = r.type === "SELL";
                   return (
                     <div key={r.id} data-testid="chips-request-item" className="flex items-center justify-between rounded-xl bg-card/55 border border-white/10 p-3.5">
                       <div>
-                        <p className="tabular-nums font-bold">{formatChips(r.amount)} chips</p>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            data-testid="chips-request-type-badge"
+                            className={`text-[9px] font-bold tracking-wider rounded-full border px-1.5 py-0.5 ${
+                              isSell ? "text-[hsl(var(--magenta))] border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.1)]" : "text-primary border-primary/35 bg-primary/10"
+                            }`}
+                          >
+                            {isSell ? "SELL" : "BUY"}
+                          </span>
+                          <p className="tabular-nums font-bold">{formatChips(r.amount)} {isSell ? "chips → points" : "chips"}</p>
+                        </div>
                         <p className="text-[11px] text-white/45 mt-0.5">{timeAgo(r.created_at)}{r.admin_note ? ` · ${r.admin_note}` : ""}</p>
                       </div>
                       <Badge variant="outline" className={`rounded-full border text-[10px] font-bold px-2.5 py-1 flex items-center gap-1 ${S.cls}`}>
