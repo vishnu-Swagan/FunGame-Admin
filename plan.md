@@ -42,7 +42,7 @@
   - **Same Login ID/password cannot be used on another device at the same time.**
   - Enforce by storing `active_session_id` on the user doc and embedding `sid` in JWT.
   - If another device logs in, older tokens are rejected on their next API call with **401** + code **`SESSION_REPLACED`**.
-  - Add `POST /api/auth/logout` to release the session.
+  - Add `POST /api/auth/logout` to revoke the session (revoked-marker invalidates all tokens).
   - Frontend shows a clear “logged in on another device” message on the login screen.
 - **Chips → Points conversion (P0): Admin-approved SELL requests (no instant conversion)**
   - Players submit a **SELL** request instead of converting instantly.
@@ -67,7 +67,7 @@
 - ✅ 2026 polish additions: auto-fit rendering (FitWidth), roulette cinematic camera zoom, background music disabled, Aviator sound set to flight-engine only.
 - ✅ Resend email integration completed + verified.
 - ✅ LIVE‑10 completed + verified 100%: points economy + admin-provisioned accounts.
-- 🔄 **NEW (IN PROGRESS):** single-session enforcement + SELL request flow + admin user ledger stats.
+- ✅ **LIVE‑11 completed + verified**: single-session enforcement + admin-approved SELL requests + admin user ledger stats.
 
 ---
 
@@ -235,132 +235,82 @@
 
 ---
 
-### Phase LIVE‑11 (NEW): Session Management + Manual Chip Selling + Admin Ledger Stats
+### Phase LIVE‑11: Session Management + Manual Chip Selling + Admin Ledger Stats
 **Goal (P0/P1):** Enforce single-session logins, shift chips→points to admin-approved SELL requests, and provide admin-wide aggregated user stats.
 
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ COMPLETED + VERIFIED
+- Verification: **`/app/test_reports/iteration_10.json`** (backend 30/30 pass; frontend flows verified)
 
 #### LIVE‑11A (P0) — Single active login session per user (kick-out model)
-**Backend changes**
-- Data model:
-  - Add `active_session_id: str | null` to `users`.
-- JWT changes:
-  - `create_access_token(user_id, role, sid)` includes a `sid` claim.
+**Implemented**
+- Server-side session tracking:
+  - `users.active_session_id` stored in MongoDB.
+  - JWT includes `sid` claim.
 - Login behavior (`POST /api/auth/login`):
-  - On successful login generate new `sid` (UUID).
-  - Persist to `users.active_session_id`.
-  - Return JWT with `sid` claim.
-  - This invalidates previous sessions for that user.
-- Auth validation (`get_current_user` in `auth_utils.py`):
-  - Decode JWT.
-  - Load user.
-  - Verify `payload.sid == user.active_session_id`.
-  - If mismatch: raise **401** with detail `{code: 'SESSION_REPLACED', message: 'Logged in on another device'}`.
-- Logout endpoint:
-  - `POST /api/auth/logout` clears `active_session_id` if it matches current token’s `sid` (safe, idempotent).
+  - Generates new session ID (`sid`) and stores it in `users.active_session_id`.
+  - Invalidates prior sessions for that Login ID.
+- Auth validation (`get_current_user`):
+  - Compares token `sid` with `users.active_session_id`.
+  - Mismatch → **401** with `detail.code = SESSION_REPLACED`.
+- Logout endpoint (`POST /api/auth/logout`):
+  - Sets `active_session_id` to a **revoked-marker**, invalidating all existing tokens.
 
-**Frontend changes**
-- Axios interceptor (`frontend/src/lib/api.js`):
-  - On 401 with `detail.code === 'SESSION_REPLACED'`:
-    - Clear token.
-    - Redirect to `/login?reason=session_replaced`.
-- Login page (`Login.js`):
-  - If `reason=session_replaced`, show message: “You were logged out because this Login ID was used on another device.”
-- Optional: on manual logout in UI, call `/auth/logout` before clearing token.
-
-**Acceptance criteria**
-- Same Login ID cannot be active simultaneously on two devices.
-- First device gets logged out on next API call after second login.
-
-Files
-- Backend: `/app/backend/auth_utils.py`, `/app/backend/routes_auth.py`, `/app/backend/models.py`
-- Frontend: `/app/frontend/src/lib/api.js`, `/app/frontend/src/context/AuthContext.js`, `/app/frontend/src/pages/auth/Login.js`
-
----
+**Frontend behavior**
+- Axios interceptor catches `SESSION_REPLACED` and:
+  - Clears token
+  - Stores a one-time logout reason
+  - Redirects to `/login`
+- Login screen displays `data-testid="session-replaced-notice"` banner.
+- `AuthContext.logout()` calls `/auth/logout` best-effort before clearing local auth.
 
 #### LIVE‑11B (P0) — Chips → Points becomes admin-approved SELL request (1:1)
-**Core rules (confirmed)**
+**Implemented rules**
 - **1 chip = 1 point**
 - **Deduct chips only on admin approval**
-- If user lacks chips at approval time: approval fails; request stays **PENDING**
+- If insufficient chips at approval time: approval fails and request remains **PENDING**
 - **Points → Chips remains instant**
 
-**Backend changes**
-- Data model:
-  - Extend `chip_requests` documents with `type: 'BUY' | 'SELL'`.
-  - Backfill existing chip requests as `type='BUY'`.
-- Player flow:
-  - Replace `POST /api/chips/convert` for `CHIPS_TO_POINTS` with `POST /api/chips/request` using `type='SELL'`.
-  - Keep `POINTS_TO_CHIPS` conversion route intact (either same endpoint direction or a dedicated points->chips route).
-  - Deprecate or restrict `CHIPS_TO_POINTS` instant conversion in `routes_player.py` (return 410/400 with clear message).
-- Admin flow:
-  - Update `POST /api/admin/chip-requests/{id}/approve`:
-    - If `type=='BUY'`: existing behavior (credit chips).
-    - If `type=='SELL'`: attempt atomic `debit_chips(user_id, amount, note='Sold X chips for points', ref=request_id)`.
-      - If insufficient chips: error and keep request PENDING.
-      - If success: credit points (`$inc points_balance`) and create `points_transactions` CREDIT entry.
-  - Update deny endpoint to work for both types.
+**Backend changes (implemented)**
+- Instant `CHIPS_TO_POINTS` conversion blocked:
+  - `POST /api/chips/convert` with `direction=CHIPS_TO_POINTS` returns **400** with guidance.
+- New endpoint:
+  - `POST /api/chips/sell-request` creates a `chip_requests` doc with `type='SELL'` (min 500, must be ≤ current balance, max 3 pending).
+- Existing buy chip request flow retained:
+  - `POST /api/chips/request` now creates `type='BUY'`.
+- Admin approvals:
+  - `POST /api/admin/chip-requests/{id}/approve`:
+    - BUY → credits chips (unchanged)
+    - SELL → debits chips and credits points 1:1 + ledger entries
+  - Deny works for both; SELL deny leaves chips untouched.
 
-**Frontend changes**
-- Player Chips page (`ChipsPage.js`):
-  - Remove/disable “Sell chips → points” instant converter.
-  - Add a **Sell chips request** UI that creates a `type='SELL'` chip request.
-  - Keep “Points → chips” converter intact.
-- Admin Chip Requests (`AdminChipRequests.js`):
-  - Add a **Type** column and type-aware confirmation copy.
-  - Approval button triggers chip credit for BUY, points credit for SELL.
-
-Files
-- Backend: `/app/backend/routes_player.py`, `/app/backend/routes_admin.py`, `/app/backend/models.py`, `/app/backend/ledger.py`
-- Frontend: `/app/frontend/src/pages/app/ChipsPage.js`, `/app/frontend/src/pages/admin/AdminChipRequests.js`
-
----
+**Frontend changes (implemented)**
+- `ChipsPage.js`:
+  - “Sell chips → points” now submits a sell request (`Request sale`) instead of instant conversion.
+  - History shows BUY/SELL badges.
+- `AdminChipRequests.js`:
+  - Adds **Type** column (SELL → POINTS / BUY).
+  - Type-aware dialogs + toasts.
 
 #### LIVE‑11C (P1) — Admin detailed user stats (deposits / won / lost)
-**Backend changes**
-- Update `GET /api/admin/users` to return per-user aggregates from `chip_transactions`:
-  - Use Mongo aggregation with `$group` per user.
-  - Categorize via `note` patterns using `$regexMatch` (as per current ledger notes used by games/admin flows):
-    - **Deposits**: chip credits from “Chip request approved”, “Welcome play chips”, “account provisioned by admin”
-    - **Winning chips**: credits containing “win (round”, “cashout”, or known win notes
-    - **Loss chips**: sum of **DEBIT** bets (exclude refund/cancel credits such as “refunded”, “cancelled”)
-  - Return these alongside base user fields.
+**Backend changes (implemented)**
+- `GET /api/admin/users` returns a per-user `stats` object:
+  - `total_deposits`, `winning_chips`, `loss_chips`
+  - Aggregated from `chip_transactions` using note-regex categorization.
 
-**Frontend changes**
-- Update Admin Users table (`AdminUsers.js`) to add columns:
-  - Deposits, Won, Lost
-  - Keep existing chip balance + points balance.
-
-Files
-- Backend: `/app/backend/routes_admin.py` (aggregation), ensure uses `chip_transactions`
-- Frontend: `/app/frontend/src/pages/admin/AdminUsers.js`
-
----
-
-#### LIVE‑11D — Testing & Verification (MANDATORY)
-- Backend testing agent:
-  - Validate session invalidation behavior (sid mismatch → 401 SESSION_REPLACED).
-  - Validate SELL request approval behavior (insufficient chips keeps PENDING; successful approval debits chips + credits points + logs ledgers).
-  - Validate `/admin/users` aggregation outputs sane values.
-- Frontend testing agent:
-  - Login multi-device simulation (token A invalid after login B).
-  - Chips page: SELL request submission + history.
-  - Admin chip requests: approve SELL updates points; approve BUY credits chips.
-  - Admin users page shows new columns.
+**Frontend changes (implemented)**
+- `AdminUsers.js` shows Deposits / Won / Lost columns.
 
 ---
 
 ## 3) Next Actions
-1. **P0: LIVE‑11A — Single active session enforcement** (backend + frontend handling)
-2. **P0: LIVE‑11B — Chips→Points via admin-approved SELL requests** (remove instant CHIPS→POINTS)
-3. **P1: LIVE‑11C — Admin user ledger aggregates (deposits/won/lost)**
-4. **Run full backend + frontend testing agent** and write new report.
-5. **P1: Resend production deliverability**
-   - Verify sending domain in Resend.
-   - Update `SENDER_EMAIL`.
-   - Smoke test password reset emails.
-6. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
-   - Strict RBAC, maker-checker workflows, TOTP.
+1. **P1: Resend production deliverability**
+   - Verify sending domain in Resend
+   - Update `SENDER_EMAIL`
+   - Smoke test password reset emails with real inboxes
+2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure** *(await explicit user go-ahead)*
+   - Strict RBAC
+   - Maker-checker workflows
+   - TOTP
 
 ---
 
@@ -381,18 +331,18 @@ Files
 - Account provisioning:
   - ✅ Signup request → admin assigns login/password → user logs in via login ID.
   - ✅ Legacy accounts can still log in via email.
-- Sessions (NEW):
+- Sessions:
   - ✅ **One active session per Login ID**; second login invalidates previous.
-  - ✅ Previous session receives 401 `SESSION_REPLACED` on next API call and is redirected to login.
-  - ✅ Logout clears the current session.
-- Economy (UPDATED):
+  - ✅ Previous session receives 401 `SESSION_REPLACED` on next API call and is redirected to login with a clear notice.
+  - ✅ Logout revokes the active session server-side.
+- Economy:
   - ✅ Chips → Points only through **admin-approved SELL requests** (1:1).
-  - ✅ Chips deducted **only on approval**; insufficient chips prevents approval and request stays PENDING.
+  - ✅ Chips deducted **only on approval**; insufficient chips prevents approval and request remains PENDING.
   - ✅ Points → Chips still instant.
-- Admin auditing (NEW):
+- Admin auditing:
   - ✅ Admin Users shows per-user: balance, deposits, won, lost.
 - Testing:
-  - ✅ Mandatory testing agent run after LIVE‑11 changes and report saved.
+  - ✅ Mandatory testing agent run after LIVE‑11 changes and report saved (**`/app/test_reports/iteration_10.json`**).
 
 ---
 
@@ -406,7 +356,7 @@ Files
 - ✅ Resend integration verified (**iteration_7.json**).
 - ✅ Responsive + roulette camera + sound changes verified (**iteration_8.json**).
 - ✅ LIVE‑10 completed: points economy + admin-provisioned accounts verified (**iteration_9.json**).
-- 🔄 LIVE‑11 started: single-session auth + SELL requests + admin aggregates (pending implementation + testing).
+- ✅ **LIVE‑11 completed: sessions + SELL approvals + admin aggregates verified (**iteration_10.json**).**
 
 **Test credentials**
 - Admin: `admin@fungame.app` / `FunGame@Admin2025`
