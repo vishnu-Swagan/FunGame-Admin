@@ -1,35 +1,36 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
+/**
+ * Public sign-up is closed. New players submit an account REQUEST with their
+ * details - the admin verifies them and assigns a unique Login ID + password.
+ */
 export default function Register() {
-  const navigate = useNavigate();
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
+  const [dob, setDob] = useState("");
+  const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (password.length < 8) {
-      toast.error("Password must be at least 8 characters");
-      return;
-    }
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/register", { email, password });
-      if (data.email_delivery === "failed") {
-        toast.warning(data.message);
-      } else {
-        toast.success("Verification code sent!");
-      }
-      navigate("/verify-email", { state: { email, devCode: data.dev_code } });
+      await api.post("/auth/signup-request", {
+        full_name: fullName,
+        email,
+        date_of_birth: dob,
+        phone,
+      });
+      setDone(true);
     } catch (err) {
       toast.error(errMsg(err));
     } finally {
@@ -37,14 +38,48 @@ export default function Register() {
     }
   };
 
+  if (done) {
+    return (
+      <AuthShell title="Request submitted" subtitle="You are one step away from the lounge.">
+        <div data-testid="signup-success-card" className="rounded-2xl border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.1)] p-5 text-center space-y-3">
+          <CheckCircle2 className="h-10 w-10 mx-auto text-[hsl(var(--emerald))]" />
+          <p className="font-semibold text-white">Thanks, {fullName.split(" ")[0]}!</p>
+          <p className="text-sm text-white/65 leading-relaxed">
+            The admin will verify your details and share your unique <span className="text-primary font-semibold">Login ID and password</span> with you.
+            Once you receive them, log in below.
+          </p>
+        </div>
+        <Button asChild data-testid="signup-success-login-button" className="w-full h-12 rounded-xl text-base font-bold mt-5">
+          <Link to="/login">Go to log in</Link>
+        </Button>
+      </AuthShell>
+    );
+  }
+
   return (
-    <AuthShell title="Create your account" subtitle="Join the FunGame lounge. You will verify your email, complete a short profile, then an operator approves your entry.">
+    <AuthShell title="Request an account" subtitle="The admin verifies every player and assigns your unique Login ID and password.">
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="fullName">Full name</Label>
+          <Input
+            id="fullName"
+            data-testid="signup-fullname-input"
+            type="text"
+            required
+            minLength={2}
+            maxLength={64}
+            autoComplete="name"
+            placeholder="Your full name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            className="h-12 rounded-xl bg-white/5 border-white/12"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="email">Email ID</Label>
           <Input
             id="email"
-            data-testid="register-email-input"
+            data-testid="signup-email-input"
             type="email"
             required
             autoComplete="email"
@@ -55,31 +90,39 @@ export default function Register() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
-          <div className="relative">
-            <Input
-              id="password"
-              data-testid="register-password-input"
-              type={showPw ? "text" : "password"}
-              required
-              minLength={8}
-              autoComplete="new-password"
-              placeholder="At least 8 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="h-12 rounded-xl bg-white/5 border-white/12 pr-12"
-            />
-            <button type="button" aria-label={showPw ? "Hide password" : "Show password"} onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/80">
-              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
+          <Label htmlFor="dob">Date of birth</Label>
+          <Input
+            id="dob"
+            data-testid="signup-dob-input"
+            type="date"
+            required
+            max={new Date().toISOString().slice(0, 10)}
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+            className="h-12 rounded-xl bg-white/5 border-white/12"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="phone">Phone number (with country code)</Label>
+          <Input
+            id="phone"
+            data-testid="signup-phone-input"
+            type="tel"
+            required
+            autoComplete="tel"
+            placeholder="+91 98765 43210"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="h-12 rounded-xl bg-white/5 border-white/12"
+          />
+          <p className="text-[11px] text-white/40">Include your country code, e.g. +91, +1, +44</p>
         </div>
         <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
-          {busy ? "Creating…" : "Continue"}
+          {busy ? "Submitting…" : "Submit request"}
         </Button>
       </form>
-      <p className="mt-5 text-sm text-white/60">
-        Already registered?{" "}
+      <p className="mt-5 text-center text-sm text-white/60">
+        Already have your Login ID?{" "}
         <Link data-testid="register-login-link" to="/login" className="text-primary font-semibold hover:underline">
           Log in
         </Link>

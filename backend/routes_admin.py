@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
-                    AnnouncementUpdate, GameUpdate, SystemConfigUpdate)
-from auth_utils import require_admin
+                    AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
+                    AdminSignupApprove, AdminPointsAdjust)
+from auth_utils import require_admin, hash_password
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -46,6 +47,7 @@ async def stats(admin: dict = Depends(require_admin)):
     active_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'ACTIVE'})
     suspended_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'SUSPENDED'})
     pending_chip_requests = await db.chip_requests.count_documents({'status': 'PENDING'})
+    pending_signups = await db.signup_requests.count_documents({'status': 'PENDING'})
     total_games = await db.games.count_documents({})
     enabled_games = await db.games.count_documents({'status': 'ENABLED'})
     announcements_count = await db.announcements.count_documents({'active': True})
@@ -54,6 +56,7 @@ async def stats(admin: dict = Depends(require_admin)):
         'total_users': total_users, 'pending_users': pending_users,
         'active_users': active_users, 'suspended_users': suspended_users,
         'pending_chip_requests': pending_chip_requests,
+        'pending_signups': pending_signups,
         'total_games': total_games, 'enabled_games': enabled_games,
         'active_announcements': announcements_count,
         'maintenance_mode': cfg.get('maintenance_mode', False) if cfg else False,
@@ -113,6 +116,109 @@ async def suspend_user(user_id: str, body: AdminUserAction = None, admin: dict =
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'SUSPENDED'}})
     await _notify(user_id, 'Account suspended', 'Your FunGame account has been suspended. Contact support for details.', 'SUSPENSION')
     return {'message': 'User suspended'}
+
+
+# ---------- Signup requests (admin-provisioned accounts) ----------
+@router.get('/signup-requests')
+async def list_signup_requests(status: str = Query(default=None), admin: dict = Depends(require_admin)):
+    query = {}
+    if status:
+        query['status'] = status
+    reqs = await db.signup_requests.find(query, {'_id': 0}).sort('created_at', -1).to_list(500)
+    return {'requests': serialize_doc(reqs)}
+
+
+@router.post('/signup-requests/{request_id}/approve')
+async def approve_signup_request(request_id: str, body: AdminSignupApprove, admin: dict = Depends(require_admin)):
+    """Verify a signup request and provision the account with an admin-assigned
+    unique Login ID + password. The account is created ACTIVE and pre-verified."""
+    req = await db.signup_requests.find_one({'id': request_id})
+    if not req:
+        raise HTTPException(status_code=404, detail='Signup request not found')
+    if req.get('status') != 'PENDING':
+        raise HTTPException(status_code=400, detail='Request already resolved')
+    username = body.username  # validated + lowercased by the model
+    if await db.users.find_one({'username': username}):
+        raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
+    if await db.users.find_one({'email': req['email']}):
+        raise HTTPException(status_code=409, detail='A user with this email already exists')
+    # resolve the request atomically first (idempotency guard), then create the user
+    result = await db.signup_requests.update_one(
+        {'id': request_id, 'status': 'PENDING'},
+        {'$set': {'status': 'APPROVED', 'reviewed_at': _now(), 'reviewed_by': admin['id'],
+                  'assigned_username': username, 'admin_note': body.note}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail='Request already resolved')
+    user = {
+        'id': str(uuid.uuid4()),
+        'email': req['email'],
+        'username': username,
+        'password_hash': hash_password(body.password),
+        'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
+        'display_name': req['full_name'], 'full_name': req['full_name'],
+        'country': None, 'date_of_birth': req.get('date_of_birth'), 'phone': req.get('phone'),
+        'avatar': 'star',
+        'chip_balance': 0, 'points_balance': 0,
+        'favorites': [], 'recent_games': [],
+        'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
+        'accepted_terms': True,
+        'approved_at': _now(), 'created_at': _now(),
+        'provisioned_by': admin['id'], 'signup_request_id': request_id,
+    }
+    await db.users.insert_one(user)
+    if body.starting_chips > 0:
+        await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
+    await _notify(user['id'], 'Welcome to FunGame!',
+                  f'Your account is ready. Log in with your assigned Login ID "{username}". PLAY CHIPS — NO CASH VALUE.', 'APPROVAL')
+    logger.info(f'Signup request {request_id} approved -> user {username}')
+    return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}
+
+
+@router.post('/signup-requests/{request_id}/reject')
+async def reject_signup_request(request_id: str, body: AdminUserAction = None, admin: dict = Depends(require_admin)):
+    req = await db.signup_requests.find_one({'id': request_id})
+    if not req:
+        raise HTTPException(status_code=404, detail='Signup request not found')
+    if req.get('status') != 'PENDING':
+        raise HTTPException(status_code=400, detail='Request already resolved')
+    note = (body.note if body else None) or 'Details could not be verified'
+    result = await db.signup_requests.update_one(
+        {'id': request_id, 'status': 'PENDING'},
+        {'$set': {'status': 'REJECTED', 'reviewed_at': _now(), 'reviewed_by': admin['id'], 'admin_note': note}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail='Request already resolved')
+    return {'message': 'Signup request rejected'}
+
+
+# ---------- Points (admin adjustments) ----------
+@router.post('/users/{user_id}/points')
+async def adjust_points(user_id: str, body: AdminPointsAdjust, admin: dict = Depends(require_admin)):
+    user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'})
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    if body.delta < 0:
+        result = await db.users.find_one_and_update(
+            {'id': user_id, 'points_balance': {'$gte': -body.delta}},
+            {'$inc': {'points_balance': body.delta}}, return_document=True,
+        )
+        if result is None:
+            raise HTTPException(status_code=400, detail='User does not have enough points')
+    else:
+        result = await db.users.find_one_and_update(
+            {'id': user_id}, {'$inc': {'points_balance': body.delta}}, return_document=True,
+        )
+    balance_after = result.get('points_balance', 0) if result else 0
+    await db.points_transactions.insert_one({
+        'id': str(uuid.uuid4()), 'user_id': user_id,
+        'type': 'CREDIT' if body.delta > 0 else 'DEBIT', 'amount': abs(body.delta),
+        'balance_after': balance_after, 'note': body.note or 'Admin points adjustment',
+        'ref': f'admin:{admin["id"]}', 'created_at': _now(),
+    })
+    await _notify(user_id, 'Points update',
+                  f'An operator {"added" if body.delta > 0 else "deducted"} {abs(body.delta)} points. New points balance: {balance_after}.', 'POINTS')
+    return {'message': 'Points adjusted', 'points_balance': balance_after}
 
 
 # ---------- Chip requests ----------

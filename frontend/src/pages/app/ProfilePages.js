@@ -36,16 +36,26 @@ export function Profile() {
           <AvatarBadge avatarKey={user?.avatar} size={60} />
           <div className="min-w-0">
             <p data-testid="profile-display-name" className="font-bold text-lg truncate">{user?.display_name || "Player"}</p>
-            <p className="text-xs text-white/55 truncate">{user?.email}</p>
+            <p className="text-xs text-white/55 truncate">
+              {user?.username ? <span className="text-primary/85 font-semibold">@{user.username}</span> : null}
+              {user?.username ? " · " : ""}
+              {user?.email}
+            </p>
             <div className="mt-1.5 flex items-center gap-2">
               <UserStatusBadge status={user?.status} />
               {user?.role === "ADMIN" && <span className="text-[10px] font-bold text-primary tracking-wider">ADMIN</span>}
             </div>
           </div>
         </div>
-        <div className="mt-4 rounded-xl bg-white/5 border border-white/10 px-4 py-3 flex items-center justify-between">
-          <span className="text-xs text-white/55">Play-chip balance</span>
-          <span className="tabular-nums font-bold text-primary">{formatChips(user?.chip_balance)}</span>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+            <p className="text-xs text-white/55">Play chips</p>
+            <p className="tabular-nums font-bold text-primary" data-testid="profile-chip-balance">{formatChips(user?.chip_balance)}</p>
+          </div>
+          <div className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+            <p className="text-xs text-white/55">Points</p>
+            <p className="tabular-nums font-bold text-white" data-testid="profile-points-balance">{formatChips(user?.points_balance || 0)}</p>
+          </div>
         </div>
       </div>
 

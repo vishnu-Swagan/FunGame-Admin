@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { UserCheck, UserX, Ban, RotateCcw, Users } from "lucide-react";
+import { UserCheck, UserX, Ban, RotateCcw, Users, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -22,6 +23,11 @@ export default function AdminUsers() {
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectNote, setRejectNote] = useState("");
   const [busyId, setBusyId] = useState(null);
+  // points adjustment dialog
+  const [pointsTarget, setPointsTarget] = useState(null);
+  const [pointsDelta, setPointsDelta] = useState("");
+  const [pointsNote, setPointsNote] = useState("");
+  const [pointsBusy, setPointsBusy] = useState(false);
 
   const load = useCallback(async (f) => {
     setLoading(true);
@@ -60,6 +66,27 @@ export default function AdminUsers() {
     setRejectNote("");
   };
 
+  const adjustPoints = async () => {
+    const delta = parseInt(pointsDelta, 10);
+    if (!delta) {
+      toast.error("Enter a non-zero points amount (use negative to deduct)");
+      return;
+    }
+    setPointsBusy(true);
+    try {
+      const { data } = await api.post(`/admin/users/${pointsTarget.id}/points`, { delta, note: pointsNote || null });
+      toast.success(`Points adjusted — new balance: ${formatChips(data.points_balance)}`);
+      setPointsTarget(null);
+      setPointsDelta("");
+      setPointsNote("");
+      await load(filter);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setPointsBusy(false);
+    }
+  };
+
   return (
     <PageTransition className="space-y-4">
       <h1 className="text-2xl font-bold tracking-tight">Users</h1>
@@ -95,6 +122,7 @@ export default function AdminUsers() {
                 <TableHead className="text-white/50">Country</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
                 <TableHead className="text-white/50 text-right">Chips</TableHead>
+                <TableHead className="text-white/50 text-right">Points</TableHead>
                 <TableHead className="text-white/50">Joined</TableHead>
                 <TableHead className="text-white/50 text-right">Actions</TableHead>
               </TableRow>
@@ -107,13 +135,27 @@ export default function AdminUsers() {
                       <AvatarBadge avatarKey={u.avatar} size={30} />
                       <div className="min-w-0">
                         <p className="font-semibold text-sm truncate">{u.display_name || "—"}</p>
-                        <p className="text-[11px] text-white/45 truncate">{u.email}</p>
+                        <p className="text-[11px] text-white/45 truncate">
+                          {u.username ? <span className="text-primary/85 font-semibold">@{u.username}</span> : null}
+                          {u.username ? " · " : ""}
+                          {u.email}
+                        </p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-white/70">{u.country || "—"}</TableCell>
                   <TableCell><UserStatusBadge status={u.status} /></TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-semibold">{formatChips(u.chip_balance)}</TableCell>
+                  <TableCell className="text-right">
+                    <button
+                      data-testid="admin-adjust-points-button"
+                      onClick={() => { setPointsTarget(u); setPointsDelta(""); setPointsNote(""); }}
+                      className="inline-flex items-center gap-1 tabular-nums text-sm font-semibold text-white/85 hover:text-primary border border-transparent hover:border-primary/30 rounded-lg px-2 py-1"
+                      title="Adjust points"
+                    >
+                      <Star className="h-3 w-3 text-primary/70" /> {formatChips(u.points_balance || 0)}
+                    </button>
+                  </TableCell>
                   <TableCell className="text-xs text-white/50">{timeAgo(u.created_at)}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
@@ -181,6 +223,38 @@ export default function AdminUsers() {
             <Button variant="outline" onClick={() => setRejectTarget(null)} className="rounded-xl border-white/15">Cancel</Button>
             <Button data-testid="admin-reject-confirm-button" onClick={confirmReject} className="rounded-xl bg-destructive text-white hover:brightness-110">
               <RotateCcw className="h-4 w-4 mr-1.5" /> Reject user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Points adjust dialog */}
+      <Dialog open={!!pointsTarget} onOpenChange={(o) => !o && setPointsTarget(null)}>
+        <DialogContent className="rounded-2xl border-white/10 bg-card" data-testid="admin-points-dialog">
+          <DialogHeader>
+            <DialogTitle>Adjust points — {pointsTarget?.display_name || pointsTarget?.email}</DialogTitle>
+            <DialogDescription>
+              Current points: {formatChips(pointsTarget?.points_balance || 0)}. Use a negative number to deduct.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            data-testid="admin-points-delta-input"
+            type="number"
+            placeholder="e.g. 500 or -500"
+            value={pointsDelta}
+            onChange={(e) => setPointsDelta(e.target.value)}
+            className="rounded-xl bg-white/5 border-white/12 tabular-nums"
+          />
+          <Textarea
+            data-testid="admin-points-note-input"
+            placeholder="Note (optional)"
+            value={pointsNote}
+            onChange={(e) => setPointsNote(e.target.value)}
+            className="rounded-xl bg-white/5 border-white/12 min-h-[60px]"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPointsTarget(null)} className="rounded-xl border-white/15">Cancel</Button>
+            <Button data-testid="admin-points-confirm-button" onClick={adjustPoints} disabled={pointsBusy} className="rounded-xl font-bold">
+              <Star className="h-4 w-4 mr-1.5" /> {pointsBusy ? "Saving…" : "Apply"}
             </Button>
           </DialogFooter>
         </DialogContent>

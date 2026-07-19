@@ -24,6 +24,7 @@ export default function AdminDashboard() {
   }
 
   const KPIS = [
+    { label: "Pending signups", value: stats.pending_signups ?? 0, icon: UserCheck, to: "/admin/signups", accent: "text-primary", urgent: (stats.pending_signups ?? 0) > 0 },
     { label: "Pending approvals", value: stats.pending_users, icon: UserCheck, to: "/admin/users?status=PENDING", accent: "text-primary", urgent: stats.pending_users > 0 },
     { label: "Pending chip requests", value: stats.pending_chip_requests, icon: HandCoins, to: "/admin/chip-requests", accent: "text-[hsl(var(--cyan))]", urgent: stats.pending_chip_requests > 0 },
     { label: "Active players", value: stats.active_users, icon: Users, to: "/admin/users?status=ACTIVE", accent: "text-[hsl(var(--emerald))]" },

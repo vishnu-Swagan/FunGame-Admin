@@ -1,13 +1,15 @@
 """
-FunGame Backend API Test Suite
-Tests all backend endpoints for the foundation gate.
+Backend API tests for FunGame Points Economy + Admin-Provisioned Accounts features.
+Tests both new features:
+1. Points economy (chips <-> points conversion, admin adjustments)
+2. Admin-provisioned accounts (signup requests, admin approval with username/password)
 """
 import requests
 import sys
-import random
-import string
+import time
 from datetime import datetime
 
+# Public endpoint from frontend/.env
 BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
 
 class Colors:
@@ -17,808 +19,416 @@ class Colors:
     BLUE = '\033[94m'
     END = '\033[0m'
 
-class FunGameTester:
+class APITester:
     def __init__(self):
         self.tests_run = 0
         self.tests_passed = 0
-        self.tests_failed = 0
         self.admin_token = None
         self.player_token = None
-        self.new_user_token = None
-        self.new_user_email = None
-        self.new_user_id = None
-        self.dev_code = None
-        self.chip_request_id = None
-        self.failed_tests = []
+        self.test_user_id = None
+        self.test_signup_request_id = None
+        self.test_username = None
+        self.test_password = None
+        self.failures = []
 
     def log(self, msg, color=Colors.BLUE):
         print(f"{color}{msg}{Colors.END}")
 
-    def test(self, name, func):
-        """Run a single test"""
-        self.tests_run += 1
-        self.log(f"\n[{self.tests_run}] Testing: {name}", Colors.BLUE)
-        try:
-            func()
-            self.tests_passed += 1
-            self.log(f"✅ PASSED: {name}", Colors.GREEN)
-            return True
-        except AssertionError as e:
-            self.tests_failed += 1
-            self.failed_tests.append(f"{name}: {str(e)}")
-            self.log(f"❌ FAILED: {name}\n   Error: {str(e)}", Colors.RED)
-            return False
-        except Exception as e:
-            self.tests_failed += 1
-            self.failed_tests.append(f"{name}: {str(e)}")
-            self.log(f"❌ ERROR: {name}\n   Exception: {str(e)}", Colors.RED)
-            return False
-
-    def req(self, method, endpoint, expected_status, token=None, data=None, desc=""):
-        """Make HTTP request and validate status"""
+    def test(self, name, method, endpoint, expected_status, data=None, token=None, description=""):
+        """Run a single API test"""
         url = f"{BASE_URL}{endpoint}"
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = f'Bearer {token}'
-        
+
+        self.tests_run += 1
+        print(f"\n{'='*80}")
+        self.log(f"TEST {self.tests_run}: {name}", Colors.BLUE)
+        if description:
+            print(f"  {description}")
+        print(f"  {method} {endpoint}")
+        if data:
+            print(f"  Body: {data}")
+
         try:
             if method == 'GET':
-                resp = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(url, headers=headers, timeout=10)
             elif method == 'POST':
-                resp = requests.post(url, json=data, headers=headers, timeout=10)
+                response = requests.post(url, json=data, headers=headers, timeout=10)
             elif method == 'PATCH':
-                resp = requests.patch(url, json=data, headers=headers, timeout=10)
+                response = requests.patch(url, json=data, headers=headers, timeout=10)
             elif method == 'DELETE':
-                resp = requests.delete(url, headers=headers, timeout=10)
+                response = requests.delete(url, headers=headers, timeout=10)
+
+            success = response.status_code == expected_status
+            
+            if success:
+                self.tests_passed += 1
+                self.log(f"✅ PASS - Status: {response.status_code}", Colors.GREEN)
+                try:
+                    resp_data = response.json()
+                    print(f"  Response: {resp_data}")
+                    return True, resp_data
+                except:
+                    return True, {}
             else:
-                raise ValueError(f"Unsupported method: {method}")
-            
-            if desc:
-                print(f"   {desc}: {resp.status_code}")
-            
-            assert resp.status_code == expected_status, f"Expected {expected_status}, got {resp.status_code}. Response: {resp.text[:200]}"
-            
-            try:
-                return resp.json()
-            except:
-                return {}
-        except requests.exceptions.RequestException as e:
-            raise AssertionError(f"Request failed: {str(e)}")
+                self.log(f"❌ FAIL - Expected {expected_status}, got {response.status_code}", Colors.RED)
+                try:
+                    error_detail = response.json()
+                    print(f"  Error: {error_detail}")
+                except:
+                    print(f"  Response: {response.text[:200]}")
+                self.failures.append(f"{name}: Expected {expected_status}, got {response.status_code}")
+                return False, {}
 
-    # ========== HEALTH & ROOT ==========
-    def test_health(self):
-        data = self.req('GET', '/health', 200, desc="Health check")
-        assert data.get('status') == 'ok', "Health check should return status ok"
-
-    def test_root(self):
-        data = self.req('GET', '/', 200, desc="Root endpoint")
-        assert 'FunGame' in data.get('message', ''), "Root should mention FunGame"
-        assert 'PLAY CHIPS' in data.get('disclaimer', ''), "Root should have disclaimer"
-
-    # ========== AUTH FLOW ==========
-    def test_register_new_user(self):
-        """Register a new user and capture dev_code"""
-        rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        self.new_user_email = f"test_{rand}@example.com"
-        password = "TestPass123!"
-        
-        data = self.req('POST', '/auth/register', 200, data={
-            'email': self.new_user_email,
-            'password': password
-        }, desc="Register new user")
-        
-        assert 'dev_code' in data, "Registration should return dev_code in demo mode"
-        self.dev_code = data['dev_code']
-        assert len(self.dev_code) == 6, "dev_code should be 6 digits"
-        print(f"   📧 Dev code: {self.dev_code}")
-
-    def test_verify_email(self):
-        """Verify email with dev_code and get token"""
-        assert self.dev_code, "dev_code must be set from registration"
-        
-        data = self.req('POST', '/auth/verify-email', 200, data={
-            'email': self.new_user_email,
-            'code': self.dev_code
-        }, desc="Verify email")
-        
-        assert 'access_token' in data, "Verify should return access_token"
-        assert 'user' in data, "Verify should return user object"
-        self.new_user_token = data['access_token']
-        self.new_user_id = data['user']['id']
-        assert data['user']['status'] == 'VERIFIED', "User status should be VERIFIED after email verification"
-        print(f"   🔑 Token obtained for new user")
-
-    def test_login_admin(self):
-        """Login as admin"""
-        data = self.req('POST', '/auth/login', 200, data={
-            'email': 'admin@fungame.app',
-            'password': 'FunGame@Admin2025'
-        }, desc="Admin login")
-        
-        assert 'access_token' in data, "Login should return access_token"
-        assert data['user']['role'] == 'ADMIN', "User should be ADMIN"
-        self.admin_token = data['access_token']
-        print(f"   🔑 Admin token obtained")
-
-    def test_login_player(self):
-        """Login as pre-approved player"""
-        data = self.req('POST', '/auth/login', 200, data={
-            'email': 'player@fungame.app',
-            'password': 'Player@123'
-        }, desc="Player login")
-        
-        assert 'access_token' in data, "Login should return access_token"
-        assert data['user']['role'] == 'PLAYER', "User should be PLAYER"
-        assert data['user']['status'] == 'ACTIVE', "Player should be ACTIVE"
-        self.player_token = data['access_token']
-        print(f"   🔑 Player token obtained, balance: {data['user']['chip_balance']}")
-
-    def test_forgot_password(self):
-        """Test forgot password flow"""
-        data = self.req('POST', '/auth/forgot-password', 200, data={
-            'email': 'player@fungame.app'
-        }, desc="Forgot password")
-        
-        assert 'message' in data, "Should return message"
-        # In demo mode, dev_code should be present
-        if 'dev_code' in data:
-            print(f"   📧 Reset code: {data['dev_code']}")
-
-    def test_reset_password(self):
-        """Test reset password with code"""
-        # Use player email for reset test to avoid interfering with new user flow
-        data = self.req('POST', '/auth/forgot-password', 200, data={
-            'email': 'player@fungame.app'
-        }, desc="Request reset code")
-        
-        if 'dev_code' in data:
-            reset_code = data['dev_code']
-            # Now reset password
-            self.req('POST', '/auth/reset-password', 200, data={
-                'email': 'player@fungame.app',
-                'code': reset_code,
-                'new_password': 'Player@123'  # Reset to same password to not break other tests
-            }, desc="Reset password")
-            print(f"   ✅ Password reset successful")
-
-    # ========== ONBOARDING ==========
-    def test_onboarding_profile(self):
-        """Submit onboarding profile"""
-        assert self.new_user_token, "New user token required"
-        
-        data = self.req('POST', '/onboarding/profile', 200, token=self.new_user_token, data={
-            'display_name': 'Test Player',
-            'country': 'India',
-            'date_of_birth': '1995-05-15',
-            'avatar': 'star'
-        }, desc="Submit profile")
-        
-        assert data['user']['status'] == 'PROFILE_SUBMITTED', "Status should be PROFILE_SUBMITTED"
-        print(f"   ✅ Profile submitted")
-
-    def test_onboarding_submit(self):
-        """Submit for approval"""
-        assert self.new_user_token, "New user token required"
-        
-        data = self.req('POST', '/onboarding/submit', 200, token=self.new_user_token, desc="Submit for approval")
-        
-        assert data['user']['status'] == 'PENDING', "Status should be PENDING"
-        print(f"   ✅ Submitted for approval, status: PENDING")
-
-    def test_pending_user_blocked_from_games(self):
-        """PENDING user should get 403 from /games"""
-        assert self.new_user_token, "New user token required"
-        
-        self.req('GET', '/games', 403, token=self.new_user_token, desc="PENDING user accessing games")
-        print(f"   ✅ PENDING user correctly blocked from /games")
-
-    def test_pending_user_blocked_from_chips(self):
-        """PENDING user should get 403 from /chips/balance"""
-        assert self.new_user_token, "New user token required"
-        
-        self.req('GET', '/chips/balance', 403, token=self.new_user_token, desc="PENDING user accessing chips")
-        print(f"   ✅ PENDING user correctly blocked from /chips/balance")
-
-    # ========== ADMIN USER APPROVAL ==========
-    def test_admin_list_pending_users(self):
-        """Admin lists pending users"""
-        assert self.admin_token, "Admin token required"
-        
-        data = self.req('GET', '/admin/users?status=PENDING', 200, token=self.admin_token, desc="List pending users")
-        
-        assert 'users' in data, "Should return users array"
-        # Find our new user
-        found = any(u['id'] == self.new_user_id for u in data['users'])
-        assert found, f"New user {self.new_user_id} should be in pending list"
-        print(f"   ✅ Found {len(data['users'])} pending user(s)")
-
-    def test_admin_approve_user(self):
-        """Admin approves user - should set ACTIVE and credit 1000 welcome chips"""
-        assert self.admin_token, "Admin token required"
-        assert self.new_user_id, "New user ID required"
-        
-        data = self.req('POST', f'/admin/users/{self.new_user_id}/approve', 200, token=self.admin_token, desc="Approve user")
-        
-        assert data['user']['status'] == 'ACTIVE', "User should be ACTIVE after approval"
-        assert data['user']['chip_balance'] == 1000, "User should have 1000 welcome chips"
-        print(f"   ✅ User approved, balance: {data['user']['chip_balance']}")
-
-    def test_admin_double_approve_blocked(self):
-        """Double-approve should fail with 400"""
-        assert self.admin_token, "Admin token required"
-        assert self.new_user_id, "New user ID required"
-        
-        self.req('POST', f'/admin/users/{self.new_user_id}/approve', 400, token=self.admin_token, desc="Double approve attempt")
-        print(f"   ✅ Double-approve correctly blocked")
-
-    # ========== GAMES ==========
-    def test_games_list_18_games(self):
-        """GET /games should return exactly 18 games, all COMING_SOON"""
-        # Refresh token for newly approved user
-        data = self.req('POST', '/auth/login', 200, data={
-            'email': self.new_user_email,
-            'password': 'TestPass123!'
-        })
-        self.new_user_token = data['access_token']
-        
-        data = self.req('GET', '/games', 200, token=self.new_user_token, desc="List games")
-        
-        games = data.get('games', [])
-        assert len(games) == 18, f"Should have exactly 18 games, got {len(games)}"
-        
-        # Check all are COMING_SOON
-        for game in games:
-            assert game['status'] == 'COMING_SOON', f"Game {game['slug']} should be COMING_SOON, got {game['status']}"
-        
-        print(f"   ✅ Found 18 games, all COMING_SOON")
-
-    def test_game_detail(self):
-        """GET /games/{slug} should return game details"""
-        data = self.req('GET', '/games/aviator', 200, token=self.new_user_token, desc="Get game detail")
-        
-        assert data['game']['slug'] == 'aviator', "Should return aviator game"
-        assert data['game']['status'] == 'COMING_SOON', "Aviator should be COMING_SOON"
-        print(f"   ✅ Game detail retrieved: {data['game']['name']}")
-
-    def test_game_play_blocked(self):
-        """POST /games/aviator/play should return 409 (non-playable)"""
-        self.req('POST', '/games/aviator/play', 409, token=self.new_user_token, desc="Attempt to play game")
-        print(f"   ✅ Game play correctly blocked with 409")
-
-    def test_game_favorite_toggle(self):
-        """Toggle favorite on a game"""
-        data = self.req('POST', '/games/aviator/favorite', 200, token=self.new_user_token, desc="Toggle favorite")
-        
-        assert 'favorites' in data, "Should return favorites array"
-        print(f"   ✅ Favorite toggled, action: {data.get('action')}")
-
-    # ========== CHIPS ==========
-    def test_chip_balance(self):
-        """GET /chips/balance should return balance"""
-        data = self.req('GET', '/chips/balance', 200, token=self.new_user_token, desc="Get chip balance")
-        
-        assert 'balance' in data, "Should return balance"
-        assert data['balance'] == 1000, "New approved user should have 1000 chips"
-        assert 'PLAY CHIPS' in data.get('disclaimer', ''), "Should have disclaimer"
-        print(f"   ✅ Balance: {data['balance']}")
-
-    def test_chip_request_create(self):
-        """POST /chips/request should create a chip request"""
-        data = self.req('POST', '/chips/request', 200, token=self.new_user_token, data={
-            'amount': 2500,
-            'note': 'Test request for 2500 chips'
-        }, desc="Create chip request")
-        
-        assert 'request' in data, "Should return request object"
-        assert data['request']['status'] == 'PENDING', "Request should be PENDING"
-        self.chip_request_id = data['request']['id']
-        print(f"   ✅ Chip request created: {self.chip_request_id}")
-
-    def test_chip_requests_list(self):
-        """GET /chips/requests should list user's requests"""
-        data = self.req('GET', '/chips/requests', 200, token=self.new_user_token, desc="List chip requests")
-        
-        assert 'requests' in data, "Should return requests array"
-        assert len(data['requests']) > 0, "Should have at least one request"
-        print(f"   ✅ Found {len(data['requests'])} request(s)")
-
-    def test_admin_list_chip_requests(self):
-        """Admin lists chip requests"""
-        data = self.req('GET', '/admin/chip-requests?status=PENDING', 200, token=self.admin_token, desc="Admin list chip requests")
-        
-        assert 'requests' in data, "Should return requests array"
-        found = any(r['id'] == self.chip_request_id for r in data['requests'])
-        assert found, "Should find our chip request"
-        print(f"   ✅ Found {len(data['requests'])} pending request(s)")
-
-    def test_admin_approve_chip_request(self):
-        """Admin approves chip request - should credit balance and create ledger entry"""
-        assert self.chip_request_id, "Chip request ID required"
-        
-        data = self.req('POST', f'/admin/chip-requests/{self.chip_request_id}/approve', 200, token=self.admin_token, data={
-            'note': 'Approved by admin'
-        }, desc="Approve chip request")
-        
-        assert 'balance_after' in data, "Should return balance_after"
-        assert data['balance_after'] == 3500, f"Balance should be 3500 (1000 + 2500), got {data['balance_after']}"
-        print(f"   ✅ Chip request approved, new balance: {data['balance_after']}")
-
-    def test_admin_double_approve_chip_request_blocked(self):
-        """Double-approve chip request should fail with 400"""
-        assert self.chip_request_id, "Chip request ID required"
-        
-        self.req('POST', f'/admin/chip-requests/{self.chip_request_id}/approve', 400, token=self.admin_token, desc="Double approve chip request")
-        print(f"   ✅ Double-approve chip request correctly blocked")
-
-    def test_chip_transactions(self):
-        """GET /chips/transactions should show ledger entries"""
-        data = self.req('GET', '/chips/transactions', 200, token=self.new_user_token, desc="Get transactions")
-        
-        assert 'transactions' in data, "Should return transactions array"
-        assert len(data['transactions']) >= 2, "Should have at least 2 transactions (welcome + approved request)"
-        print(f"   ✅ Found {len(data['transactions'])} transaction(s)")
-
-    # ========== NOTIFICATIONS ==========
-    def test_notifications(self):
-        """GET /notifications should return notifications"""
-        data = self.req('GET', '/notifications', 200, token=self.new_user_token, desc="Get notifications")
-        
-        assert 'notifications' in data, "Should return notifications array"
-        assert 'unread_count' in data, "Should return unread_count"
-        # User should have notifications from approval and chip request approval
-        assert len(data['notifications']) >= 2, "Should have at least 2 notifications"
-        print(f"   ✅ Found {len(data['notifications'])} notification(s), {data['unread_count']} unread")
-
-    def test_mark_notification_read(self):
-        """Mark a notification as read"""
-        # Get notifications first
-        data = self.req('GET', '/notifications', 200, token=self.new_user_token)
-        if data['notifications']:
-            notif_id = data['notifications'][0]['id']
-            self.req('POST', f'/notifications/{notif_id}/read', 200, token=self.new_user_token, desc="Mark notification read")
-            print(f"   ✅ Notification marked as read")
-
-    # ========== ANNOUNCEMENTS ==========
-    def test_announcements(self):
-        """GET /announcements should return announcements"""
-        data = self.req('GET', '/announcements', 200, token=self.new_user_token, desc="Get announcements")
-        
-        assert 'announcements' in data, "Should return announcements array"
-        assert len(data['announcements']) >= 3, "Should have at least 3 seeded announcements"
-        # Check first is pinned
-        if data['announcements']:
-            assert data['announcements'][0].get('pinned') == True, "First announcement should be pinned"
-        print(f"   ✅ Found {len(data['announcements'])} announcement(s)")
-
-    # ========== SETTINGS ==========
-    def test_update_settings(self):
-        """PATCH /settings should update user settings"""
-        data = self.req('PATCH', '/settings', 200, token=self.new_user_token, data={
-            'reduced_motion': True,
-            'high_contrast': True
-        }, desc="Update settings")
-        
-        assert 'settings' in data, "Should return settings object"
-        assert data['settings']['reduced_motion'] == True, "reduced_motion should be True"
-        assert data['settings']['high_contrast'] == True, "high_contrast should be True"
-        print(f"   ✅ Settings updated")
-
-    def test_change_password(self):
-        """POST /auth/change-password should change password"""
-        self.req('POST', '/auth/change-password', 200, token=self.new_user_token, data={
-            'current_password': 'TestPass123!',
-            'new_password': 'NewTestPass123!'
-        }, desc="Change password")
-        print(f"   ✅ Password changed")
-
-    # ========== MAINTENANCE MODE ==========
-    def test_maintenance_mode_on(self):
-        """Admin enables maintenance mode"""
-        data = self.req('PATCH', '/admin/system', 200, token=self.admin_token, data={
-            'maintenance_mode': True
-        }, desc="Enable maintenance mode")
-        
-        assert data['config']['maintenance_mode'] == True, "Maintenance mode should be enabled"
-        print(f"   ✅ Maintenance mode enabled")
-
-    def test_player_blocked_during_maintenance(self):
-        """Player should get 503 during maintenance"""
-        self.req('GET', '/games', 503, token=self.player_token, desc="Player accessing games during maintenance")
-        print(f"   ✅ Player correctly blocked with 503 during maintenance")
-
-    def test_admin_works_during_maintenance(self):
-        """Admin should still work during maintenance"""
-        data = self.req('GET', '/admin/stats', 200, token=self.admin_token, desc="Admin accessing stats during maintenance")
-        
-        assert 'total_users' in data, "Admin should get stats"
-        print(f"   ✅ Admin still has access during maintenance")
-
-    def test_maintenance_mode_off(self):
-        """Admin disables maintenance mode"""
-        data = self.req('PATCH', '/admin/system', 200, token=self.admin_token, data={
-            'maintenance_mode': False
-        }, desc="Disable maintenance mode")
-        
-        assert data['config']['maintenance_mode'] == False, "Maintenance mode should be disabled"
-        print(f"   ✅ Maintenance mode disabled")
-
-    def test_player_access_restored(self):
-        """Player should access games after maintenance is off"""
-        data = self.req('GET', '/games', 200, token=self.player_token, desc="Player accessing games after maintenance")
-        
-        assert len(data['games']) == 18, "Player should see 18 games"
-        print(f"   ✅ Player access restored")
-
-    # ========== NO PAYMENT ROUTES ==========
-    def test_no_payment_routes(self):
-        """Verify no payment/deposit/withdraw routes exist"""
-        payment_endpoints = [
-            '/payment', '/payments', '/deposit', '/deposits',
-            '/withdraw', '/withdrawals', '/cashout', '/transfer'
-        ]
-        
-        for endpoint in payment_endpoints:
-            self.req('GET', endpoint, 404, token=self.player_token, desc=f"Check {endpoint} returns 404")
-        
-        print(f"   ✅ All payment routes correctly return 404")
-
-    # ========== ADMIN STATS ==========
-    def test_admin_stats(self):
-        """GET /admin/stats should return dashboard stats"""
-        data = self.req('GET', '/admin/stats', 200, token=self.admin_token, desc="Get admin stats")
-        
-        assert 'total_users' in data, "Should return total_users"
-        assert 'pending_users' in data, "Should return pending_users"
-        assert 'total_games' in data, "Should return total_games"
-        assert data['total_games'] == 18, "Should have 18 games"
-        print(f"   ✅ Stats: {data['total_users']} users, {data['total_games']} games")
-
-    # ========== SYSTEM CONFIG ==========
-    def test_system_config_public(self):
-        """GET /system/config should be public (no auth)"""
-        data = self.req('GET', '/system/config', 200, desc="Get system config (public)")
-        
-        assert 'maintenance_mode' in data, "Should return maintenance_mode"
-        assert 'PLAY CHIPS' in data.get('disclaimer', ''), "Should have disclaimer"
-        print(f"   ✅ System config accessible without auth")
-
-    # ========== FUN ROULETTE LIVE GAME ==========
-    def test_roulette_state_player(self):
-        """GET /games/fun-roulette/state as player"""
-        import time
-        data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token, desc="Get roulette state (player)")
-        
-        assert 'round_number' in data, "Should return round_number"
-        assert 'phase' in data, "Should return phase"
-        assert data['phase'] in ['BETTING', 'SPINNING', 'RESULT'], f"Phase should be valid, got {data['phase']}"
-        assert 'phase_ends_in' in data, "Should return phase_ends_in"
-        assert 'my_bets' in data, "Should return my_bets"
-        assert 'last_results' in data, "Should return last_results"
-        assert 'balance' in data, "Should return balance"
-        
-        # Store for universal sync test
-        self.roulette_round_player = data['round_number']
-        self.roulette_phase_player = data['phase']
-        self.roulette_winning_player = data.get('winning_number')
-        
-        print(f"   ✅ Round {data['round_number']}, phase: {data['phase']}, countdown: {data['phase_ends_in']:.1f}s")
-        return data
-
-    def test_roulette_state_admin(self):
-        """GET /games/fun-roulette/state as admin - should match player's round"""
-        data = self.req('GET', '/games/fun-roulette/state', 200, token=self.admin_token, desc="Get roulette state (admin)")
-        
-        assert data['round_number'] == self.roulette_round_player, f"Admin round {data['round_number']} should match player round {self.roulette_round_player}"
-        
-        # If phase is not BETTING, winning_number must match
-        if self.roulette_phase_player != 'BETTING' and self.roulette_winning_player is not None:
-            assert data.get('winning_number') == self.roulette_winning_player, f"Admin winning number {data.get('winning_number')} should match player {self.roulette_winning_player}"
-        
-        print(f"   ✅ Universal sync verified: both see round {data['round_number']}")
-
-    def test_roulette_wait_for_betting_phase(self):
-        """Wait for BETTING phase to test placing bets"""
-        import time
-        max_wait = 30
-        start = time.time()
-        
-        while time.time() - start < max_wait:
-            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
-            if data['phase'] == 'BETTING' and data['phase_ends_in'] > 6:
-                print(f"   ✅ BETTING phase ready, {data['phase_ends_in']:.1f}s remaining")
-                self.roulette_betting_round = data['round_number']
-                return data
-            time.sleep(1)
-        
-        raise AssertionError("Timeout waiting for BETTING phase with >6s remaining")
-
-    def test_roulette_place_bet_color(self):
-        """POST /games/fun-roulette/bets - place bet on red"""
-        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
-            'bet_type': 'color',
-            'value': 'red',
-            'amount': 100
-        }, desc="Place bet on RED")
-        
-        assert 'my_bets' in data, "Should return my_bets"
-        assert 'my_total' in data, "Should return my_total"
-        assert data['my_total'] >= 100, f"Total should be at least 100, got {data['my_total']}"
-        assert 'balance' in data, "Should return updated balance"
-        
-        self.roulette_balance_after_bet = data['balance']
-        print(f"   ✅ Bet placed, total: {data['my_total']}, balance: {data['balance']}")
-
-    def test_roulette_place_bet_straight(self):
-        """POST /games/fun-roulette/bets - stack another bet on number 17"""
-        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
-            'bet_type': 'straight',
-            'value': 17,
-            'amount': 50
-        }, desc="Place bet on number 17")
-        
-        assert data['my_total'] >= 150, f"Total should be at least 150 (100+50), got {data['my_total']}"
-        print(f"   ✅ Stacked bet, total: {data['my_total']}")
-
-    def test_roulette_clear_bets(self):
-        """POST /games/fun-roulette/bets/clear - refund all bets"""
-        data = self.req('POST', '/games/fun-roulette/bets/clear', 200, token=self.player_token, desc="Clear all bets")
-        
-        assert 'refunded' in data, "Should return refunded amount"
-        assert data['refunded'] >= 150, f"Should refund at least 150, got {data['refunded']}"
-        assert 'balance' in data, "Should return updated balance"
-        
-        print(f"   ✅ Bets cleared, refunded: {data['refunded']}, balance: {data['balance']}")
-
-    def test_roulette_bet_below_minimum(self):
-        """POST /games/fun-roulette/bets with amount < 10 should fail with 400"""
-        self.req('POST', '/games/fun-roulette/bets', 400, token=self.player_token, data={
-            'bet_type': 'color',
-            'value': 'black',
-            'amount': 5
-        }, desc="Bet below minimum (5 chips)")
-        
-        print(f"   ✅ Bet below minimum correctly rejected with 400")
-
-    def test_roulette_place_final_bet(self):
-        """Place a final bet to test settlement"""
-        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
-            'bet_type': 'color',
-            'value': 'black',
-            'amount': 100
-        }, desc="Place final bet for settlement test")
-        
-        self.roulette_final_bet_round = data['round_number']
-        print(f"   ✅ Final bet placed on round {data['round_number']}")
-
-    def test_roulette_wait_for_settlement(self):
-        """Wait for the round to complete and check settlement"""
-        import time
-        max_wait = 30
-        start = time.time()
-        
-        while time.time() - start < max_wait:
-            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
-            
-            # Check if we got settlement for our bet round
-            if data.get('settled') and data['settled']['round_number'] == self.roulette_final_bet_round:
-                settled = data['settled']
-                assert 'winning_number' in settled, "Settlement should have winning_number"
-                assert 'total_bet' in settled, "Settlement should have total_bet"
-                assert 'payout' in settled, "Settlement should have payout"
-                assert settled['total_bet'] == 100, f"Total bet should be 100, got {settled['total_bet']}"
-                
-                print(f"   ✅ Settlement received: round {settled['round_number']}, number {settled['winning_number']}, bet {settled['total_bet']}, payout {settled['payout']}")
-                return settled
-            
-            time.sleep(2)
-        
-        raise AssertionError("Timeout waiting for settlement")
-
-    def test_roulette_bet_during_spinning_phase(self):
-        """Wait for SPINNING phase and verify bets are rejected with 409"""
-        import time
-        max_wait = 30
-        start = time.time()
-        
-        while time.time() - start < max_wait:
-            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
-            if data['phase'] in ['SPINNING', 'RESULT']:
-                # Try to place bet - should fail with 409
-                self.req('POST', '/games/fun-roulette/bets', 409, token=self.player_token, data={
-                    'bet_type': 'color',
-                    'value': 'red',
-                    'amount': 100
-                }, desc=f"Bet during {data['phase']} phase")
-                
-                print(f"   ✅ Bet correctly rejected with 409 during {data['phase']} phase")
-                return
-            
-            time.sleep(1)
-        
-        raise AssertionError("Timeout waiting for SPINNING/RESULT phase")
-
-    def test_roulette_old_play_endpoint(self):
-        """POST /games/fun-roulette/play should return 409 LIVE_ROUNDS"""
-        self.req('POST', '/games/fun-roulette/play', 409, token=self.player_token, data={
-            'bet': 100,
-            'payload': {'bet_type': 'color', 'value': 'red'}
-        }, desc="Old play endpoint")
-        
-        print(f"   ✅ Old play endpoint correctly returns 409 LIVE_ROUNDS")
-
-    def test_roulette_history(self):
-        """GET /games/fun-roulette/history should show settled rounds"""
-        data = self.req('GET', '/games/fun-roulette/history', 200, token=self.player_token, desc="Get roulette history")
-        
-        assert 'rounds' in data, "Should return rounds array"
-        # Should have at least one settled round from our test
-        assert len(data['rounds']) > 0, "Should have at least one round in history"
-        
-        # Check first round structure
-        if data['rounds']:
-            r = data['rounds'][0]
-            assert 'outcome' in r, "Round should have outcome"
-            assert 'winning_number' in r['outcome'], "Outcome should have winning_number"
-            assert 'bet' in r, "Round should have bet (total bet amount)"
-            assert 'payout' in r, "Round should have payout"
-            assert 'bets' in r['outcome'], "Outcome should have bets array"
-        
-        print(f"   ✅ History retrieved: {len(data['rounds'])} round(s)")
-
-    def test_roulette_phase_progression(self):
-        """Poll state across a full cycle and verify phase progression"""
-        import time
-        
-        # Wait for a new round to start (BETTING phase)
-        max_wait = 30
-        start = time.time()
-        initial_round = None
-        
-        while time.time() - start < max_wait:
-            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
-            if data['phase'] == 'BETTING' and data['phase_ends_in'] > 15:
-                initial_round = data['round_number']
-                print(f"   📍 Starting phase progression test at round {initial_round}, BETTING phase")
-                break
-            time.sleep(1)
-        
-        if not initial_round:
-            raise AssertionError("Could not find BETTING phase to start progression test")
-        
-        # Track phases
-        phases_seen = []
-        last_phase = None
-        
-        # Poll for 30 seconds to see phase transitions
-        start = time.time()
-        while time.time() - start < 30:
-            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
-            
-            if data['phase'] != last_phase:
-                phases_seen.append(data['phase'])
-                print(f"   📍 Phase: {data['phase']}, round: {data['round_number']}, countdown: {data['phase_ends_in']:.1f}s")
-                last_phase = data['phase']
-            
-            # If we've seen all three phases and moved to next round, we're done
-            if len(phases_seen) >= 3 and data['round_number'] > initial_round:
-                print(f"   ✅ Phase progression verified: {' → '.join(phases_seen)}")
-                assert 'BETTING' in phases_seen, "Should see BETTING phase"
-                assert 'SPINNING' in phases_seen, "Should see SPINNING phase"
-                assert 'RESULT' in phases_seen, "Should see RESULT phase"
-                return
-            
-            time.sleep(1)
-        
-        # If we didn't see all phases, that's still ok - just report what we saw
-        print(f"   ⚠️  Saw phases: {' → '.join(phases_seen)} (may not have completed full cycle)")
+        except Exception as e:
+            self.log(f"❌ FAIL - Exception: {str(e)}", Colors.RED)
+            self.failures.append(f"{name}: {str(e)}")
+            return False, {}
 
     def run_all_tests(self):
-        """Run all tests in order"""
-        self.log("\n" + "="*60, Colors.YELLOW)
-        self.log("FunGame Backend API Test Suite", Colors.YELLOW)
-        self.log("="*60 + "\n", Colors.YELLOW)
+        """Run all backend tests"""
+        self.log("\n" + "="*80, Colors.YELLOW)
+        self.log("FUNGAME BACKEND API TESTS - Points Economy + Admin-Provisioned Accounts", Colors.YELLOW)
+        self.log("="*80 + "\n", Colors.YELLOW)
 
-        # Health checks
-        self.test("Health endpoint", self.test_health)
-        self.test("Root endpoint", self.test_root)
-        self.test("System config (public)", self.test_system_config_public)
-
-        # Auth flow
-        self.test("Register new user", self.test_register_new_user)
-        self.test("Verify email with dev_code", self.test_verify_email)
-        self.test("Login as admin", self.test_login_admin)
-        self.test("Login as player", self.test_login_player)
-        self.test("Forgot password", self.test_forgot_password)
-        self.test("Reset password", self.test_reset_password)
-
-        # Onboarding
-        self.test("Submit onboarding profile", self.test_onboarding_profile)
-        self.test("Submit for approval", self.test_onboarding_submit)
-        self.test("PENDING user blocked from /games", self.test_pending_user_blocked_from_games)
-        self.test("PENDING user blocked from /chips/balance", self.test_pending_user_blocked_from_chips)
-
-        # Admin approval
-        self.test("Admin list pending users", self.test_admin_list_pending_users)
-        self.test("Admin approve user (1000 welcome chips)", self.test_admin_approve_user)
-        self.test("Double-approve blocked", self.test_admin_double_approve_blocked)
-
-        # Games
-        self.test("List 18 games (all COMING_SOON)", self.test_games_list_18_games)
-        self.test("Get game detail", self.test_game_detail)
-        self.test("Game play blocked (409)", self.test_game_play_blocked)
-        self.test("Toggle game favorite", self.test_game_favorite_toggle)
-
-        # Chips
-        self.test("Get chip balance", self.test_chip_balance)
-        self.test("Create chip request", self.test_chip_request_create)
-        self.test("List chip requests", self.test_chip_requests_list)
-        self.test("Admin list chip requests", self.test_admin_list_chip_requests)
-        self.test("Admin approve chip request", self.test_admin_approve_chip_request)
-        self.test("Double-approve chip request blocked", self.test_admin_double_approve_chip_request_blocked)
-        self.test("Get transaction ledger", self.test_chip_transactions)
-
-        # Notifications
-        self.test("Get notifications", self.test_notifications)
-        self.test("Mark notification as read", self.test_mark_notification_read)
-
-        # Announcements
-        self.test("Get announcements (3 seeded)", self.test_announcements)
-
-        # Settings
-        self.test("Update user settings", self.test_update_settings)
-        self.test("Change password", self.test_change_password)
-
-        # Maintenance mode
-        self.test("Enable maintenance mode", self.test_maintenance_mode_on)
-        self.test("Player blocked during maintenance (503)", self.test_player_blocked_during_maintenance)
-        self.test("Admin works during maintenance", self.test_admin_works_during_maintenance)
-        self.test("Disable maintenance mode", self.test_maintenance_mode_off)
-        self.test("Player access restored", self.test_player_access_restored)
-
-        # No payment routes
-        self.test("No payment routes exist (404)", self.test_no_payment_routes)
-
-        # Admin
-        self.test("Admin dashboard stats", self.test_admin_stats)
-
-        # Fun Roulette Live Game
-        self.log("\n" + "="*60, Colors.YELLOW)
-        self.log("FUN ROULETTE LIVE GAME TESTS", Colors.YELLOW)
-        self.log("="*60 + "\n", Colors.YELLOW)
+        # ========== FEATURE 1: CLOSED PUBLIC REGISTRATION ==========
+        self.log("\n### FEATURE 1: PUBLIC REGISTRATION CLOSED ###", Colors.YELLOW)
         
-        self.test("Roulette state (player)", self.test_roulette_state_player)
-        self.test("Roulette state (admin) - universal sync", self.test_roulette_state_admin)
-        self.test("Wait for BETTING phase", self.test_roulette_wait_for_betting_phase)
-        self.test("Place bet on color (RED)", self.test_roulette_place_bet_color)
-        self.test("Stack bet on straight number (17)", self.test_roulette_place_bet_straight)
-        self.test("Clear bets (refund)", self.test_roulette_clear_bets)
-        self.test("Bet below minimum (400)", self.test_roulette_bet_below_minimum)
-        self.test("Place final bet for settlement", self.test_roulette_place_final_bet)
-        self.test("Wait for settlement", self.test_roulette_wait_for_settlement)
-        self.test("Bet during SPINNING/RESULT phase (409)", self.test_roulette_bet_during_spinning_phase)
-        self.test("Old play endpoint returns 409", self.test_roulette_old_play_endpoint)
-        self.test("Roulette history", self.test_roulette_history)
-        self.test("Phase progression (BETTING→SPINNING→RESULT)", self.test_roulette_phase_progression)
+        success, _ = self.test(
+            "Register endpoint returns 410",
+            "POST", "/auth/register", 410,
+            data={"email": "test@example.com", "password": "TestPass123!"},
+            description="Public signup is closed - should return 410"
+        )
 
-        # Summary
-        self.log("\n" + "="*60, Colors.YELLOW)
+        # ========== FEATURE 2: SIGNUP REQUEST FLOW ==========
+        self.log("\n### FEATURE 2: SIGNUP REQUEST FLOW ###", Colors.YELLOW)
+        
+        # Valid signup request
+        success, resp = self.test(
+            "Create signup request - valid",
+            "POST", "/auth/signup-request", 200,
+            data={
+                "full_name": "QA Tester",
+                "email": "qa.signup@example.com",
+                "date_of_birth": "1994-05-20",
+                "phone": "+14155552671"
+            },
+            description="Submit valid signup request"
+        )
+        if success:
+            self.test_signup_request_id = resp.get('request_id')
+
+        # Duplicate pending request
+        self.test(
+            "Duplicate pending signup request - 409",
+            "POST", "/auth/signup-request", 409,
+            data={
+                "full_name": "QA Tester",
+                "email": "qa.signup@example.com",
+                "date_of_birth": "1994-05-20",
+                "phone": "+14155552671"
+            },
+            description="Same email with pending request should return 409"
+        )
+
+        # Invalid phone (no country code)
+        self.test(
+            "Invalid phone without country code - 422",
+            "POST", "/auth/signup-request", 422,
+            data={
+                "full_name": "Invalid Phone",
+                "email": "invalid.phone@example.com",
+                "date_of_birth": "1994-05-20",
+                "phone": "1234567890"
+            },
+            description="Phone without country code should return 422"
+        )
+
+        # Existing user email
+        self.test(
+            "Signup request with existing user email - 409",
+            "POST", "/auth/signup-request", 409,
+            data={
+                "full_name": "Existing User",
+                "email": "player@fungame.app",
+                "date_of_birth": "1994-05-20",
+                "phone": "+14155552671"
+            },
+            description="Email of existing user should return 409"
+        )
+
+        # ========== FEATURE 3: ADMIN LOGIN & SIGNUP APPROVAL ==========
+        self.log("\n### FEATURE 3: ADMIN LOGIN & SIGNUP APPROVAL ###", Colors.YELLOW)
+        
+        # Admin login
+        success, resp = self.test(
+            "Admin login",
+            "POST", "/auth/login", 200,
+            data={"email": "admin@fungame.app", "password": "FunGame@Admin2025"},
+            description="Login as admin"
+        )
+        if success:
+            self.admin_token = resp.get('access_token')
+
+        if not self.admin_token:
+            self.log("❌ Admin login failed - cannot continue with admin tests", Colors.RED)
+            return
+
+        # Get pending signup requests
+        success, resp = self.test(
+            "Get pending signup requests",
+            "GET", "/admin/signup-requests?status=PENDING", 200,
+            token=self.admin_token,
+            description="List pending signup requests"
+        )
+
+        # Approve signup request
+        if self.test_signup_request_id:
+            success, resp = self.test(
+                "Approve signup request",
+                "POST", f"/admin/signup-requests/{self.test_signup_request_id}/approve", 200,
+                data={
+                    "username": "qa_tester_01",
+                    "password": "QaPass@123",
+                    "starting_chips": 1500
+                },
+                token=self.admin_token,
+                description="Approve request and create account with username/password"
+            )
+            if success:
+                self.test_username = resp.get('username')
+                self.test_password = "QaPass@123"
+                self.test_user_id = resp.get('user', {}).get('id')
+
+            # Try approving again - should fail
+            self.test(
+                "Approve same request again - 400",
+                "POST", f"/admin/signup-requests/{self.test_signup_request_id}/approve", 400,
+                data={
+                    "username": "qa_tester_02",
+                    "password": "QaPass@123",
+                    "starting_chips": 1500
+                },
+                token=self.admin_token,
+                description="Approving already resolved request should return 400"
+            )
+
+        # Create another request for duplicate username test
+        success, resp = self.test(
+            "Create another signup request",
+            "POST", "/auth/signup-request", 200,
+            data={
+                "full_name": "Another Tester",
+                "email": "another.tester@example.com",
+                "date_of_birth": "1995-06-15",
+                "phone": "+14155552672"
+            }
+        )
+        if success:
+            another_request_id = resp.get('request_id')
+            # Try to approve with duplicate username
+            self.test(
+                "Approve with duplicate username - 409",
+                "POST", f"/admin/signup-requests/{another_request_id}/approve", 409,
+                data={
+                    "username": "qa_tester_01",
+                    "password": "AnotherPass@123",
+                    "starting_chips": 1000
+                },
+                token=self.admin_token,
+                description="Duplicate username should return 409"
+            )
+            # Reject this request
+            self.test(
+                "Reject signup request",
+                "POST", f"/admin/signup-requests/{another_request_id}/reject", 200,
+                data={"note": "Test rejection"},
+                token=self.admin_token,
+                description="Reject the signup request"
+            )
+
+        # ========== FEATURE 4: USERNAME/EMAIL LOGIN ==========
+        self.log("\n### FEATURE 4: USERNAME/EMAIL LOGIN ###", Colors.YELLOW)
+        
+        if self.test_username and self.test_password:
+            # Login with username (lowercase)
+            success, resp = self.test(
+                "Login with username (lowercase)",
+                "POST", "/auth/login", 200,
+                data={"email": self.test_username, "password": self.test_password},
+                description="Login with assigned username"
+            )
+            if success:
+                self.player_token = resp.get('access_token')
+                user = resp.get('user', {})
+                print(f"  User: username={user.get('username')}, chips={user.get('chip_balance')}, status={user.get('status')}")
+
+            # Login with username (uppercase) - should work
+            success, resp = self.test(
+                "Login with username (uppercase)",
+                "POST", "/auth/login", 200,
+                data={"email": "QA_TESTER_01", "password": self.test_password},
+                description="Login with uppercase username should work"
+            )
+
+        # Legacy email login
+        success, resp = self.test(
+            "Legacy email login",
+            "POST", "/auth/login", 200,
+            data={"email": "player@fungame.app", "password": "Player@123"},
+            description="Legacy player email login should still work"
+        )
+        if success:
+            legacy_player_token = resp.get('access_token')
+            legacy_user = resp.get('user', {})
+            print(f"  Legacy user: email={legacy_user.get('email')}, chips={legacy_user.get('chip_balance')}")
+
+        # ========== FEATURE 5: CHIPS <-> POINTS CONVERSION ==========
+        self.log("\n### FEATURE 5: CHIPS <-> POINTS CONVERSION ###", Colors.YELLOW)
+        
+        if not self.player_token:
+            self.log("❌ No player token - skipping conversion tests", Colors.RED)
+        else:
+            # Get initial balance
+            success, resp = self.test(
+                "Get chip balance (includes points)",
+                "GET", "/chips/balance", 200,
+                token=self.player_token,
+                description="Check initial balance"
+            )
+            if success:
+                initial_chips = resp.get('balance', 0)
+                initial_points = resp.get('points', 0)
+                print(f"  Initial: chips={initial_chips}, points={initial_points}")
+
+            # Try converting less than minimum (499)
+            self.test(
+                "Convert chips to points - below minimum (422)",
+                "POST", "/chips/convert", 422,
+                data={"direction": "CHIPS_TO_POINTS", "amount": 499},
+                token=self.player_token,
+                description="Amount below 500 should return 422"
+            )
+
+            # Convert 500 chips to points
+            success, resp = self.test(
+                "Convert 500 chips to points",
+                "POST", "/chips/convert", 200,
+                data={"direction": "CHIPS_TO_POINTS", "amount": 500},
+                token=self.player_token,
+                description="Sell 500 chips for 500 points"
+            )
+            if success:
+                new_chips = resp.get('chip_balance', 0)
+                new_points = resp.get('points_balance', 0)
+                print(f"  After conversion: chips={new_chips}, points={new_points}")
+                print(f"  Expected: chips={initial_chips - 500}, points={initial_points + 500}")
+
+            # Convert 500 points back to chips
+            success, resp = self.test(
+                "Convert 500 points to chips",
+                "POST", "/chips/convert", 200,
+                data={"direction": "POINTS_TO_CHIPS", "amount": 500},
+                token=self.player_token,
+                description="Convert 500 points back to chips"
+            )
+            if success:
+                final_chips = resp.get('chip_balance', 0)
+                final_points = resp.get('points_balance', 0)
+                print(f"  After reverse: chips={final_chips}, points={final_points}")
+
+            # Try converting more points than available
+            self.test(
+                "Convert points - insufficient balance (400)",
+                "POST", "/chips/convert", 400,
+                data={"direction": "POINTS_TO_CHIPS", "amount": 500},
+                token=self.player_token,
+                description="Converting more points than available should return 400"
+            )
+
+            # Get points transactions
+            success, resp = self.test(
+                "Get points transactions",
+                "GET", "/points/transactions", 200,
+                token=self.player_token,
+                description="List points transaction history"
+            )
+            if success:
+                txs = resp.get('transactions', [])
+                print(f"  Found {len(txs)} points transactions")
+
+        # ========== FEATURE 6: ADMIN POINTS ADJUSTMENT ==========
+        self.log("\n### FEATURE 6: ADMIN POINTS ADJUSTMENT ###", Colors.YELLOW)
+        
+        if not self.admin_token or not self.test_user_id:
+            self.log("❌ No admin token or test user - skipping admin points tests", Colors.RED)
+        else:
+            # Add 250 points
+            success, resp = self.test(
+                "Admin add points",
+                "POST", f"/admin/users/{self.test_user_id}/points", 200,
+                data={"delta": 250, "note": "Test credit"},
+                token=self.admin_token,
+                description="Admin adds 250 points to user"
+            )
+            if success:
+                print(f"  New points balance: {resp.get('points_balance')}")
+
+            # Try to deduct more than available
+            self.test(
+                "Admin deduct excessive points - 400",
+                "POST", f"/admin/users/{self.test_user_id}/points", 400,
+                data={"delta": -9999},
+                token=self.admin_token,
+                description="Deducting more points than available should return 400"
+            )
+
+        # ========== FEATURE 7: ADMIN STATS ==========
+        self.log("\n### FEATURE 7: ADMIN STATS ###", Colors.YELLOW)
+        
+        if self.admin_token:
+            success, resp = self.test(
+                "Get admin stats (includes pending_signups)",
+                "GET", "/admin/stats", 200,
+                token=self.admin_token,
+                description="Admin dashboard stats should include pending_signups count"
+            )
+            if success:
+                print(f"  Stats: pending_signups={resp.get('pending_signups')}, total_users={resp.get('total_users')}")
+
+        # ========== SUMMARY ==========
+        self.print_summary()
+
+    def print_summary(self):
+        """Print test summary"""
+        print("\n" + "="*80)
         self.log("TEST SUMMARY", Colors.YELLOW)
-        self.log("="*60, Colors.YELLOW)
-        self.log(f"Total tests: {self.tests_run}", Colors.BLUE)
-        self.log(f"Passed: {self.tests_passed}", Colors.GREEN)
-        self.log(f"Failed: {self.tests_failed}", Colors.RED)
+        print("="*80)
+        print(f"Total tests: {self.tests_run}")
+        print(f"Passed: {Colors.GREEN}{self.tests_passed}{Colors.END}")
+        print(f"Failed: {Colors.RED}{self.tests_run - self.tests_passed}{Colors.END}")
         
-        if self.tests_failed > 0:
-            self.log("\nFailed tests:", Colors.RED)
-            for failed in self.failed_tests:
-                self.log(f"  - {failed}", Colors.RED)
+        if self.failures:
+            print(f"\n{Colors.RED}FAILURES:{Colors.END}")
+            for failure in self.failures:
+                print(f"  - {failure}")
         
         success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
-        self.log(f"\nSuccess rate: {success_rate:.1f}%", Colors.GREEN if success_rate == 100 else Colors.YELLOW)
-        self.log("="*60 + "\n", Colors.YELLOW)
+        print(f"\nSuccess rate: {success_rate:.1f}%")
+        
+        if self.tests_passed == self.tests_run:
+            self.log("\n✅ ALL TESTS PASSED!", Colors.GREEN)
+            return 0
+        else:
+            self.log(f"\n❌ {self.tests_run - self.tests_passed} TEST(S) FAILED", Colors.RED)
+            return 1
 
-        return 0 if self.tests_failed == 0 else 1
+def main():
+    tester = APITester()
+    exit_code = tester.run_all_tests()
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
-    tester = FunGameTester()
-    sys.exit(tester.run_all_tests())
+    main()

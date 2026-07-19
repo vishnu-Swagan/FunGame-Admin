@@ -47,14 +47,14 @@ export default function Login() {
     <AuthShell title="Welcome back" subtitle="Log in to enter the FunGame lounge.">
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">Login ID or Email</Label>
           <Input
             id="email"
             data-testid="login-email-input"
-            type="email"
+            type="text"
             required
-            autoComplete="email"
-            placeholder="you@example.com"
+            autoComplete="username"
+            placeholder="your Login ID or email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="h-12 rounded-xl bg-white/5 border-white/12"
@@ -88,7 +88,7 @@ export default function Login() {
           Forgot password?
         </Link>
         <Link data-testid="login-register-link" to="/register" className="text-primary font-semibold hover:underline">
-          Create account
+          Request an account
         </Link>
       </div>
     </AuthShell>

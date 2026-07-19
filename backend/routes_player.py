@@ -4,8 +4,9 @@ import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
-from models import OnboardingProfileRequest, ChipRequestCreate, SettingsUpdate
+from models import OnboardingProfileRequest, ChipRequestCreate, SettingsUpdate, ConvertRequest
 from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
+from ledger import credit_chips, debit_chips, InsufficientChips
 
 logger = logging.getLogger('player')
 router = APIRouter(tags=['player'])
@@ -120,7 +121,56 @@ async def toggle_favorite(slug: str, user: dict = Depends(require_active_player)
 @router.get('/chips/balance')
 async def chip_balance(user: dict = Depends(require_active_player)):
     fresh = await db.users.find_one({'id': user['id']})
-    return {'balance': fresh.get('chip_balance', 0), 'disclaimer': 'PLAY CHIPS — NO CASH VALUE'}
+    return {
+        'balance': fresh.get('chip_balance', 0),
+        'points': fresh.get('points_balance', 0),
+        'disclaimer': 'PLAY CHIPS — NO CASH VALUE',
+    }
+
+
+@router.post('/chips/convert')
+async def convert_chips_points(body: ConvertRequest, user: dict = Depends(require_active_player)):
+    """Instant chips <-> points conversion. 1 chip = 1 point, minimum 500."""
+    if user.get('role') == 'ADMIN':
+        raise HTTPException(status_code=400, detail='Admins do not convert chips')
+    uid = user['id']
+    if body.direction == 'CHIPS_TO_POINTS':
+        try:
+            chip_balance = await debit_chips(uid, body.amount, f'Sold {body.amount} chips for points (1:1)', ref='convert')
+        except InsufficientChips:
+            raise HTTPException(status_code=400, detail='Not enough chips — you need at least the amount you are selling')
+        result = await db.users.find_one_and_update(
+            {'id': uid}, {'$inc': {'points_balance': body.amount}}, return_document=True,
+        )
+        points_balance = result.get('points_balance', 0) if result else body.amount
+        await db.points_transactions.insert_one({
+            'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'CREDIT', 'amount': body.amount,
+            'balance_after': points_balance, 'note': f'Sold {body.amount} chips for points (1:1)',
+            'ref': 'convert', 'created_at': _now(),
+        })
+        message = f'Sold {body.amount} chips — {body.amount} points credited.'
+    else:  # POINTS_TO_CHIPS
+        result = await db.users.find_one_and_update(
+            {'id': uid, 'points_balance': {'$gte': body.amount}},
+            {'$inc': {'points_balance': -body.amount}}, return_document=True,
+        )
+        if result is None:
+            raise HTTPException(status_code=400, detail='Not enough points — you need at least the amount you are converting')
+        points_balance = result.get('points_balance', 0)
+        await db.points_transactions.insert_one({
+            'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'DEBIT', 'amount': body.amount,
+            'balance_after': points_balance, 'note': f'Converted {body.amount} points to chips (1:1)',
+            'ref': 'convert', 'created_at': _now(),
+        })
+        chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert')
+        message = f'Converted {body.amount} points — {body.amount} chips credited.'
+    return {'message': message, 'chip_balance': chip_balance, 'points_balance': points_balance}
+
+
+@router.get('/points/transactions')
+async def my_points_transactions(user: dict = Depends(require_active_player)):
+    txs = await db.points_transactions.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', -1).to_list(200)
+    return {'transactions': serialize_doc(txs)}
 
 
 @router.post('/chips/request')

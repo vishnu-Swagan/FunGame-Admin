@@ -1,26 +1,18 @@
 [
   {
-    "content": "Create FitWidth auto-scale component + viewport-fit/overflow guards",
+    "content": "Backend: models, auth (register 410, signup-request, username login), admin (signups, points), player convert",
     "status": "completed"
   },
   {
-    "content": "Apply FitWidth to roulette board, 3 slot cabinets, 3 card game rows",
+    "content": "Frontend: Request Account form, Login ID label, ChipsPage points converter, Profile username/points",
     "status": "completed"
   },
   {
-    "content": "Roulette camera zoom: dolly-in during spin, pull back after result (verified via computed transforms)",
+    "content": "Frontend: AdminSignups page + nav + route + dashboard stat, AdminUsers points column + adjust dialog",
     "status": "completed"
   },
   {
-    "content": "Disable background casino music (keep SFX + mute toggle)",
-    "status": "completed"
-  },
-  {
-    "content": "Aviator: flight engine sound only (rise with multiplier + doppler fly-away)",
-    "status": "completed"
-  },
-  {
-    "content": "Run testing agent regression pass across affected games",
+    "content": "Run mandatory testing agent (auth + economy changes)",
     "status": "in_progress"
   }
 ]

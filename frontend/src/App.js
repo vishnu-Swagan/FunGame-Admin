@@ -38,6 +38,7 @@ import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScree
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
+import AdminSignups from "@/pages/admin/AdminSignups";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
 import AdminGames from "@/pages/admin/AdminGames";
 import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
@@ -104,6 +105,7 @@ function App() {
           {/* Admin */}
           <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
             <Route index element={<AdminDashboard />} />
+            <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
             <Route path="games" element={<AdminGames />} />

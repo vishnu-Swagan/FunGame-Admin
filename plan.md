@@ -3,7 +3,7 @@
 ## 1) Objectives
 - Deliver a **play‑chip‑only** FunGame PWA‑style web app (React + FastAPI + MongoDB) with premium, original UI and the disclaimer: **“PLAY CHIPS — NO CASH VALUE”**.
 - Maintain the **core foundation** already built:
-  - Auth + onboarding approval flow
+  - Auth + onboarding approval flow (legacy)
   - Admin console (basic)
   - Server-authoritative chip ledger
   - Game catalog (18 games)
@@ -27,19 +27,35 @@
   - Each gets its **own component** and bespoke animations/sounds.
 - **Win celebration polish (P1):** add modern, satisfying win feedback (confetti/coin burst) across games.
 - Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after game polish is complete (confirmed).
-- **Email delivery (P1):** use a real transactional email provider for verification/reset codes.
-  - Resend is now integrated (replaces demo mode).
+- **Email delivery (P1):** use a real transactional email provider for password resets and system notifications.
+  - Resend is integrated.
   - Note: `onboarding@resend.dev` is **Resend TEST MODE** sender; real-user deliverability requires domain verification + updating `SENDER_EMAIL`.
+
+### NEW Objectives (P0) — Account Provisioning + Points Economy
+- **Admin‑provisioned accounts (P0):** new users do **NOT** receive a password at signup.
+  - New users submit a **signup request** with: **Full Name, Email ID, Date of Birth, Phone Number (with country code)**.
+  - Admin verifies and **assigns unique Login ID (username) + password**.
+  - Login accepts **username OR email** (legacy accounts keep email login).
+  - Signup no longer depends on email verification for onboarding; admin-created users are **pre‑verified**.
+  - Resend remains for **password reset**.
+- **Chips ⇄ Points conversion (P0):**
+  - Users can **sell chips to admin and receive points instantly**.
+  - **Minimum conversion amount: 500**.
+  - **Rate: 1 chip = 1 point**.
+  - **Bidirectional** conversion supported (**points → chips** also allowed, same rate).
+  - Points are shown on profile/admin and have their own transaction log.
 
 **Current status (corrected):**
 - ✅ Platform foundation + all 18 universal live games are running.
 - ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette realism + 3D, Dice realism, sound engine).
-- ✅ **Card games bug fixed + verified** (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
-- ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
-- ✅ **Win confetti/coin burst completed + verified** (ResultBanner).
-- ✅ **Roulette betting UX upgraded**: chips now land centered on bet spots; added split/corner bet hit‑zones + backend validation.
-- ✅ **Resend email integration completed + verified** (verification/reset email delivery; demo mode replaced).
-- ⏸️ Remaining work is backlog only (domain verification for Resend deliverability + enterprise admin restructure).
+- ✅ Card games bug fixed + verified (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
+- ✅ Slot redesigns completed + verified (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
+- ✅ Win confetti/coin burst completed + verified (ResultBanner).
+- ✅ Roulette betting UX upgraded: chips now land centered on bet spots; split/corner bet hit‑zones + backend validation.
+- ✅ 2026 polish additions: auto-fit rendering on any mobile device (FitWidth), roulette cinematic camera zoom during spin, background music disabled, Aviator sound set to flight-engine only.
+- ✅ Resend email integration completed + verified (verification/reset email delivery; demo mode replaced).
+- 🟡 **NEW (IN PROGRESS): LIVE‑10 Points economy + admin-provisioned accounts**.
+- ⏸️ Remaining backlog: Resend domain verification for real deliverability + enterprise admin restructure.
 
 ---
 
@@ -82,17 +98,6 @@
   - Crash point pre-committed per round.
   - Manual cashout + auto-cashout settlement.
 
-**Backend deliverables (implemented)**
-- `/app/backend/live_engines.py`
-- `/app/backend/routes_live.py`
-- `/app/backend/server.py`
-- `/app/backend/routes_games.py`
-
-**Data collections (implemented)**
-- `live_outcomes`, `live_bets` for fixed-cycle games.
-- `aviator_rounds`, `aviator_bets` for Aviator.
-- `game_rounds` remains the canonical per-user settled history record.
-
 ---
 
 ### Phase LIVE‑2: Aviator (Spribe‑style) + Roulette UI/Timing
@@ -100,31 +105,12 @@
 
 **Status:** ✅ COMPLETED
 
-**Aviator frontend (`/app/frontend/src/pages/play/AviatorGame.js`)**
-- Universal live rounds + smooth multiplier interpolation.
-- Dual bet panels + auto cashout + bet queueing.
-- Visual: custom plane asset integrated.
-
-**Roulette frontend (`/app/frontend/src/pages/play/RouletteGame.js`)**
-- Matches backend 30s loop.
-- Realistic wheel/ball motion and classic European table layout.
-
 ---
 
 ### Phase LIVE‑3: Convert Remaining Games to Live Rounds
 **Goal:** Convert all remaining game UIs and APIs to consume the universal live endpoints.
 
 **Status:** ✅ COMPLETED
-
-**Shared frontend infrastructure (implemented)**
-- `/app/frontend/src/lib/useLiveRound.js`
-- `/app/frontend/src/components/play/LiveBar.js`
-
-**Converted games (implemented)**
-- Dice: Seven-Up-Down
-- Card: Teen Patti, Poker, No Hold, Champion Poker, Andar Bahar
-- Others: Keno, Bingo, etc.
-- Slots: fever-joker-bonus, giant-jackpot, triple-fun, joker-bonus, lucky-8-line
 
 ---
 
@@ -134,12 +120,8 @@
 **Status:** ✅ UPDATED / REGRESSIONS CLOSED
 - Card game regression fixed and verified with mandatory testing agent:
   - Report: **`/app/test_reports/iteration_5.json`**
-  - Backend: 100% (15/15)
-  - Frontend: 100% (all 5 card games verified smooth, bets work, no console errors)
 - Slot redesign + win celebration verification:
   - Report: **`/app/test_reports/iteration_6.json`**
-  - Backend: 100% (6/6)
-  - Frontend: 100% (all 3 new slot cabinets verified distinct with staggered stops; betting + refunds; Teen Patti regression clean)
 
 ---
 
@@ -163,163 +145,144 @@
   - Ambient casino bed + win/lose crowd reactions + per-game cues
   - Global mute toggle persisted in `localStorage`
 
-**3D Roulette wheel (completed, verified)**
-- File: `/app/frontend/src/pages/play/RouletteGame.js`
-- Implemented using CSS transforms with `perspective` and `preserve-3d`:
-  1. **Perspective scene** (~860px) with wheel head tilted (`rotateX(52deg)`)
-  2. **RimWall3D**: 12 stacked ring layers extruding a wooden bowl wall below the wheel face + soft ground shadow (`translateZ(-30px)`)
-  3. **Turret3D**: raised golden turret (stacked discs) + cross-handles and knob at `translateZ(20–24px)` that rotates with the wheel
-  4. **Ball physics upgraded to 3D**: ball transitions from rim track height to pocket height (`translateZ(20px → 5px)`) with small vertical hops synced to deflector bounces
-  5. Pointer + winning-number badge remain **screen-space overlays** above the tilted scene
-
-**Roulette bet placement flexibility (completed, verified)**
-- Frontend:
-  - Chips render centered on the spot (`BetChip` with framer-motion toss)
-  - Added invisible hit‑zones:
-    - **Split**: tap the line between 2 adjacent numbers
-    - **Corner**: tap the cross where 4 numbers meet
-- Backend:
-  - Added validation + payouts:
-    - `split` → 18x
-    - `corner` → 9x
-  - Validates adjacency/shape (incl. `0-1-2-3` first four; zero splits `0-1/2/3`)
-
 ---
 
 ### Phase LIVE‑6: Card Games — Bug Fix + Smoothing (Teen Patti / Poker / Champion Poker)
-**Goal (P0):** Fix the user-reported “unsmooth gameplay”/buggy flow by preventing polling updates from interrupting flip/deal animations and by ensuring server phase timings align with the frontend reveal timeline.
+**Goal (P0):** Fix user-reported “unsmooth gameplay” by preventing polling updates from interrupting deal/flip animations.
 
 **Status:** ✅ COMPLETED + VERIFIED
-
-**Root cause (confirmed)**
-- `useLiveRound.js` was re-anchoring the countdown deadline on every poll. Network jitter caused `countdown` to jump, making derived `elapsed` time non-monotonic. This **un-triggered** `FlipCard` deal/flip thresholds (cards appearing/disappearing, flipping back, re-dealing flicker).
-
-**Fix (implemented)**
-1. **Anchored deadlines per phase**
-   - Deadline anchors once per `(round_number, phase)` and only re-syncs if drift exceeds ~450ms.
-2. **Monotonic reveal clock + consumers updated**
-   - New `revealElapsed` monotonic inside REVEAL.
-   - `revealProgress` derived from the monotonic clock.
-   - Updated to consume `revealElapsed`:
-     - `/app/frontend/src/pages/play/CardDuelGame.js` (Teen Patti + Poker)
-     - `/app/frontend/src/pages/play/VideoPokerGame.js` (No-Hold)
-     - `/app/frontend/src/pages/play/ChampionPokerGame.js`
-     - `/app/frontend/src/pages/play/AndarBaharGame.js`
-3. **Tight phase transition**
-   - Boundary poll triggers at countdown==0.
-4. **Second timing fix discovered during slot verification**
-   - `revealElapsed` reads `deadlineRef` directly so the first REVEAL render never sees stale betting-phase countdown.
-
-**Mandatory verification (completed)**
-- Testing agent run and recorded in **`/app/test_reports/iteration_5.json`** (backend + frontend).
+- Root cause: non-monotonic reveal timeline due to deadline re-anchoring each poll.
+- Fix: anchored deadline per phase + monotonic `revealElapsed` + boundary poll + stale-countdown fix.
+- Verification: **`/app/test_reports/iteration_5.json`**.
 
 ---
 
 ### Phase LIVE‑7: Slot Games Redesign (3 Distinct Experiences)
-**Goal (P0):** Make 777 Triple Fun, Joker Bonus, Lucky 8 Line visually and structurally different, inspired by real casino slots (without copying protected art).
+**Goal (P0):** Make 777 Triple Fun, Joker Bonus, Lucky 8 Line visually and structurally different.
 
 **Status:** ✅ COMPLETED + VERIFIED
-
-**Delivered implementation**
-- New shared reel utilities:
-  - `/app/frontend/src/pages/play/slots/reelKit.js`
-    - Seeded PRNG for deterministic decorative symbols
-    - Staggered reel stop times: `reveal*0.42 + i*reveal*0.2`
-    - `SpinStrip` + `SettledCell` primitives
-- Three distinct cabinet components:
-  1. `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
-     - Classic Vegas: red/gold marquee with blinking bulbs, chrome bezel, ivory mechanical reels with BAR/777 symbols, animated pull lever, classic paytable.
-  2. `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
-     - Dark jester: violet neon flicker title with `VenetianMask`, harlequin diamond backdrop, neon fruit reels, **3-segment JOKER METER**.
-  3. `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
-     - Asian fortune: crimson/gold cabinet, swaying lanterns, full **3×3 symbol grid**, **8 numbered chasing line lamps**, center-line win emphasis.
-- Routing wired:
-  - `/app/frontend/src/pages/play/GamePlay.js`
-    - `triple-fun` → `TripleFun777Game`
-    - `joker-bonus` → `JokerBonusGame`
-    - `lucky-8-line` → `Lucky8LineGame`
-    - `fever-joker-bonus` & `giant-jackpot` remain on generic `SlotGame`
-
-**New CSS animations (implemented)**
-- `/app/frontend/src/App.css`
-  - Reel scroll + blur, bulb blink, neon flicker, lantern sway, line flash, win glow
-
-**New slot SFX (implemented)**
-- `/app/frontend/src/lib/sound.js` additions:
-  - `lever`, `reelStop`, `slotBell`, `lever777`, `jokerLaugh`, `jokerSpin`, `gong`, `coinShower`, `luckySpin`
-
-**Verification**
-- Testing agent report: **`/app/test_reports/iteration_6.json`**.
+- Implemented 3 bespoke cabinet components + reelKit.
+- Verification: **`/app/test_reports/iteration_6.json`**.
 
 ---
 
 ### Phase LIVE‑8: Win Celebration Polish (Confetti / Coin Burst)
-**Goal (P1):** Add delightful, modern win feedback across games.
+**Goal (P1):** Add delightful win feedback across games.
 
 **Status:** ✅ COMPLETED + VERIFIED
-
-**Delivered implementation**
-- `/app/frontend/src/components/play/ResultBanner.js`
-  - Confetti burst on wins (18 flecks)
-  - Big-win variant: 32 pieces with gold coins when `payout >= total_bet * 5`
-  - Deterministic per index; animates only transform/opacity
-  - Respects `prefers-reduced-motion`
-- `/app/frontend/src/lib/useLiveRound.js`
-  - Adds `result.big` flag in the settled banner payload.
-
-**Verification**
-- Included in testing agent report **`iteration_6.json`**.
 
 ---
 
 ### Phase 4: Email Provider Integration (Resend) — real delivery for verification/reset
-**Goal (P1):** Replace demo email verification with **real transactional delivery** for verification and password reset.
+**Goal (P1):** Replace demo email verification with real transactional delivery.
+
+**Status:** ✅ COMPLETED + VERIFIED
+- Resend provider added + branded HTML templates + graceful failure handling.
+- Verification: **`/app/test_reports/iteration_7.json`** + follow-up curl verification.
+
+---
+
+### Phase LIVE‑9: 2026 UX Polish — Responsive rendering + Camera + Sound tuning
+**Goal:** Make the app render perfectly across all mobile device sizes and add cinematic game presentation.
 
 **Status:** ✅ COMPLETED + VERIFIED
 
-**Delivered implementation**
-- Dependency:
-  - Installed `resend==2.34.0`
-  - Backend `requirements.txt` updated
-- Configuration (`/app/backend/.env`):
-  - `EMAIL_PROVIDER="resend"`
-  - `RESEND_API_KEY="(user-provided)"`
-  - `SENDER_EMAIL="onboarding@resend.dev"`
-  - Fixed a malformed `.env` line where `CORS_ORIGINS` and `JWT_SECRET` were previously merged.
-- Backend implementation:
-  - `/app/backend/email_service.py`
-    - Added `resend` provider using `asyncio.to_thread(resend.Emails.send, params)` (non-blocking)
-    - Branded HTML templates (inline CSS + table layout; includes PLAY CHIPS disclaimer)
-    - Graceful error handling returning `{sent: false, provider: 'resend'}` on failure
-  - `/app/backend/routes_auth.py`
-    - `/register` (new + re-register), `/resend-verification`: surface `email_delivery: 'failed'` + friendly message when Resend rejects recipient (common in test-mode)
-    - `/forgot-password`: keeps anti-enumeration generic response (no deliverability leakage)
-    - `dev_code` no longer exposed when provider != demo (`is_dev_mode` false)
-- Frontend polish:
-  - `/app/frontend/src/pages/auth/Register.js` and `/VerifyEmail.js`: show warning toast when `email_delivery === 'failed'` using server message.
+**Delivered**
+- **Auto-fit rendering on any mobile screen**
+  - New `FitWidth` component + applied to roulette board, 3 slot cabinets, and 5-card rows.
+  - `viewport-fit=cover` added.
+  - `overflow-x: hidden` guard.
+- **Roulette cinematic camera**
+  - Dolly-in zoom (scale ~1.34) during spin; pull-back after result.
+- **Sound changes**
+  - Background casino music disabled.
+  - Aviator uses **flight engine only** (multiplier-driven pitch climb + doppler fly-away); all other Aviator sounds disabled.
 
 **Verification**
-- Direct send path verified (Resend test inbox): `delivered@resend.dev` returned real `email_id`s.
-- Testing agent report: **`/app/test_reports/iteration_7.json`** (initially 10/11 due to a re-register response gap).
-- Follow-up fix applied to re-register path and re-verified via curl (delivery failure now correctly surfaced).
+- Frontend regression report: **`/app/test_reports/iteration_8.json`**.
 
-**Important caveat / deliverability constraint**
-- Using `SENDER_EMAIL=onboarding@resend.dev` runs in **Resend TEST MODE**:
-  - Emails only deliver to the Resend account owner’s verified addresses and Resend test inboxes (e.g. `delivered@resend.dev`).
-  - For real user delivery: verify a domain in Resend and set `SENDER_EMAIL=noreply@yourdomain.com`.
+---
+
+### Phase LIVE‑10: Points Economy + Admin‑Provisioned Accounts (NEW)
+**Goal (P0):** Implement conversion between chips and points, and change signup to an admin‑approved provisioning model.
+
+**Status:** 🟡 IN PROGRESS
+
+#### LIVE‑10A — Chips ⇄ Points conversion (instant)
+**Backend**
+- Data model:
+  - Add `points_balance: int` to `users` (default 0) OR introduce a dedicated `points_balance` field while keeping chips separate.
+  - Add new collection `points_transactions` (ledger-style log) OR extend `chip_transactions` with an additional currency field.
+- New player endpoint:
+  - `POST /api/player/chips/convert`
+    - Body: `{ direction: 'CHIPS_TO_POINTS'|'POINTS_TO_CHIPS', amount: int }`
+    - Enforce **min amount 500**.
+    - Atomic balance checks and updates.
+    - Write transaction entries for both sides.
+- Admin UI/data:
+  - Admin should see points balance per user.
+  - Admin can adjust points if needed (`POST /api/admin/users/{id}/points/adjust`).
+
+**Frontend**
+- Player:
+  - Chips page: add **Points card** + converter UI.
+  - Profile: show points and chips.
+- Admin:
+  - Users list: show points balance + adjust action.
+
+#### LIVE‑10B — Signup request + admin assigned login/password
+**New flow**
+1. Player submits **Signup Request**:
+   - Full Name, Email, Date of Birth, Phone with country code.
+2. Admin reviews request, then **assigns unique Login ID + password**.
+3. User logs in with **Login ID (preferred)** or email (legacy).
+
+**Backend**
+- Models to add:
+  - `SignupRequestCreate` (full_name, email, dob, phone)
+  - `AdminSignupApprove` (login_id, password, starting_chips?, note?)
+- Auth changes:
+  - `/auth/register` becomes disabled for new users (return `410 Gone` or a message telling to use signup request).
+  - New public endpoint: `POST /auth/signup-request`.
+  - Login request model changes: `LoginRequest.email` becomes a generic `identifier: str` (username or email).
+  - Login logic: find by `login_id` OR `email`.
+- Admin endpoints:
+  - `GET /admin/signup-requests` (list PENDING)
+  - `POST /admin/signup-requests/{id}/approve` → create ACTIVE user with `login_id` and `password_hash`, pre-verified
+  - `POST /admin/signup-requests/{id}/reject`
+  - Stats: add `pending_signups` count.
+
+**Frontend**
+- Replace `Register.js` with "Request Account" form (Full Name/Email/DOB/Phone).
+- Update `Welcome.js` call-to-action to "Request Account".
+- Update `Login.js`: field label "Login ID or Email".
+- Admin:
+  - Add `AdminSignups.js` page with approve dialog (generate username/password) and reject.
+  - Add Admin nav item + route in `App.js`.
+
+**Testing (MANDATORY due to auth change)**
+- Backend tests:
+  - Create signup request → approve → login with username → access player routes.
+  - Reject flow.
+  - Legacy email login still works.
+  - Conversion endpoint (both directions) min 500 enforcement.
+- Frontend tests:
+  - Signup request UI → admin approves → login using assigned ID.
+  - Chips ↔ points conversion UI.
 
 ---
 
 ## 3) Next Actions
-1. **P1: Resend production deliverability**
-   - User verifies a sending domain at resend.com → Domains.
-   - Update `/app/backend/.env`: `SENDER_EMAIL` to the verified domain sender.
-   - (Optional) Add DKIM/SPF/DMARC best practices as per Resend domain setup.
-   - Run a backend + frontend smoke test (register/verify/reset flows).
-2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
-   - Await user priority confirmation.
-   - Implement strict RBAC, maker-checker workflows, and TOTP.
-   - Add full regression test pass.
+1. **P0: Complete LIVE‑10**
+   - Implement chips ⇄ points conversion + admin visibility/adjustment.
+   - Replace register with signup request flow + admin provisioning.
+   - Run mandatory testing agent regression across backend + frontend.
+2. **P1: Resend production deliverability**
+   - Verify sending domain in Resend.
+   - Update `SENDER_EMAIL`.
+   - Smoke test register/request + reset flows.
+3. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
+   - Strict RBAC, maker-checker workflows, TOTP.
 
 ---
 
@@ -329,46 +292,35 @@
   - Chips remain server-authoritative; no client-side balance edits.
   - No deposit/withdraw/cash-out/payment routes exist.
 - Live games:
-  - ✅ **All 18 games run 24/7 universal synchronized rounds**.
+  - ✅ All 18 games run 24/7 universal synchronized rounds.
   - ✅ Every player sees the same round number/phase/outcome per game.
-  - ✅ Betting locks correctly at phase boundaries.
-  - ✅ Settlement is idempotent and ledger-consistent.
 - UX polish:
-  - ✅ ENABLED badge hidden on player-facing thumbnails/details.
-  - ✅ Premium flagship visuals: Aviator plane, **Roulette 3D wheel + ball**, Dice realism.
-  - ✅ Roulette bet placement feels like real felt: centered chips + split/corner line/cross hit-zones.
-  - ✅ Sound enabled for all games with global mute.
-- Card games (P0):
-  - ✅ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
-  - ✅ Verified by **mandatory testing agent** after fix (**iteration_5.json**).
-- Slots (P0):
-  - ✅ 777 Triple Fun, Joker Bonus, Lucky 8 Line are clearly differentiated in theme, layout, symbols, sounds, and win animations.
-  - ✅ Verified by testing agent (**iteration_6.json**).
-- Win polish (P1):
-  - ✅ Confetti/coin burst on wins in `ResultBanner`.
-- Email (P1):
-  - ✅ Resend integration operational; branded HTML emails for verification/reset.
-  - ⚠️ Production deliverability depends on domain verification + updating `SENDER_EMAIL`.
+  - ✅ Premium flagship visuals, 3D roulette, dice realism.
+  - ✅ Responsive on any mobile screen.
+  - ✅ Roulette cinematic camera.
+  - ✅ Background music disabled.
+  - ✅ Aviator sound = flight engine only.
+- Economy:
+  - 🟡 Chips ⇄ points conversion works instantly, min 500, 1:1, with full transaction logs.
+- Account provisioning:
+  - 🟡 Signup request → admin assigns login/password → user logs in via login ID.
+  - ✅ Legacy accounts can still log in via email.
+- Testing:
+  - Mandatory testing agent run after LIVE‑10 changes (auth + economy).
 
 ---
 
 ## STATUS LOG
-- ✅ Phase 1 POC complete: core workflows green in tests.
-- ✅ Phase 2 complete: player app + admin console delivered.
-- ✅ All 18 games converted to **universal 24/7 live rounds** (backend + frontend).
-- ✅ Aviator Spribe-style universal live rounds implemented + custom plane asset.
-- ✅ Roulette upgraded: realistic wheel/ball/table.
-- ✅ **Roulette wheel upgraded to 3D** (CSS 3D scene + extruded bowl + 3D ball drops) — implemented in `RouletteGame.js`.
-- ✅ **Roulette betting UX upgraded** (chips centered; split + corner line/cross hit zones; backend payouts/validation added).
-- ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
-- ✅ Dice games upgraded with real dice visuals + rolling effects.
-- ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
-- ✅ **Card games regression fixed + verified** (deadline anchoring + monotonic `revealElapsed` + boundary poll + stale-countdown fix). Test report: **`/app/test_reports/iteration_5.json`**.
-- ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line distinct cabinets + reelKit + slot SFX + CSS animations). Test report: **`/app/test_reports/iteration_6.json`**.
-- ✅ **Win celebration confetti/coin burst completed + verified** (ResultBanner + `result.big`). Included in **iteration_6.json**.
-- ✅ **Resend email integration completed** (replaces demo mode; branded HTML; graceful delivery failure surfacing; frontend warnings). Testing agent: **`/app/test_reports/iteration_7.json`** + follow-up fix verified.
-- ⏸️ BACKLOG/BLOCKED: Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
-- ⏳ NEXT: Verify Resend domain for real user deliverability and update `SENDER_EMAIL`.
+- ✅ Phase 1 POC complete.
+- ✅ Phase 2 complete.
+- ✅ All 18 games converted to universal 24/7 live rounds.
+- ✅ Roulette upgraded to realistic + 3D + improved betting UX.
+- ✅ Card games bug fixed + verified (**iteration_5.json**).
+- ✅ Slot redesigns verified (**iteration_6.json**).
+- ✅ Resend integration verified (**iteration_7.json**).
+- ✅ Responsive + roulette camera + sound changes verified (**iteration_8.json**).
+- 🟡 **LIVE‑10 started:** points economy + admin-provisioned accounts.
+- ⏸️ Backlog: Resend domain verification, enterprise admin restructure.
 
 **Test credentials**
 - Admin: `admin@fungame.app` / `FunGame@Admin2025`

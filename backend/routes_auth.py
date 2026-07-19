@@ -7,7 +7,8 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from db import db, serialize_doc
 from models import (RegisterRequest, VerifyEmailRequest, ResendVerificationRequest,
-                    LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest)
+                    LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
+                    SignupRequestCreate)
 from auth_utils import hash_password, verify_password, create_access_token, get_current_user
 from email_service import EmailService, is_dev_mode
 
@@ -36,48 +37,38 @@ def _user_public(user: dict) -> dict:
 
 @router.post('/register')
 async def register(body: RegisterRequest):
-    email = body.email.lower().strip()
-    existing = await db.users.find_one({'email': email})
-    if existing:
-        if existing.get('email_verified'):
-            raise HTTPException(status_code=409, detail='An account with this email already exists. Please log in.')
-        # Unverified account re-registering: refresh code + password
-        code = _gen_code()
-        await db.users.update_one({'email': email}, {'$set': {
-            'password_hash': hash_password(body.password),
-            'verification_code_hash': _hash_code(code),
-            'verification_expires_at': (_now() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(),
-        }})
-        sent = await EmailService.send_verification_code(email, code)
-        resp = {'message': 'Verification code re-sent. Check your email.', 'email': email}
-        if not sent.get('sent'):
-            resp['message'] = 'Account updated, but the verification email could not be delivered right now. Please try "Resend code" in a moment.'
-            resp['email_delivery'] = 'failed'
-        if is_dev_mode():
-            resp['dev_code'] = code
-        return resp
+    """Public self-registration is closed - accounts are provisioned by the admin."""
+    raise HTTPException(
+        status_code=410,
+        detail='Public sign-up is closed. Please submit an account request — the admin will verify your details and assign your unique Login ID and password.',
+    )
 
-    code = _gen_code()
-    user = {
-        'id': str(uuid.uuid4()), 'email': email,
-        'password_hash': hash_password(body.password),
-        'role': 'PLAYER', 'status': 'PENDING_VERIFICATION', 'email_verified': False,
-        'display_name': None, 'country': None, 'date_of_birth': None, 'avatar': 'star',
-        'chip_balance': 0, 'favorites': [], 'recent_games': [],
-        'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
-        'verification_code_hash': _hash_code(code),
-        'verification_expires_at': (_now() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(),
+
+@router.post('/signup-request')
+async def signup_request(body: SignupRequestCreate):
+    """New players request an account with their details; the admin verifies and
+    assigns a unique Login ID + password offline."""
+    email = body.email.lower().strip()
+    if await db.users.find_one({'email': email}):
+        raise HTTPException(status_code=409, detail='An account with this email already exists. Please log in.')
+    if await db.signup_requests.find_one({'email': email, 'status': 'PENDING'}):
+        raise HTTPException(status_code=409, detail='A request for this email is already pending review.')
+    doc = {
+        'id': str(uuid.uuid4()),
+        'full_name': body.full_name.strip(),
+        'email': email,
+        'date_of_birth': body.date_of_birth,
+        'phone': body.phone,
+        'status': 'PENDING',
         'created_at': _now().isoformat(),
+        'reviewed_at': None, 'reviewed_by': None, 'admin_note': None, 'assigned_username': None,
     }
-    await db.users.insert_one(user)
-    sent = await EmailService.send_verification_code(email, code)
-    resp = {'message': 'Registered. Verification code sent to your email.', 'email': email}
-    if not sent.get('sent'):
-        resp['message'] = 'Account created, but the verification email could not be delivered right now. Please try "Resend code" in a moment.'
-        resp['email_delivery'] = 'failed'
-    if is_dev_mode():
-        resp['dev_code'] = code
-    return resp
+    await db.signup_requests.insert_one(doc)
+    logger.info(f'Signup request created for {email}')
+    return {
+        'message': 'Request submitted! The admin will verify your details and share your unique Login ID and password with you.',
+        'request_id': doc['id'],
+    }
 
 
 @router.post('/verify-email')
@@ -127,12 +118,14 @@ async def resend_verification(body: ResendVerificationRequest):
 
 @router.post('/login')
 async def login(body: LoginRequest):
-    email = body.email.lower().strip()
-    user = await db.users.find_one({'email': email})
+    ident = body.email.lower().strip()
+    # Login ID (username) or email - legacy accounts keep email login
+    query = {'email': ident} if '@' in ident else {'username': ident}
+    user = await db.users.find_one(query)
     if not user or not verify_password(body.password, user.get('password_hash', '')):
-        raise HTTPException(status_code=401, detail='Invalid email or password')
+        raise HTTPException(status_code=401, detail='Invalid login ID or password')
     if not user.get('email_verified'):
-        raise HTTPException(status_code=403, detail={'code': 'EMAIL_NOT_VERIFIED', 'message': 'Please verify your email first.', 'email': email})
+        raise HTTPException(status_code=403, detail={'code': 'EMAIL_NOT_VERIFIED', 'message': 'Please verify your email first.', 'email': user.get('email')})
     token = create_access_token(user['id'], user['role'])
     return {'access_token': token, 'user': _user_public(user)}
 

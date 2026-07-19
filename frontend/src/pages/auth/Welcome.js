@@ -7,7 +7,7 @@ import { Disclaimer } from "@/components/common";
 const FEATURES = [
   { icon: Gamepad2, title: "18 original games", text: "Aviator, Teen Patti, Fun Roulette and more — all in production." },
   { icon: Coins, title: "Play chips only", text: "No payments, no cash-outs. Pure amusement." },
-  { icon: ShieldCheck, title: "Operator approved", text: "Every account is reviewed before entering the lobby." },
+  { icon: ShieldCheck, title: "Operator approved", text: "Request an account — the admin verifies you and assigns your Login ID." },
 ];
 
 export default function Welcome() {
@@ -55,7 +55,7 @@ export default function Welcome() {
 
         <div className="space-y-3 pt-8">
           <Button data-testid="welcome-register-button" onClick={() => navigate("/register")} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
-            Create account
+            Request an account
           </Button>
           <Button data-testid="welcome-login-button" onClick={() => navigate("/login")} variant="outline" className="w-full h-12 rounded-xl text-base font-semibold border-white/15 bg-white/5 hover:bg-white/10">
             I already have an account
