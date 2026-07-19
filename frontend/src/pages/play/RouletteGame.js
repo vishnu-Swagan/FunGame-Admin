@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { Timer, RotateCcw, Repeat } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
@@ -175,6 +176,28 @@ const ResultDot = ({ n, big = false }) => (
 /* ---- Module-level board pieces (stable identity = no remount flicker) ---- */
 const FELT_CELL = "border border-white/60 bg-[#127a43] text-white flex items-center justify-center";
 
+/** Pick the chip colour that matches the staked total (largest denom <= total). */
+const chipLook = (v) => CHIPS.reduce((acc, c) => (v >= c.v ? c : acc), CHIPS[0]);
+
+/** A staked chip sitting dead-centre on its bet spot - drops in with a springy
+    casino "toss" and pops away when bets are cleared. */
+const BetChip = ({ total }) => {
+  const c = chipLook(total);
+  return (
+    <motion.span
+      initial={{ scale: 2.2, y: -34, opacity: 0 }}
+      animate={{ scale: 1, y: 0, opacity: 1 }}
+      exit={{ scale: 0.4, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 480, damping: 26 }}
+      className="pointer-events-none absolute left-1/2 top-1/2 z-20 h-7 w-7 -ml-3.5 -mt-3.5 rounded-full border-2 border-dashed flex items-center justify-center text-[9px] font-extrabold tabular-nums shadow-[0_3px_7px_rgba(0,0,0,0.5)]"
+      style={{ background: c.bg, color: c.fg, borderColor: "rgba(255,255,255,0.8)" }}
+      data-testid="board-chip"
+    >
+      {total >= 1000 ? `${total / 1000}k` : total}
+    </motion.span>
+  );
+};
+
 const NumberSpot = ({ n }) => (
   <span
     className={`pointer-events-none inline-flex items-center justify-center w-[26px] h-[32px] rounded-[50%] text-white text-[13px] font-bold tabular-nums ${
@@ -198,11 +221,22 @@ const BoardCell = ({ type, value, label, className = "", style, testId, betting,
     className={`relative font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-85"} ${className}`}
   >
     {label}
-    {chipTotal ? (
-      <span className="absolute -top-1.5 -right-1.5 z-10 h-6 min-w-6 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border-2 border-yellow-200 shadow-md tabular-nums">
-        {chipTotal >= 1000 ? `${chipTotal / 1000}k` : chipTotal}
-      </span>
-    ) : null}
+    <AnimatePresence>{chipTotal ? <BetChip total={chipTotal} /> : null}</AnimatePresence>
+  </button>
+);
+
+/** Invisible hit zone straddling a line (split) or a cross (corner) between
+    numbers - exactly like placing a chip on the felt lines in a real casino. */
+const BetSpot = ({ type, nums, pos, style, betting, onPlace, chipTotal }) => (
+  <button
+    data-testid={`roulette-spot-${type}-${nums.join("-")}`}
+    aria-label={`${type} bet on ${nums.join(", ")}`}
+    onClick={() => onPlace(type, nums.join("-"))}
+    disabled={!betting}
+    style={style}
+    className={`relative z-10 h-7 w-7 rounded-full ${pos} ${betting ? "active:scale-110" : ""}`}
+  >
+    <AnimatePresence>{chipTotal ? <BetChip total={chipTotal} /> : null}</AnimatePresence>
   </button>
 );
 
@@ -547,6 +581,42 @@ export default function RouletteGame({ game }) {
                 className={FELT_CELL}
               />
             ))}
+            {/* split + corner hit zones — chips land on the lines between numbers */}
+            {[0, 1, 2].map((row) =>
+              Array.from({ length: 12 }, (_, j) => {
+                const n = 3 * (j + 1) - row;
+                const spots = [];
+                if (j < 11) spots.push({ type: "split", nums: [n, n + 3], pos: "justify-self-end self-center translate-x-1/2" });
+                if (row < 2) spots.push({ type: "split", nums: [n - 1, n], pos: "self-end justify-self-center translate-y-1/2" });
+                if (j < 11 && row < 2)
+                  spots.push({ type: "corner", nums: [n - 1, n, n + 2, n + 3], pos: "justify-self-end self-end translate-x-1/2 translate-y-1/2" });
+                return spots.map((s) => (
+                  <BetSpot
+                    key={`${s.type}-${s.nums.join("-")}`}
+                    type={s.type}
+                    nums={s.nums}
+                    pos={s.pos}
+                    betting={betting}
+                    onPlace={placeBet}
+                    chipTotal={spotTotals[`${s.type}:${s.nums.join("-")}`]}
+                    style={{ gridColumn: j + 2, gridRow: row + 1 }}
+                  />
+                ));
+              })
+            )}
+            {/* zero splits on the 0 wedge boundary */}
+            {[3, 2, 1].map((z, row) => (
+              <BetSpot
+                key={`zero-split-${z}`}
+                type="split"
+                nums={[0, z]}
+                pos="justify-self-start self-center -translate-x-1/2"
+                betting={betting}
+                onPlace={placeBet}
+                chipTotal={spotTotals[`split:0-${z}`]}
+                style={{ gridColumn: 2, gridRow: row + 1 }}
+              />
+            ))}
             {/* dozens */}
             {[1, 2, 3].map((d) => (
               <BoardCell
@@ -611,7 +681,12 @@ export default function RouletteGame({ game }) {
             <RotateCcw className="h-3.5 w-3.5" /> Clear
           </button>
         </div>
-        <p className="text-[11px] text-white/40">Straight 36x · Dozen/Column 3x · Red/Black/Odd/Even/1-18/19-36 2x · Live rounds every 30s, synced worldwide</p>
+        <p className="text-[11px] text-white/40">
+          Straight 36x · Split 18x · Corner 9x · Dozen/Column 3x · Red/Black/Odd/Even/1-18/19-36 2x
+        </p>
+        <p className="text-[10px] text-white/35">
+          Tap a number for straight-up · tap the line between two numbers for a split · tap the cross where four numbers meet for a corner
+        </p>
       </div>
 
       <HistoryStrip history={history} />
