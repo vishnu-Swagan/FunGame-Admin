@@ -12,13 +12,27 @@
   - One global round state per game shared by all players.
   - Real-time sync via **polling (≈1s) + client-side interpolation**.
   - Standard loop timing for most games: **~20–30s cycles**.
-- **Aviator (P0):** Spribe-style crash game concept (original UI assets; mimic concept/flow, not copied art).
-- **Roulette (P0):** **30-second continuous live loop** + realistic UI (green board, chips, spin wheel with white ball).
-- Ensure **smooth, realistic game presentation** (visual + audio) while keeping all rounds **universally timed** (server-synchronized).
-- Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after live games are completed (confirmed by user).
-- Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed by user).
+- **Visual & audio premium polish (P0):** realistic casino feel across games.
+  - Remove noisy UI status elements (e.g., “ENABLED” badges on thumbnails).
+  - Flagship visual realism (Aviator plane, Roulette wheel/ball/table, Dice realism).
+  - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + per-game SFX).
+- **Card games stability & realism (P0):** Teen Patti + Poker + Champion Poker must be **smooth** and **non-jarring**.
+  - Fix animation/polling clashes causing flicker / state desync / rushed dealing.
+  - Ensure reveal timelines stay aligned with server phases.
+  - **MANDATORY:** run the testing agent after the bug fix (frontend + backend).
+- **Slot differentiation (P0):** the 3 slot titles must look and feel **distinct** (real casino research), not reskins.
+  - 777 Triple Fun → classic Vegas red/gold mechanical 3‑reel
+  - Joker Bonus → purple/dark jester theme
+  - Lucky 8 Line → Asian fortune red/gold theme with **8‑line win display**
+  - Each gets its **own component** and bespoke animations/sounds.
+- Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after game polish is complete (confirmed).
+- Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed).
 
-**Current status:** ✅ P0 delivered — all 18 live games + Aviator + Roulette upgrades + universal visual/audio polish + realistic card flows completed and verified.
+**Current status (corrected):**
+- ✅ Platform foundation + all 18 universal live games are running.
+- ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette, Dice, sound engine).
+- ⚠️ **P0 regression:** Card games (Teen Patti/Poker/Champion Poker) reported “unsmooth”/buggy; previous edits attempted but not verified.
+- ⏳ Slot redesigns + win confetti polish not started.
 
 ---
 
@@ -37,7 +51,7 @@
 
 **Status:** ✅ DONE
 - Player app + admin panel implemented.
-- 18 games seeded and enabled (gameplay v1 migration applied).
+- 18 games seeded and enabled.
 
 ---
 
@@ -61,32 +75,11 @@
   - Crash point pre-committed per round.
   - Manual cashout + auto-cashout settlement.
 
-**Backend deliverables**
+**Backend deliverables (implemented)**
 - `/app/backend/live_engines.py`
-  - Universal outcome generators for the 16 fixed-cycle games.
-  - Selection validation + payout settlement + compact summaries for last-results strips.
-  - Rounding fixes to avoid float precision issues in payouts.
 - `/app/backend/routes_live.py`
-  - `GET  /api/live/{slug}/state`
-  - `POST /api/live/{slug}/bets`
-  - `POST /api/live/{slug}/bets/clear`
-  - Aviator endpoints:
-    - `GET  /api/live/aviator/state`
-    - `POST /api/live/aviator/bets` (2 panels + optional auto_cashout; queues during flight)
-    - `POST /api/live/aviator/cashout`
-    - `POST /api/live/aviator/bets/cancel`
 - `/app/backend/server.py`
-  - Router wiring for `routes_live`.
-  - MongoDB indexes:
-    - `live_outcomes`: unique `(slug, round_number)`
-    - `live_bets`: indexes for `(user_id, slug, status)` and `(slug, round_number)`
-    - `aviator_rounds`: unique `round_number`
-    - `aviator_bets`: indexes for `(round_number, status)` and `(user_id, round_number)`
-  - Aviator keepalive task runs `advance_aviator()` continuously to ensure 24/7 progression.
 - `/app/backend/routes_games.py`
-  - Roulette updated to **30s loop** (20s bet / 6s spin / 4s result).
-  - Legacy `POST /api/games/{slug}/play` now returns `409 {code: LIVE_ROUNDS}` for all 18 games.
-  - History endpoint remains available for all games.
 
 **Data collections (implemented)**
 - `live_outcomes`, `live_bets` for fixed-cycle games.
@@ -101,22 +94,13 @@
 **Status:** ✅ COMPLETED
 
 **Aviator frontend (`/app/frontend/src/pages/play/AviatorGame.js`)**
-- Fully converted to universal live rounds:
-  - Server-synced countdown + client interpolation for FLYING multiplier.
-  - Dual bet panels (BET 1 / BET 2).
-  - Auto cashout toggle + multiplier input.
-  - Bet queueing during flight (BET NEXT ROUND).
-  - Cancel bet during BETTING/queued.
-  - Live all-bets feed (sanitized masked names).
-  - Universal crash history strip.
-- Visuals: premium crash stage + curve + plane animation.
+- Universal live rounds + smooth multiplier interpolation.
+- Dual bet panels + auto cashout + bet queueing.
+- Visual: custom plane asset integrated.
 
 **Roulette frontend (`/app/frontend/src/pages/play/RouletteGame.js`)**
-- Updated to match backend 30s loop.
-- Visual upgrades:
-  - Realistic wheel + **white ball**.
-  - Spin animation tuned to the 6s spin window.
-  - Classic European table layout + chip tray + on-board bet markers + last results strip.
+- Matches backend 30s loop.
+- Realistic wheel/ball motion and classic European table layout.
 
 ---
 
@@ -127,146 +111,126 @@
 
 **Shared frontend infrastructure (implemented)**
 - `/app/frontend/src/lib/useLiveRound.js`
-  - Polls `/api/live/{slug}/state`, manages countdown and settlement banners.
 - `/app/frontend/src/components/play/LiveBar.js`
-  - `LiveBar`, `LiveBetPanel`, `LastResults`, `ResultPill`.
 
 **Converted games (implemented)**
-- Seven-Up-Down (Dice)
-- Fun Target
-- Super Golden Wheel
-- Checker
-- Teen Patti
-- Poker
-- No Hold
-- Champion Poker
-- Andar Bahar
-- Keno
-- Bingo
-- 5 Slots:
-  - Fever Joker Bonus
-  - Giant Jackpot
-  - Joker Bonus
-  - Lucky 8 Line
-  - Triple Fun
-
-All reveal animations are driven by universal outcomes + `revealProgress` for consistent UX.
+- Dice: Seven-Up-Down
+- Card: Teen Patti, Poker, No Hold, Champion Poker, Andar Bahar
+- Others: Keno, Bingo, etc.
+- Slots (currently too similar): 777 Triple Fun, Joker Bonus, Lucky 8 Line (plus other slot titles)
 
 ---
 
 ### Phase LIVE‑4: Testing, Hardening, and Fixes
 **Goal:** Stabilize the live platform across all games.
 
-**Status:** ✅ COMPLETED
-
-**Testing results**
-- Test report: `/app/test_reports/iteration_4.json`
-  - Backend: **17/19 tests passed** (remaining 2 are non-issues: one test logic error; one 422 validation for >100k bet amount which is acceptable).
-  - Frontend: **100%** — all key game pages load correctly; no console errors.
-  - Universal sync, phase management, and idempotent settlement: **VERIFIED**.
-- Added automated test file: `/app/tests/test_live_games.py`
+**Status:** ⚠️ PARTIAL / NEEDS UPDATE
+- A previous test report exists (`/app/test_reports/iteration_4.json`), but the **card-game bug fix was not verified** with the mandatory testing agent after subsequent edits.
+- This phase must be re-opened specifically for the reported card-game regression.
 
 ---
 
 ### Phase LIVE‑5: Visual & Audio Polish
-**Goal:** Raise realism and premium feel across the app: remove unnecessary status noise, improve flagship visuals, and add sound with global mute.
+**Goal:** Raise realism and premium feel across the app.
 
 **Status:** ✅ COMPLETED
 
-**Delivered changes**
-- **Remove ENABLED badge**
-  - `ENABLED` status badge removed from **game cards** and **game detail hero**.
-  - Status badges still show for non-enabled states (e.g., `COMING_SOON`, `MAINTENANCE`).
-  - Badge remains visible in **AdminGames** table for operational visibility.
-- **Aviator plane asset integration**
-  - User-supplied red plane image processed (edge flood fill + component cleanup, pedestal removed, mirrored).
-  - Saved as: `/app/frontend/public/game-art/aviator-plane.png`.
-  - Used:
-    - BETTING: idle bob
-    - FLYING: plane at curve tip with bob
-    - CRASH: fly-away
-- **Roulette realism upgrade**
-  - Researched real European spin behaviour:
-    - **Wheel counterclockwise**, **ball clockwise** (opposite directions), deceleration, deflector bounces.
-  - Implemented:
-    - rAF ball animation with spiral-in and bounce jitter
-    - wheel deceleration matches spin phase
-  - **Table replaced** with classic horizontal European layout matching the provided reference:
-    - 0 wedge at left
-    - 12×3 number grid with red/black ovals
-    - 2-to-1 column bets, dozens, and outside bets
-    - horizontally scrollable on mobile
-  - Note: `RouletteGame.js` was **fully rewritten** after a truncation incident during parallel edits; verified working.
-- **Dice realism upgrade**
-  - Seven-Up-Down uses **real 3D CSS dice** (preserve-3d cube, ivory faces, pips, red single-pip) with tumbling animation.
-- **Sound for all games (global)**
-  - `/app/frontend/src/lib/sound.js`: WebAudio-synthesized SFX
-    - chip, win/bigWin/lose/push
-    - dice roll/land, reel, deal, spin, draw
-    - roulette ballSpin/ballLand
-    - aviator takeoff/cashout/crash
-  - Global **mute toggle** added in `PlayShell` header; persisted in `localStorage`.
-  - Generic sounds wired into `useLiveRound` (chip on bet; reveal sound per game; win/lose/push on settlement).
-  - Roulette + Aviator have additional bespoke sounds tied to their unique transitions.
-- Verification:
-  - `esbuild` compile checks passed.
-  - Screenshots captured confirming: dice tumbling, roulette ball-on-track + classic table, aviator plane + curve, lobby with no ENABLED badges.
+**Delivered changes (implemented)**
+- Removed **ENABLED** badge from player-facing thumbnails/details.
+- Aviator plane asset integrated.
+- Roulette upgraded: wheel + ball animation, counterclockwise wheel behavior, custom table.
+- Dice realism: 3D rolling + real dice visuals.
+- Sound for all games:
+  - `/app/frontend/src/lib/sound.js` WebAudio synth engine
+  - Ambient casino bed + win/lose crowd reactions + per-game cues
+  - Global mute toggle persisted in `localStorage`
 
 ---
 
-### Phase LIVE‑6: Realistic Card Game Flows (Universal, Non‑Rushed)
-**Goal:** Make Andar/Bahar, Champion Poker, and all card games feel like a real table: cards are dealt one-by-one at a natural pace, with flip moments, holds, redraws, and winner announcements — all driven by the **universal server-synchronized round clock** so every player sees the same sequence at the same time.
+### Phase LIVE‑6: Card Games — Bug Fix + Smoothing (Teen Patti / Poker / Champion Poker)
+**Goal (P0):** Fix the user-reported “unsmooth gameplay”/buggy flow by preventing polling updates from interrupting flip/deal animations and by ensuring server phase timings align with the frontend reveal timeline.
 
-**Status:** ✅ COMPLETED
+**Status:** 🔥 IN PROGRESS (must be verified)
 
-**Backend timing updates (implemented)**
-- Extended LIVE_GAMES cycle timings for card games (still epoch-derived, identical for all users):
-  - `teen-patti`: **15 / 12 / 6** (33s)
-  - `poker`: **15 / 14 / 6** (35s)
-  - `no-hold`: **14 / 8 / 5** (27s)
-  - `champion-poker`: **15 / 14 / 6** (35s)
-  - `andar-bahar`: **15 / 16 / 5** (36s)
+**Primary suspected root cause**
+- `useLiveRound.js` polling (≈1s) may be overwriting animation state mid-reveal, causing:
+  - flicker/jumps
+  - cards “re-dealing”
+  - abrupt state resets
 
-**New UI components (implemented)**
-- `/app/frontend/src/components/play/FlipCard.js`
-  - 3D flip card with slide-in “deal” animation.
-  - `CardSlot` placeholders so table layout never jumps.
-- `/app/frontend/src/App.css`
-  - 3D flip CSS (`fg-card3d*` classes).
+**Work items**
+1. **Frontend smoothing / state management**
+   - Audit and update:
+     - `/app/frontend/src/pages/play/CardDuelGame.js`
+     - `/app/frontend/src/pages/play/VideoPokerGame.js`
+     - `/app/frontend/src/pages/play/ChampionPokerGame.js`
+     - `/app/frontend/src/lib/useLiveRound.js`
+   - Implement an animation-safe strategy (one or more):
+     - derive card-reveal progress purely from server `phase` + `countdown` (no local re-deal state)
+     - freeze per-round “presentation state” keyed by `round_number` until phase changes
+     - ignore mid-phase outcome refreshes unless `round_number` advances
+   - Ensure `FlipCard` usage does not re-mount unexpectedly (stable keys and stable layout slots).
 
-**Universal dealing timelines (implemented)**
-- All timelines use the universally-synced countdown from `/api/live/{slug}/state`:
-  - `elapsed = revealSecs - countdown`
-  - This ensures the same card appears at the same moment for every viewer.
+2. **Backend/Timing validation**
+   - Confirm `/app/backend/live_engines.py` card-game phase durations match frontend flip cadence.
+   - Ensure state payloads are stable within a phase (no unnecessary reshaping that triggers re-render thrash).
 
-**Per-game realistic flows (implemented)**
-- **Teen Patti / Poker (`CardDuelGame.js`)**
-  - Cards dealt face-down **alternating Player/Dealer**, then flipped one-by-one.
-  - Then hands + **WINNER** badge; loser dimmed; **TIE** badge when applicable.
-- **Champion Poker (`ChampionPokerGame.js`)**
-  - Five cards dealt+flipped sequentially.
-  - House marks **HELD/DRAW**.
-  - Discards flip face-down, redraw occurs one-by-one.
-  - Final hand announced.
-- **No Hold (`VideoPokerGame.js`)**
-  - Five cards dealt+flipped sequentially.
-  - Then hand label + multiplier.
-- **Andar Bahar (`AndarBaharGame.js`)**
-  - Joker flips first.
-  - Cards dealt one-by-one at a natural pace (auto-compressed only for long sequences).
-  - Live “card N…” counter during dealing.
-  - Matching card and winner announced.
+3. **MANDATORY verification (immediately after fix)**
+   - Run **testing agent** for both:
+     - Backend: live endpoints + phase correctness
+     - Frontend: card pages load + stable animations (no console errors)
+   - Save a new test report under `/app/test_reports/` (next iteration number).
 
-**Sound upgrades for card realism (implemented)**
-- Added new SFX: `flick`, `flip`, `hold` in `/app/frontend/src/lib/sound.js`.
-- Wired per-card via count-tracking effects so the sound triggers **exactly** when a new card appears.
+**Exit criteria**
+- Teen Patti / Poker / Champion Poker deal and flip smoothly with no flicker.
+- No state desync between server phase and presented cards.
+- Testing agent confirms green.
 
-**Verification (completed)**
-- `esbuild` clean.
-- Screenshots captured and validated:
-  - Teen Patti: mid-deal (face-down) + flip + winner.
-  - Andar Bahar: mid-deal with joker counter.
-  - Champion Poker: HELD/DRAW stage + final hand.
+---
+
+### Phase LIVE‑7: Slot Games Redesign (3 Distinct Experiences)
+**Goal (P0):** Make 777 Triple Fun, Joker Bonus, Lucky 8 Line visually and structurally different, inspired by real casino slots (without copying protected art).
+
+**Status:** ⏳ NOT STARTED
+
+**Approach**
+- Create **separate components** (recommended) instead of a single `SlotGame.js` skin:
+  - `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
+  - `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
+  - `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
+- Shared low-level reel/spin logic can remain in a common module, but **UI layout, symbols, sounds, and win presentation must differ**.
+
+**Theme specs (user-approved)**
+1. **777 Triple Fun**
+   - Classic Vegas red/gold, chrome trims, mechanical 3‑reel vibe
+   - Bold “SEVENS” focus, lever/knob styling, incandescent glow
+2. **Joker Bonus**
+   - Purple/dark jester theme, neon accents
+   - Joker wild emphasis, bonus meter / “jester laugh” styling
+3. **Lucky 8 Line**
+   - Asian fortune red/gold theme (lanterns/fortune motifs)
+   - Explicit **8‑line win display** and line highlight animations
+
+**Deliverables**
+- Distinct symbol sets (vector/CSS-based or generated assets) + unique reel frames.
+- Distinct spin SFX + win stingers (via `sound.js`).
+- Distinct win animations (glow, shake, count-up, line highlights).
+
+**Verification**
+- Frontend testing agent: pages render, spins animate, no console errors.
+
+---
+
+### Phase LIVE‑8: Win Celebration Polish (Confetti / Coin Burst)
+**Goal (P1):** Add delightful, modern win feedback across games.
+
+**Status:** ⏳ NOT STARTED
+
+**Work items**
+- Enhance `/app/frontend/src/components/play/ResultBanner.js`:
+  - Confetti burst on win
+  - Coin sparkle/burst variant for big wins
+  - Respect global mute and reduced-motion preferences
 
 ---
 
@@ -277,15 +241,17 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 ---
 
 ## 3) Next Actions
-1. **Backlog priority confirmation (when user is ready): Master Prompt 1 enterprise admin/RBAC restructure**
-   - Clarify final scope and enforcement strictness (RBAC roles, maker/checker, TOTP, etc.).
-2. **SMTP/SendGrid integration**
-   - User provides credentials.
-   - Replace demo email verification with real email delivery.
-3. **(Optional hardening / P1)**
-   - Add lightweight load-test for polling endpoints.
-   - Add client clock-offset smoothing if needed for low-latency markets.
-   - Add sound volume slider (in addition to mute) if requested.
+1. **P0: Fix card games regression (Teen Patti / Poker / Champion Poker)**
+   - Implement animation-safe state + timing alignment.
+   - **Run mandatory testing agent (frontend + backend)** and publish new test report.
+2. **P0: Redesign 3 slot games into distinct components**
+   - Implement themes + unique symbols/sounds/win animations.
+   - Run frontend test pass.
+3. **P1: Confetti/coin burst for wins**
+   - Update `ResultBanner.js` and verify across a sample of games.
+4. **Backlog (blocked by user inputs / priority):**
+   - SMTP/SendGrid integration (credentials pending).
+   - Master Prompt 1 enterprise admin/RBAC restructure (after games).
 
 ---
 
@@ -299,17 +265,17 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
   - ✅ Every player sees the same round number/phase/outcome per game.
   - ✅ Betting locks correctly at phase boundaries.
   - ✅ Settlement is idempotent and ledger-consistent.
-- Flagship titles:
-  - ✅ **Aviator** behaves like a crash game with smooth interpolation, manual + auto cashout, bet queueing, and no crash leak.
-  - ✅ **Roulette** runs on an exact **30s** loop with wheel+ball physics and a classic European table layout.
 - UX polish:
   - ✅ ENABLED badge hidden on player-facing thumbnails/details.
-  - ✅ Premium assets: Aviator plane integrated in-flight.
-  - ✅ Realistic dice and roulette motion.
-  - ✅ Sound enabled for all games with a global mute toggle.
-  - ✅ **Card games are realistic and not rushed**: universal, timed, sequential dealing + flip/hold/redraw flows.
-- Quality:
-  - ✅ Automated smoke tests + manual regression pass succeed.
+  - ✅ Premium flagship visuals: Aviator plane, Roulette realism, Dice realism.
+  - ✅ Sound enabled for all games with global mute.
+- Card games (P0):
+  - ⏳ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
+  - ⏳ Verified by **mandatory testing agent** after fix.
+- Slots (P0):
+  - ⏳ 777 Triple Fun, Joker Bonus, Lucky 8 Line are clearly differentiated in theme, layout, symbols, sounds, and win animations.
+- Win polish (P1):
+  - ⏳ Confetti/coin burst on wins in `ResultBanner`.
 
 ---
 
@@ -317,14 +283,16 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 - ✅ Phase 1 POC complete: core workflows green in tests.
 - ✅ Phase 2 complete: player app + admin console delivered.
 - ✅ All 18 games converted to **universal 24/7 live rounds** (backend + frontend).
-- ✅ Aviator Spribe-style universal live rounds implemented.
-- ✅ Roulette upgraded (30s loop + realistic wheel/ball + classic table).
-- ✅ Game thumbnail logos cropped and applied globally.
-- ✅ Phase LIVE‑5 completed: visual/audio polish (remove ENABLED badge, real plane asset, realistic roulette ball physics, real 3D dice, sound for all games).
-- ✅ Phase LIVE‑6 completed: realistic universal **card game dealing flows** (Teen Patti/Poker, Champion Poker, No Hold, Andar Bahar).
-- ✅ Testing complete (iteration_4.json), no critical bugs.
-- ⏸️ **BACKLOG/BLOCKED:** Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
-- ⏸️ **PENDING:** Real email provider integration (SendGrid/SMTP creds at end).
+- ✅ Aviator Spribe-style universal live rounds implemented + custom plane asset.
+- ✅ Roulette upgraded (30s loop + realistic wheel/ball + custom table).
+- ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
+- ✅ Dice games upgraded with real dice visuals + rolling effects.
+- ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
+- 🔥 **IN PROGRESS:** Fix card-game “unsmooth” bug (Teen Patti/Poker/Champion Poker) + **mandatory testing agent** verification.
+- ⏳ NOT STARTED: 3 slot redesigns (777 Triple Fun / Joker Bonus / Lucky 8 Line) into distinct components.
+- ⏳ NOT STARTED: Confetti/coin burst win polish.
+- ⏸️ BACKLOG/BLOCKED: Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
+- ⏸️ PENDING: Real email provider integration (SendGrid/SMTP creds at end).
 
 **Test credentials**
 - Admin: `admin@fungame.app` / `FunGame@Admin2025`

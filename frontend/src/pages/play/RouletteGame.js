@@ -110,6 +110,40 @@ const ResultDot = ({ n, big = false }) => (
   </span>
 );
 
+/* ---- Module-level board pieces (stable identity = no remount flicker) ---- */
+const FELT_CELL = "border border-white/60 bg-[#127a43] text-white flex items-center justify-center";
+
+const NumberSpot = ({ n }) => (
+  <span
+    className={`pointer-events-none inline-flex items-center justify-center w-[26px] h-[32px] rounded-[50%] text-white text-[13px] font-bold tabular-nums ${
+      RED.has(n) ? "bg-[#c22c31]" : "bg-[#101318]"
+    }`}
+  >
+    {n}
+  </span>
+);
+
+const Diamond = ({ color }) => (
+  <span className="pointer-events-none inline-block h-4 w-4 rotate-45 border border-white/80" style={{ background: color === "red" ? "#c22c31" : "#101318" }} />
+);
+
+const BoardCell = ({ type, value, label, className = "", style, testId, betting, onPlace, chipTotal }) => (
+  <button
+    data-testid={testId || `roulette-cell-${type}-${value}`}
+    onClick={() => onPlace(type, value)}
+    disabled={!betting}
+    style={style}
+    className={`relative font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-85"} ${className}`}
+  >
+    {label}
+    {chipTotal ? (
+      <span className="absolute -top-1.5 -right-1.5 z-10 h-6 min-w-6 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border-2 border-yellow-200 shadow-md tabular-nums">
+        {chipTotal >= 1000 ? `${chipTotal / 1000}k` : chipTotal}
+      </span>
+    ) : null}
+  </button>
+);
+
 export default function RouletteGame({ game }) {
   const [state, setState] = useState(null);
   const [balance, setBalance] = useState(null);
@@ -220,8 +254,11 @@ export default function RouletteGame({ game }) {
           subtitle: win ? `You staked ${formatChips(s.total_bet)}` : `You staked ${formatChips(s.total_bet)} — better luck next spin`,
           payout: s.payout,
         });
-        if (win) (s.payout >= s.total_bet * 5 ? sfx.bigWin : sfx.win)();
-        else sfx.lose();
+        if (win) (s.payout >= s.total_bet * 5 ? sfx.bigWinCelebration : sfx.winCelebration)();
+        else {
+          sfx.lose();
+          sfx.aww();
+        }
         loadHistory();
       }
     },
@@ -302,41 +339,7 @@ export default function RouletteGame({ game }) {
   const betting = state?.phase === "BETTING";
   const isResult = state?.phase === "RESULT";
   const winning = state?.winning_number;
-
-  const SpotChip = ({ k }) =>
-    spotTotals[k] ? (
-      <span className="absolute -top-1.5 -right-1.5 z-10 h-6 min-w-6 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border-2 border-yellow-200 shadow-md tabular-nums">
-        {spotTotals[k] >= 1000 ? `${spotTotals[k] / 1000}k` : spotTotals[k]}
-      </span>
-    ) : null;
-
-  const Cell = ({ type, value, label, className = "", style, testId }) => (
-    <button
-      data-testid={testId || `roulette-cell-${type}-${value}`}
-      onClick={() => placeBet(type, value)}
-      disabled={!betting}
-      style={style}
-      className={`relative font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-85"} ${className}`}
-    >
-      {label}
-      <SpotChip k={`${type}:${value}`} />
-    </button>
-  );
-
-  // Classic table cell styles
-  const feltCell = "border border-white/60 bg-[#127a43] text-white flex items-center justify-center";
-  const NumberSpot = ({ n }) => (
-    <span
-      className={`pointer-events-none inline-flex items-center justify-center w-[26px] h-[32px] rounded-[50%] text-white text-[13px] font-bold tabular-nums ${
-        RED.has(n) ? "bg-[#c22c31]" : "bg-[#101318]"
-      }`}
-    >
-      {n}
-    </span>
-  );
-  const Diamond = ({ color }) => (
-    <span className="pointer-events-none inline-block h-4 w-4 rotate-45 border border-white/80" style={{ background: color === "red" ? "#c22c31" : "#101318" }} />
-  );
+  const cellCommon = { betting, onPlace: placeBet };
 
   return (
     <PlayShell game={game} balance={balance}>
@@ -416,59 +419,67 @@ export default function RouletteGame({ game }) {
         <div className="min-w-[600px] select-none">
           <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "44px 44px 44px 42px 42px" }}>
             {/* zero wedge */}
-            <Cell
+            <BoardCell
+              {...cellCommon}
               type="straight"
               value={0}
+              chipTotal={spotTotals["straight:0"]}
               label={<span className="pointer-events-none font-display text-xl">0</span>}
               testId="roulette-cell-straight-0"
               style={{ gridColumn: 1, gridRow: "1 / span 3" }}
-              className={`${feltCell} rounded-l-[24px] ${isResult && winning === 0 ? "ring-2 ring-primary z-10" : ""}`}
+              className={`${FELT_CELL} rounded-l-[24px] ${isResult && winning === 0 ? "ring-2 ring-primary z-10" : ""}`}
             />
             {/* number grid — classic layout, top row 3..36 */}
             {[0, 1, 2].map((row) =>
               Array.from({ length: 12 }, (_, j) => {
                 const n = 3 * (j + 1) - row;
                 return (
-                  <Cell
+                  <BoardCell
+                    {...cellCommon}
                     key={n}
                     type="straight"
                     value={n}
+                    chipTotal={spotTotals[`straight:${n}`]}
                     label={<NumberSpot n={n} />}
                     style={{ gridColumn: j + 2, gridRow: row + 1 }}
-                    className={`${feltCell} ${isResult && winning === n ? "ring-2 ring-primary z-10" : ""}`}
+                    className={`${FELT_CELL} ${isResult && winning === n ? "ring-2 ring-primary z-10" : ""}`}
                   />
                 );
               })
             )}
             {/* 2 to 1 column bets (top row = column 3) */}
             {[0, 1, 2].map((row) => (
-              <Cell
+              <BoardCell
+                {...cellCommon}
                 key={`col-${row}`}
                 type="column"
                 value={3 - row}
+                chipTotal={spotTotals[`column:${3 - row}`]}
                 label={<span className="pointer-events-none text-[10px] font-extrabold tracking-tight">2 to 1</span>}
                 style={{ gridColumn: 14, gridRow: row + 1 }}
-                className={feltCell}
+                className={FELT_CELL}
               />
             ))}
             {/* dozens */}
             {[1, 2, 3].map((d) => (
-              <Cell
+              <BoardCell
+                {...cellCommon}
                 key={`dozen-${d}`}
                 type="dozen"
                 value={d}
+                chipTotal={spotTotals[`dozen:${d}`]}
                 label={<span className="pointer-events-none text-[12px] font-extrabold tracking-wide">{d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"}</span>}
                 style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 4 }}
-                className={feltCell}
+                className={FELT_CELL}
               />
             ))}
             {/* outside bets */}
-            <Cell type="range" value="low" label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 5 }} className={feltCell} />
-            <Cell type="parity" value="even" label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 5 }} className={feltCell} />
-            <Cell type="color" value="red" label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 5 }} className={feltCell} />
-            <Cell type="color" value="black" label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 5 }} className={feltCell} />
-            <Cell type="parity" value="odd" label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={feltCell} />
-            <Cell type="range" value="high" label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={feltCell} />
+            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={FELT_CELL} />
           </div>
         </div>
         <p className="text-[10px] text-white/50 mt-1.5 sm:hidden">Swipe the table sideways to reach every bet</p>

@@ -15,7 +15,7 @@ import { formatChips } from "@/components/common";
  * appears. The matching card is highlighted and the winner announced.
  */
 export default function AndarBaharGame({ game }) {
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealElapsed } =
     useLiveRound(game.slug, {
       formatResult: (s) => ({
         title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} wins — you called it!` : `${s.outcome.winner.toUpperCase()} wins`,
@@ -25,10 +25,10 @@ export default function AndarBaharGame({ game }) {
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
 
-  /* ---------- universal dealing timeline ---------- */
+  /* ---------- universal dealing timeline (monotonic server clock) ---------- */
   const seq = outcome?.sequence || [];
   const revealSecs = state?.timings?.reveal || 16;
-  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  const elapsed = revealElapsed;
   // natural pace, compressed only when the sequence is very long
   const pace = Math.min(0.55, Math.max(0.18, (revealSecs - 3.4) / Math.max(1, seq.length)));
   const jokerFlipped = !!outcome && elapsed >= 0.9;

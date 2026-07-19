@@ -14,7 +14,7 @@ import { ResultBanner } from "@/components/play/ResultBanner";
  * 4) the final hand is announced.
  */
 export default function ChampionPokerGame({ game }) {
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets, revealElapsed } =
     useLiveRound(game.slug, {
       formatResult: (s) => ({
         title: s.outcome.hand === "NO WIN" ? "No win" : s.outcome.hand,
@@ -23,9 +23,8 @@ export default function ChampionPokerGame({ game }) {
     });
   const [amount, setAmount] = useState(50);
 
-  /* ---------- universal dealing timeline ---------- */
-  const revealSecs = state?.timings?.reveal || 14;
-  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  /* ---------- universal dealing timeline (monotonic server clock) ---------- */
+  const elapsed = revealElapsed;
   const DEAL = 0.7;
   const holds = outcome?.holds || [];
   const drawIdx = holds.map((h, i) => (h ? null : i)).filter((v) => v !== null);

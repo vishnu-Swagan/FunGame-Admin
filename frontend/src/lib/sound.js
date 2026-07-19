@@ -30,6 +30,21 @@ const ac = () => {
   return ctx;
 };
 
+/* Master bus: louder output tamed by a compressor so nothing clips */
+let masterBus = null;
+const bus = (c) => {
+  if (!masterBus) {
+    const comp = c.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.ratio.value = 6;
+    masterBus = c.createGain();
+    masterBus.gain.value = 1.5;
+    masterBus.connect(comp);
+    comp.connect(c.destination);
+  }
+  return masterBus;
+};
+
 // Unlock audio on the first user gesture (browser autoplay policy)
 if (typeof window !== "undefined") {
   const unlock = () => {
@@ -55,7 +70,7 @@ function tone({ freq = 440, dur = 0.15, type = "sine", vol = 0.15, when = 0, sli
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g).connect(c.destination);
+    o.connect(g).connect(bus(c));
     o.start(t0);
     o.stop(t0 + dur + 0.06);
   } catch (e) {
@@ -83,7 +98,7 @@ function noise({ dur = 0.2, vol = 0.12, when = 0, freq = 1800, q = 1, filter = "
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.linearRampToValueAtTime(vol, t0 + 0.015);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(f).connect(g).connect(c.destination);
+    src.connect(f).connect(g).connect(bus(c));
     src.start(t0);
     src.stop(t0 + dur + 0.05);
   } catch (e) {
@@ -171,5 +186,104 @@ export const sfx = {
   crash: () => {
     noise({ dur: 0.5, vol: 0.25, freq: 320, filter: "lowpass", q: 0.7 });
     tone({ freq: 130, dur: 0.5, type: "sawtooth", vol: 0.14, slideTo: 55 });
+  },
+
+  /* crowd atmosphere */
+  cheer: (big = false) => {
+    // crowd roar: filtered noise swell + a handful of gliding "voices"
+    const dur = big ? 2.2 : 1.4;
+    noise({ dur, vol: big ? 0.2 : 0.13, freq: 900, q: 0.5 });
+    noise({ dur: dur * 0.8, vol: 0.09, when: 0.12, freq: 2200, q: 0.7 });
+    const voices = big ? 8 : 5;
+    for (let i = 0; i < voices; i++) {
+      const f = 280 + Math.random() * 320;
+      tone({ freq: f, dur: 0.5 + Math.random() * 0.45, type: "sawtooth", vol: 0.03, when: Math.random() * 0.5, slideTo: f * (1.12 + Math.random() * 0.25) });
+    }
+    if (big) tone({ freq: 1400, dur: 0.5, type: "sine", vol: 0.08, when: 0.35, slideTo: 2500 }); // whistle
+  },
+  clap: (big = false) => {
+    // rhythmic applause from a couple of overlapping "clappers"
+    const n = big ? 16 : 10;
+    let t = 0.05;
+    for (let i = 0; i < n; i++) {
+      noise({ dur: 0.045, vol: 0.15, when: t + Math.random() * 0.02, freq: 1200 + Math.random() * 600, q: 2 });
+      noise({ dur: 0.04, vol: 0.1, when: t + 0.035 + Math.random() * 0.02, freq: 900 + Math.random() * 500, q: 2 });
+      t += 0.11 + Math.random() * 0.03;
+    }
+  },
+  aww: () => {
+    // crowd "hoooooo" of disappointment - detuned voices gliding down
+    for (let i = 0; i < 6; i++) {
+      const f = 330 + Math.random() * 90;
+      tone({ freq: f, dur: 1.1 + Math.random() * 0.35, type: "sine", vol: 0.055, when: Math.random() * 0.18, slideTo: f * 0.55 });
+    }
+    noise({ dur: 1.25, vol: 0.06, freq: 500, q: 0.6 });
+  },
+  winCelebration: () => {
+    sfx.win();
+    sfx.cheer(false);
+    sfx.clap(false);
+  },
+  bigWinCelebration: () => {
+    sfx.bigWin();
+    sfx.cheer(true);
+    sfx.clap(true);
+  },
+};
+
+/* ---------------- Ambient casino music (generative, no files) ---------------- */
+const CHORDS = [
+  [220.0, 261.63, 329.63], // Am
+  [174.61, 220.0, 261.63], // F
+  [261.63, 329.63, 392.0], // C
+  [196.0, 246.94, 293.66], // G
+];
+let musicTimer = null;
+let musicBeat = 0;
+let musicNext = 0;
+
+function musicNote(c, freq, t, dur, vol, type = "triangle") {
+  try {
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(bus(c));
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+export const music = {
+  start: () => {
+    if (musicTimer || muted) return;
+    const c = ac();
+    if (!c) return;
+    musicNext = c.currentTime + 0.15;
+    musicBeat = 0;
+    musicTimer = setInterval(() => {
+      const c2 = ac();
+      if (!c2 || muted) return;
+      if (musicNext < c2.currentTime - 1) musicNext = c2.currentTime + 0.05; // catch up after tab sleep
+      while (musicNext < c2.currentTime + 0.7) {
+        const b = musicBeat;
+        const chord = CHORDS[Math.floor(b / 8) % CHORDS.length];
+        const note = chord[b % 3] * (b % 8 >= 4 ? 2 : 1);
+        musicNote(c2, note, musicNext, 0.3, 0.028); // soft pluck
+        if (b % 4 === 0) musicNote(c2, chord[0] / 2, musicNext, 0.6, 0.045, "sine"); // bass
+        if (b % 8 === 6) musicNote(c2, chord[2] * 2, musicNext + 0.16, 0.22, 0.02); // sparkle
+        musicNext += 0.32;
+        musicBeat++;
+      }
+    }, 240);
+  },
+  stop: () => {
+    clearInterval(musicTimer);
+    musicTimer = null;
   },
 };

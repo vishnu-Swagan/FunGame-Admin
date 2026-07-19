@@ -14,9 +14,43 @@ import { formatChips } from "@/components/common";
  * winner are announced. Every player worldwide sees the same card at the
  * same moment.
  */
+
+/* Module-level seat row: keeps a STABLE component identity so React never
+   remounts the cards between countdown ticks (remounting caused the cards
+   to constantly re-run their deal animation = flicker/ghosting bug). */
+const SeatRow = ({ label, seat, cards, hand, nCards, outcome, showHands, winner, dealtFn, flipFn }) => {
+  const isWinner = showHands && winner === seat;
+  const isLoser = showHands && winner !== seat && winner !== "tie";
+  return (
+    <div className={`rounded-xl p-2 -m-2 transition-[background-color] duration-300 ${isWinner ? "bg-[hsl(var(--emerald)/0.07)]" : ""}`}>
+      <div className="flex items-center gap-2 mb-1.5 min-h-[18px]">
+        <p className="text-[11px] font-semibold text-white/50">{label}</p>
+        {showHands && hand && <span className="text-[11px] font-bold text-primary">{hand}</span>}
+        {isWinner && (
+          <span className="text-[9px] font-extrabold tracking-wider text-[hsl(var(--emerald))] border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.12)] rounded-full px-1.5 py-0.5">
+            WINNER
+          </span>
+        )}
+      </div>
+      <div className="flex gap-1.5">
+        {Array.from({ length: nCards }, (_, i) => (
+          <FlipCard
+            key={i}
+            code={outcome ? cards[i] : null}
+            size={nCards === 3 ? "lg" : "md"}
+            dealt={dealtFn(i)}
+            flipped={flipFn(i)}
+            dim={isLoser}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function CardDuelGame({ game }) {
   const nCards = game.slug === "teen-patti" ? 3 : 5;
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealElapsed } =
     useLiveRound(game.slug, {
       formatResult: (s) => {
         const push = s.bets.length > 0 && s.bets.every((b) => b.result === "push");
@@ -31,9 +65,8 @@ export default function CardDuelGame({ game }) {
   const [amount, setAmount] = useState(50);
   const options = state?.options || { player: 1.95, dealer: 1.95, tie: game.slug === "teen-patti" ? 8 : 20 };
 
-  /* ---------- universal dealing timeline ---------- */
-  const revealSecs = state?.timings?.reveal || (nCards === 3 ? 12 : 14);
-  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  /* ---------- universal dealing timeline (monotonic server clock) ---------- */
+  const elapsed = revealElapsed;
   const DEAL = nCards === 3 ? 0.6 : 0.5; // seconds per card dealt
   const FLIP = nCards === 3 ? 0.65 : 0.5; // seconds per card flipped
   const START = 0.2;
@@ -64,42 +97,23 @@ export default function CardDuelGame({ game }) {
     sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
   });
 
-  const Row = ({ label, seat, cards, hand, dealtFn, flipFn }) => {
-    const isWinner = showHands && winner === seat;
-    const isLoser = showHands && winner !== seat && winner !== "tie";
-    return (
-      <div className={`rounded-xl p-2 -m-2 transition-[background-color] duration-300 ${isWinner ? "bg-[hsl(var(--emerald)/0.07)]" : ""}`}>
-        <div className="flex items-center gap-2 mb-1.5 min-h-[18px]">
-          <p className="text-[11px] font-semibold text-white/50">{label}</p>
-          {showHands && hand && <span className="text-[11px] font-bold text-primary">{hand}</span>}
-          {isWinner && (
-            <span className="text-[9px] font-extrabold tracking-wider text-[hsl(var(--emerald))] border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.12)] rounded-full px-1.5 py-0.5">
-              WINNER
-            </span>
-          )}
-        </div>
-        <div className="flex gap-1.5">
-          {Array.from({ length: nCards }, (_, i) => (
-            <FlipCard
-              key={i}
-              code={outcome ? cards[i] : null}
-              size={nCards === 3 ? "lg" : "md"}
-              dealt={dealtFn(i)}
-              flipped={flipFn(i)}
-              dim={isLoser}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
 
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-4">
-        <Row label="Dealer" seat="dealer" cards={outcome?.dealer || []} hand={outcome?.dealer_hand} dealtFn={dealtD} flipFn={flipD} />
+        <SeatRow
+          label="Dealer"
+          seat="dealer"
+          cards={outcome?.dealer || []}
+          hand={outcome?.dealer_hand}
+          nCards={nCards}
+          outcome={outcome}
+          showHands={showHands}
+          winner={winner}
+          dealtFn={dealtD}
+          flipFn={flipD}
+        />
         <div className="relative border-t border-white/8">
           {showHands && winner === "tie" && (
             <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 text-[9px] font-extrabold tracking-widest text-primary border border-primary/40 bg-black/60 rounded-full px-2 py-0.5">
@@ -107,7 +121,18 @@ export default function CardDuelGame({ game }) {
             </span>
           )}
         </div>
-        <Row label="Player" seat="player" cards={outcome?.player || []} hand={outcome?.player_hand} dealtFn={dealtP} flipFn={flipP} />
+        <SeatRow
+          label="Player"
+          seat="player"
+          cards={outcome?.player || []}
+          hand={outcome?.player_hand}
+          nCards={nCards}
+          outcome={outcome}
+          showHands={showHands}
+          winner={winner}
+          dealtFn={dealtP}
+          flipFn={flipP}
+        />
         <div className="flex items-center justify-between">
           <p className="text-[11px] text-white/45">One universal deal per round — dealt live, card by card</p>
           <LastResults

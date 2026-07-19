@@ -1,30 +1,18 @@
 [
   {
-    "content": "Create sound.js (WebAudio synth) + mute toggle in PlayShell",
+    "content": "Audit useLiveRound.js polling + card games for animation/state clash",
     "status": "completed"
   },
   {
-    "content": "Hide ENABLED badge on game cards + detail hero",
+    "content": "Implement animation-safe fix (monotonic revealElapsed + anchored deadline + boundary poll)",
     "status": "completed"
   },
   {
-    "content": "Aviator: use cut-out plane image in flight scene + takeoff/cashout/crash sounds",
+    "content": "Verify backend live_engines.py card phase timings align with frontend reveal timeline",
     "status": "completed"
   },
   {
-    "content": "Roulette: realistic wheel physics (wheel CCW, ball CW spiral) + classic horizontal table + sounds",
-    "status": "completed"
-  },
-  {
-    "content": "Dice: real 3D dice with pips + tumbling roll + sounds",
-    "status": "completed"
-  },
-  {
-    "content": "Generic sounds for all games via useLiveRound (chip/win/lose + reveal sounds)",
-    "status": "completed"
-  },
-  {
-    "content": "Build check + screenshots + verify",
-    "status": "completed"
+    "content": "Run mandatory testing_agent (backend + frontend) for card games fix",
+    "status": "in_progress"
   }
 ]

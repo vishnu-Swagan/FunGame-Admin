@@ -17,6 +17,9 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
   const deadlineRef = useRef(0);
+  const phaseKeyRef = useRef("");
+  const boundaryPollRef = useRef("");
+  const monoRef = useRef({ key: "", val: 0 });
   const settledShownRef = useRef(null);
   const prevPhaseRef = useRef(null);
   const formatRef = useRef(formatResult);
@@ -37,7 +40,18 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     (data) => {
       setState(data);
       setBalance(data.balance);
-      deadlineRef.current = Date.now() + data.phase_ends_in * 1000;
+      /* Anchor the phase deadline ONCE per (round, phase). Re-anchoring on every
+         poll made the countdown jitter with network latency, which rewound the
+         card-dealing timelines mid-animation (cards un-dealt / re-flipped =
+         the flicker bug). Only resync on real drift (tab slept, clock skew). */
+      const phaseKey = `${data.round_number}:${data.phase}`;
+      const newDeadline = Date.now() + data.phase_ends_in * 1000;
+      if (phaseKeyRef.current !== phaseKey) {
+        phaseKeyRef.current = phaseKey;
+        deadlineRef.current = newDeadline;
+      } else if (Math.abs(newDeadline - deadlineRef.current) > 450) {
+        deadlineRef.current = newDeadline;
+      }
       // A new reveal is starting - clear the previous round's banner + play the reveal sound
       if (data.phase === "REVEAL") {
         setResult((r) => (r && r.key === `r-${data.round_number}` ? r : null));
@@ -59,8 +73,11 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
         const merged = { ...base, ...extra };
         setResult(merged);
         if (merged.push) sfx.push();
-        else if (merged.win) (s.payout >= s.total_bet * 5 ? sfx.bigWin : sfx.win)();
-        else sfx.lose();
+        else if (merged.win) (s.payout >= s.total_bet * 5 ? sfx.bigWinCelebration : sfx.winCelebration)();
+        else {
+          sfx.lose();
+          sfx.aww();
+        }
         loadHistory();
       }
     },
@@ -82,6 +99,17 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     const p = setInterval(poll, pollMs);
     const t = setInterval(() => {
       setCountdown(Math.max(0, (deadlineRef.current - Date.now()) / 1000));
+      /* Fire ONE instant poll right at the phase boundary so the next phase
+         (e.g. REVEAL) starts on time instead of up to a full poll-interval
+         late - keeps the dealing choreography tight. */
+      if (
+        deadlineRef.current > 0 &&
+        Date.now() >= deadlineRef.current &&
+        boundaryPollRef.current !== phaseKeyRef.current
+      ) {
+        boundaryPollRef.current = phaseKeyRef.current;
+        poll();
+      }
     }, 100);
     return () => {
       clearInterval(p);
@@ -124,8 +152,19 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
 
   const phase = state?.phase;
   const revealSecs = state?.timings?.reveal || 4;
+  /* Monotonic reveal clock: within one round's REVEAL phase this value can
+     only move forward, so deal/flip animations can never un-trigger even if
+     the countdown gets a small network-latency correction. */
+  const rawElapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  const monoKey = `${state?.round_number ?? "-"}:${phase ?? "-"}`;
+  if (monoRef.current.key !== monoKey) {
+    monoRef.current = { key: monoKey, val: rawElapsed };
+  } else if (rawElapsed > monoRef.current.val) {
+    monoRef.current.val = rawElapsed;
+  }
+  const revealElapsed = monoRef.current.val;
   const revealProgress =
-    phase === "RESULT" ? 1 : phase === "REVEAL" ? Math.min(1, Math.max(0, (revealSecs - countdown) / revealSecs)) : 0;
+    phase === "RESULT" ? 1 : phase === "REVEAL" ? Math.min(1, Math.max(0, revealElapsed / revealSecs)) : 0;
 
   return {
     state,
@@ -145,5 +184,6 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     myTotal: state?.my_total || 0,
     lastResults: state?.last_results || [],
     revealProgress,
+    revealElapsed,
   };
 }

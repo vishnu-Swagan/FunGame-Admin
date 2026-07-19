@@ -16,7 +16,7 @@ const PAYTABLE = [
  * clock, then the hand is announced. No rushing, real table pace.
  */
 export default function VideoPokerGame({ game }) {
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets, revealElapsed } =
     useLiveRound(game.slug, {
       formatResult: (s) => ({
         title: s.outcome.hand === "NO WIN" ? "No win" : s.outcome.hand,
@@ -25,9 +25,8 @@ export default function VideoPokerGame({ game }) {
     });
   const [amount, setAmount] = useState(50);
 
-  /* ---------- universal dealing timeline ---------- */
-  const revealSecs = state?.timings?.reveal || 8;
-  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  /* ---------- universal dealing timeline (monotonic server clock) ---------- */
+  const elapsed = revealElapsed;
   const DEAL = 0.75;
   const dealt = (i) => !!outcome && elapsed >= 0.2 + i * DEAL;
   const flipped = (i) => !!outcome && elapsed >= 0.2 + i * DEAL + 0.4;

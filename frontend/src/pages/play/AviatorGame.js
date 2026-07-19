@@ -269,7 +269,14 @@ export default function AviatorGame({ game }) {
       // phase-transition sounds (universal round, heard by everyone watching)
       if (prev && prev.phase !== data.phase) {
         if (data.phase === "FLYING") sfx.takeoff();
-        if (data.phase === "CRASHED" && prev.phase === "FLYING") sfx.crash();
+        if (data.phase === "CRASHED" && prev.phase === "FLYING") {
+          sfx.crash();
+          // crowd reacts to MY outcome
+          const lostBet = (data.my_bets || []).some((b) => b.status === "LOST");
+          const cashedBet = (data.my_bets || []).some((b) => b.status === "CASHED");
+          if (lostBet) sfx.aww();
+          else if (cashedBet) sfx.clap(false);
+        }
       }
       // refresh my history when a round I was in finishes
       if (prev && prev.phase !== "CRASHED" && data.phase === "CRASHED" && (prev.my_bets || []).length > 0) {
@@ -337,9 +344,11 @@ export default function AviatorGame({ game }) {
       setBalance(data.balance);
       if (data.result === "cashed_out") {
         sfx.cashout();
+        (data.multiplier >= 5 ? sfx.bigWinCelebration : sfx.winCelebration)();
         toast.success(`Cashed out at ${data.multiplier}x — +${formatChips(data.payout)} chips`);
       } else {
         sfx.lose();
+        sfx.aww();
         toast.error(`Too late — crashed at ${data.crash_point}x`);
       }
       await poll();
