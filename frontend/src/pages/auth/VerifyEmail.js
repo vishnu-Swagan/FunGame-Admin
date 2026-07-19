@@ -54,7 +54,11 @@ export default function VerifyEmail() {
     try {
       const { data } = await api.post("/auth/resend-verification", { email });
       setDevCode(data.dev_code || null);
-      toast.success("Code re-sent");
+      if (data.email_delivery === "failed") {
+        toast.warning(data.message);
+      } else {
+        toast.success("Code re-sent");
+      }
     } catch (err) {
       toast.error(errMsg(err));
     }

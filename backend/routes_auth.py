@@ -67,8 +67,11 @@ async def register(body: RegisterRequest):
         'created_at': _now().isoformat(),
     }
     await db.users.insert_one(user)
-    await EmailService.send_verification_code(email, code)
+    sent = await EmailService.send_verification_code(email, code)
     resp = {'message': 'Registered. Verification code sent to your email.', 'email': email}
+    if not sent.get('sent'):
+        resp['message'] = 'Account created, but the verification email could not be delivered right now. Please try "Resend code" in a moment.'
+        resp['email_delivery'] = 'failed'
     if is_dev_mode():
         resp['dev_code'] = code
     return resp
@@ -109,8 +112,11 @@ async def resend_verification(body: ResendVerificationRequest):
         'verification_code_hash': _hash_code(code),
         'verification_expires_at': (_now() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(),
     }})
-    await EmailService.send_verification_code(email, code)
+    sent = await EmailService.send_verification_code(email, code)
     resp = {'message': 'Verification code re-sent.'}
+    if not sent.get('sent'):
+        resp['message'] = 'The verification email could not be delivered right now. Please try again in a moment.'
+        resp['email_delivery'] = 'failed'
     if is_dev_mode():
         resp['dev_code'] = code
     return resp

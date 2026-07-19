@@ -24,7 +24,11 @@ export default function Register() {
     setBusy(true);
     try {
       const { data } = await api.post("/auth/register", { email, password });
-      toast.success("Verification code sent!");
+      if (data.email_delivery === "failed") {
+        toast.warning(data.message);
+      } else {
+        toast.success("Verification code sent!");
+      }
       navigate("/verify-email", { state: { email, devCode: data.dev_code } });
     } catch (err) {
       toast.error(errMsg(err));
