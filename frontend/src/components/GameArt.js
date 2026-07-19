@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Plane, Dices, Layers, LayoutGrid, Crown, Trophy, Flame, CircleDot, Target, Gem,
   Sparkles, Hash, Infinity as InfinityIcon, Zap, Sun, Boxes, Spade, Club,
@@ -74,6 +75,8 @@ export const GameArt = ({ game, className = "", glyphSize = "text-5xl", showGlin
   const Icon = ICONS[art.icon] || Sparkles;
   const pattern = PATTERNS[game?.slug] || "dots";
   const isCardFan = pattern === "cardfan";
+  const [logoFailed, setLogoFailed] = useState(false);
+  const hasLogo = !!game?.slug && !logoFailed;
 
   return (
     <div
@@ -84,25 +87,39 @@ export const GameArt = ({ game, className = "", glyphSize = "text-5xl", showGlin
       {/* pattern layer */}
       <div className="absolute inset-0" style={patternStyle(pattern, art.accent)} />
 
-      {/* card fan silhouettes for card games */}
-      {isCardFan && (
+      {hasLogo ? (
+        /* official game thumbnail logo */
+        <img
+          src={`/game-art/${game.slug}.png`}
+          alt=""
+          loading="lazy"
+          draggable="false"
+          onError={() => setLogoFailed(true)}
+          className="absolute inset-0 h-full w-full object-contain p-1.5 drop-shadow-[0_8px_18px_rgba(0,0,0,0.55)] select-none"
+        />
+      ) : (
         <>
-          <div className="absolute right-[18%] bottom-[-12%] h-[70%] w-[34%] rounded-xl border border-white/20 bg-white/10" style={{ transform: "rotate(-14deg)" }} />
-          <div className="absolute right-[8%] bottom-[-14%] h-[70%] w-[34%] rounded-xl border border-white/25 bg-white/15" style={{ transform: "rotate(-2deg)" }} />
-          <div className="absolute right-[-4%] bottom-[-12%] h-[70%] w-[34%] rounded-xl border border-white/20 bg-white/10" style={{ transform: "rotate(10deg)" }} />
+          {/* card fan silhouettes for card games */}
+          {isCardFan && (
+            <>
+              <div className="absolute right-[18%] bottom-[-12%] h-[70%] w-[34%] rounded-xl border border-white/20 bg-white/10" style={{ transform: "rotate(-14deg)" }} />
+              <div className="absolute right-[8%] bottom-[-14%] h-[70%] w-[34%] rounded-xl border border-white/25 bg-white/15" style={{ transform: "rotate(-2deg)" }} />
+              <div className="absolute right-[-4%] bottom-[-12%] h-[70%] w-[34%] rounded-xl border border-white/20 bg-white/10" style={{ transform: "rotate(10deg)" }} />
+            </>
+          )}
+
+          {/* icon watermark */}
+          <Icon className="absolute -bottom-3 -right-3 h-20 w-20 text-white opacity-[0.13]" strokeWidth={1.4} />
+
+          {/* big glyph */}
+          <span
+            className={`font-display absolute left-3 bottom-1.5 ${glyphSize} leading-none text-white/90`}
+            style={{ textShadow: `0 2px 14px rgba(0,0,0,0.45), 0 0 22px ${art.accent || "#ffd447"}55` }}
+          >
+            {art.glyph}
+          </span>
         </>
       )}
-
-      {/* icon watermark */}
-      <Icon className="absolute -bottom-3 -right-3 h-20 w-20 text-white opacity-[0.13]" strokeWidth={1.4} />
-
-      {/* big glyph */}
-      <span
-        className={`font-display absolute left-3 bottom-1.5 ${glyphSize} leading-none text-white/90`}
-        style={{ textShadow: `0 2px 14px rgba(0,0,0,0.45), 0 0 22px ${art.accent || "#ffd447"}55` }}
-      >
-        {art.glyph}
-      </span>
 
       {/* star glints */}
       {showGlints && (
