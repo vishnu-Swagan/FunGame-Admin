@@ -10,6 +10,7 @@ const SEGMENTS = [0, 1.5, 2, 3, 5, 10, 20, 50];
 export default function WheelGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
     useLiveRound(game.slug, {
+      revealSound: "spin",
       formatResult: (s) => ({
         title: s.outcome.multiplier > 0 ? `Golden ${s.outcome.multiplier}x!` : "Blank segment",
         subtitle: s.outcome.multiplier > 0 ? "The wheel shines on you" : "Join the next spin for the gold",

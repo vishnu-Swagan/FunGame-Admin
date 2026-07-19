@@ -1,22 +1,30 @@
 [
   {
-    "content": "Build shared frontend: useLiveRound hook + LiveBar component",
+    "content": "Create sound.js (WebAudio synth) + mute toggle in PlayShell",
     "status": "completed"
   },
   {
-    "content": "Rewrite AviatorGame.js - Spribe-style universal live (curve, plane, dual panels, auto-cashout, feed, history)",
+    "content": "Hide ENABLED badge on game cards + detail hero",
     "status": "completed"
   },
   {
-    "content": "Upgrade RouletteGame.js - 30s loop + richer wheel with white ball + felt board polish",
+    "content": "Aviator: use cut-out plane image in flight scene + takeoff/cashout/crash sounds",
     "status": "completed"
   },
   {
-    "content": "Convert 11 game components to live rounds (dice, target, wheel, checker, duel, no-hold, champion, andar-bahar, keno, bingo, slots)",
+    "content": "Roulette: realistic wheel physics (wheel CCW, ball CW spiral) + classic horizontal table + sounds",
     "status": "completed"
   },
   {
-    "content": "Run testing agent (backend + frontend) and fix all reported bugs",
+    "content": "Dice: real 3D dice with pips + tumbling roll + sounds",
+    "status": "completed"
+  },
+  {
+    "content": "Generic sounds for all games via useLiveRound (chip/win/lose + reveal sounds)",
+    "status": "completed"
+  },
+  {
+    "content": "Build check + screenshots + verify",
     "status": "completed"
   }
 ]

@@ -14,6 +14,7 @@ const PAYTABLE = [
 export default function VideoPokerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
     useLiveRound(game.slug, {
+      revealSound: "deal",
       formatResult: (s) => ({
         title: s.outcome.hand === "NO WIN" ? "No win" : s.outcome.hand,
         subtitle: s.outcome.multiplier > 0 ? `Pays ${s.outcome.multiplier}x` : "Join the next deal for a paying hand",

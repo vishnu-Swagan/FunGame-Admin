@@ -10,6 +10,7 @@ import { formatChips } from "@/components/common";
 export default function AndarBaharGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
     useLiveRound(game.slug, {
+      revealSound: "deal",
       formatResult: (s) => ({
         title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} wins — you called it!` : `${s.outcome.winner.toUpperCase()} wins`,
         subtitle: `Match found after ${s.outcome.sequence.length} card${s.outcome.sequence.length > 1 ? "s" : ""}`,

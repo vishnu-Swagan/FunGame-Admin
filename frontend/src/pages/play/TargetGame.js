@@ -10,6 +10,7 @@ import { formatChips } from "@/components/common";
 export default function TargetGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
     useLiveRound(game.slug, {
+      revealSound: "spin",
       formatResult: (s) => ({
         title: s.payout > 0 ? "Bullseye! 9x" : "Missed",
         subtitle: `The target landed on ${s.outcome.result}`,

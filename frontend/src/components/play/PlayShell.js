@@ -1,9 +1,13 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Coins } from "lucide-react";
+import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
+import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 
 export const PlayShell = ({ game, balance, children }) => {
   const navigate = useNavigate();
+  const [muted, setMutedState] = useState(isMuted());
+  useEffect(() => onMuteChange(setMutedState), []);
   return (
     <div className="space-y-4" data-testid="game-play-page">
       <div className="flex items-center justify-between gap-3">
@@ -16,6 +20,16 @@ export const PlayShell = ({ game, balance, children }) => {
           <ArrowLeft className="h-4 w-4 text-white/85" />
         </button>
         <h1 className="font-display text-2xl text-white flex-1 truncate">{game.name}</h1>
+        <button
+          data-testid="play-sound-toggle"
+          onClick={toggleMuted}
+          aria-label={muted ? "Unmute game sounds" : "Mute game sounds"}
+          className={`h-10 w-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full border transition-[background-color,border-color] duration-150 ${
+            muted ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-primary/35 bg-primary/10 hover:bg-primary/15"
+          }`}
+        >
+          {muted ? <VolumeX className="h-4 w-4 text-white/60" /> : <Volume2 className="h-4 w-4 text-primary" />}
+        </button>
         <div data-testid="play-balance" className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 px-3 py-1.5">
           <Coins className="h-4 w-4 text-primary" />
           <span className="tabular-nums text-sm font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>

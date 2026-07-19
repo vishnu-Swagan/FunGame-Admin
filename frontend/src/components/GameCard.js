@@ -19,7 +19,9 @@ export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) 
     >
       <GameArt game={game} className={`${wide ? "h-[110px]" : "h-[120px] sm:h-[140px]"} rounded-t-2xl`} glyphSize={wide ? "text-3xl" : "text-4xl"} />
 
-      <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-2.5 left-2.5" />
+      {game.status !== "ENABLED" && (
+        <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-2.5 left-2.5" />
+      )}
 
       {onToggleFavorite && (
         <button

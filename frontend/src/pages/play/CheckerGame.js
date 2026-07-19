@@ -9,6 +9,7 @@ import { ResultBanner } from "@/components/play/ResultBanner";
 export default function CheckerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
     useLiveRound(game.slug, {
+      revealSound: "draw",
       formatResult: (s) => ({
         title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} takes the board!` : `${s.outcome.winner.toUpperCase()} wins the duel`,
         subtitle: `Captures — Gold ${s.outcome.gold} : Steel ${s.outcome.steel}`,

@@ -17,7 +17,7 @@
 - Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after live games are completed (confirmed by user).
 - Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed by user).
 
-**Current status:** ✅ P0 delivered — all 18 live games + Aviator + Roulette upgrades completed and tested.
+**Current status:** ✅ P0 delivered — all 18 live games + Aviator + Roulette upgrades + visual/audio polish completed and verified.
 
 ---
 
@@ -108,13 +108,13 @@
   - Cancel bet during BETTING/queued.
   - Live all-bets feed (sanitized masked names).
   - Universal crash history strip.
-- Visuals (original): curve + plane-at-tip animation and premium crash stage.
+- Visuals: premium crash stage + curve + plane-at-tip animation.
 
 **Roulette frontend (`/app/frontend/src/pages/play/RouletteGame.js`)**
 - Updated to match backend 30s loop.
 - Visual upgrades:
-  - More realistic wheel (rim/track/studs) + **white ball**.
-  - Spin animation tuned (~5.2s) to the 6s spin window.
+  - More realistic wheel + **white ball**.
+  - Spin animation tuned to the 6s spin window.
   - Green felt board, chip tray, on-board bet markers, last results strip.
 
 ---
@@ -167,6 +167,52 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 
 ---
 
+### Phase LIVE‑5: Visual & Audio Polish
+**Goal:** Raise realism and premium feel across the app: remove unnecessary status noise, improve flagship visuals, and add sound with global mute.
+
+**Status:** ✅ COMPLETED
+
+**Delivered changes**
+- **Remove ENABLED badge**
+  - `ENABLED` status badge removed from **game cards** and **game detail hero**.
+  - Status badges still show for non-enabled states (e.g., `COMING_SOON`, `MAINTENANCE`).
+  - Badge remains visible in **AdminGames** table for operational visibility.
+- **Aviator plane asset integration**
+  - User-supplied red plane image processed (edge flood fill + component cleanup, pedestal removed, mirrored).
+  - Saved as: `/app/frontend/public/game-art/aviator-plane.png`.
+  - Used:
+    - BETTING: idle bob
+    - FLYING: plane at curve tip with bob
+    - CRASH: fly-away
+- **Roulette realism upgrade**
+  - Researched real European spin behaviour:
+    - **Wheel counterclockwise**, **ball clockwise** (opposite directions), deceleration, deflector bounces.
+  - Implemented:
+    - rAF ball animation with spiral-in and bounce jitter
+    - wheel deceleration matches spin phase
+  - **Table replaced** with classic horizontal European layout matching the provided reference:
+    - 0 wedge at left
+    - 12×3 number grid with red/black ovals
+    - 2-to-1 column bets, dozens, and outside bets
+    - horizontally scrollable on mobile
+  - Note: `RouletteGame.js` was **fully rewritten** after a truncation incident during parallel edits; verified working.
+- **Dice realism upgrade**
+  - Seven-Up-Down uses **real 3D CSS dice** (preserve-3d cube, ivory faces, pips, red single-pip) with tumbling animation.
+- **Sound for all games (global)**
+  - `/app/frontend/src/lib/sound.js`: WebAudio-synthesized SFX
+    - chip, win/bigWin/lose/push
+    - dice roll/land, reel, deal, spin, draw
+    - roulette ballSpin/ballLand
+    - aviator takeoff/cashout/crash
+  - Global **mute toggle** added in `PlayShell` header; persisted in `localStorage`.
+  - Generic sounds wired into `useLiveRound` (chip on bet; reveal sound per game; win/lose/push on settlement).
+  - Roulette + Aviator have additional bespoke sounds tied to their unique transitions.
+- Verification:
+  - `esbuild` compile checks passed.
+  - Screenshots captured confirming: dice tumbling, roulette ball-on-track + classic table, aviator plane + curve, lobby with no ENABLED badges.
+
+---
+
 ### Phase 4: Email Provider Integration (SendGrid/SMTP) — after credentials provided
 **Status:** ⏸️ PENDING (user will provide credentials at the end)
 - Keep demo verification code flow until credentials provided.
@@ -182,6 +228,7 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 3. **(Optional hardening / P1)**
    - Add lightweight load-test for polling endpoints.
    - Add client clock-offset smoothing if needed for low-latency markets.
+   - Add sound volume slider (in addition to mute) if requested.
 
 ---
 
@@ -197,7 +244,12 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
   - ✅ Settlement is idempotent and ledger-consistent.
 - Flagship titles:
   - ✅ **Aviator** behaves like a crash game with smooth interpolation, manual + auto cashout, bet queueing, and no crash leak.
-  - ✅ **Roulette** runs on an exact **30s** loop with green board, chips, and wheel + white ball.
+  - ✅ **Roulette** runs on an exact **30s** loop with wheel+ball physics and a classic European table layout.
+- UX polish:
+  - ✅ ENABLED badge hidden on player-facing thumbnails/details.
+  - ✅ Premium assets: Aviator plane integrated in-flight.
+  - ✅ Realistic dice and roulette motion.
+  - ✅ Sound enabled for all games with a global mute toggle.
 - Quality:
   - ✅ Automated smoke tests + manual regression pass succeed.
 
@@ -208,7 +260,9 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 - ✅ Phase 2 complete: player app + admin console delivered.
 - ✅ All 18 games converted to **universal 24/7 live rounds** (backend + frontend).
 - ✅ Aviator Spribe-style universal live rounds implemented.
-- ✅ Roulette upgraded (30s loop + realistic wheel/ball + felt board).
+- ✅ Roulette upgraded (30s loop + realistic wheel/ball + classic table).
+- ✅ Game thumbnail logos cropped and applied globally.
+- ✅ Phase LIVE‑5 completed: visual/audio polish (remove ENABLED badge, real plane asset, realistic roulette ball physics, real 3D dice, sound for all games).
 - ✅ Testing complete (iteration_4.json), no critical bugs.
 - ⏸️ **BACKLOG/BLOCKED:** Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
 - ⏸️ **PENDING:** Real email provider integration (SendGrid/SMTP creds at end).

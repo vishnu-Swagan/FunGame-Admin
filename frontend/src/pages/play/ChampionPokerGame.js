@@ -9,6 +9,7 @@ import { ResultBanner } from "@/components/play/ResultBanner";
 export default function ChampionPokerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, revealProgress, myBets } =
     useLiveRound(game.slug, {
+      revealSound: "deal",
       formatResult: (s) => ({
         title: s.outcome.hand === "NO WIN" ? "No win" : s.outcome.hand,
         subtitle: s.outcome.multiplier > 0 ? `Pays ${s.outcome.multiplier}x` : "The dealer drew a cold hand",

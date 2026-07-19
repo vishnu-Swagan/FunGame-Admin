@@ -86,7 +86,9 @@ export default function GameDetail() {
       {/* Hero art */}
       <div className="relative">
         <GameArt game={game} className="h-[220px] rounded-2xl" glyphSize="text-7xl" />
-        <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-3 left-3" />
+        {game.status !== "ENABLED" && (
+          <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-3 left-3" />
+        )}
         <button
           data-testid="favorite-toggle-button"
           onClick={toggleFav}

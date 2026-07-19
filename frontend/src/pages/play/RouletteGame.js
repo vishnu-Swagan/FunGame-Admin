@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Timer, RotateCcw, Repeat } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
@@ -16,14 +17,6 @@ const CHIPS = [
   { v: 500, bg: "#f472b6", fg: "#500724" },
   { v: 1000, bg: "#4ade80", fg: "#052e16" },
 ];
-
-const numColor = (n) => (n === 0 ? "green" : RED.has(n) ? "red" : "black");
-const cellBg = (n) =>
-  n === 0
-    ? "bg-[#0a7a3c] hover:bg-[#0c8a44] border-[#12a355]/60"
-    : RED.has(n)
-    ? "bg-[#b3282d] hover:bg-[#c22f35] border-[#e05a5f]/50"
-    : "bg-[#15181f] hover:bg-[#20242e] border-white/25";
 
 // ---------------- SVG European wheel ----------------
 function polar(cx, cy, r, deg) {
@@ -123,7 +116,6 @@ export default function RouletteGame({ game }) {
   const [chip, setChip] = useState(100);
   const [countdown, setCountdown] = useState(0);
   const [wheelRot, setWheelRot] = useState(0);
-  const [ballRot, setBallRot] = useState(0);
   const [spinningAnim, setSpinningAnim] = useState(false);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
@@ -137,6 +129,8 @@ export default function RouletteGame({ game }) {
   const lastBetsRef = useRef([]);
   const wheelRotRef = useRef(0);
   const stateRef = useRef(null);
+  const ballRef = useRef(null);
+  const ballAnimRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -147,18 +141,54 @@ export default function RouletteGame({ game }) {
     }
   }, []);
 
-  const spinTo = useCallback((winning) => {
-    const idx = EURO_ORDER.indexOf(winning);
-    if (idx < 0) return;
-    const prev = wheelRotRef.current;
-    const targetMod = (360 - idx * SEG) % 360;
-    const delta = 5 * 360 + ((targetMod - ((prev % 360) + 360) % 360) + 360) % 360;
-    const next = prev + delta;
-    wheelRotRef.current = next;
-    setSpinningAnim(true);
-    setWheelRot(next);
-    setBallRot((b) => b - 4 * 360);
+  /* Real European roulette physics: the wheel spins COUNTERCLOCKWISE while the
+     ball is launched CLOCKWISE on the outer track. The ball circles the track,
+     decelerates, spirals down past the deflectors with small bounces and
+     finally settles into the winning pocket as the wheel slows. */
+  const animateBall = useCallback(() => {
+    const DURATION = 5200; // matches the wheel deceleration
+    const TOTAL = 6 * 360; // clockwise revolutions (opposite to the wheel)
+    const R_TRACK = 101;
+    const R_POCKET = 75;
+    const start = performance.now();
+    cancelAnimationFrame(ballAnimRef.current);
+    const frame = (now) => {
+      const p = Math.min(1, (now - start) / DURATION);
+      const ease = 1 - Math.pow(1 - p, 3); // decelerating
+      const ang = TOTAL * ease; // ends exactly at the top pointer
+      let r = R_TRACK;
+      if (p > 0.55) {
+        const q = Math.min(1, (p - 0.55) / 0.35);
+        r = R_TRACK - (R_TRACK - R_POCKET) * q;
+        if (p > 0.62 && p < 0.92) r += Math.sin(p * 55) * 2.6 * (1 - p); // deflector bounces
+      }
+      if (ballRef.current) ballRef.current.style.transform = `rotate(${ang}deg) translateY(-${r}px)`;
+      if (p < 1) {
+        ballAnimRef.current = requestAnimationFrame(frame);
+      } else {
+        sfx.ballLand();
+      }
+    };
+    ballAnimRef.current = requestAnimationFrame(frame);
   }, []);
+
+  const spinTo = useCallback(
+    (winning) => {
+      const idx = EURO_ORDER.indexOf(winning);
+      if (idx < 0) return;
+      const prev = wheelRotRef.current;
+      const targetMod = (360 - idx * SEG) % 360;
+      // counterclockwise: at least 5 full turns, ending with the winning pocket at the top
+      const delta = 5 * 360 + (((((prev % 360) + 360) % 360) - targetMod + 360) % 360);
+      const next = prev - delta;
+      wheelRotRef.current = next;
+      setSpinningAnim(true);
+      setWheelRot(next);
+      sfx.ballSpin();
+      animateBall();
+    },
+    [animateBall]
+  );
 
   const applyState = useCallback(
     (data) => {
@@ -190,6 +220,8 @@ export default function RouletteGame({ game }) {
           subtitle: win ? `You staked ${formatChips(s.total_bet)}` : `You staked ${formatChips(s.total_bet)} — better luck next spin`,
           payout: s.payout,
         });
+        if (win) (s.payout >= s.total_bet * 5 ? sfx.bigWin : sfx.win)();
+        else sfx.lose();
         loadHistory();
       }
     },
@@ -215,6 +247,7 @@ export default function RouletteGame({ game }) {
     return () => {
       clearInterval(pollRef.current);
       clearInterval(tickRef.current);
+      cancelAnimationFrame(ballAnimRef.current);
     };
   }, [poll, loadHistory]);
 
@@ -230,6 +263,7 @@ export default function RouletteGame({ game }) {
       setState((s) => (s ? { ...s, my_bets: data.my_bets, my_total: data.my_total } : s));
       setBalance(data.balance);
       lastBetsRef.current = data.my_bets;
+      sfx.chip();
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -242,6 +276,7 @@ export default function RouletteGame({ game }) {
       const { data } = await api.post("/games/fun-roulette/bets/clear");
       setBalance(data.balance);
       setState((s) => (s ? { ...s, my_bets: [], my_total: 0 } : s));
+      sfx.chip();
       toast.success(`Refunded ${formatChips(data.refunded)} chips`);
     } catch (e) {
       toast.error(errMsg(e));
@@ -275,16 +310,32 @@ export default function RouletteGame({ game }) {
       </span>
     ) : null;
 
-  const Cell = ({ type, value, label, className = "", testId }) => (
+  const Cell = ({ type, value, label, className = "", style, testId }) => (
     <button
       data-testid={testId || `roulette-cell-${type}-${value}`}
       onClick={() => placeBet(type, value)}
       disabled={!betting}
-      className={`relative rounded-md border font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-80"} ${className}`}
+      style={style}
+      className={`relative font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-85"} ${className}`}
     >
       {label}
       <SpotChip k={`${type}:${value}`} />
     </button>
+  );
+
+  // Classic table cell styles
+  const feltCell = "border border-white/60 bg-[#127a43] text-white flex items-center justify-center";
+  const NumberSpot = ({ n }) => (
+    <span
+      className={`pointer-events-none inline-flex items-center justify-center w-[26px] h-[32px] rounded-[50%] text-white text-[13px] font-bold tabular-nums ${
+        RED.has(n) ? "bg-[#c22c31]" : "bg-[#101318]"
+      }`}
+    >
+      {n}
+    </span>
+  );
+  const Diamond = ({ color }) => (
+    <span className="pointer-events-none inline-block h-4 w-4 rotate-45 border border-white/80" style={{ background: color === "red" ? "#c22c31" : "#101318" }} />
   );
 
   return (
@@ -323,19 +374,20 @@ export default function RouletteGame({ game }) {
         <div className="relative h-[230px] w-[230px]" data-testid="roulette-wheel">
           {/* pointer */}
           <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-20 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
-          {/* wheel */}
+          {/* wheel — spins counterclockwise like a real European wheel */}
           <div
             className="absolute inset-0"
             style={{ transform: `rotate(${wheelRot}deg)`, transition: spinningAnim ? "transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none" }}
           >
             <WheelSVG />
           </div>
-          {/* white ball orbit */}
-          <div
-            className="absolute inset-0 z-10 pointer-events-none"
-            style={{ transform: `rotate(${ballRot}deg)`, transition: spinningAnim ? "transform 5.2s cubic-bezier(0.22, 0.9, 0.3, 1)" : "none" }}
-          >
-            <div className="absolute left-1/2 top-[24px] -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]" />
+          {/* white ball — launched clockwise, spirals into the winning pocket */}
+          <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+            <div
+              ref={ballRef}
+              className="h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]"
+              style={{ transform: "rotate(0deg) translateY(-75px)" }}
+            />
           </div>
           {/* landed number */}
           {!betting && winning !== null && !spinningAnimActive(countdown, state) && (
@@ -355,43 +407,71 @@ export default function RouletteGame({ game }) {
 
       <ResultBanner result={result} />
 
-      {/* Green felt board */}
-      <div className="rounded-2xl border-2 border-[#c9a227]/50 p-3 space-y-1.5" style={{ background: "radial-gradient(140% 120% at 50% 0%, #0d6b36 0%, #094d27 55%, #073d1f 100%)" }} data-testid="roulette-board">
-        {/* zero */}
-        <Cell type="straight" value={0} label="0" className={`w-full py-3 min-h-[44px] text-white text-lg ${cellBg(0)} ${isResult && winning === 0 ? "ring-2 ring-primary" : ""}`} testId="roulette-cell-straight-0" />
-        {/* numbers 1-36 */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {Array.from({ length: 36 }, (_, i) => i + 1).map((n) => (
+      {/* Classic European table — swipe sideways on small screens */}
+      <div
+        className="rounded-2xl border-2 border-[#c9a227]/50 p-2.5 overflow-x-auto"
+        style={{ background: "radial-gradient(130% 140% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%)" }}
+        data-testid="roulette-board"
+      >
+        <div className="min-w-[600px] select-none">
+          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "44px 44px 44px 42px 42px" }}>
+            {/* zero wedge */}
             <Cell
-              key={n}
               type="straight"
-              value={n}
-              label={n}
-              className={`py-2.5 min-h-[40px] text-white text-base tabular-nums ${cellBg(n)} ${isResult && winning === n ? "ring-2 ring-primary" : ""}`}
+              value={0}
+              label={<span className="pointer-events-none font-display text-xl">0</span>}
+              testId="roulette-cell-straight-0"
+              style={{ gridColumn: 1, gridRow: "1 / span 3" }}
+              className={`${feltCell} rounded-l-[24px] ${isResult && winning === 0 ? "ring-2 ring-primary z-10" : ""}`}
             />
-          ))}
+            {/* number grid — classic layout, top row 3..36 */}
+            {[0, 1, 2].map((row) =>
+              Array.from({ length: 12 }, (_, j) => {
+                const n = 3 * (j + 1) - row;
+                return (
+                  <Cell
+                    key={n}
+                    type="straight"
+                    value={n}
+                    label={<NumberSpot n={n} />}
+                    style={{ gridColumn: j + 2, gridRow: row + 1 }}
+                    className={`${feltCell} ${isResult && winning === n ? "ring-2 ring-primary z-10" : ""}`}
+                  />
+                );
+              })
+            )}
+            {/* 2 to 1 column bets (top row = column 3) */}
+            {[0, 1, 2].map((row) => (
+              <Cell
+                key={`col-${row}`}
+                type="column"
+                value={3 - row}
+                label={<span className="pointer-events-none text-[10px] font-extrabold tracking-tight">2 to 1</span>}
+                style={{ gridColumn: 14, gridRow: row + 1 }}
+                className={feltCell}
+              />
+            ))}
+            {/* dozens */}
+            {[1, 2, 3].map((d) => (
+              <Cell
+                key={`dozen-${d}`}
+                type="dozen"
+                value={d}
+                label={<span className="pointer-events-none text-[12px] font-extrabold tracking-wide">{d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"}</span>}
+                style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 4 }}
+                className={feltCell}
+              />
+            ))}
+            {/* outside bets */}
+            <Cell type="range" value="low" label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 5 }} className={feltCell} />
+            <Cell type="parity" value="even" label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 5 }} className={feltCell} />
+            <Cell type="color" value="red" label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 5 }} className={feltCell} />
+            <Cell type="color" value="black" label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 5 }} className={feltCell} />
+            <Cell type="parity" value="odd" label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={feltCell} />
+            <Cell type="range" value="high" label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={feltCell} />
+          </div>
         </div>
-        {/* column bets */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {[1, 2, 3].map((c) => (
-            <Cell key={c} type="column" value={c} label="2 : 1" className="py-2 min-h-[38px] text-[11px] text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-          ))}
-        </div>
-        {/* dozens */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {[1, 2, 3].map((d) => (
-            <Cell key={d} type="dozen" value={d} label={d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"} className="py-2.5 min-h-[40px] text-xs text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-          ))}
-        </div>
-        {/* outside bets */}
-        <div className="grid grid-cols-6 gap-1.5">
-          <Cell type="range" value="low" label="1-18" className="py-2.5 min-h-[40px] text-[10px] text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-          <Cell type="parity" value="even" label="EVEN" className="py-2.5 min-h-[40px] text-[10px] text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-          <Cell type="color" value="red" label="RED" className="py-2.5 min-h-[40px] text-[10px] text-white bg-[#b3282d] border-[#e05a5f]/50" />
-          <Cell type="color" value="black" label="BLACK" className="py-2.5 min-h-[40px] text-[10px] text-white bg-[#15181f] border-white/25" />
-          <Cell type="parity" value="odd" label="ODD" className="py-2.5 min-h-[40px] text-[10px] text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-          <Cell type="range" value="high" label="19-36" className="py-2.5 min-h-[40px] text-[10px] text-[#ffe08a] bg-[#0a5c2d] border-[#c9a227]/40" />
-        </div>
+        <p className="text-[10px] text-white/50 mt-1.5 sm:hidden">Swipe the table sideways to reach every bet</p>
       </div>
 
       {/* Chip selector + actions */}

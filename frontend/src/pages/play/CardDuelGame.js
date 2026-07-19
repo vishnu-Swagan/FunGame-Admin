@@ -10,6 +10,7 @@ import { formatChips } from "@/components/common";
 export default function CardDuelGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
     useLiveRound(game.slug, {
+      revealSound: "deal",
       formatResult: (s) => {
         const push = s.bets.length > 0 && s.bets.every((b) => b.result === "push");
         return {

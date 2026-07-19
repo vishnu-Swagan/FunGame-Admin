@@ -7,6 +7,7 @@ import { ResultBanner } from "@/components/play/ResultBanner";
 export default function KenoGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, placing, revealProgress } =
     useLiveRound(game.slug, {
+      revealSound: "draw",
       formatResult: (s) => {
         const b = s.bets[0] || {};
         const m = (b.matches || []).length;

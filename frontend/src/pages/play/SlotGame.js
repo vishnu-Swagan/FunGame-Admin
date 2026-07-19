@@ -46,6 +46,7 @@ const Symbol = ({ id, map, size = 44 }) => {
 export default function SlotGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
     useLiveRound(game.slug, {
+      revealSound: "reel",
       formatResult: (s) => ({
         push: s.outcome.multiplier === 1,
         title: s.outcome.multiplier > 1 ? `${s.outcome.label} — ${s.outcome.multiplier}x!` : s.outcome.multiplier === 1 ? "Pair — stake back" : "No win",

@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { Plane, Users, X } from "lucide-react";
+import { Users, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { formatChips } from "@/components/common";
+
+const PLANE_SRC = "/game-art/aviator-plane.png";
 
 const QUICK = [50, 100, 500, 1000];
 
@@ -31,8 +34,8 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
   const steps = 36;
   for (let i = 0; i <= steps; i++) {
     const t = (elapsed * i) / steps;
-    const x = 4 + (t / T) * (W - 14);
-    const y = H - 6 - ((Math.exp(g * t) - 1) / (M - 1)) * (H - 14);
+    const x = 4 + (t / T) * (W - 16);
+    const y = H - 6 - ((Math.exp(g * t) - 1) / (M - 1)) * (H - 21);
     pts.push([x, y]);
   }
   const tip = pts[pts.length - 1];
@@ -66,13 +69,18 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
         </svg>
       )}
 
-      {/* plane at the curve tip */}
+      {/* the Aviator plane at the curve tip */}
       {(flying || crashed) && (
         <div
-          className={`absolute transition-[transform,opacity] duration-300 ${crashed ? "opacity-0 translate-x-16 -translate-y-10" : ""}`}
-          style={{ left: `${tip[0]}%`, top: `${(tip[1] / H) * 100}%`, transform: "translate(-30%, -70%)" }}
+          className={`absolute transition-[transform,opacity] duration-300 ${crashed ? "opacity-0 translate-x-20 -translate-y-12" : ""}`}
+          style={{ left: `${tip[0]}%`, top: `${(tip[1] / H) * 100}%`, transform: "translate(-42%, -78%)" }}
         >
-          <Plane className={`h-8 w-8 -rotate-[24deg] ${crashed ? "text-red-400" : "text-[#ff4f9a]"} drop-shadow-[0_0_10px_rgba(255,79,154,0.7)]`} />
+          <img
+            src={PLANE_SRC}
+            alt=""
+            draggable="false"
+            className={`h-14 w-auto select-none drop-shadow-[0_6px_16px_rgba(255,79,154,0.45)] ${crashed ? "-rotate-[13deg]" : "fg-plane-bob"}`}
+          />
         </div>
       )}
 
@@ -80,7 +88,7 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         {phase === "BETTING" ? (
           <>
-            <Plane className="h-8 w-8 text-white/35 mb-1" />
+            <img src={PLANE_SRC} alt="" draggable="false" className="h-16 w-auto mb-1 fg-plane-idle select-none drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]" />
             <p className="text-[11px] font-bold tracking-[0.2em] text-white/55">TAKING OFF IN</p>
             <p data-testid="aviator-countdown" className="font-display text-5xl text-white/90 tabular-nums">
               {countdown.toFixed(1)}s
@@ -258,6 +266,11 @@ export default function AviatorGame({ game }) {
         if (data.phase === "CRASHED") setMult(data.crash_point);
         if (data.phase === "BETTING") setMult(1.0);
       }
+      // phase-transition sounds (universal round, heard by everyone watching)
+      if (prev && prev.phase !== data.phase) {
+        if (data.phase === "FLYING") sfx.takeoff();
+        if (data.phase === "CRASHED" && prev.phase === "FLYING") sfx.crash();
+      }
       // refresh my history when a round I was in finishes
       if (prev && prev.phase !== "CRASHED" && data.phase === "CRASHED" && (prev.my_bets || []).length > 0) {
         loadHistory();
@@ -293,6 +306,7 @@ export default function AviatorGame({ game }) {
       if (auto) body.auto_cashout = parseFloat(auto);
       const { data } = await api.post("/live/aviator/bets", body);
       setBalance(data.balance);
+      sfx.chip();
       toast.success(data.queued ? "Bet queued for the next round" : "Bet placed — good luck!");
       await poll();
     } catch (e) {
@@ -322,8 +336,10 @@ export default function AviatorGame({ game }) {
       const { data } = await api.post("/live/aviator/cashout", { bet_id: betId });
       setBalance(data.balance);
       if (data.result === "cashed_out") {
+        sfx.cashout();
         toast.success(`Cashed out at ${data.multiplier}x — +${formatChips(data.payout)} chips`);
       } else {
+        sfx.lose();
         toast.error(`Too late — crashed at ${data.crash_point}x`);
       }
       await poll();

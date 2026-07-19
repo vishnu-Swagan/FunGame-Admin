@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
+import { sfx } from "@/lib/sound";
 
 /**
  * Universal live-round client. Polls /live/{slug}/state so every player sees
  * the SAME 24/7 synchronized round, phase, countdown and outcome.
+ * `revealSound` (optional): sfx key played when the reveal phase starts
+ * ("dice" | "reel" | "deal" | "spin" | "draw").
  */
-export function useLiveRound(slug, { pollMs = 1500, formatResult } = {}) {
+export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } = {}) {
   const [state, setState] = useState(null);
   const [balance, setBalance] = useState(null);
   const [countdown, setCountdown] = useState(0);
@@ -15,8 +18,11 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult } = {}) {
   const [history, setHistory] = useState([]);
   const deadlineRef = useRef(0);
   const settledShownRef = useRef(null);
+  const prevPhaseRef = useRef(null);
   const formatRef = useRef(formatResult);
   formatRef.current = formatResult;
+  const revealSoundRef = useRef(revealSound);
+  revealSoundRef.current = revealSound;
 
   const loadHistory = useCallback(async () => {
     try {
@@ -32,10 +38,14 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult } = {}) {
       setState(data);
       setBalance(data.balance);
       deadlineRef.current = Date.now() + data.phase_ends_in * 1000;
-      // A new reveal is starting - clear the previous round's banner
+      // A new reveal is starting - clear the previous round's banner + play the reveal sound
       if (data.phase === "REVEAL") {
         setResult((r) => (r && r.key === `r-${data.round_number}` ? r : null));
+        if (prevPhaseRef.current !== "REVEAL" && revealSoundRef.current && sfx[revealSoundRef.current]) {
+          sfx[revealSoundRef.current]();
+        }
       }
+      prevPhaseRef.current = data.phase;
       if (data.settled && settledShownRef.current !== data.settled.round_number) {
         settledShownRef.current = data.settled.round_number;
         const s = data.settled;
@@ -46,7 +56,11 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult } = {}) {
           title: s.payout > 0 ? "You won!" : "Not this time",
         };
         const extra = formatRef.current ? formatRef.current(s) : {};
-        setResult({ ...base, ...extra });
+        const merged = { ...base, ...extra };
+        setResult(merged);
+        if (merged.push) sfx.push();
+        else if (merged.win) (s.payout >= s.total_bet * 5 ? sfx.bigWin : sfx.win)();
+        else sfx.lose();
         loadHistory();
       }
     },
@@ -83,6 +97,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult } = {}) {
         const { data } = await api.post(`/live/${slug}/bets`, { selection, amount });
         setBalance(data.balance);
         setState((s) => (s ? { ...s, my_bets: data.my_bets, my_total: data.my_total } : s));
+        sfx.chip();
         return data;
       } catch (e) {
         toast.error(errMsg(e));
