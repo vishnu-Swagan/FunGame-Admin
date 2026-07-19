@@ -15,7 +15,7 @@
 - **Visual & audio premium polish (P0):** realistic casino feel across games.
   - Remove noisy UI status elements (e.g., “ENABLED” badges on thumbnails).
   - Flagship visual realism (Aviator plane, Roulette 3D wheel/ball/table, Dice realism).
-  - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + game-specific SFX).
+  - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + game-specific SFX), with user overrides.
 - **Card games stability & realism (P0):** Teen Patti + Poker + Champion Poker must be **smooth** and **non-jarring**.
   - Fix animation/polling clashes causing flicker / state desync / rushed dealing.
   - Ensure reveal timelines stay aligned with server phases.
@@ -54,7 +54,7 @@
 - ✅ Roulette betting UX upgraded: chips now land centered on bet spots; split/corner bet hit‑zones + backend validation.
 - ✅ 2026 polish additions: auto-fit rendering on any mobile device (FitWidth), roulette cinematic camera zoom during spin, background music disabled, Aviator sound set to flight-engine only.
 - ✅ Resend email integration completed + verified (verification/reset email delivery; demo mode replaced).
-- 🟡 **NEW (IN PROGRESS): LIVE‑10 Points economy + admin-provisioned accounts**.
+- ✅ **LIVE‑10 completed + verified 100%:** points economy + admin-provisioned accounts.
 - ⏸️ Remaining backlog: Resend domain verification for real deliverability + enterprise admin restructure.
 
 ---
@@ -138,7 +138,7 @@
   - Counterclockwise wheel behavior
   - Realistic ball motion + audio
   - **3D Roulette wheel scene (pure CSS 3D, no new deps)**
-  - **Improved betting UX**: chips land centered; split/corner hit‑zones
+  - **Improved betting UX**: chips land centered; split/corner hit‑zones + backend validation
 - Dice realism: 3D rolling + real dice visuals.
 - Sound for all games:
   - `/app/frontend/src/lib/sound.js` WebAudio synth engine
@@ -203,85 +203,78 @@
 
 ---
 
-### Phase LIVE‑10: Points Economy + Admin‑Provisioned Accounts (NEW)
+### Phase LIVE‑10: Points Economy + Admin‑Provisioned Accounts
 **Goal (P0):** Implement conversion between chips and points, and change signup to an admin‑approved provisioning model.
 
-**Status:** 🟡 IN PROGRESS
+**Status:** ✅ COMPLETED + VERIFIED (100%)
+- Verification: **`/app/test_reports/iteration_9.json`** (backend 24/24 + full frontend flows)
 
 #### LIVE‑10A — Chips ⇄ Points conversion (instant)
-**Backend**
+**Backend (delivered)**
 - Data model:
-  - Add `points_balance: int` to `users` (default 0) OR introduce a dedicated `points_balance` field while keeping chips separate.
-  - Add new collection `points_transactions` (ledger-style log) OR extend `chip_transactions` with an additional currency field.
-- New player endpoint:
-  - `POST /api/player/chips/convert`
+  - Added `points_balance: int` to `users` (default 0) and backfilled existing users.
+  - New collection `points_transactions` as a ledger-style log.
+- Endpoints:
+  - `POST /api/chips/convert`
     - Body: `{ direction: 'CHIPS_TO_POINTS'|'POINTS_TO_CHIPS', amount: int }`
-    - Enforce **min amount 500**.
+    - Enforces **min amount 500**.
     - Atomic balance checks and updates.
-    - Write transaction entries for both sides.
-- Admin UI/data:
-  - Admin should see points balance per user.
-  - Admin can adjust points if needed (`POST /api/admin/users/{id}/points/adjust`).
-
-**Frontend**
-- Player:
-  - Chips page: add **Points card** + converter UI.
-  - Profile: show points and chips.
+    - Writes to chip ledger and points ledger.
+  - `GET /api/chips/balance` now includes `{ balance, points }`.
+  - `GET /api/points/transactions` returns points transaction history.
 - Admin:
-  - Users list: show points balance + adjust action.
+  - `POST /api/admin/users/{id}/points` to adjust points (over-deduct guarded).
+
+**Frontend (delivered)**
+- Player:
+  - Chips page: **Points wallet card** + direction toggle + converter UI.
+  - Profile: shows points and `@username` when available.
+- Admin:
+  - Users list: Points column + adjust dialog.
 
 #### LIVE‑10B — Signup request + admin assigned login/password
-**New flow**
+**Flow (delivered)**
 1. Player submits **Signup Request**:
    - Full Name, Email, Date of Birth, Phone with country code.
 2. Admin reviews request, then **assigns unique Login ID + password**.
 3. User logs in with **Login ID (preferred)** or email (legacy).
 
-**Backend**
-- Models to add:
-  - `SignupRequestCreate` (full_name, email, dob, phone)
-  - `AdminSignupApprove` (login_id, password, starting_chips?, note?)
-- Auth changes:
-  - `/auth/register` becomes disabled for new users (return `410 Gone` or a message telling to use signup request).
-  - New public endpoint: `POST /auth/signup-request`.
-  - Login request model changes: `LoginRequest.email` becomes a generic `identifier: str` (username or email).
-  - Login logic: find by `login_id` OR `email`.
-- Admin endpoints:
-  - `GET /admin/signup-requests` (list PENDING)
-  - `POST /admin/signup-requests/{id}/approve` → create ACTIVE user with `login_id` and `password_hash`, pre-verified
-  - `POST /admin/signup-requests/{id}/reject`
-  - Stats: add `pending_signups` count.
+**Backend (delivered)**
+- Public signup disabled:
+  - `/api/auth/register` → **410 Gone** with instruction to submit a signup request.
+- Public request endpoint:
+  - `POST /api/auth/signup-request` validates DOB (`YYYY-MM-DD`) and phone (`+<countrycode><number>`).
+- Admin request management:
+  - `GET /api/admin/signup-requests` (+ status filter)
+  - `POST /api/admin/signup-requests/{id}/approve` with atomic PENDING guard + unique username check
+    - creates ACTIVE, pre-verified user with optional `starting_chips` (credited via chip ledger)
+  - `POST /api/admin/signup-requests/{id}/reject`
+- Login updated:
+  - Login field accepts **username OR email** (case-insensitive for username).
+  - Legacy email accounts remain unaffected.
+- Admin stats:
+  - `/api/admin/stats` includes `pending_signups`.
 
-**Frontend**
-- Replace `Register.js` with "Request Account" form (Full Name/Email/DOB/Phone).
-- Update `Welcome.js` call-to-action to "Request Account".
-- Update `Login.js`: field label "Login ID or Email".
+**Frontend (delivered)**
+- Replaced Register page with **Request an account** form.
+- Updated Welcome CTA to "Request an account".
+- Updated Login label and input to accept **Login ID or Email**.
 - Admin:
-  - Add `AdminSignups.js` page with approve dialog (generate username/password) and reject.
-  - Add Admin nav item + route in `App.js`.
-
-**Testing (MANDATORY due to auth change)**
-- Backend tests:
-  - Create signup request → approve → login with username → access player routes.
-  - Reject flow.
-  - Legacy email login still works.
-  - Conversion endpoint (both directions) min 500 enforcement.
-- Frontend tests:
-  - Signup request UI → admin approves → login using assigned ID.
-  - Chips ↔ points conversion UI.
+  - New **Admin → Signups** page (`/admin/signups`) with:
+    - Tabs: PENDING / APPROVED / REJECTED / ALL
+    - Verify & assign dialog with suggested username + crypto-random password generator
+    - Credentials card with copy-to-clipboard
+    - Reject action
+  - Admin dashboard stat card includes pending signups.
 
 ---
 
 ## 3) Next Actions
-1. **P0: Complete LIVE‑10**
-   - Implement chips ⇄ points conversion + admin visibility/adjustment.
-   - Replace register with signup request flow + admin provisioning.
-   - Run mandatory testing agent regression across backend + frontend.
-2. **P1: Resend production deliverability**
+1. **P1: Resend production deliverability**
    - Verify sending domain in Resend.
    - Update `SENDER_EMAIL`.
-   - Smoke test register/request + reset flows.
-3. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
+   - Smoke test password reset emails.
+2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
    - Strict RBAC, maker-checker workflows, TOTP.
 
 ---
@@ -301,12 +294,14 @@
   - ✅ Background music disabled.
   - ✅ Aviator sound = flight engine only.
 - Economy:
-  - 🟡 Chips ⇄ points conversion works instantly, min 500, 1:1, with full transaction logs.
+  - ✅ Chips ⇄ points conversion works instantly, min 500, 1:1, bidirectional, with transaction logs.
+  - ✅ Admin can adjust points with safeguards.
 - Account provisioning:
-  - 🟡 Signup request → admin assigns login/password → user logs in via login ID.
+  - ✅ Signup request → admin assigns login/password → user logs in via login ID.
   - ✅ Legacy accounts can still log in via email.
 - Testing:
-  - Mandatory testing agent run after LIVE‑10 changes (auth + economy).
+  - ✅ Mandatory testing agent run after LIVE‑10 changes:
+    - Report: **`/app/test_reports/iteration_9.json`**.
 
 ---
 
@@ -319,7 +314,7 @@
 - ✅ Slot redesigns verified (**iteration_6.json**).
 - ✅ Resend integration verified (**iteration_7.json**).
 - ✅ Responsive + roulette camera + sound changes verified (**iteration_8.json**).
-- 🟡 **LIVE‑10 started:** points economy + admin-provisioned accounts.
+- ✅ **LIVE‑10 completed:** points economy + admin-provisioned accounts verified (**iteration_9.json**).
 - ⏸️ Backlog: Resend domain verification, enterprise admin restructure.
 
 **Test credentials**
