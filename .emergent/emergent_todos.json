@@ -1,0 +1,34 @@
+[
+  {
+    "content": "Phase 1: Build complete backend (auth, onboarding, chips, games, announcements, notifications, admin, maintenance)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: POC test script — register→verify→onboard→admin approve→chip request→approve→balance/notifications green",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Get design guidelines from design_agent",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Build frontend player app (auth, onboarding, lobby with 18 games, chips, announcements, notifications, profile, settings, system screens)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Build admin panel (users, chip requests, games, announcements, maintenance)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: All user stories covered in development",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 4 (later): SendGrid/SMTP email integration when user provides credentials",
+    "status": "pending"
+  }
+]
