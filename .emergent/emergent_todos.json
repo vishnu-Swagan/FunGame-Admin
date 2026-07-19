@@ -4,31 +4,27 @@
     "status": "completed"
   },
   {
-    "content": "Phase 1: POC test script — register→verify→onboard→admin approve→chip request→approve→balance/notifications green",
+    "content": "Phase 1: POC test script — 37/37 checks green",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Get design guidelines from design_agent",
+    "content": "Phase 2: Design guidelines + full player app + admin panel",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Build frontend player app (auth, onboarding, lobby with 18 games, chips, announcements, notifications, profile, settings, system screens)",
+    "content": "Phase 2: End to End Testing using Testing Agent",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Build admin panel (users, chip requests, games, announcements, maintenance)",
+    "content": "Bug fix: implement real gameplay for all 18 games (server engines + play UIs) — verified by testing agent 100%",
     "status": "completed"
   },
   {
-    "content": "Phase 2: All user stories covered in development",
-    "status": "completed"
+    "content": "Master Prompt 1 restructure (RBAC, MFA, double-entry ledger, maker/checker, audit chain) — awaiting user answers to clarifying questions",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
-    "status": "in_progress"
-  },
-  {
-    "content": "Phase 4 (later): SendGrid/SMTP email integration when user provides credentials",
+    "content": "SendGrid/SMTP email integration when user provides credentials",
     "status": "pending"
   }
 ]

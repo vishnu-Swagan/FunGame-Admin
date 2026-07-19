@@ -130,3 +130,6 @@
 - [IN PROGRESS] Phase 2: E2E testing via testing agent
 - [PENDING] Phase 4: real email provider (user will supply SendGrid/SMTP creds at the end; demo mode active: dev_code shown on screen)
 - Credentials: admin@fungame.app / FunGame@Admin2025 ; player@fungame.app / Player@123 (see /app/memory/test_credentials.md)
+- [DONE] Gameplay v1: real server-authoritative engines for ALL 18 games (routes_games.py + game_engines.py + ledger.py), all games ENABLED, play UIs at /games/{slug}/play. Bug "Gameplay engine ships in a later build gate" FIXED and verified by testing agent (iteration_2.json: 100% backend 25/25, 100% frontend).
+- [OPEN] Master Prompt 1 (enterprise core API + admin console: RBAC 12 roles, TOTP MFA, double-entry ledger, maker/checker, audit hash-chain, /api/v1) — awaiting user's answers to 5 clarifying questions before restructure.
+- [PENDING] Real email provider (SendGrid/SMTP) — user will provide credentials at the end.
