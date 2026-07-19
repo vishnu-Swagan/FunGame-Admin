@@ -1,42 +1,30 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useGamePlay } from "@/lib/useGamePlay";
+import { useLiveRound } from "@/lib/useLiveRound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { BetPanel } from "@/components/play/BetPanel";
+import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 
 const SEGMENTS = [0, 1.5, 2, 3, 5, 10, 20, 50];
 
 export default function WheelGame({ game }) {
-  const { balance, busy, play, history, loadHistory } = useGamePlay(game.slug);
-  const [bet, setBet] = useState(50);
-  const [spinning, setSpinning] = useState(false);
-  const [landed, setLanded] = useState(null);
-  const [result, setResult] = useState(null);
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
+    useLiveRound(game.slug, {
+      formatResult: (s) => ({
+        title: s.outcome.multiplier > 0 ? `Golden ${s.outcome.multiplier}x!` : "Blank segment",
+        subtitle: s.outcome.multiplier > 0 ? "The wheel shines on you" : "Join the next spin for the gold",
+      }),
+    });
+  const [amount, setAmount] = useState(50);
 
-  const doPlay = async () => {
-    setResult(null);
-    setSpinning(true);
-    setLanded(null);
-    const data = await play(bet, {});
-    setTimeout(() => {
-      setSpinning(false);
-      if (data) {
-        const o = data.round.outcome;
-        setLanded(o.multiplier);
-        setResult({
-          key: data.round.id, win: o.multiplier > 0,
-          title: o.multiplier > 0 ? `Golden ${o.multiplier}x!` : "Blank segment",
-          subtitle: o.multiplier > 0 ? "The wheel shines on you" : "Spin again for the gold",
-          payout: data.round.payout,
-        });
-        loadHistory();
-      }
-    }, 1400);
-  };
+  const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.4));
+  const spinning = phase === "REVEAL" && !showFinal;
+  const landed = showFinal ? outcome.multiplier : null;
 
   return (
     <PlayShell game={game} balance={balance}>
+      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "SPINNING…" }} />
+
       <div className="rounded-2xl bg-card/55 border border-white/10 p-6 flex flex-col items-center gap-3">
         <motion.div
           animate={spinning ? { rotate: 360 } : { rotate: 0 }}
@@ -57,10 +45,25 @@ export default function WheelGame({ game }) {
             </span>
           ))}
         </div>
+        <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 0 ? "gold" : "neutral"} />} />
       </div>
 
       <ResultBanner result={result} />
-      <BetPanel bet={bet} setBet={setBet} onPlay={doPlay} busy={busy || spinning} playLabel="Spin the golden wheel" />
+      <LiveBetPanel
+        amount={amount}
+        setAmount={setAmount}
+        onPlace={() => placeBet(null, amount)}
+        betting={betting}
+        placing={placing}
+        label="Join this spin"
+        myTotal={myTotal}
+        hint="One universal wheel spin per round — your stake pays the landed multiplier"
+      />
+      {betting && myBets.length > 0 && (
+        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+          Clear my bets (refund)
+        </button>
+      )}
       <HistoryStrip history={history} />
     </PlayShell>
   );

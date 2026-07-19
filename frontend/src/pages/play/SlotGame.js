@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Cherry, Citrus, Bell, Star, Sparkles, Coins, Gem, Crown, Diamond, Grape, Apple, Flower2, Fish, Flame, Zap, Circle,
 } from "lucide-react";
-import { useGamePlay } from "@/lib/useGamePlay";
+import { useLiveRound } from "@/lib/useLiveRound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { BetPanel } from "@/components/play/BetPanel";
+import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 
 const SYMBOLS = {
@@ -44,44 +44,36 @@ const Symbol = ({ id, map, size = 44 }) => {
 };
 
 export default function SlotGame({ game }) {
-  const { balance, busy, play, history, loadHistory } = useGamePlay(game.slug);
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
+    useLiveRound(game.slug, {
+      formatResult: (s) => ({
+        push: s.outcome.multiplier === 1,
+        title: s.outcome.multiplier > 1 ? `${s.outcome.label} — ${s.outcome.multiplier}x!` : s.outcome.multiplier === 1 ? "Pair — stake back" : "No win",
+        subtitle: s.outcome.multiplier > 1 ? "The reels align!" : undefined,
+      }),
+    });
   const map = SYMBOLS[game.slug] || SYMBOLS["fever-joker-bonus"];
   const ids = Object.keys(map);
-  const [bet, setBet] = useState(50);
-  const [reels, setReels] = useState([ids[0], ids[1], ids[2]]);
-  const [spinning, setSpinning] = useState(false);
-  const [result, setResult] = useState(null);
-  const timer = useRef(null);
+  const [amount, setAmount] = useState(50);
+  const [anim, setAnim] = useState([ids[0], ids[1], ids[2]]);
 
-  useEffect(() => () => clearInterval(timer.current), []);
-
-  const doPlay = async () => {
-    setResult(null);
-    setSpinning(true);
-    timer.current = setInterval(() => {
-      setReels([0, 1, 2].map(() => ids[Math.floor(Math.random() * ids.length)]));
+  useEffect(() => {
+    if (phase !== "REVEAL") return;
+    const t = setInterval(() => {
+      setAnim([0, 1, 2].map(() => ids[Math.floor(Math.random() * ids.length)]));
     }, 90);
-    const data = await play(bet, {});
-    setTimeout(() => {
-      clearInterval(timer.current);
-      setSpinning(false);
-      if (data) {
-        const o = data.round.outcome;
-        setReels(o.reels);
-        setResult({
-          key: data.round.id, win: data.round.payout > 0,
-          push: o.multiplier === 1,
-          title: o.multiplier > 1 ? `${o.label} — ${o.multiplier}x!` : o.multiplier === 1 ? "Pair — stake back" : "No win",
-          subtitle: o.multiplier > 1 ? "The reels align!" : undefined,
-          payout: o.multiplier > 1 ? data.round.payout : 0,
-        });
-        loadHistory();
-      }
-    }, 1000);
-  };
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
+  const spinning = phase === "REVEAL" && !showFinal;
+  const reels = showFinal ? outcome.reels : spinning ? anim : [ids[0], ids[1], ids[2]];
 
   return (
     <PlayShell game={game} balance={balance}>
+      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "SPINNING…" }} />
+
       <div className="rounded-2xl bg-card/55 border border-white/10 p-5">
         <div className="flex justify-center gap-2.5" data-testid="slot-reels">
           {reels.map((r, i) => (
@@ -93,6 +85,11 @@ export default function SlotGame({ game }) {
             </div>
           ))}
         </div>
+        {showFinal && phase === "RESULT" && (
+          <p className="text-center text-sm font-bold text-white/85 mt-2" data-testid="slot-label">
+            {outcome.label}{outcome.multiplier > 1 ? ` — ${outcome.multiplier}x` : ""}
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1">
           {ids.map((id) => (
             <span key={id} className="flex items-center gap-1 text-[10px] text-white/50">
@@ -100,11 +97,27 @@ export default function SlotGame({ game }) {
             </span>
           ))}
         </div>
-        <p className="text-[11px] text-white/45 text-center mt-2">3 of a kind pays the paytable · any pair returns your stake · wilds substitute</p>
+        <p className="text-[11px] text-white/45 text-center mt-2">One universal spin per round · 3 of a kind pays · pairs return your stake · wilds substitute</p>
+        <div className="flex justify-center mt-2">
+          <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 1 ? "gold" : r.multiplier === 1 ? "cyan" : "neutral"} />} />
+        </div>
       </div>
 
       <ResultBanner result={result} />
-      <BetPanel bet={bet} setBet={setBet} onPlay={doPlay} busy={busy || spinning} playLabel="Spin" />
+      <LiveBetPanel
+        amount={amount}
+        setAmount={setAmount}
+        onPlace={() => placeBet(null, amount)}
+        betting={betting}
+        placing={placing}
+        label="Join this spin"
+        myTotal={myTotal}
+      />
+      {betting && myBets.length > 0 && (
+        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+          Clear my bets (refund)
+        </button>
+      )}
       <HistoryStrip history={history} />
     </PlayShell>
   );

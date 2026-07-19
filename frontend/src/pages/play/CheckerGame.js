@@ -1,50 +1,35 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Crown } from "lucide-react";
 import { motion } from "framer-motion";
-import { useGamePlay } from "@/lib/useGamePlay";
+import { useLiveRound } from "@/lib/useLiveRound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { BetPanel } from "@/components/play/BetPanel";
+import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 
 export default function CheckerGame({ game }) {
-  const { balance, busy, play, history, loadHistory } = useGamePlay(game.slug);
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
+    useLiveRound(game.slug, {
+      formatResult: (s) => ({
+        title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} takes the board!` : `${s.outcome.winner.toUpperCase()} wins the duel`,
+        subtitle: `Captures — Gold ${s.outcome.gold} : Steel ${s.outcome.steel}`,
+      }),
+    });
   const [side, setSide] = useState(null);
-  const [bet, setBet] = useState(50);
-  const [shown, setShown] = useState([]);
-  const [playing, setPlaying] = useState(false);
-  const [result, setResult] = useState(null);
-  const timer = useRef(null);
+  const [amount, setAmount] = useState(50);
 
-  useEffect(() => () => clearInterval(timer.current), []);
+  const rounds = outcome?.rounds || [];
+  const shownCount = phase === "RESULT" ? rounds.length : Math.floor(revealProgress * rounds.length);
+  const shown = rounds.slice(0, shownCount);
 
-  const doPlay = async () => {
-    if (!side) return;
-    setResult(null);
-    setShown([]);
-    const data = await play(bet, { side });
-    if (!data) return;
-    const o = data.round.outcome;
-    setPlaying(true);
-    let i = 0;
-    timer.current = setInterval(() => {
-      i += 1;
-      setShown(o.rounds.slice(0, i));
-      if (i >= o.rounds.length) {
-        clearInterval(timer.current);
-        setPlaying(false);
-        setResult({
-          key: data.round.id, win: o.won,
-          title: o.won ? `${o.winner.toUpperCase()} takes the board!` : `${o.winner.toUpperCase()} wins the duel`,
-          subtitle: `Captures — Gold ${o.gold} : Steel ${o.steel}`,
-          payout: data.round.payout,
-        });
-        loadHistory();
-      }
-    }, 320);
-  };
+  const sideTotals = {};
+  myBets.forEach((b) => {
+    sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
+  });
 
   return (
     <PlayShell game={game} balance={balance}>
+      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "CAPTURING…" }} />
+
       <div className="rounded-2xl bg-card/55 border border-white/10 p-5">
         <div
           className="mx-auto h-28 w-28 rounded-xl border border-white/15 mb-4"
@@ -62,7 +47,10 @@ export default function CheckerGame({ game }) {
             </motion.div>
           ))}
         </div>
-        <p className="text-[11px] text-white/45 text-center mt-2">Best of 7 captures — winning side pays 1.9x</p>
+        <p className="text-[11px] text-white/45 text-center mt-2">Best of 7 captures — winning side pays 1.9x · universal duel every round</p>
+        <div className="flex justify-center mt-2">
+          <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "gold" ? "G" : "S"} tone={r.winner === "gold" ? "gold" : "neutral"} />} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -74,16 +62,36 @@ export default function CheckerGame({ game }) {
             key={s.id}
             data-testid={`checker-side-${s.id}`}
             onClick={() => setSide(s.id)}
-            className={`rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"}`}
+            disabled={!betting}
+            className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"} ${!betting ? "opacity-70" : ""}`}
           >
             <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
             <p className="text-[10px] text-white/45">pays 1.9x</p>
+            {sideTotals[s.id] > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
+                {sideTotals[s.id]}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       <ResultBanner result={result} />
-      <BetPanel bet={bet} setBet={setBet} onPlay={doPlay} busy={busy || playing} disabled={!side} playLabel={side ? `Start duel — ${side.toUpperCase()}` : "Pick a side first"} />
+      <LiveBetPanel
+        amount={amount}
+        setAmount={setAmount}
+        onPlace={() => side && placeBet(side, amount)}
+        betting={betting}
+        placing={placing}
+        disabled={!side}
+        label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
+        myTotal={myTotal}
+      />
+      {betting && myBets.length > 0 && (
+        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+          Clear my bets (refund)
+        </button>
+      )}
       <HistoryStrip history={history} />
     </PlayShell>
   );

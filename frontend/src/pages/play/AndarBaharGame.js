@@ -1,63 +1,46 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { useGamePlay } from "@/lib/useGamePlay";
+import { useLiveRound } from "@/lib/useLiveRound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { BetPanel } from "@/components/play/BetPanel";
+import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { PlayingCard } from "@/components/play/PlayingCard";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { formatChips } from "@/components/common";
 
 export default function AndarBaharGame({ game }) {
-  const { balance, busy, play, history, loadHistory } = useGamePlay(game.slug);
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
+    useLiveRound(game.slug, {
+      formatResult: (s) => ({
+        title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} wins — you called it!` : `${s.outcome.winner.toUpperCase()} wins`,
+        subtitle: `Match found after ${s.outcome.sequence.length} card${s.outcome.sequence.length > 1 ? "s" : ""}`,
+      }),
+    });
   const [side, setSide] = useState(null);
-  const [bet, setBet] = useState(50);
-  const [joker, setJoker] = useState(null);
-  const [shown, setShown] = useState([]); // dealt cards progressively
-  const [dealing, setDealing] = useState(false);
-  const [result, setResult] = useState(null);
-  const timer = useRef(null);
+  const [amount, setAmount] = useState(50);
 
-  useEffect(() => () => clearInterval(timer.current), []);
-
-  const doPlay = async () => {
-    if (!side) return;
-    setResult(null);
-    setShown([]);
-    setJoker(null);
-    const data = await play(bet, { side });
-    if (!data) return;
-    const o = data.round.outcome;
-    setJoker(o.joker);
-    setDealing(true);
-    let i = 0;
-    timer.current = setInterval(() => {
-      i += 1;
-      setShown(o.sequence.slice(0, i));
-      if (i >= o.sequence.length) {
-        clearInterval(timer.current);
-        setDealing(false);
-        setResult({
-          key: data.round.id, win: o.won,
-          title: o.won ? `${o.winner.toUpperCase()} wins — you called it!` : `${o.winner.toUpperCase()} wins`,
-          subtitle: `Match found after ${o.sequence.length} card${o.sequence.length > 1 ? "s" : ""}`,
-          payout: data.round.payout,
-        });
-        loadHistory();
-      }
-    }, 220);
-  };
+  const sequence = outcome?.sequence || [];
+  const shownCount = phase === "RESULT" ? sequence.length : Math.ceil(revealProgress * sequence.length);
+  const shown = sequence.slice(0, shownCount);
+  const reveal = !!outcome && phase !== "BETTING";
 
   const sideCards = (s) => shown.filter((c) => c.side === s);
+  const sideTotals = {};
+  myBets.forEach((b) => {
+    sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
+  });
 
   return (
     <PlayShell game={game} balance={balance}>
+      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
+
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-3">
         <div className="flex items-center justify-center gap-3">
           <p className="text-[11px] font-semibold text-white/50">JOKER CARD</p>
-          <PlayingCard code={joker} size="sm" faceDown={!joker} />
+          <PlayingCard code={reveal ? outcome.joker : null} size="sm" faceDown={!reveal} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           {["andar", "bahar"].map((s) => (
-            <div key={s} className={`rounded-xl border p-2.5 min-h-[110px] ${result && shown.length && shown[shown.length - 1].side === s ? "border-primary/50 bg-primary/8" : "border-white/10 bg-white/4"}`}>
+            <div key={s} className={`rounded-xl border p-2.5 min-h-[110px] ${phase === "RESULT" && outcome?.winner === s ? "border-primary/50 bg-primary/8" : "border-white/10 bg-white/4"}`}>
               <p className={`text-xs font-bold mb-1.5 ${s === "andar" ? "text-[hsl(var(--cyan))]" : "text-[hsl(var(--magenta))]"}`}>{s.toUpperCase()}</p>
               <div className="flex flex-wrap gap-1">
                 {sideCards(s).slice(-8).map((c, i) => (
@@ -68,6 +51,9 @@ export default function AndarBaharGame({ game }) {
               </div>
             </div>
           ))}
+        </div>
+        <div className="flex justify-center">
+          <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "andar" ? "A" : "B"} tone={r.winner === "andar" ? "cyan" : "magenta"} />} />
         </div>
       </div>
 
@@ -80,18 +66,39 @@ export default function AndarBaharGame({ game }) {
             key={s.id}
             data-testid={`andar-bahar-side-${s.id}`}
             onClick={() => setSide(s.id)}
-            className={`rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${
+            disabled={!betting}
+            className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${
               side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"
-            }`}
+            } ${!betting ? "opacity-70" : ""}`}
           >
             <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
             <p className="text-[10px] text-white/45">pays 1.9x</p>
+            {sideTotals[s.id] > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
+                {formatChips(sideTotals[s.id])}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       <ResultBanner result={result} />
-      <BetPanel bet={bet} setBet={setBet} onPlay={doPlay} busy={busy || dealing} disabled={!side} playLabel={side ? `Deal — betting ${side.toUpperCase()}` : "Pick a side first"} />
+      <LiveBetPanel
+        amount={amount}
+        setAmount={setAmount}
+        onPlace={() => side && placeBet(side, amount)}
+        betting={betting}
+        placing={placing}
+        disabled={!side}
+        label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
+        myTotal={myTotal}
+        hint="One universal joker + deal per round for all players"
+      />
+      {betting && myBets.length > 0 && (
+        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+          Clear my bets (refund)
+        </button>
+      )}
       <HistoryStrip history={history} />
     </PlayShell>
   );

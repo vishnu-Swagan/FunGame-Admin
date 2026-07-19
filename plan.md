@@ -1,136 +1,245 @@
-# FunGame (Mobile‑first Web App) — Development Plan
+# FunGame (Mobile‑first Web App) — Development Plan (Updated)
 
 ## 1) Objectives
-- Deliver a **play‑chip‑only** FunGame PWA‑style web app (React + FastAPI + MongoDB) with a premium, original UI (no copied assets) and clear banner: **“PLAY CHIPS — NO CASH VALUE”**.
-- Implement full **backend + admin panel**: auth, onboarding approval, chips (requests + history), game catalog (18 games), announcements, notifications, maintenance + min client version gating.
-- Foundation gate: **0 playable games**; all 18 show as **COMING_SOON** (or server status), game detail pages exist but cannot start rounds.
-- Build with **demo-mode email verification** now; plug in SendGrid/SMTP later via an abstracted EmailService.
+- Deliver a **play‑chip‑only** FunGame PWA‑style web app (React + FastAPI + MongoDB) with premium, original UI and the disclaimer: **“PLAY CHIPS — NO CASH VALUE”**.
+- Maintain the **core foundation** already built:
+  - Auth + onboarding approval flow
+  - Admin console (basic)
+  - Server-authoritative chip ledger
+  - Game catalog (18 games)
+  - Player app UX (mobile‑first)
+- **Current primary objective (P0): Convert ALL 18 games to universal, server-synchronized live rounds running 24/7**.
+  - One global round state per game (and per table) shared by all players.
+  - Real-time sync via **polling (≈1s) + client-side interpolation** for smooth animation.
+  - Standard loop timing for most games: **~20–30s cycles**.
+- **Aviator (P0):** Implement a Spribe-style crash game experience (original UI assets; mimic concept/flow, not copied art).
+- **Roulette (P0):** Refine to a **30-second continuous live loop** and upgrade visuals to match user expectation (green board + chips + spin wheel with white ball).
+- Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after live games are completed (confirmed by user).
+- Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed by user).
+
+---
 
 ## 2) Implementation Steps
 
 ### Phase 1: Core Flow POC (Isolation) — Email verification + onboarding approval + chip request lifecycle
 **Goal:** Prove the most failure‑prone workflow (multi-role state machine + notifications) works end-to-end before building full UI.
 
-**User stories (POC)**
-1. As a new user, I can register and receive a verification code (demo) so I can verify my email.
-2. As a verified user, I can submit onboarding profile data and be marked PENDING for approval.
-3. As an admin, I can approve/reject a pending user so they become ACTIVE/REJECTED.
-4. As an ACTIVE user, I can submit a chip request so I can receive play chips.
-5. As an admin, I can approve/deny chip requests and the user sees updated balance + notification.
+**Status:** ✅ DONE
+- Verified via automated tests.
 
-**Backend (POC endpoints + models)**
-- Data models: User, Session/Token, EmailVerification, OnboardingProfile, ChipTransaction, ChipRequest, Notification, Announcement, Game, SystemConfig.
-- Auth: register/login, bcrypt password hashing, JWT access + refresh, secure cookie or localStorage strategy (decide and implement consistently).
-- Verification (demo): generate code, store hashed code + expiry; return code in response **only when** `APP_ENV=development`.
-- Onboarding: profile submit → review snapshot → status=PENDING until admin approval.
-- Chips: server-authoritative balance via transactions ledger; chip requests create pending request; admin approve creates credit transaction; deny records denial.
-- Notifications: create on approval/denial events.
-- Admin RBAC: role=ADMIN; seed admin.
-
-**POC execution**
-- Create a minimal CLI or pytest script hitting API:
-  - register → verify → submit onboarding → admin approve → request chips → admin approve → verify balance + notifications.
-- Do not proceed until this script is green.
+---
 
 ### Phase 2: V1 App Development (Full UX + Admin Panel)
 **Goal:** Build the complete foundation app (player + admin) with consistent navigation, design system, and gating rules.
 
-**User stories (V1 player app)**
-1. As a user, I can complete auth + onboarding and clearly see whether I’m PENDING/ACTIVE so I know what I can access.
-2. As an ACTIVE user, I can browse the lobby and see **all 18 games** with status badges so I know what’s available.
-3. As a user, I can open any game detail page and see rules/status, but I cannot start gameplay until enabled.
-4. As a user, I can request play chips and view request/transaction history so I understand my balance.
-5. As a user, I can read announcements and see notifications so I stay informed.
+**Status:** ✅ DONE
+- Player app + admin panel implemented.
+- 18 games seeded and enabled (gameplay v1 migration applied).
 
-**User stories (V1 admin panel)**
-1. As an admin, I can approve/reject onboarding users so I control access.
-2. As an admin, I can approve/deny chip requests so chip grants are controlled.
-3. As an admin, I can set game statuses (e.g., COMING_SOON/MAINTENANCE) so availability is centralized.
-4. As an admin, I can create/edit announcements so players see updates.
-5. As an admin, I can enable maintenance mode and set min client version so I can block navigation when needed.
+---
 
-**Frontend build**
-- App shell: mobile-first max-width layout, top header (balance + profile), **bottom nav** (Home/Games/Chips/Inbox/Profile).
-- Routes (web equivalents):
-  - Public: /welcome /register /verify-email /login /forgot-password
-  - Onboarding: /onboarding/profile /onboarding/review /onboarding/pending
-  - App: /home /games /games/:slug /search /favorites /recent /chips /chips/request /chips/history /announcements /notifications /profile /security /settings
-  - System: /maintenance /offline /update-required
-  - Admin: /admin /admin/users /admin/chip-requests /admin/games /admin/announcements /admin/settings
-- Design system: Tailwind + shadcn/ui theme tokens for midnight background, gold accents, glass cards, focus rings, reduced-motion support.
-- Game catalog: seed + render exactly 18 cards; each with distinct **original** gradient/key-art styling (CSS/Skia-like effects not required on web).
-- Gating:
-  - PENDING/SUSPENDED/REJECTED blocked from app areas; show clear status screen and CTA.
-  - Maintenance mode blocks player navigation globally; admin still accessible.
-  - Update-required shows /update-required when server requires higher version.
-- Data/state:
-  - React Query for server state; Zod validation for API payloads.
-  - Recent/favorites stored per-user (server) or local (MVP local, with clear plan to server later).
+### Phase LIVE‑1: Universal Live Sync Backend (All 18 games) — **In Progress**
+**Goal:** Provide a single, universally synchronized 24/7 round stream per game. Outcomes are server-generated once per (slug, round_number) and shared globally.
 
-**Backend completion (beyond POC)**
-- Games: CRUD for admin, list for players; statuses enforced.
-- Announcements: CRUD admin; list/detail player.
-- Notifications: list/mark-read.
-- SystemConfig: maintenance toggle, minClientVersion.
-- Seeds: admin user, 18 games (COMING_SOON), 2–3 announcements, 1 ACTIVE test player.
+**User-confirmed design choices**
+- ✅ Focus 100% on live games now; enterprise admin later.
+- ✅ Use polling (≈1s) + client interpolation.
+- ✅ Standard loop timing for non-aviator games (~20–30s).
 
-**End of Phase 2**
-- Run one full E2E pass (manual + automated smoke) across:
-  - register/verify/onboard/pending → admin approve → lobby access → chip request → admin approve → history updates.
+**Architecture**
+- **Fixed-cycle games (most of the 18):** epoch-derived rounds (like current live roulette).
+  - Deterministic round number + phase by `time.time()`.
+  - Outcome generated once per round and persisted (unique index ensures one outcome per round).
+  - Lazy, idempotent settlement on state polling.
+- **Variable-length game (Aviator):** DB-chained rounds + background keepalive task.
+  - Round phases: BETTING → FLYING → CRASHED/RESULT.
+  - Crash point pre-committed per round.
+  - Auto-cashout + manual cashout settlement.
 
-### Phase 3: Testing, Hardening, Accessibility, and Policy Enforcement
-**User stories (quality)**
-1. As a user, I can use the app with keyboard/screen reader labels and clear focus order.
-2. As a motion-sensitive user, I can enable reduced motion and avoid heavy animations.
-3. As a user, I can recover from offline/timeout states and understand what to do next.
-4. As an admin, I can safely operate without leaking sensitive logs.
-5. As a product owner, I can verify there are **no payment/cash-out paths** anywhere.
+**Backend work items**
+1. Extend `/app/backend/live_engines.py`
+   - Standardize:
+     - cycle config per game (bet/reveal/result)
+     - `generate_outcome(slug)` (already present for many)
+     - `validate_selection(slug, selection)`
+     - `settle_bet(slug, outcome, selection, amount, ...)`
+     - `summarize_outcome(slug, outcome)`
+   - Add Aviator live round state generator:
+     - BETTING window (~6s)
+     - FLYING multiplier curve `e^(0.12t)` until crash
+     - CRASHED/RESULT window (~4s)
+     - Round history list for UI
+2. Create new live routes module (recommended): `/app/backend/routes_live.py`
+   - Generic fixed-cycle endpoints:
+     - `GET  /api/live/{slug}/state`
+     - `POST /api/live/{slug}/bets`
+     - `POST /api/live/{slug}/bets/clear` (optional per game)
+   - Aviator endpoints:
+     - `GET  /api/live/aviator/state`
+     - `POST /api/live/aviator/bets` (supports optional `auto_cashout`)
+     - `POST /api/live/aviator/cashout`
+     - `POST /api/live/aviator/bets/cancel` (during BETTING)
+3. Update `/app/backend/server.py`
+   - Include `routes_live`.
+   - Add DB indexes:
+     - `live_outcomes`: unique `(slug, round_number)`
+     - `live_bets`: `(user_id, slug, round_number, status)`
+     - `aviator_rounds`: unique `round_number`
+     - `aviator_bets`: `(user_id, round_number, status)`
+   - Lifespan background task:
+     - `advance_aviator()` every 1s (ensures 24/7 chaining even with low traffic).
+4. Update `/app/backend/routes_games.py`
+   - Convert remaining `/games/{slug}/play` pathways to live:
+     - Return `409 {code: "LIVE_ROUNDS"}` for all live-converted games.
+   - Keep `/games/{slug}/history` for unified history backed by `game_rounds`.
+5. Roulette timing update
+   - Change roulette round timing to **30 seconds** (BET 20 / SPIN 6 / RESULT 4).
+
+**Data collections**
+- `live_outcomes`, `live_bets` for fixed-cycle games.
+- `aviator_rounds`, `aviator_bets` for Aviator.
+- `game_rounds` remains the canonical per-user settled history record.
+
+**Testing (backend)**
+- Add curl/pytest smoke tests:
+  - Round clock invariants (phase changes at correct boundaries).
+  - Outcome uniqueness under concurrent access.
+  - Idempotent settlement correctness.
+  - Insufficient chips behavior.
+
+---
+
+### Phase LIVE‑2: Aviator (Spribe‑style) + Roulette UI/Timing — **Not Started**
+**Goal:** Deliver the two flagship live games with polished mobile-first UX.
+
+**Aviator frontend (`/app/frontend/src/pages/play/AviatorGame.js`)**
+- Convert from per-user stateful rounds to **universal live rounds**:
+  - Betting countdown synced to server.
+  - FLYING animation using client interpolation.
+  - Manual cashout + auto-cashout.
+  - Round history strip (recent crash multipliers).
+  - Live bets feed (sanitized) (optional, P1 if needed).
+- Visual spec (original assets):
+  - Sky/gradient scene + plane animation at curve tip.
+  - Large multiplier typography.
+  - Dual bet panels consistent with crash-game norms.
+
+**Roulette frontend (`/app/frontend/src/pages/play/RouletteGame.js`)**
+- Update client expectations to the **30s loop**.
+- Ensure UI includes:
+  - Green board with numbers
+  - Chips selector and on-board markers
+  - Wheel with **white ball** (already present; refine realism)
+  - Better spin feel aligned to SPIN window (6s)
+
+**Testing (frontend)**
+- Verify timer sync stability under refresh.
+- Ensure betting locks close correctly.
+- Ensure settlement banner shows once per round.
+
+---
+
+### Phase LIVE‑3: Convert Remaining Games to Live Rounds — **Not Started**
+**Goal:** Convert all other game UIs and APIs to consume the universal live endpoints.
+
+**Frontend work items**
+- Add shared live client hook: `/app/frontend/src/lib/useLiveRound.js`
+  - Polling, server clock offset, phase timers, optimistic UI where safe.
+- Add shared components:
+  - `LiveBar` (phase label + countdown)
+  - `LiveBetPanel` (chip/bet + selection)
+  - `LiveResultBanner` (result + payout)
+
+**Games to convert**
+- Seven-Up-Down (Dice)
+- Fun Target
+- Super Golden Wheel
+- Checker
+- Teen Patti
+- Poker
+- No Hold
+- Champion Poker
+- Andar Bahar
+- Keno
+- Bingo
+- 5 Slots: Fever Joker Bonus / Giant Jackpot / Joker Bonus / Lucky 8 Line / Triple Fun
+
+**Backend support**
+- Ensure `live_engines.py` outcome/settlement supports each slug.
+- Standardize selection schemas per game kind.
+
+---
+
+### Phase LIVE‑4: Testing, Hardening, and Fixes — **Not Started**
+**Goal:** Stabilize the live platform across all games.
 
 **Work items**
+- Backend:
+  - Load testing for polling endpoints.
+  - Verify unique outcome generation under concurrency.
+  - Settlement idempotency + ledger correctness.
+- Frontend:
+  - Regression pass across all games and chip balance.
+  - Mobile performance checks (60fps interpolation where needed).
 - Automated tests:
-  - Backend: pytest for auth, onboarding transitions, chip ledger invariants, maintenance/update gating.
-  - Frontend: RTL tests for route guards, 18-game rendering, chips request flow.
-- Security/reliability:
-  - Rate limiting (basic), token expiry/refresh, secure headers, input validation (Zod + Pydantic).
-  - Global error boundaries, retry policies, offline screen.
-- Accessibility pass: aria-labels, contrast checks, focus states, reduced motion toggle.
+  - Extend pytest for live endpoints and settlement.
+  - Add RTL smoke tests for key live UIs (roulette + aviator at minimum).
+
+---
 
 ### Phase 4: Email Provider Integration (SendGrid/SMTP) — after credentials provided
-**User stories (email)**
-1. As a registering user, I receive a real verification email so I can verify without demo codes.
-2. As a user, I can request a new verification email if I missed it.
-3. As an admin, I can see email delivery errors in a safe, non-sensitive log.
-4. As a user, I can reset my password via email.
-5. As an operator, I can switch providers via env config without code changes.
+**Status:** ⏸️ PENDING (user will provide credentials at the end)
+- Keep demo verification code flow until credentials provided.
 
-**Work items**
-- Implement EmailService provider(s) behind interface; add env-based configuration.
-- Add provider-specific best-practice settings (sender verification, rate limits).
-- Turn off demo-code surfacing in production.
+---
 
 ## 3) Next Actions
-1. Define schemas + seed plan (users/roles/statuses, games list, chip ledger) and implement Phase 1 POC endpoints.
-2. Implement POC script/tests and get them green.
-3. Build player UI routes + admin panel routes (Phase 2) wired to proven APIs.
-4. Run end-to-end testing pass; fix UX and gating issues.
-5. After app is stable, request SendGrid/SMTP credentials and implement Phase 4.
+1. **Implement Phase LIVE‑1 backend**
+   - Create `routes_live.py`, wire into `server.py`, add indexes.
+   - Finalize `live_engines.py` for all slugs + Aviator live manager.
+   - Convert remaining `/games/{slug}/play` to `LIVE_ROUNDS` gating.
+   - Update roulette backend timing to **30s**.
+2. **Implement Phase LIVE‑2 UI upgrades**
+   - Aviator Spribe-style experience (universal live).
+   - Roulette UI polish + 30s loop alignment.
+3. Convert remaining games to live UIs (Phase LIVE‑3).
+4. Run full backend + frontend testing (Phase LIVE‑4).
+5. After completion, request SMTP credentials and integrate SendGrid/SMTP (Phase 4).
+
+---
 
 ## 4) Success Criteria
-- Auth + onboarding works: register → verify (demo) → profile/review → PENDING → admin approval → ACTIVE.
-- Admin panel works: approve users, approve/deny chip requests, manage games + announcements, toggle maintenance.
-- Lobby shows exactly **18 games**, each non-playable with correct status badge.
-- Chips: balance is server-authoritative; requests + history work; no client-side balance edits.
-- System enforcement: maintenance/update-required blocks player navigation.
-- No payment/deposit/withdraw/cash-out functionality or routes exist.
-- Tests cover key invariants (status gating, 18 games present, no gameplay start, chip ledger correctness).
+- Platform-level:
+  - Clear disclaimer: **PLAY CHIPS — NO CASH VALUE** across player app.
+  - Chips remain server-authoritative; no client-side balance edits.
+  - No deposit/withdraw/cash-out/payment routes exist.
+- Live games:
+  - **All 18 games run 24/7 universal synchronized rounds**.
+  - Every player sees the same round number/phase/outcome per game.
+  - Betting locks correctly at phase boundaries.
+  - Settlement is **idempotent** and ledger-consistent.
+- Flagship titles:
+  - **Aviator** behaves like a crash game with smooth interpolation and correct cashout logic.
+  - **Roulette** runs on an exact **30s** loop with green board, chips, and wheel + white ball.
+- Quality:
+  - Automated smoke tests + manual regression pass succeed.
+
 ---
+
 ## STATUS LOG
-- [DONE] Phase 1 POC: backend built, test_core.py 37/37 checks green (auth, onboarding approval, chip ledger, gating, maintenance, no payment routes)
-- [DONE] Phase 2: full player frontend (welcome/register/verify/login/forgot, onboarding x3, home lobby w/ hero carousel + rails, games grid 18, game detail, search, favorites, recent, chips wallet, announcements, notifications, profile/security/settings, maintenance/offline/update-required) + admin panel (dashboard, users, chip-requests, games, announcements, system)
-- [IN PROGRESS] Phase 2: E2E testing via testing agent
-- [PENDING] Phase 4: real email provider (user will supply SendGrid/SMTP creds at the end; demo mode active: dev_code shown on screen)
-- Credentials: admin@fungame.app / FunGame@Admin2025 ; player@fungame.app / Player@123 (see /app/memory/test_credentials.md)
-- [DONE] Gameplay v1: real server-authoritative engines for ALL 18 games (routes_games.py + game_engines.py + ledger.py), all games ENABLED, play UIs at /games/{slug}/play. Bug "Gameplay engine ships in a later build gate" FIXED and verified by testing agent (iteration_2.json: 100% backend 25/25, 100% frontend).
-- [OPEN] Master Prompt 1 (enterprise core API + admin console: RBAC 12 roles, TOTP MFA, double-entry ledger, maker/checker, audit hash-chain, /api/v1) — awaiting user's answers to 5 clarifying questions before restructure.
-- [PENDING] Real email provider (SendGrid/SMTP) — user will provide credentials at the end.
-- [DONE] Live European Roulette: universal 25s rounds from server epoch time (17s betting / 5s spin / 3s result), same round + winning number for ALL users. Green felt board (0, 1-36, columns, dozens, outside bets), chip tray betting, SVG European wheel + white ball animation, refunds/clear, rebet, last-results strip. Verified by testing agent iteration_3.json: 100% backend + frontend + regression.
+- ✅ Phase 1 POC complete: core workflows green in tests.
+- ✅ Phase 2 complete: player app + admin console delivered.
+- ✅ Gameplay v1 complete: all 18 games playable via server-authoritative instant/stateful engines.
+- ✅ Live European Roulette v1 complete: universal synchronized rounds implemented and tested.
+- ✅ User confirmed priorities:
+  - Games first; enterprise admin later.
+  - Polling + interpolation.
+  - Standard 20–30s loops.
+  - SMTP stays demo until end.
+- 🟡 **IN PROGRESS:** Phase LIVE‑1 — building universal live engine system (`/app/backend/live_engines.py` exists and includes generators/settlement helpers; needs full routing + Aviator live loop + full conversion).
+- ⏸️ **BACKLOG/BLOCKED:** Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
+- ⏸️ **PENDING:** Real email provider integration (SendGrid/SMTP creds at end).
+
+**Test credentials**
+- Admin: `admin@fungame.app` / `FunGame@Admin2025`
+- Player: `player@fungame.app` / `Player@123`

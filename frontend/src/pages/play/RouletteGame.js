@@ -41,22 +41,44 @@ function wedgePath(cx, cy, r0, r1, a0, a1) {
 
 const WheelSVG = () => (
   <svg viewBox="0 0 220 220" className="w-full h-full">
-    <circle cx="110" cy="110" r="108" fill="#3a2a08" />
-    <circle cx="110" cy="110" r="103" fill="none" stroke="#c9a227" strokeWidth="3" />
+    <defs>
+      <radialGradient id="rimWood" cx="50%" cy="42%" r="62%">
+        <stop offset="0%" stopColor="#6b4a12" />
+        <stop offset="70%" stopColor="#4a320c" />
+        <stop offset="100%" stopColor="#2c1d06" />
+      </radialGradient>
+      <radialGradient id="hubMetal" cx="45%" cy="40%" r="65%">
+        <stop offset="0%" stopColor="#f4d67a" />
+        <stop offset="55%" stopColor="#c9a227" />
+        <stop offset="100%" stopColor="#7a5c12" />
+      </radialGradient>
+    </defs>
+    {/* wooden rim */}
+    <circle cx="110" cy="110" r="109" fill="url(#rimWood)" />
+    <circle cx="110" cy="110" r="106" fill="none" stroke="#e8c86a" strokeWidth="1.2" opacity="0.8" />
+    <circle cx="110" cy="110" r="103" fill="none" stroke="#c9a227" strokeWidth="2.4" />
+    {/* ball track */}
+    <circle cx="110" cy="110" r="99" fill="#1c1408" />
+    <circle cx="110" cy="110" r="95" fill="none" stroke="#00000055" strokeWidth="6" />
+    {/* deflector studs */}
+    {[22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5].map((a) => {
+      const [dx, dy] = polar(110, 110, 97, a);
+      return <circle key={a} cx={dx} cy={dy} r="2" fill="#e8c86a" />;
+    })}
     {EURO_ORDER.map((n, i) => {
       const a0 = i * SEG - SEG / 2;
       const a1 = a0 + SEG;
       const fill = n === 0 ? "#0a7a3c" : RED.has(n) ? "#b3282d" : "#15181f";
       const mid = i * SEG;
-      const [tx, ty] = polar(110, 110, 88, mid);
+      const [tx, ty] = polar(110, 110, 84, mid);
       return (
         <g key={n}>
-          <path d={wedgePath(110, 110, 58, 100, a0, a1)} fill={fill} stroke="#c9a227" strokeWidth="0.6" />
+          <path d={wedgePath(110, 110, 54, 92, a0, a1)} fill={fill} stroke="#c9a227" strokeWidth="0.7" />
           <text
             x={tx}
             y={ty}
             fill="#fff"
-            fontSize="8.5"
+            fontSize="8"
             fontWeight="700"
             textAnchor="middle"
             dominantBaseline="central"
@@ -67,14 +89,20 @@ const WheelSVG = () => (
         </g>
       );
     })}
-    <circle cx="110" cy="110" r="58" fill="#1a1408" stroke="#c9a227" strokeWidth="1.5" />
-    <circle cx="110" cy="110" r="30" fill="#2b2005" stroke="#c9a227" strokeWidth="1" />
-    {[0, 90, 180, 270].map((a) => {
-      const [x1, y1] = polar(110, 110, 30, a);
-      const [x2, y2] = polar(110, 110, 56, a);
-      return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#c9a227" strokeWidth="2.5" />;
+    {/* pocket separators glint */}
+    <circle cx="110" cy="110" r="92" fill="none" stroke="#e8c86a" strokeWidth="0.8" opacity="0.7" />
+    {/* cone centre */}
+    <circle cx="110" cy="110" r="54" fill="#1a1408" stroke="#c9a227" strokeWidth="1.5" />
+    <circle cx="110" cy="110" r="40" fill="#241a06" />
+    <circle cx="110" cy="110" r="28" fill="#2b2005" stroke="#c9a227" strokeWidth="1" />
+    {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
+      const [x1, y1] = polar(110, 110, 28, a);
+      const [x2, y2] = polar(110, 110, 52, a);
+      return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#c9a227" strokeWidth="2" opacity="0.9" />;
     })}
-    <circle cx="110" cy="110" r="7" fill="#c9a227" />
+    {/* turret */}
+    <circle cx="110" cy="110" r="9" fill="url(#hubMetal)" />
+    <circle cx="110" cy="110" r="3.5" fill="#f8e6ae" />
   </svg>
 );
 
@@ -124,12 +152,12 @@ export default function RouletteGame({ game }) {
     if (idx < 0) return;
     const prev = wheelRotRef.current;
     const targetMod = (360 - idx * SEG) % 360;
-    const delta = 4 * 360 + ((targetMod - ((prev % 360) + 360) % 360) + 360) % 360;
+    const delta = 5 * 360 + ((targetMod - ((prev % 360) + 360) % 360) + 360) % 360;
     const next = prev + delta;
     wheelRotRef.current = next;
     setSpinningAnim(true);
     setWheelRot(next);
-    setBallRot((b) => b - 3 * 360);
+    setBallRot((b) => b - 4 * 360);
   }, []);
 
   const applyState = useCallback(
@@ -285,29 +313,29 @@ export default function RouletteGame({ game }) {
         <div className="h-1.5 rounded-full bg-white/5 overflow-hidden -mt-2">
           <div
             className="h-full bg-[hsl(var(--emerald))] rounded-full transition-[width] duration-200"
-            style={{ width: `${Math.min(100, (countdown / (state?.betting_seconds || 17)) * 100)}%` }}
+            style={{ width: `${Math.min(100, (countdown / (state?.betting_seconds || 20)) * 100)}%` }}
           />
         </div>
       )}
 
       {/* Wheel */}
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-3">
-        <div className="relative h-[200px] w-[200px]" data-testid="roulette-wheel">
+        <div className="relative h-[230px] w-[230px]" data-testid="roulette-wheel">
           {/* pointer */}
           <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-20 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
           {/* wheel */}
           <div
             className="absolute inset-0"
-            style={{ transform: `rotate(${wheelRot}deg)`, transition: spinningAnim ? "transform 4.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none" }}
+            style={{ transform: `rotate(${wheelRot}deg)`, transition: spinningAnim ? "transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none" }}
           >
             <WheelSVG />
           </div>
           {/* white ball orbit */}
           <div
             className="absolute inset-0 z-10 pointer-events-none"
-            style={{ transform: `rotate(${ballRot}deg)`, transition: spinningAnim ? "transform 4.2s cubic-bezier(0.22, 0.9, 0.3, 1)" : "none" }}
+            style={{ transform: `rotate(${ballRot}deg)`, transition: spinningAnim ? "transform 5.2s cubic-bezier(0.22, 0.9, 0.3, 1)" : "none" }}
           >
-            <div className="absolute left-1/2 top-[22px] -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+            <div className="absolute left-1/2 top-[24px] -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]" />
           </div>
           {/* landed number */}
           {!betting && winning !== null && !spinningAnimActive(countdown, state) && (
@@ -405,7 +433,7 @@ export default function RouletteGame({ game }) {
             <RotateCcw className="h-3.5 w-3.5" /> Clear
           </button>
         </div>
-        <p className="text-[11px] text-white/40">Straight 36x · Dozen/Column 3x · Red/Black/Odd/Even/1-18/19-36 2x · Live rounds every 25s, synced worldwide</p>
+        <p className="text-[11px] text-white/40">Straight 36x · Dozen/Column 3x · Red/Black/Odd/Even/1-18/19-36 2x · Live rounds every 30s, synced worldwide</p>
       </div>
 
       <HistoryStrip history={history} />
@@ -413,10 +441,10 @@ export default function RouletteGame({ game }) {
   );
 }
 
-// Ball/wheel animation lasts ~4.2s of the 5s spin phase; show the landed number
+// Ball/wheel animation lasts ~5.2s of the 6s spin phase; show the landed number
 // once the spin phase is nearly over or during the result phase.
 function spinningAnimActive(countdown, state) {
   if (!state) return false;
-  if (state.phase === "SPINNING") return countdown > 0.6;
+  if (state.phase === "SPINNING") return countdown > 0.7;
   return false;
 }

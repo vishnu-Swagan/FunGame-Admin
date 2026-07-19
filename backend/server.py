@@ -2,6 +2,7 @@
 
 PLAY CHIPS — NO CASH VALUE. No payments, deposits, withdrawals or transfers exist.
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter
@@ -14,12 +15,26 @@ import routes_auth
 import routes_player
 import routes_admin
 import routes_games
+import routes_live
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+async def _aviator_keepalive():
+    """Keep the universal Aviator round machine ticking 24/7."""
+    from routes_live import advance_aviator
+    while True:
+        try:
+            await advance_aviator()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f'aviator keepalive: {e}')
+        await asyncio.sleep(0.7)
 
 
 @asynccontextmanager
@@ -34,8 +49,17 @@ async def lifespan(app: FastAPI):
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     await db.roulette_rounds.create_index('round_number', unique=True)
     await db.roulette_bets.create_index([('user_id', 1), ('round_number', 1), ('status', 1)])
-    logger.info('FunGame seed complete — 18 games, admin + test player ready')
+    # Universal live rounds (all 18 games, 24/7)
+    await db.live_outcomes.create_index([('slug', 1), ('round_number', 1)], unique=True)
+    await db.live_bets.create_index([('user_id', 1), ('slug', 1), ('status', 1)])
+    await db.live_bets.create_index([('slug', 1), ('round_number', 1)])
+    await db.aviator_rounds.create_index('round_number', unique=True)
+    await db.aviator_bets.create_index([('round_number', 1), ('status', 1)])
+    await db.aviator_bets.create_index([('user_id', 1), ('round_number', 1)])
+    keepalive = asyncio.create_task(_aviator_keepalive())
+    logger.info('FunGame ready - 18 games running universal 24/7 live rounds')
     yield
+    keepalive.cancel()
     client.close()
 
 
@@ -55,6 +79,7 @@ async def health():
 
 
 api_router.include_router(routes_auth.router)
+api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)

@@ -1,30 +1,22 @@
 [
   {
-    "content": "Phase 1: Build complete backend (auth, onboarding, chips, games, announcements, notifications, admin, maintenance)",
+    "content": "Build shared frontend: useLiveRound hook + LiveBar component",
     "status": "completed"
   },
   {
-    "content": "Phase 1: POC test script — 37/37 checks green",
+    "content": "Rewrite AviatorGame.js - Spribe-style universal live (curve, plane, dual panels, auto-cashout, feed, history)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Design guidelines + full player app + admin panel",
+    "content": "Upgrade RouletteGame.js - 30s loop + richer wheel with white ball + felt board polish",
     "status": "completed"
   },
   {
-    "content": "Phase 2: End to End Testing using Testing Agent",
+    "content": "Convert 11 game components to live rounds (dice, target, wheel, checker, duel, no-hold, champion, andar-bahar, keno, bingo, slots)",
     "status": "completed"
   },
   {
-    "content": "Bug fix: implement real gameplay for all 18 games (server engines + play UIs) — verified by testing agent 100%",
-    "status": "completed"
-  },
-  {
-    "content": "Master Prompt 1 restructure (RBAC, MFA, double-entry ledger, maker/checker, audit chain) — awaiting user answers to clarifying questions",
-    "status": "pending"
-  },
-  {
-    "content": "SendGrid/SMTP email integration when user provides credentials",
-    "status": "pending"
+    "content": "Run testing agent (backend + frontend) and fix all reported bugs",
+    "status": "in_progress"
   }
 ]
