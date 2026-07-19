@@ -99,6 +99,68 @@ const WheelSVG = () => (
   </svg>
 );
 
+/* ---------------- 3D wheel pieces (CSS transforms) ---------------- */
+
+/** Extruded wooden bowl wall - stacked rings below the wheel face fake a
+    solid cylinder once the scene is tilted in perspective. */
+const RimWall3D = () => (
+  <>
+    {Array.from({ length: 12 }, (_, i) => (
+      <div
+        key={i}
+        aria-hidden="true"
+        className="absolute inset-0 rounded-full"
+        style={{
+          transform: `translateZ(${-(i + 1) * 2}px)`,
+          background:
+            i === 11
+              ? "#160f04"
+              : "radial-gradient(circle at 50% 30%, #5b3f0e 0%, #3a290a 62%, #241806 100%)",
+        }}
+      />
+    ))}
+    {/* soft elliptical ground shadow */}
+    <div
+      aria-hidden="true"
+      className="absolute rounded-full"
+      style={{
+        inset: -16,
+        transform: "translateZ(-30px)",
+        background: "radial-gradient(circle, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 55%, transparent 75%)",
+        filter: "blur(7px)",
+      }}
+    />
+  </>
+);
+
+/** Raised golden turret with cross handles - spins with the wheel head. */
+const Turret3D = () => (
+  <div className="absolute inset-0 pointer-events-none" style={{ transformStyle: "preserve-3d" }} aria-hidden="true">
+    {Array.from({ length: 8 }, (_, i) => (
+      <div
+        key={i}
+        className="absolute left-1/2 top-1/2 h-[22px] w-[22px] -ml-[11px] -mt-[11px] rounded-full"
+        style={{
+          transform: `translateZ(${(i + 1) * 2.4}px)`,
+          background: "radial-gradient(circle at 38% 32%, #f4d67a, #b8901f 60%, #7a5c12)",
+        }}
+      />
+    ))}
+    <div
+      className="absolute left-1/2 top-1/2 h-[7px] w-[92px] -ml-[46px] -mt-[3.5px] rounded-full"
+      style={{ transform: "translateZ(20px)", background: "linear-gradient(90deg, #7a5c12, #f4d67a 50%, #7a5c12)", boxShadow: "0 0 5px rgba(0,0,0,0.4)" }}
+    />
+    <div
+      className="absolute left-1/2 top-1/2 h-[92px] w-[7px] -ml-[3.5px] -mt-[46px] rounded-full"
+      style={{ transform: "translateZ(20px)", background: "linear-gradient(180deg, #7a5c12, #f4d67a 50%, #7a5c12)", boxShadow: "0 0 5px rgba(0,0,0,0.4)" }}
+    />
+    <div
+      className="absolute left-1/2 top-1/2 h-[13px] w-[13px] -ml-[6.5px] -mt-[6.5px] rounded-full"
+      style={{ transform: "translateZ(24px)", background: "radial-gradient(circle at 35% 30%, #ffe9ad, #c9a227 70%, #8a6a14)" }}
+    />
+  </div>
+);
+
 // Small colored result chip
 const ResultDot = ({ n, big = false }) => (
   <span
@@ -178,12 +240,15 @@ export default function RouletteGame({ game }) {
   /* Real European roulette physics: the wheel spins COUNTERCLOCKWISE while the
      ball is launched CLOCKWISE on the outer track. The ball circles the track,
      decelerates, spirals down past the deflectors with small bounces and
-     finally settles into the winning pocket as the wheel slows. */
+     finally settles into the winning pocket as the wheel slows. In 3D the
+     ball also drops in height (translateZ) from the upper rim into the bowl. */
   const animateBall = useCallback(() => {
     const DURATION = 5200; // matches the wheel deceleration
     const TOTAL = 6 * 360; // clockwise revolutions (opposite to the wheel)
     const R_TRACK = 101;
     const R_POCKET = 75;
+    const Z_TRACK = 20; // height on the outer rim edge
+    const Z_POCKET = 5; // height once seated in a pocket
     const start = performance.now();
     cancelAnimationFrame(ballAnimRef.current);
     const frame = (now) => {
@@ -191,12 +256,18 @@ export default function RouletteGame({ game }) {
       const ease = 1 - Math.pow(1 - p, 3); // decelerating
       const ang = TOTAL * ease; // ends exactly at the top pointer
       let r = R_TRACK;
+      let z = Z_TRACK;
       if (p > 0.55) {
         const q = Math.min(1, (p - 0.55) / 0.35);
         r = R_TRACK - (R_TRACK - R_POCKET) * q;
-        if (p > 0.62 && p < 0.92) r += Math.sin(p * 55) * 2.6 * (1 - p); // deflector bounces
+        z = Z_TRACK - (Z_TRACK - Z_POCKET) * q;
+        if (p > 0.62 && p < 0.92) {
+          const hop = Math.sin(p * 55) * (1 - p);
+          r += hop * 2.6; // deflector bounces
+          z += Math.abs(hop) * 5; // little vertical hops
+        }
       }
-      if (ballRef.current) ballRef.current.style.transform = `rotate(${ang}deg) translateY(-${r}px)`;
+      if (ballRef.current) ballRef.current.style.transform = `rotate(${ang}deg) translateY(-${r}px) translateZ(${z}px)`;
       if (p < 1) {
         ballAnimRef.current = requestAnimationFrame(frame);
       } else {
@@ -372,27 +443,43 @@ export default function RouletteGame({ game }) {
         </div>
       )}
 
-      {/* Wheel */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-3">
-        <div className="relative h-[230px] w-[230px]" data-testid="roulette-wheel">
-          {/* pointer */}
-          <div className="absolute left-1/2 -top-1 -translate-x-1/2 z-20 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
-          {/* wheel — spins counterclockwise like a real European wheel */}
-          <div
-            className="absolute inset-0"
-            style={{ transform: `rotate(${wheelRot}deg)`, transition: spinningAnim ? "transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none" }}
-          >
-            <WheelSVG />
-          </div>
-          {/* white ball — launched clockwise, spirals into the winning pocket */}
-          <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+      {/* 3D Wheel */}
+      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-2">
+        <div className="relative h-[212px] w-[264px]" data-testid="roulette-wheel">
+          {/* screen-space pointer above the far edge of the tilted wheel */}
+          <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
+          {/* perspective scene */}
+          <div className="absolute inset-0" style={{ perspective: "860px" }}>
             <div
-              ref={ballRef}
-              className="h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]"
-              style={{ transform: "rotate(0deg) translateY(-75px)" }}
-            />
+              className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
+              style={{ transform: "rotateX(52deg)", transformStyle: "preserve-3d" }}
+            >
+              {/* extruded wooden bowl + ground shadow */}
+              <RimWall3D />
+              {/* wheel head — spins counterclockwise like a real European wheel */}
+              <div
+                className="absolute inset-0"
+                style={{
+                  transform: `rotateZ(${wheelRot}deg)`,
+                  transformStyle: "preserve-3d",
+                  transition: spinningAnim ? "transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none",
+                  willChange: "transform",
+                }}
+              >
+                <WheelSVG />
+                <Turret3D />
+              </div>
+              {/* white ball — launched clockwise, spirals down into the winning pocket */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
+                <div
+                  ref={ballRef}
+                  className="h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]"
+                  style={{ transform: "rotate(0deg) translateY(-75px) translateZ(5px)" }}
+                />
+              </div>
+            </div>
           </div>
-          {/* landed number */}
+          {/* landed number — screen-space overlay */}
           {!betting && winning !== null && !spinningAnimActive(countdown, state) && (
             <div className="absolute inset-0 z-20 flex items-center justify-center">
               <ResultDot n={winning} big />

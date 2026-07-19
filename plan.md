@@ -14,7 +14,7 @@
   - Standard loop timing for most games: **~20–30s cycles**.
 - **Visual & audio premium polish (P0):** realistic casino feel across games.
   - Remove noisy UI status elements (e.g., “ENABLED” badges on thumbnails).
-  - Flagship visual realism (Aviator plane, Roulette wheel/ball/table, Dice realism).
+  - Flagship visual realism (Aviator plane, Roulette 3D wheel/ball/table, Dice realism).
   - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + game-specific SFX).
 - **Card games stability & realism (P0):** Teen Patti + Poker + Champion Poker must be **smooth** and **non-jarring**.
   - Fix animation/polling clashes causing flicker / state desync / rushed dealing.
@@ -31,7 +31,7 @@
 
 **Current status (corrected):**
 - ✅ Platform foundation + all 18 universal live games are running.
-- ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette, Dice, sound engine).
+- ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette realism + 3D, Dice realism, sound engine).
 - ✅ **Card games bug fixed + verified** (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
 - ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
 - ✅ **Win confetti/coin burst completed + verified** (ResultBanner).
@@ -147,12 +147,26 @@
 **Delivered changes (implemented)**
 - Removed **ENABLED** badge from player-facing thumbnails/details.
 - Aviator plane asset integrated.
-- Roulette upgraded: wheel + ball animation, counterclockwise wheel behavior, custom table.
+- Roulette upgraded:
+  - Classic European table
+  - Counterclockwise wheel behavior
+  - Realistic ball motion + audio
+  - **NEW: 3D Roulette wheel scene (pure CSS 3D, no new deps)**
 - Dice realism: 3D rolling + real dice visuals.
 - Sound for all games:
   - `/app/frontend/src/lib/sound.js` WebAudio synth engine
   - Ambient casino bed + win/lose crowd reactions + per-game cues
   - Global mute toggle persisted in `localStorage`
+
+**3D Roulette wheel (completed, verified)**
+- File: `/app/frontend/src/pages/play/RouletteGame.js`
+- Implemented using CSS transforms with `perspective` and `preserve-3d`:
+  1. **Perspective scene** (~860px) with wheel head tilted (`rotateX(52deg)`)
+  2. **RimWall3D**: 12 stacked ring layers extruding a wooden bowl wall below the wheel face + soft ground shadow (`translateZ(-30px)`)
+  3. **Turret3D**: raised golden turret (stacked discs) + cross-handles and knob at `translateZ(20–24px)` that rotates with the wheel
+  4. **Ball physics upgraded to 3D**: ball transitions from rim track height to pocket height (`translateZ(20px → 5px)`) with small vertical hops synced to deflector bounces
+  5. Pointer + winning-number badge remain **screen-space overlays** above the tilted scene
+- Verification: confirmed via screenshots across phases (BETTING idle, mid-spin, RESULT landed), build clean.
 
 ---
 
@@ -178,7 +192,7 @@
 3. **Tight phase transition**
    - Boundary poll triggers at countdown==0 to reduce “late phase switch” feel.
 4. **Second timing fix discovered during slot verification**
-   - `revealElapsed` now reads `deadlineRef` directly (anchored synchronously in `applyState`) so the **first REVEAL render never sees stale betting-phase countdown** (previously could make reels appear pre-stopped at reveal start).
+   - `revealElapsed` reads `deadlineRef` directly (anchored synchronously in `applyState`) so the **first REVEAL render never sees stale betting-phase countdown**.
 
 **Mandatory verification (completed)**
 - Testing agent run and recorded in **`/app/test_reports/iteration_5.json`** (backend + frontend).
@@ -279,7 +293,7 @@
   - ✅ Settlement is idempotent and ledger-consistent.
 - UX polish:
   - ✅ ENABLED badge hidden on player-facing thumbnails/details.
-  - ✅ Premium flagship visuals: Aviator plane, Roulette realism, Dice realism.
+  - ✅ Premium flagship visuals: Aviator plane, **Roulette 3D wheel + ball**, Dice realism.
   - ✅ Sound enabled for all games with global mute.
 - Card games (P0):
   - ✅ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
@@ -297,7 +311,8 @@
 - ✅ Phase 2 complete: player app + admin console delivered.
 - ✅ All 18 games converted to **universal 24/7 live rounds** (backend + frontend).
 - ✅ Aviator Spribe-style universal live rounds implemented + custom plane asset.
-- ✅ Roulette upgraded (30s loop + realistic wheel/ball + custom table).
+- ✅ Roulette upgraded: realistic wheel/ball/table.
+- ✅ **Roulette wheel upgraded to 3D** (CSS 3D scene + extruded bowl + 3D ball drops) — implemented in `RouletteGame.js`.
 - ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
 - ✅ Dice games upgraded with real dice visuals + rolling effects.
 - ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
