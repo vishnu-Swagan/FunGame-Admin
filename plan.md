@@ -27,7 +27,9 @@
   - Each gets its **own component** and bespoke animations/sounds.
 - **Win celebration polish (P1):** add modern, satisfying win feedback (confetti/coin burst) across games.
 - Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after game polish is complete (confirmed).
-- Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed).
+- **Email delivery (P1):** use a real transactional email provider for verification/reset codes.
+  - Resend is now integrated (replaces demo mode).
+  - Note: `onboarding@resend.dev` is **Resend TEST MODE** sender; real-user deliverability requires domain verification + updating `SENDER_EMAIL`.
 
 **Current status (corrected):**
 - ✅ Platform foundation + all 18 universal live games are running.
@@ -35,7 +37,9 @@
 - ✅ **Card games bug fixed + verified** (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
 - ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
 - ✅ **Win confetti/coin burst completed + verified** (ResultBanner).
-- ⏸️ Remaining work is backlog only (SMTP creds + enterprise admin restructure).
+- ✅ **Roulette betting UX upgraded**: chips now land centered on bet spots; added split/corner bet hit‑zones + backend validation.
+- ✅ **Resend email integration completed + verified** (verification/reset email delivery; demo mode replaced).
+- ⏸️ Remaining work is backlog only (domain verification for Resend deliverability + enterprise admin restructure).
 
 ---
 
@@ -151,7 +155,8 @@
   - Classic European table
   - Counterclockwise wheel behavior
   - Realistic ball motion + audio
-  - **NEW: 3D Roulette wheel scene (pure CSS 3D, no new deps)**
+  - **3D Roulette wheel scene (pure CSS 3D, no new deps)**
+  - **Improved betting UX**: chips land centered; split/corner hit‑zones
 - Dice realism: 3D rolling + real dice visuals.
 - Sound for all games:
   - `/app/frontend/src/lib/sound.js` WebAudio synth engine
@@ -166,7 +171,18 @@
   3. **Turret3D**: raised golden turret (stacked discs) + cross-handles and knob at `translateZ(20–24px)` that rotates with the wheel
   4. **Ball physics upgraded to 3D**: ball transitions from rim track height to pocket height (`translateZ(20px → 5px)`) with small vertical hops synced to deflector bounces
   5. Pointer + winning-number badge remain **screen-space overlays** above the tilted scene
-- Verification: confirmed via screenshots across phases (BETTING idle, mid-spin, RESULT landed), build clean.
+
+**Roulette bet placement flexibility (completed, verified)**
+- Frontend:
+  - Chips render centered on the spot (`BetChip` with framer-motion toss)
+  - Added invisible hit‑zones:
+    - **Split**: tap the line between 2 adjacent numbers
+    - **Corner**: tap the cross where 4 numbers meet
+- Backend:
+  - Added validation + payouts:
+    - `split` → 18x
+    - `corner` → 9x
+  - Validates adjacency/shape (incl. `0-1-2-3` first four; zero splits `0-1/2/3`)
 
 ---
 
@@ -180,19 +196,19 @@
 
 **Fix (implemented)**
 1. **Anchored deadlines per phase**
-   - Deadline now anchors once per `(round_number, phase)` and only re-syncs if drift exceeds ~450ms.
+   - Deadline anchors once per `(round_number, phase)` and only re-syncs if drift exceeds ~450ms.
 2. **Monotonic reveal clock + consumers updated**
    - New `revealElapsed` monotonic inside REVEAL.
-   - `revealProgress` now derived from the monotonic clock (helps games like Bingo/Keno/Checker too).
+   - `revealProgress` derived from the monotonic clock.
    - Updated to consume `revealElapsed`:
      - `/app/frontend/src/pages/play/CardDuelGame.js` (Teen Patti + Poker)
      - `/app/frontend/src/pages/play/VideoPokerGame.js` (No-Hold)
      - `/app/frontend/src/pages/play/ChampionPokerGame.js`
      - `/app/frontend/src/pages/play/AndarBaharGame.js`
 3. **Tight phase transition**
-   - Boundary poll triggers at countdown==0 to reduce “late phase switch” feel.
+   - Boundary poll triggers at countdown==0.
 4. **Second timing fix discovered during slot verification**
-   - `revealElapsed` reads `deadlineRef` directly (anchored synchronously in `applyState`) so the **first REVEAL render never sees stale betting-phase countdown**.
+   - `revealElapsed` reads `deadlineRef` directly so the first REVEAL render never sees stale betting-phase countdown.
 
 **Mandatory verification (completed)**
 - Testing agent run and recorded in **`/app/test_reports/iteration_5.json`** (backend + frontend).
@@ -214,9 +230,9 @@
   1. `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
      - Classic Vegas: red/gold marquee with blinking bulbs, chrome bezel, ivory mechanical reels with BAR/777 symbols, animated pull lever, classic paytable.
   2. `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
-     - Dark jester: violet neon flicker title with `VenetianMask`, harlequin diamond backdrop, neon fruit reels, **3-segment JOKER METER** that lights as wilds land + jester-laugh styling.
+     - Dark jester: violet neon flicker title with `VenetianMask`, harlequin diamond backdrop, neon fruit reels, **3-segment JOKER METER**.
   3. `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
-     - Asian fortune: crimson/gold cabinet, swaying lanterns, full **3×3 symbol grid** with deterministic decorative rows seeded by `round_number`, **8 numbered chasing line lamps**, center-line win emphasis.
+     - Asian fortune: crimson/gold cabinet, swaying lanterns, full **3×3 symbol grid**, **8 numbered chasing line lamps**, center-line win emphasis.
 - Routing wired:
   - `/app/frontend/src/pages/play/GamePlay.js`
     - `triple-fun` → `TripleFun777Game`
@@ -226,20 +242,14 @@
 
 **New CSS animations (implemented)**
 - `/app/frontend/src/App.css`
-  - Reel scroll + blur
-  - Bulb blink
-  - Neon flicker
-  - Lantern sway
-  - Line flash
-  - Win glow
+  - Reel scroll + blur, bulb blink, neon flicker, lantern sway, line flash, win glow
 
 **New slot SFX (implemented)**
 - `/app/frontend/src/lib/sound.js` additions:
   - `lever`, `reelStop`, `slotBell`, `lever777`, `jokerLaugh`, `jokerSpin`, `gong`, `coinShower`, `luckySpin`
 
 **Verification**
-- Testing agent report: **`/app/test_reports/iteration_6.json`**
-  - Verified distinct UIs, staggered stops via timed screenshots, betting + clear-bets refunds.
+- Testing agent report: **`/app/test_reports/iteration_6.json`**.
 
 ---
 
@@ -259,21 +269,53 @@
 
 **Verification**
 - Included in testing agent report **`iteration_6.json`**.
-- Additionally visually confirmed via a Seven-Up-Down win screenshot (confetti visible inside the win banner).
 
 ---
 
-### Phase 4: Email Provider Integration (SendGrid/SMTP) — after credentials provided
-**Status:** ⏸️ PENDING (user will provide credentials at the end)
-- Keep demo verification code flow until credentials provided.
+### Phase 4: Email Provider Integration (Resend) — real delivery for verification/reset
+**Goal (P1):** Replace demo email verification with **real transactional delivery** for verification and password reset.
+
+**Status:** ✅ COMPLETED + VERIFIED
+
+**Delivered implementation**
+- Dependency:
+  - Installed `resend==2.34.0`
+  - Backend `requirements.txt` updated
+- Configuration (`/app/backend/.env`):
+  - `EMAIL_PROVIDER="resend"`
+  - `RESEND_API_KEY="(user-provided)"`
+  - `SENDER_EMAIL="onboarding@resend.dev"`
+  - Fixed a malformed `.env` line where `CORS_ORIGINS` and `JWT_SECRET` were previously merged.
+- Backend implementation:
+  - `/app/backend/email_service.py`
+    - Added `resend` provider using `asyncio.to_thread(resend.Emails.send, params)` (non-blocking)
+    - Branded HTML templates (inline CSS + table layout; includes PLAY CHIPS disclaimer)
+    - Graceful error handling returning `{sent: false, provider: 'resend'}` on failure
+  - `/app/backend/routes_auth.py`
+    - `/register` (new + re-register), `/resend-verification`: surface `email_delivery: 'failed'` + friendly message when Resend rejects recipient (common in test-mode)
+    - `/forgot-password`: keeps anti-enumeration generic response (no deliverability leakage)
+    - `dev_code` no longer exposed when provider != demo (`is_dev_mode` false)
+- Frontend polish:
+  - `/app/frontend/src/pages/auth/Register.js` and `/VerifyEmail.js`: show warning toast when `email_delivery === 'failed'` using server message.
+
+**Verification**
+- Direct send path verified (Resend test inbox): `delivered@resend.dev` returned real `email_id`s.
+- Testing agent report: **`/app/test_reports/iteration_7.json`** (initially 10/11 due to a re-register response gap).
+- Follow-up fix applied to re-register path and re-verified via curl (delivery failure now correctly surfaced).
+
+**Important caveat / deliverability constraint**
+- Using `SENDER_EMAIL=onboarding@resend.dev` runs in **Resend TEST MODE**:
+  - Emails only deliver to the Resend account owner’s verified addresses and Resend test inboxes (e.g. `delivered@resend.dev`).
+  - For real user delivery: verify a domain in Resend and set `SENDER_EMAIL=noreply@yourdomain.com`.
 
 ---
 
 ## 3) Next Actions
-1. **P2 (Backlog): SMTP/SendGrid integration**
-   - Await credentials from user.
-   - Switch email verification from demo mode to real delivery.
-   - Run backend + frontend testing agent after integration.
+1. **P1: Resend production deliverability**
+   - User verifies a sending domain at resend.com → Domains.
+   - Update `/app/backend/.env`: `SENDER_EMAIL` to the verified domain sender.
+   - (Optional) Add DKIM/SPF/DMARC best practices as per Resend domain setup.
+   - Run a backend + frontend smoke test (register/verify/reset flows).
 2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
    - Await user priority confirmation.
    - Implement strict RBAC, maker-checker workflows, and TOTP.
@@ -294,6 +336,7 @@
 - UX polish:
   - ✅ ENABLED badge hidden on player-facing thumbnails/details.
   - ✅ Premium flagship visuals: Aviator plane, **Roulette 3D wheel + ball**, Dice realism.
+  - ✅ Roulette bet placement feels like real felt: centered chips + split/corner line/cross hit-zones.
   - ✅ Sound enabled for all games with global mute.
 - Card games (P0):
   - ✅ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
@@ -303,6 +346,9 @@
   - ✅ Verified by testing agent (**iteration_6.json**).
 - Win polish (P1):
   - ✅ Confetti/coin burst on wins in `ResultBanner`.
+- Email (P1):
+  - ✅ Resend integration operational; branded HTML emails for verification/reset.
+  - ⚠️ Production deliverability depends on domain verification + updating `SENDER_EMAIL`.
 
 ---
 
@@ -313,14 +359,16 @@
 - ✅ Aviator Spribe-style universal live rounds implemented + custom plane asset.
 - ✅ Roulette upgraded: realistic wheel/ball/table.
 - ✅ **Roulette wheel upgraded to 3D** (CSS 3D scene + extruded bowl + 3D ball drops) — implemented in `RouletteGame.js`.
+- ✅ **Roulette betting UX upgraded** (chips centered; split + corner line/cross hit zones; backend payouts/validation added).
 - ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
 - ✅ Dice games upgraded with real dice visuals + rolling effects.
 - ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
 - ✅ **Card games regression fixed + verified** (deadline anchoring + monotonic `revealElapsed` + boundary poll + stale-countdown fix). Test report: **`/app/test_reports/iteration_5.json`**.
 - ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line distinct cabinets + reelKit + slot SFX + CSS animations). Test report: **`/app/test_reports/iteration_6.json`**.
-- ✅ **Win celebration confetti/coin burst completed + verified** (ResultBanner + `result.big`). Included in **iteration_6.json**; also visually confirmed on a win.
+- ✅ **Win celebration confetti/coin burst completed + verified** (ResultBanner + `result.big`). Included in **iteration_6.json**.
+- ✅ **Resend email integration completed** (replaces demo mode; branded HTML; graceful delivery failure surfacing; frontend warnings). Testing agent: **`/app/test_reports/iteration_7.json`** + follow-up fix verified.
 - ⏸️ BACKLOG/BLOCKED: Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
-- ⏸️ PENDING: Real email provider integration (SendGrid/SMTP creds at end).
+- ⏳ NEXT: Verify Resend domain for real user deliverability and update `SENDER_EMAIL`.
 
 **Test credentials**
 - Admin: `admin@fungame.app` / `FunGame@Admin2025`

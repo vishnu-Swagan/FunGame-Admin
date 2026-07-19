@@ -48,8 +48,11 @@ async def register(body: RegisterRequest):
             'verification_code_hash': _hash_code(code),
             'verification_expires_at': (_now() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(),
         }})
-        await EmailService.send_verification_code(email, code)
+        sent = await EmailService.send_verification_code(email, code)
         resp = {'message': 'Verification code re-sent. Check your email.', 'email': email}
+        if not sent.get('sent'):
+            resp['message'] = 'Account updated, but the verification email could not be delivered right now. Please try "Resend code" in a moment.'
+            resp['email_delivery'] = 'failed'
         if is_dev_mode():
             resp['dev_code'] = code
         return resp
