@@ -29,6 +29,7 @@ import ChipsPage from "@/pages/app/ChipsPage";
 import Announcements from "@/pages/app/Announcements";
 import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
+import GamePlay from "@/pages/play/GamePlay";
 
 // System
 import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScreens";
@@ -81,6 +82,7 @@ function App() {
             <Route path="/home" element={<Home />} />
             <Route path="/games" element={<Games />} />
             <Route path="/games/:slug" element={<GameDetail />} />
+            <Route path="/games/:slug/play" element={<GamePlay />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/recent" element={<Recent />} />

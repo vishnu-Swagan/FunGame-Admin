@@ -113,17 +113,7 @@ async def toggle_favorite(slug: str, user: dict = Depends(require_active_player)
     return {'favorites': favs, 'action': action}
 
 
-@router.post('/games/{slug}/play')
-async def play_game(slug: str, user: dict = Depends(require_active_player)):
-    """Foundation gate: no game is playable. Server refuses round start unless ENABLED."""
-    game = await db.games.find_one({'slug': slug})
-    if not game:
-        raise HTTPException(status_code=404, detail='Game not found')
-    status = game.get('status')
-    if status != 'ENABLED':
-        raise HTTPException(status_code=409, detail={'code': status, 'message': f"{game['name']} is not playable yet ({status.replace('_', ' ').title()})."})
-    # Even when ENABLED, gameplay engine is not shipped in the foundation build.
-    raise HTTPException(status_code=501, detail={'code': 'NOT_IMPLEMENTED', 'message': 'Gameplay engine ships in a later build gate.'})
+# NOTE: gameplay endpoints (play/cashout/draw/history) live in routes_games.py
 
 
 # ---------- Chips ----------

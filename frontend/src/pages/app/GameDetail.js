@@ -47,11 +47,15 @@ export default function GameDetail() {
   };
 
   const tryPlay = async () => {
+    if (game.status === "ENABLED") {
+      navigate(`/games/${slug}/play`);
+      return;
+    }
     setPlayBusy(true);
     try {
-      await api.post(`/games/${slug}/play`);
+      await api.post(`/games/${slug}/play`, { bet: 10, payload: {} });
     } catch (e) {
-      // Server always refuses at this gate — surface its message
+      // Server refuses for non-enabled games — surface its message
       toast.info(errMsg(e, "This game is not playable yet."));
     } finally {
       setPlayBusy(false);
@@ -103,11 +107,15 @@ export default function GameDetail() {
         data-testid="game-detail-play-button"
         onClick={tryPlay}
         disabled={playBusy}
-        variant="outline"
-        className="w-full h-13 min-h-[52px] rounded-xl text-base font-bold border-[hsl(var(--cyan)/0.4)] bg-[hsl(var(--cyan)/0.08)] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.14)]"
+        variant={game.status === "ENABLED" ? "default" : "outline"}
+        className={`w-full h-13 min-h-[52px] rounded-xl text-base font-bold ${
+          game.status === "ENABLED"
+            ? "hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150"
+            : "border-[hsl(var(--cyan)/0.4)] bg-[hsl(var(--cyan)/0.08)] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.14)]"
+        }`}
       >
         <Play className="h-5 w-5 mr-2" />
-        {game.status === "COMING_SOON" ? "Coming soon" : game.status === "MAINTENANCE" ? "Under maintenance" : game.status === "ENABLED" ? "Play" : "Unavailable"}
+        {game.status === "ENABLED" ? "Play now" : game.status === "COMING_SOON" ? "Coming soon" : game.status === "MAINTENANCE" ? "Under maintenance" : "Unavailable"}
       </Button>
 
       <div className="rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4">
@@ -122,7 +130,9 @@ export default function GameDetail() {
           <ListChecks className="h-4 w-4 text-primary" /> Rules & paytable
         </p>
         <p className="mt-2 text-sm text-white/55 leading-relaxed">
-          Full rules, bet controls and history unlock when {game.name} passes its build gate. Every round outcome is decided by the server — never the client.
+          {game.status === "ENABLED"
+            ? "Every round outcome is decided by the server — never the client. Open the game to see bets, paytables and your round history."
+            : `Full rules, bet controls and history unlock when ${game.name} becomes available. Every round outcome is decided by the server — never the client.`}
         </p>
       </div>
 
