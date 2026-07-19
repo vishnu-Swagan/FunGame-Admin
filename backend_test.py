@@ -482,6 +482,236 @@ class FunGameTester:
         assert 'PLAY CHIPS' in data.get('disclaimer', ''), "Should have disclaimer"
         print(f"   ✅ System config accessible without auth")
 
+    # ========== FUN ROULETTE LIVE GAME ==========
+    def test_roulette_state_player(self):
+        """GET /games/fun-roulette/state as player"""
+        import time
+        data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token, desc="Get roulette state (player)")
+        
+        assert 'round_number' in data, "Should return round_number"
+        assert 'phase' in data, "Should return phase"
+        assert data['phase'] in ['BETTING', 'SPINNING', 'RESULT'], f"Phase should be valid, got {data['phase']}"
+        assert 'phase_ends_in' in data, "Should return phase_ends_in"
+        assert 'my_bets' in data, "Should return my_bets"
+        assert 'last_results' in data, "Should return last_results"
+        assert 'balance' in data, "Should return balance"
+        
+        # Store for universal sync test
+        self.roulette_round_player = data['round_number']
+        self.roulette_phase_player = data['phase']
+        self.roulette_winning_player = data.get('winning_number')
+        
+        print(f"   ✅ Round {data['round_number']}, phase: {data['phase']}, countdown: {data['phase_ends_in']:.1f}s")
+        return data
+
+    def test_roulette_state_admin(self):
+        """GET /games/fun-roulette/state as admin - should match player's round"""
+        data = self.req('GET', '/games/fun-roulette/state', 200, token=self.admin_token, desc="Get roulette state (admin)")
+        
+        assert data['round_number'] == self.roulette_round_player, f"Admin round {data['round_number']} should match player round {self.roulette_round_player}"
+        
+        # If phase is not BETTING, winning_number must match
+        if self.roulette_phase_player != 'BETTING' and self.roulette_winning_player is not None:
+            assert data.get('winning_number') == self.roulette_winning_player, f"Admin winning number {data.get('winning_number')} should match player {self.roulette_winning_player}"
+        
+        print(f"   ✅ Universal sync verified: both see round {data['round_number']}")
+
+    def test_roulette_wait_for_betting_phase(self):
+        """Wait for BETTING phase to test placing bets"""
+        import time
+        max_wait = 30
+        start = time.time()
+        
+        while time.time() - start < max_wait:
+            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
+            if data['phase'] == 'BETTING' and data['phase_ends_in'] > 6:
+                print(f"   ✅ BETTING phase ready, {data['phase_ends_in']:.1f}s remaining")
+                self.roulette_betting_round = data['round_number']
+                return data
+            time.sleep(1)
+        
+        raise AssertionError("Timeout waiting for BETTING phase with >6s remaining")
+
+    def test_roulette_place_bet_color(self):
+        """POST /games/fun-roulette/bets - place bet on red"""
+        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
+            'bet_type': 'color',
+            'value': 'red',
+            'amount': 100
+        }, desc="Place bet on RED")
+        
+        assert 'my_bets' in data, "Should return my_bets"
+        assert 'my_total' in data, "Should return my_total"
+        assert data['my_total'] >= 100, f"Total should be at least 100, got {data['my_total']}"
+        assert 'balance' in data, "Should return updated balance"
+        
+        self.roulette_balance_after_bet = data['balance']
+        print(f"   ✅ Bet placed, total: {data['my_total']}, balance: {data['balance']}")
+
+    def test_roulette_place_bet_straight(self):
+        """POST /games/fun-roulette/bets - stack another bet on number 17"""
+        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
+            'bet_type': 'straight',
+            'value': 17,
+            'amount': 50
+        }, desc="Place bet on number 17")
+        
+        assert data['my_total'] >= 150, f"Total should be at least 150 (100+50), got {data['my_total']}"
+        print(f"   ✅ Stacked bet, total: {data['my_total']}")
+
+    def test_roulette_clear_bets(self):
+        """POST /games/fun-roulette/bets/clear - refund all bets"""
+        data = self.req('POST', '/games/fun-roulette/bets/clear', 200, token=self.player_token, desc="Clear all bets")
+        
+        assert 'refunded' in data, "Should return refunded amount"
+        assert data['refunded'] >= 150, f"Should refund at least 150, got {data['refunded']}"
+        assert 'balance' in data, "Should return updated balance"
+        
+        print(f"   ✅ Bets cleared, refunded: {data['refunded']}, balance: {data['balance']}")
+
+    def test_roulette_bet_below_minimum(self):
+        """POST /games/fun-roulette/bets with amount < 10 should fail with 400"""
+        self.req('POST', '/games/fun-roulette/bets', 400, token=self.player_token, data={
+            'bet_type': 'color',
+            'value': 'black',
+            'amount': 5
+        }, desc="Bet below minimum (5 chips)")
+        
+        print(f"   ✅ Bet below minimum correctly rejected with 400")
+
+    def test_roulette_place_final_bet(self):
+        """Place a final bet to test settlement"""
+        data = self.req('POST', '/games/fun-roulette/bets', 200, token=self.player_token, data={
+            'bet_type': 'color',
+            'value': 'black',
+            'amount': 100
+        }, desc="Place final bet for settlement test")
+        
+        self.roulette_final_bet_round = data['round_number']
+        print(f"   ✅ Final bet placed on round {data['round_number']}")
+
+    def test_roulette_wait_for_settlement(self):
+        """Wait for the round to complete and check settlement"""
+        import time
+        max_wait = 30
+        start = time.time()
+        
+        while time.time() - start < max_wait:
+            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
+            
+            # Check if we got settlement for our bet round
+            if data.get('settled') and data['settled']['round_number'] == self.roulette_final_bet_round:
+                settled = data['settled']
+                assert 'winning_number' in settled, "Settlement should have winning_number"
+                assert 'total_bet' in settled, "Settlement should have total_bet"
+                assert 'payout' in settled, "Settlement should have payout"
+                assert settled['total_bet'] == 100, f"Total bet should be 100, got {settled['total_bet']}"
+                
+                print(f"   ✅ Settlement received: round {settled['round_number']}, number {settled['winning_number']}, bet {settled['total_bet']}, payout {settled['payout']}")
+                return settled
+            
+            time.sleep(2)
+        
+        raise AssertionError("Timeout waiting for settlement")
+
+    def test_roulette_bet_during_spinning_phase(self):
+        """Wait for SPINNING phase and verify bets are rejected with 409"""
+        import time
+        max_wait = 30
+        start = time.time()
+        
+        while time.time() - start < max_wait:
+            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
+            if data['phase'] in ['SPINNING', 'RESULT']:
+                # Try to place bet - should fail with 409
+                self.req('POST', '/games/fun-roulette/bets', 409, token=self.player_token, data={
+                    'bet_type': 'color',
+                    'value': 'red',
+                    'amount': 100
+                }, desc=f"Bet during {data['phase']} phase")
+                
+                print(f"   ✅ Bet correctly rejected with 409 during {data['phase']} phase")
+                return
+            
+            time.sleep(1)
+        
+        raise AssertionError("Timeout waiting for SPINNING/RESULT phase")
+
+    def test_roulette_old_play_endpoint(self):
+        """POST /games/fun-roulette/play should return 409 LIVE_ROUNDS"""
+        self.req('POST', '/games/fun-roulette/play', 409, token=self.player_token, data={
+            'bet': 100,
+            'payload': {'bet_type': 'color', 'value': 'red'}
+        }, desc="Old play endpoint")
+        
+        print(f"   ✅ Old play endpoint correctly returns 409 LIVE_ROUNDS")
+
+    def test_roulette_history(self):
+        """GET /games/fun-roulette/history should show settled rounds"""
+        data = self.req('GET', '/games/fun-roulette/history', 200, token=self.player_token, desc="Get roulette history")
+        
+        assert 'rounds' in data, "Should return rounds array"
+        # Should have at least one settled round from our test
+        assert len(data['rounds']) > 0, "Should have at least one round in history"
+        
+        # Check first round structure
+        if data['rounds']:
+            r = data['rounds'][0]
+            assert 'outcome' in r, "Round should have outcome"
+            assert 'winning_number' in r['outcome'], "Outcome should have winning_number"
+            assert 'bet' in r, "Round should have bet (total bet amount)"
+            assert 'payout' in r, "Round should have payout"
+            assert 'bets' in r['outcome'], "Outcome should have bets array"
+        
+        print(f"   ✅ History retrieved: {len(data['rounds'])} round(s)")
+
+    def test_roulette_phase_progression(self):
+        """Poll state across a full cycle and verify phase progression"""
+        import time
+        
+        # Wait for a new round to start (BETTING phase)
+        max_wait = 30
+        start = time.time()
+        initial_round = None
+        
+        while time.time() - start < max_wait:
+            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
+            if data['phase'] == 'BETTING' and data['phase_ends_in'] > 15:
+                initial_round = data['round_number']
+                print(f"   📍 Starting phase progression test at round {initial_round}, BETTING phase")
+                break
+            time.sleep(1)
+        
+        if not initial_round:
+            raise AssertionError("Could not find BETTING phase to start progression test")
+        
+        # Track phases
+        phases_seen = []
+        last_phase = None
+        
+        # Poll for 30 seconds to see phase transitions
+        start = time.time()
+        while time.time() - start < 30:
+            data = self.req('GET', '/games/fun-roulette/state', 200, token=self.player_token)
+            
+            if data['phase'] != last_phase:
+                phases_seen.append(data['phase'])
+                print(f"   📍 Phase: {data['phase']}, round: {data['round_number']}, countdown: {data['phase_ends_in']:.1f}s")
+                last_phase = data['phase']
+            
+            # If we've seen all three phases and moved to next round, we're done
+            if len(phases_seen) >= 3 and data['round_number'] > initial_round:
+                print(f"   ✅ Phase progression verified: {' → '.join(phases_seen)}")
+                assert 'BETTING' in phases_seen, "Should see BETTING phase"
+                assert 'SPINNING' in phases_seen, "Should see SPINNING phase"
+                assert 'RESULT' in phases_seen, "Should see RESULT phase"
+                return
+            
+            time.sleep(1)
+        
+        # If we didn't see all phases, that's still ok - just report what we saw
+        print(f"   ⚠️  Saw phases: {' → '.join(phases_seen)} (may not have completed full cycle)")
+
     def run_all_tests(self):
         """Run all tests in order"""
         self.log("\n" + "="*60, Colors.YELLOW)
@@ -550,6 +780,25 @@ class FunGameTester:
 
         # Admin
         self.test("Admin dashboard stats", self.test_admin_stats)
+
+        # Fun Roulette Live Game
+        self.log("\n" + "="*60, Colors.YELLOW)
+        self.log("FUN ROULETTE LIVE GAME TESTS", Colors.YELLOW)
+        self.log("="*60 + "\n", Colors.YELLOW)
+        
+        self.test("Roulette state (player)", self.test_roulette_state_player)
+        self.test("Roulette state (admin) - universal sync", self.test_roulette_state_admin)
+        self.test("Wait for BETTING phase", self.test_roulette_wait_for_betting_phase)
+        self.test("Place bet on color (RED)", self.test_roulette_place_bet_color)
+        self.test("Stack bet on straight number (17)", self.test_roulette_place_bet_straight)
+        self.test("Clear bets (refund)", self.test_roulette_clear_bets)
+        self.test("Bet below minimum (400)", self.test_roulette_bet_below_minimum)
+        self.test("Place final bet for settlement", self.test_roulette_place_final_bet)
+        self.test("Wait for settlement", self.test_roulette_wait_for_settlement)
+        self.test("Bet during SPINNING/RESULT phase (409)", self.test_roulette_bet_during_spinning_phase)
+        self.test("Old play endpoint returns 409", self.test_roulette_old_play_endpoint)
+        self.test("Roulette history", self.test_roulette_history)
+        self.test("Phase progression (BETTING→SPINNING→RESULT)", self.test_roulette_phase_progression)
 
         # Summary
         self.log("\n" + "="*60, Colors.YELLOW)

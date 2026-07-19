@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
         await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
         logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
+    await db.roulette_rounds.create_index('round_number', unique=True)
+    await db.roulette_bets.create_index([('user_id', 1), ('round_number', 1), ('status', 1)])
     logger.info('FunGame seed complete — 18 games, admin + test player ready')
     yield
     client.close()

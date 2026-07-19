@@ -270,36 +270,47 @@ def play_fun_target(bet, payload):
 ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
 
+def roulette_color(n):
+    return "green" if n == 0 else ("red" if n in ROULETTE_RED else "black")
+
+
+def roulette_multiplier(btype, value, n):
+    """Returns total-return multiplier for a winning bet, 0 if lost. Raises on invalid."""
+    if btype == "straight":
+        if not isinstance(value, int) or value < 0 or value > 36:
+            bad("Straight bet needs a number 0-36")
+        return 36 if n == value else 0
+    if btype == "color":
+        if value not in ("red", "black"):
+            bad("Color bet must be red or black")
+        return 2 if roulette_color(n) == value else 0
+    if btype == "parity":
+        if value not in ("odd", "even"):
+            bad("Parity bet must be odd or even")
+        return 2 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
+    if btype == "range":
+        if value not in ("low", "high"):
+            bad("Range bet must be low or high")
+        won = (1 <= n <= 18) if value == "low" else (19 <= n <= 36)
+        return 2 if won else 0
+    if btype == "dozen":
+        if value not in (1, 2, 3):
+            bad("Dozen must be 1, 2 or 3")
+        return 3 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
+    if btype == "column":
+        if value not in (1, 2, 3):
+            bad("Column must be 1, 2 or 3")
+        return 3 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
+    bad("Invalid bet type")
+
+
 def play_fun_roulette(bet, payload):
     btype = payload.get("bet_type")
     value = payload.get("value")
     n = RNG.randint(0, 36)
-    color = "green" if n == 0 else ("red" if n in ROULETTE_RED else "black")
-    won, mult = False, 0
-    if btype == "straight":
-        if not isinstance(value, int) or value < 0 or value > 36:
-            bad("Straight bet needs a number 0-36")
-        won, mult = (n == value), 36
-    elif btype == "color":
-        if value not in ("red", "black"):
-            bad("Color bet must be red or black")
-        won, mult = (color == value), 2
-    elif btype == "parity":
-        if value not in ("odd", "even"):
-            bad("Parity bet must be odd or even")
-        won, mult = (n != 0 and (n % 2 == 1) == (value == "odd")), 2
-    elif btype == "range":
-        if value not in ("low", "high"):
-            bad("Range bet must be low or high")
-        won, mult = (1 <= n <= 18) if value == "low" else (19 <= n <= 36), 2
-    elif btype == "dozen":
-        if value not in (1, 2, 3):
-            bad("Dozen must be 1, 2 or 3")
-        won, mult = (n != 0 and (n - 1) // 12 + 1 == value), 3
-    else:
-        bad("Invalid bet type")
-    payout = bet * mult if won else 0
-    return {"number": n, "color": color, "bet_type": btype, "value": value, "won": won}, payout
+    mult = roulette_multiplier(btype, value, n)
+    payout = bet * mult
+    return {"number": n, "color": roulette_color(n), "bet_type": btype, "value": value, "won": mult > 0}, payout
 
 
 KENO_PAYTABLE = {
@@ -452,7 +463,7 @@ ENGINES = {
     "seven-up-down": play_seven_up_down,
     "andar-bahar": play_andar_bahar,
     "fun-target": play_fun_target,
-    "fun-roulette": play_fun_roulette,
+    # fun-roulette runs in LIVE synchronized rounds (see routes_games.py)
     "keno": play_keno,
     "bingo": play_bingo,
     "super-golden-wheel": play_super_golden_wheel,
