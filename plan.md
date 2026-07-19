@@ -15,7 +15,7 @@
 - **Visual & audio premium polish (P0):** realistic casino feel across games.
   - Remove noisy UI status elements (e.g., “ENABLED” badges on thumbnails).
   - Flagship visual realism (Aviator plane, Roulette wheel/ball/table, Dice realism).
-  - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + per-game SFX).
+  - **Comprehensive casino audio** via WebAudio synth (ambient + win/lose crowd reactions + game-specific SFX).
 - **Card games stability & realism (P0):** Teen Patti + Poker + Champion Poker must be **smooth** and **non-jarring**.
   - Fix animation/polling clashes causing flicker / state desync / rushed dealing.
   - Ensure reveal timelines stay aligned with server phases.
@@ -25,6 +25,7 @@
   - Joker Bonus → purple/dark jester theme
   - Lucky 8 Line → Asian fortune red/gold theme with **8‑line win display**
   - Each gets its **own component** and bespoke animations/sounds.
+- **Win celebration polish (P1):** add modern, satisfying win feedback (confetti/coin burst) across games.
 - Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after game polish is complete (confirmed).
 - Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed).
 
@@ -32,8 +33,9 @@
 - ✅ Platform foundation + all 18 universal live games are running.
 - ✅ Major visual/audio upgrades completed (thumbnails, Aviator, Roulette, Dice, sound engine).
 - ✅ **Card games bug fixed + verified** (Teen Patti / Poker / No‑Hold / Champion Poker / Andar Bahar).
-- 🔥 Slot redesigns are next (P0).
-- ⏳ Win confetti polish not started.
+- ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line now fully distinct cabinets).
+- ✅ **Win confetti/coin burst completed + verified** (ResultBanner).
+- ⏸️ Remaining work is backlog only (SMTP creds + enterprise admin restructure).
 
 ---
 
@@ -118,18 +120,22 @@
 - Dice: Seven-Up-Down
 - Card: Teen Patti, Poker, No Hold, Champion Poker, Andar Bahar
 - Others: Keno, Bingo, etc.
-- Slots (currently too similar): 777 Triple Fun, Joker Bonus, Lucky 8 Line (plus other slot titles)
+- Slots: fever-joker-bonus, giant-jackpot, triple-fun, joker-bonus, lucky-8-line
 
 ---
 
 ### Phase LIVE‑4: Testing, Hardening, and Fixes
 **Goal:** Stabilize the live platform across all games.
 
-**Status:** ✅ UPDATED / CARD-GAME REGRESSION CLOSED
-- New test report created: **`/app/test_reports/iteration_5.json`**.
+**Status:** ✅ UPDATED / REGRESSIONS CLOSED
 - Card game regression fixed and verified with mandatory testing agent:
+  - Report: **`/app/test_reports/iteration_5.json`**
   - Backend: 100% (15/15)
   - Frontend: 100% (all 5 card games verified smooth, bets work, no console errors)
+- Slot redesign + win celebration verification:
+  - Report: **`/app/test_reports/iteration_6.json`**
+  - Backend: 100% (6/6)
+  - Frontend: 100% (all 3 new slot cabinets verified distinct with staggered stops; betting + refunds; Teen Patti regression clean)
 
 ---
 
@@ -161,71 +167,85 @@
 **Fix (implemented)**
 1. **Anchored deadlines per phase**
    - Deadline now anchors once per `(round_number, phase)` and only re-syncs if drift exceeds ~450ms.
-2. **Monotonic reveal clock**
-   - New `revealElapsed` is monotonic inside a reveal phase.
+2. **Monotonic reveal clock + consumers updated**
+   - New `revealElapsed` monotonic inside REVEAL.
    - `revealProgress` now derived from the monotonic clock (helps games like Bingo/Keno/Checker too).
-3. **Tight phase transition**
-   - Instant boundary poll fires when countdown hits zero to reduce “late phase switch” feel.
-4. **Consumers updated**
    - Updated to consume `revealElapsed`:
      - `/app/frontend/src/pages/play/CardDuelGame.js` (Teen Patti + Poker)
      - `/app/frontend/src/pages/play/VideoPokerGame.js` (No-Hold)
      - `/app/frontend/src/pages/play/ChampionPokerGame.js`
      - `/app/frontend/src/pages/play/AndarBaharGame.js`
+3. **Tight phase transition**
+   - Boundary poll triggers at countdown==0 to reduce “late phase switch” feel.
+4. **Second timing fix discovered during slot verification**
+   - `revealElapsed` now reads `deadlineRef` directly (anchored synchronously in `applyState`) so the **first REVEAL render never sees stale betting-phase countdown** (previously could make reels appear pre-stopped at reveal start).
 
 **Mandatory verification (completed)**
 - Testing agent run and recorded in **`/app/test_reports/iteration_5.json`** (backend + frontend).
-
-**Exit criteria**
-- ✅ Teen Patti / Poker / Champion Poker deal and flip smoothly with no flicker.
-- ✅ No state desync between server phase and presented cards.
-- ✅ Testing agent confirms green.
 
 ---
 
 ### Phase LIVE‑7: Slot Games Redesign (3 Distinct Experiences)
 **Goal (P0):** Make 777 Triple Fun, Joker Bonus, Lucky 8 Line visually and structurally different, inspired by real casino slots (without copying protected art).
 
-**Status:** 🔥 IN PROGRESS (NEXT)
+**Status:** ✅ COMPLETED + VERIFIED
 
-**Approach**
-- Create **separate components** instead of a single `SlotGame.js` skin:
-  - `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
-  - `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
-  - `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
-- Shared low-level reel/spin logic can remain in a common module, but **UI layout, symbols, sounds, and win presentation must differ**.
+**Delivered implementation**
+- New shared reel utilities:
+  - `/app/frontend/src/pages/play/slots/reelKit.js`
+    - Seeded PRNG for deterministic decorative symbols
+    - Staggered reel stop times: `reveal*0.42 + i*reveal*0.2`
+    - `SpinStrip` + `SettledCell` primitives
+- Three distinct cabinet components:
+  1. `/app/frontend/src/pages/play/slots/TripleFun777Game.js`
+     - Classic Vegas: red/gold marquee with blinking bulbs, chrome bezel, ivory mechanical reels with BAR/777 symbols, animated pull lever, classic paytable.
+  2. `/app/frontend/src/pages/play/slots/JokerBonusGame.js`
+     - Dark jester: violet neon flicker title with `VenetianMask`, harlequin diamond backdrop, neon fruit reels, **3-segment JOKER METER** that lights as wilds land + jester-laugh styling.
+  3. `/app/frontend/src/pages/play/slots/Lucky8LineGame.js`
+     - Asian fortune: crimson/gold cabinet, swaying lanterns, full **3×3 symbol grid** with deterministic decorative rows seeded by `round_number`, **8 numbered chasing line lamps**, center-line win emphasis.
+- Routing wired:
+  - `/app/frontend/src/pages/play/GamePlay.js`
+    - `triple-fun` → `TripleFun777Game`
+    - `joker-bonus` → `JokerBonusGame`
+    - `lucky-8-line` → `Lucky8LineGame`
+    - `fever-joker-bonus` & `giant-jackpot` remain on generic `SlotGame`
 
-**Theme specs (user-approved)**
-1. **777 Triple Fun**
-   - Classic Vegas red/gold, chrome trims, mechanical 3‑reel vibe
-   - Bold “SEVENS” focus, lever/knob styling, incandescent glow
-2. **Joker Bonus**
-   - Purple/dark jester theme, neon accents
-   - Joker wild emphasis, bonus meter / “jester laugh” styling
-3. **Lucky 8 Line**
-   - Asian fortune red/gold theme (lanterns/fortune motifs)
-   - Explicit **8‑line win display** and line highlight animations
+**New CSS animations (implemented)**
+- `/app/frontend/src/App.css`
+  - Reel scroll + blur
+  - Bulb blink
+  - Neon flicker
+  - Lantern sway
+  - Line flash
+  - Win glow
 
-**Deliverables**
-- Distinct symbol sets (vector/CSS-based or generated assets) + unique reel frames.
-- Distinct spin SFX + win stingers (via `sound.js`).
-- Distinct win animations (glow, shake, count-up, line highlights).
+**New slot SFX (implemented)**
+- `/app/frontend/src/lib/sound.js` additions:
+  - `lever`, `reelStop`, `slotBell`, `lever777`, `jokerLaugh`, `jokerSpin`, `gong`, `coinShower`, `luckySpin`
 
 **Verification**
-- Frontend testing agent: pages render, spins animate, no console errors.
+- Testing agent report: **`/app/test_reports/iteration_6.json`**
+  - Verified distinct UIs, staggered stops via timed screenshots, betting + clear-bets refunds.
 
 ---
 
 ### Phase LIVE‑8: Win Celebration Polish (Confetti / Coin Burst)
 **Goal (P1):** Add delightful, modern win feedback across games.
 
-**Status:** ⏳ NOT STARTED
+**Status:** ✅ COMPLETED + VERIFIED
 
-**Work items**
-- Enhance `/app/frontend/src/components/play/ResultBanner.js`:
-  - Confetti burst on win
-  - Coin sparkle/burst variant for big wins
-  - Respect global mute and reduced-motion preferences
+**Delivered implementation**
+- `/app/frontend/src/components/play/ResultBanner.js`
+  - Confetti burst on wins (18 flecks)
+  - Big-win variant: 32 pieces with gold coins when `payout >= total_bet * 5`
+  - Deterministic per index; animates only transform/opacity
+  - Respects `prefers-reduced-motion`
+- `/app/frontend/src/lib/useLiveRound.js`
+  - Adds `result.big` flag in the settled banner payload.
+
+**Verification**
+- Included in testing agent report **`iteration_6.json`**.
+- Additionally visually confirmed via a Seven-Up-Down win screenshot (confetti visible inside the win banner).
 
 ---
 
@@ -236,15 +256,14 @@
 ---
 
 ## 3) Next Actions
-1. **P0: Slot redesigns into distinct components**
-   - Implement 3 new slot UIs/components + unique reels/symbols/SFX.
-   - Ensure each feels like a different real casino cabinet.
-   - Run frontend testing agent and store new test report.
-2. **P1: Confetti/coin burst for wins**
-   - Update `ResultBanner.js` and verify across a sample of games.
-3. **Backlog (blocked by user inputs / priority):**
-   - SMTP/SendGrid integration (credentials pending).
-   - Master Prompt 1 enterprise admin/RBAC restructure (after games).
+1. **P2 (Backlog): SMTP/SendGrid integration**
+   - Await credentials from user.
+   - Switch email verification from demo mode to real delivery.
+   - Run backend + frontend testing agent after integration.
+2. **P2 (Backlog): Master Prompt 1 enterprise admin restructure**
+   - Await user priority confirmation.
+   - Implement strict RBAC, maker-checker workflows, and TOTP.
+   - Add full regression test pass.
 
 ---
 
@@ -266,9 +285,10 @@
   - ✅ Teen Patti / Poker / Champion Poker are smooth, non-flickery, non-rushed.
   - ✅ Verified by **mandatory testing agent** after fix (**iteration_5.json**).
 - Slots (P0):
-  - ⏳ 777 Triple Fun, Joker Bonus, Lucky 8 Line are clearly differentiated in theme, layout, symbols, sounds, and win animations.
+  - ✅ 777 Triple Fun, Joker Bonus, Lucky 8 Line are clearly differentiated in theme, layout, symbols, sounds, and win animations.
+  - ✅ Verified by testing agent (**iteration_6.json**).
 - Win polish (P1):
-  - ⏳ Confetti/coin burst on wins in `ResultBanner`.
+  - ✅ Confetti/coin burst on wins in `ResultBanner`.
 
 ---
 
@@ -281,9 +301,9 @@
 - ✅ Game thumbnail logos cropped/applied; ENABLED badges removed from player UI.
 - ✅ Dice games upgraded with real dice visuals + rolling effects.
 - ✅ WebAudio sound engine (`sound.js`) added with ambient + crowd reactions.
-- ✅ **Card games regression fixed + verified** (deadline anchoring + monotonic revealElapsed + boundary poll). Test report: **`/app/test_reports/iteration_5.json`**.
-- 🔥 **IN PROGRESS (NEXT):** 3 slot redesigns (777 Triple Fun / Joker Bonus / Lucky 8 Line) into distinct components.
-- ⏳ NOT STARTED: Confetti/coin burst win polish.
+- ✅ **Card games regression fixed + verified** (deadline anchoring + monotonic `revealElapsed` + boundary poll + stale-countdown fix). Test report: **`/app/test_reports/iteration_5.json`**.
+- ✅ **Slot redesigns completed + verified** (Triple Fun 777 / Joker Bonus / Lucky 8 Line distinct cabinets + reelKit + slot SFX + CSS animations). Test report: **`/app/test_reports/iteration_6.json`**.
+- ✅ **Win celebration confetti/coin burst completed + verified** (ResultBanner + `result.big`). Included in **iteration_6.json**; also visually confirmed on a win.
 - ⏸️ BACKLOG/BLOCKED: Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
 - ⏸️ PENDING: Real email provider integration (SendGrid/SMTP creds at end).
 
