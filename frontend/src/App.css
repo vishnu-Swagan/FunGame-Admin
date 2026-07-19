@@ -78,3 +78,25 @@
   }
 }
 
+
+/* ---------- 3D card flip (universal dealing) ---------- */
+.fg-card3d {
+  perspective: 700px;
+}
+.fg-card3d-inner {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.fg-card3d-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.fg-card3d-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+

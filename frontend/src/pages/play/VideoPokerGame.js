@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
-import { PlayingCard } from "@/components/play/PlayingCard";
+import { FlipCard } from "@/components/play/FlipCard";
 import { ResultBanner } from "@/components/play/ResultBanner";
 
 const PAYTABLE = [
@@ -11,10 +11,13 @@ const PAYTABLE = [
   ["Flush", "7x"], ["Straight", "5x"], ["Three of a Kind", "4x"], ["Two Pair", "3x"], ["Jacks or Better", "2x"],
 ];
 
+/**
+ * No Hold - five cards dealt and flipped one at a time on the universal
+ * clock, then the hand is announced. No rushing, real table pace.
+ */
 export default function VideoPokerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets } =
     useLiveRound(game.slug, {
-      revealSound: "deal",
       formatResult: (s) => ({
         title: s.outcome.hand === "NO WIN" ? "No win" : s.outcome.hand,
         subtitle: s.outcome.multiplier > 0 ? `Pays ${s.outcome.multiplier}x` : "Join the next deal for a paying hand",
@@ -22,7 +25,24 @@ export default function VideoPokerGame({ game }) {
     });
   const [amount, setAmount] = useState(50);
 
-  const reveal = !!outcome && phase !== "BETTING";
+  /* ---------- universal dealing timeline ---------- */
+  const revealSecs = state?.timings?.reveal || 8;
+  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  const DEAL = 0.75;
+  const dealt = (i) => !!outcome && elapsed >= 0.2 + i * DEAL;
+  const flipped = (i) => !!outcome && elapsed >= 0.2 + i * DEAL + 0.4;
+  const showHand = !!outcome && elapsed >= 0.2 + 5 * DEAL + 0.7;
+
+  const dealtCount = !outcome ? 0 : [0, 1, 2, 3, 4].filter((i) => dealt(i)).length;
+  const prevRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "REVEAL") {
+      prevRef.current = 0;
+      return;
+    }
+    if (dealtCount > prevRef.current) sfx.flick();
+    prevRef.current = dealtCount;
+  }, [dealtCount, phase]);
 
   return (
     <PlayShell game={game} balance={balance}>
@@ -30,15 +50,14 @@ export default function VideoPokerGame({ game }) {
 
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <div className="flex gap-1.5 justify-center">
-          {(reveal ? outcome.cards : Array(5).fill(null)).map((c, i) => (
-            <motion.div key={`${i}-${c || "x"}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.12 }}>
-              <PlayingCard code={c} />
-            </motion.div>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <FlipCard key={i} code={outcome ? outcome.cards[i] : null} dealt={dealt(i)} flipped={flipped(i)} />
           ))}
         </div>
-        {reveal && phase === "RESULT" && (
+        {showHand && (
           <p className="text-center text-sm font-bold text-white/85 mt-2" data-testid="nohold-hand">
-            {outcome.hand}{outcome.multiplier > 0 ? ` — ${outcome.multiplier}x` : ""}
+            {outcome.hand}
+            {outcome.multiplier > 0 ? ` — ${outcome.multiplier}x` : ""}
           </p>
         )}
         <p className="text-[11px] text-white/45 text-center mt-2">One universal 5-card deal per round — no holds, straight to the showdown</p>

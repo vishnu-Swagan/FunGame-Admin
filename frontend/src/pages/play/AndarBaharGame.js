@@ -1,16 +1,22 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { FlipCard } from "@/components/play/FlipCard";
 import { PlayingCard } from "@/components/play/PlayingCard";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
+/**
+ * Andar Bahar with a REAL table flow on the universal clock:
+ * the joker is flipped first, then cards are dealt one at a time
+ * alternating Andar/Bahar at a natural pace until the joker's rank
+ * appears. The matching card is highlighted and the winner announced.
+ */
 export default function AndarBaharGame({ game }) {
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
+  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
     useLiveRound(game.slug, {
-      revealSound: "deal",
       formatResult: (s) => ({
         title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} wins — you called it!` : `${s.outcome.winner.toUpperCase()} wins`,
         subtitle: `Match found after ${s.outcome.sequence.length} card${s.outcome.sequence.length > 1 ? "s" : ""}`,
@@ -19,12 +25,34 @@ export default function AndarBaharGame({ game }) {
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
 
-  const sequence = outcome?.sequence || [];
-  const shownCount = phase === "RESULT" ? sequence.length : Math.ceil(revealProgress * sequence.length);
-  const shown = sequence.slice(0, shownCount);
-  const reveal = !!outcome && phase !== "BETTING";
+  /* ---------- universal dealing timeline ---------- */
+  const seq = outcome?.sequence || [];
+  const revealSecs = state?.timings?.reveal || 16;
+  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  // natural pace, compressed only when the sequence is very long
+  const pace = Math.min(0.55, Math.max(0.18, (revealSecs - 3.4) / Math.max(1, seq.length)));
+  const jokerFlipped = !!outcome && elapsed >= 0.9;
+  const FIRST = 1.7;
+  const shownCount = !outcome || elapsed < FIRST ? 0 : Math.min(seq.length, Math.floor((elapsed - FIRST) / pace) + 1);
+  const allDealt = !!outcome && shownCount >= seq.length;
+  const showWinner = !!outcome && (phase === "RESULT" || elapsed >= FIRST + seq.length * pace + 0.4);
+  const shown = seq.slice(0, shownCount);
 
-  const sideCards = (s) => shown.filter((c) => c.side === s);
+  // one soft flick per dealt card
+  const prevShownRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "REVEAL") {
+      prevShownRef.current = 0;
+      return;
+    }
+    if (shownCount > prevShownRef.current) sfx.flick();
+    prevShownRef.current = shownCount;
+  }, [shownCount, phase]);
+  useEffect(() => {
+    if (phase === "REVEAL" && jokerFlipped && prevShownRef.current === 0 && shownCount === 0) sfx.flip();
+  }, [jokerFlipped, phase, shownCount]);
+
+  const sideCards = (s) => shown.map((c, i) => ({ ...c, idx: i })).filter((c) => c.side === s);
   const sideTotals = {};
   myBets.forEach((b) => {
     sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
@@ -37,21 +65,47 @@ export default function AndarBaharGame({ game }) {
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-3">
         <div className="flex items-center justify-center gap-3">
           <p className="text-[11px] font-semibold text-white/50">JOKER CARD</p>
-          <PlayingCard code={reveal ? outcome.joker : null} size="sm" faceDown={!reveal} />
+          <FlipCard code={outcome?.joker || null} size="sm" dealt={!!outcome && phase !== "BETTING"} flipped={jokerFlipped} />
+          {phase === "REVEAL" && !allDealt && jokerFlipped && (
+            <span className="text-[10px] font-bold text-white/45 tabular-nums" data-testid="andar-bahar-dealt-count">
+              card {Math.max(0, shownCount)}…
+            </span>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {["andar", "bahar"].map((s) => (
-            <div key={s} className={`rounded-xl border p-2.5 min-h-[110px] ${phase === "RESULT" && outcome?.winner === s ? "border-primary/50 bg-primary/8" : "border-white/10 bg-white/4"}`}>
-              <p className={`text-xs font-bold mb-1.5 ${s === "andar" ? "text-[hsl(var(--cyan))]" : "text-[hsl(var(--magenta))]"}`}>{s.toUpperCase()}</p>
-              <div className="flex flex-wrap gap-1">
-                {sideCards(s).slice(-8).map((c, i) => (
-                  <motion.div key={`${s}-${i}-${c.card}`} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}>
-                    <PlayingCard code={c.card} size="sm" />
-                  </motion.div>
-                ))}
+          {["andar", "bahar"].map((s) => {
+            const cards = sideCards(s);
+            const wonHere = showWinner && outcome?.winner === s;
+            return (
+              <div
+                key={s}
+                className={`rounded-xl border p-2.5 min-h-[120px] transition-[border-color,background-color] duration-300 ${
+                  wonHere ? "border-primary/60 bg-primary/8" : "border-white/10 bg-white/4"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className={`text-xs font-bold ${s === "andar" ? "text-[hsl(var(--cyan))]" : "text-[hsl(var(--magenta))]"}`}>{s.toUpperCase()}</p>
+                  <span className="text-[10px] text-white/40 tabular-nums">{cards.length} card{cards.length === 1 ? "" : "s"}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {cards.slice(-9).map((c) => (
+                    <FlipCard
+                      key={c.idx}
+                      code={c.card}
+                      size="sm"
+                      dealt
+                      flipped
+                      highlight={c.idx === seq.length - 1 && shownCount >= seq.length}
+                    />
+                  ))}
+                  {cards.length === 0 && phase !== "BETTING" && <PlayingCard faceDown size="sm" />}
+                </div>
+                {wonHere && (
+                  <p className="text-[10px] font-extrabold tracking-wider text-primary mt-1.5">MATCH — {s.toUpperCase()} WINS</p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="flex justify-center">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "andar" ? "A" : "B"} tone={r.winner === "andar" ? "cyan" : "magenta"} />} />

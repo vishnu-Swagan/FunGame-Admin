@@ -14,10 +14,11 @@
   - Standard loop timing for most games: **~20–30s cycles**.
 - **Aviator (P0):** Spribe-style crash game concept (original UI assets; mimic concept/flow, not copied art).
 - **Roulette (P0):** **30-second continuous live loop** + realistic UI (green board, chips, spin wheel with white ball).
+- Ensure **smooth, realistic game presentation** (visual + audio) while keeping all rounds **universally timed** (server-synchronized).
 - Defer **Master Prompt 1 enterprise admin/RBAC restructure** until after live games are completed (confirmed by user).
 - Keep **SMTP/SendGrid** in demo mode until credentials are provided at the end (confirmed by user).
 
-**Current status:** ✅ P0 delivered — all 18 live games + Aviator + Roulette upgrades + visual/audio polish completed and verified.
+**Current status:** ✅ P0 delivered — all 18 live games + Aviator + Roulette upgrades + universal visual/audio polish + realistic card flows completed and verified.
 
 ---
 
@@ -108,14 +109,14 @@
   - Cancel bet during BETTING/queued.
   - Live all-bets feed (sanitized masked names).
   - Universal crash history strip.
-- Visuals: premium crash stage + curve + plane-at-tip animation.
+- Visuals: premium crash stage + curve + plane animation.
 
 **Roulette frontend (`/app/frontend/src/pages/play/RouletteGame.js`)**
 - Updated to match backend 30s loop.
 - Visual upgrades:
-  - More realistic wheel + **white ball**.
+  - Realistic wheel + **white ball**.
   - Spin animation tuned to the 6s spin window.
-  - Green felt board, chip tray, on-board bet markers, last results strip.
+  - Classic European table layout + chip tray + on-board bet markers + last results strip.
 
 ---
 
@@ -213,6 +214,62 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 
 ---
 
+### Phase LIVE‑6: Realistic Card Game Flows (Universal, Non‑Rushed)
+**Goal:** Make Andar/Bahar, Champion Poker, and all card games feel like a real table: cards are dealt one-by-one at a natural pace, with flip moments, holds, redraws, and winner announcements — all driven by the **universal server-synchronized round clock** so every player sees the same sequence at the same time.
+
+**Status:** ✅ COMPLETED
+
+**Backend timing updates (implemented)**
+- Extended LIVE_GAMES cycle timings for card games (still epoch-derived, identical for all users):
+  - `teen-patti`: **15 / 12 / 6** (33s)
+  - `poker`: **15 / 14 / 6** (35s)
+  - `no-hold`: **14 / 8 / 5** (27s)
+  - `champion-poker`: **15 / 14 / 6** (35s)
+  - `andar-bahar`: **15 / 16 / 5** (36s)
+
+**New UI components (implemented)**
+- `/app/frontend/src/components/play/FlipCard.js`
+  - 3D flip card with slide-in “deal” animation.
+  - `CardSlot` placeholders so table layout never jumps.
+- `/app/frontend/src/App.css`
+  - 3D flip CSS (`fg-card3d*` classes).
+
+**Universal dealing timelines (implemented)**
+- All timelines use the universally-synced countdown from `/api/live/{slug}/state`:
+  - `elapsed = revealSecs - countdown`
+  - This ensures the same card appears at the same moment for every viewer.
+
+**Per-game realistic flows (implemented)**
+- **Teen Patti / Poker (`CardDuelGame.js`)**
+  - Cards dealt face-down **alternating Player/Dealer**, then flipped one-by-one.
+  - Then hands + **WINNER** badge; loser dimmed; **TIE** badge when applicable.
+- **Champion Poker (`ChampionPokerGame.js`)**
+  - Five cards dealt+flipped sequentially.
+  - House marks **HELD/DRAW**.
+  - Discards flip face-down, redraw occurs one-by-one.
+  - Final hand announced.
+- **No Hold (`VideoPokerGame.js`)**
+  - Five cards dealt+flipped sequentially.
+  - Then hand label + multiplier.
+- **Andar Bahar (`AndarBaharGame.js`)**
+  - Joker flips first.
+  - Cards dealt one-by-one at a natural pace (auto-compressed only for long sequences).
+  - Live “card N…” counter during dealing.
+  - Matching card and winner announced.
+
+**Sound upgrades for card realism (implemented)**
+- Added new SFX: `flick`, `flip`, `hold` in `/app/frontend/src/lib/sound.js`.
+- Wired per-card via count-tracking effects so the sound triggers **exactly** when a new card appears.
+
+**Verification (completed)**
+- `esbuild` clean.
+- Screenshots captured and validated:
+  - Teen Patti: mid-deal (face-down) + flip + winner.
+  - Andar Bahar: mid-deal with joker counter.
+  - Champion Poker: HELD/DRAW stage + final hand.
+
+---
+
 ### Phase 4: Email Provider Integration (SendGrid/SMTP) — after credentials provided
 **Status:** ⏸️ PENDING (user will provide credentials at the end)
 - Keep demo verification code flow until credentials provided.
@@ -250,6 +307,7 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
   - ✅ Premium assets: Aviator plane integrated in-flight.
   - ✅ Realistic dice and roulette motion.
   - ✅ Sound enabled for all games with a global mute toggle.
+  - ✅ **Card games are realistic and not rushed**: universal, timed, sequential dealing + flip/hold/redraw flows.
 - Quality:
   - ✅ Automated smoke tests + manual regression pass succeed.
 
@@ -263,6 +321,7 @@ All reveal animations are driven by universal outcomes + `revealProgress` for co
 - ✅ Roulette upgraded (30s loop + realistic wheel/ball + classic table).
 - ✅ Game thumbnail logos cropped and applied globally.
 - ✅ Phase LIVE‑5 completed: visual/audio polish (remove ENABLED badge, real plane asset, realistic roulette ball physics, real 3D dice, sound for all games).
+- ✅ Phase LIVE‑6 completed: realistic universal **card game dealing flows** (Teen Patti/Poker, Champion Poker, No Hold, Andar Bahar).
 - ✅ Testing complete (iteration_4.json), no critical bugs.
 - ⏸️ **BACKLOG/BLOCKED:** Master Prompt 1 enterprise admin/RBAC restructure (deferred by user).
 - ⏸️ **PENDING:** Real email provider integration (SendGrid/SMTP creds at end).

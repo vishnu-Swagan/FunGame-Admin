@@ -1,16 +1,23 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
-import { PlayingCard } from "@/components/play/PlayingCard";
+import { FlipCard } from "@/components/play/FlipCard";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
+/**
+ * Teen Patti / Poker duel with a REAL dealing flow, driven entirely by the
+ * universal server clock: cards are dealt face-down one at a time
+ * (alternating player/dealer), then flipped one by one, then hands and the
+ * winner are announced. Every player worldwide sees the same card at the
+ * same moment.
+ */
 export default function CardDuelGame({ game }) {
+  const nCards = game.slug === "teen-patti" ? 3 : 5;
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
     useLiveRound(game.slug, {
-      revealSound: "deal",
       formatResult: (s) => {
         const push = s.bets.length > 0 && s.bets.every((b) => b.result === "push");
         return {
@@ -22,39 +29,87 @@ export default function CardDuelGame({ game }) {
     });
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
-  const nCards = game.slug === "teen-patti" ? 3 : 5;
   const options = state?.options || { player: 1.95, dealer: 1.95, tie: game.slug === "teen-patti" ? 8 : 20 };
 
-  const reveal = !!outcome && phase !== "BETTING";
+  /* ---------- universal dealing timeline ---------- */
+  const revealSecs = state?.timings?.reveal || (nCards === 3 ? 12 : 14);
+  const elapsed = phase === "RESULT" ? 999 : phase === "REVEAL" ? Math.max(0, revealSecs - countdown) : 0;
+  const DEAL = nCards === 3 ? 0.6 : 0.5; // seconds per card dealt
+  const FLIP = nCards === 3 ? 0.65 : 0.5; // seconds per card flipped
+  const START = 0.2;
+  const dealDone = START + 2 * nCards * DEAL;
+  const dealtP = (i) => !!outcome && elapsed >= START + 2 * i * DEAL + 0.01;
+  const dealtD = (i) => !!outcome && elapsed >= START + (2 * i + 1) * DEAL;
+  const flipP = (i) => !!outcome && elapsed >= dealDone + 0.5 + i * FLIP;
+  const flipD = (i) => !!outcome && elapsed >= dealDone + 0.5 + nCards * FLIP + 0.4 + i * FLIP;
+  const showHands = !!outcome && elapsed >= dealDone + 0.9 + 2 * nCards * FLIP;
+  const winner = outcome?.winner;
+
+  // one soft flick per dealt card
+  const dealtTotal = !outcome
+    ? 0
+    : Array.from({ length: nCards }).reduce((acc, _, i) => acc + (dealtP(i) ? 1 : 0) + (dealtD(i) ? 1 : 0), 0);
+  const prevDealtRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "REVEAL") {
+      prevDealtRef.current = 0;
+      return;
+    }
+    if (dealtTotal > prevDealtRef.current) sfx.flick();
+    prevDealtRef.current = dealtTotal;
+  }, [dealtTotal, phase]);
 
   const sideTotals = {};
   myBets.forEach((b) => {
     sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
   });
 
-  const Row = ({ label, cards, hand, highlight }) => (
-    <div>
-      <p className="text-[11px] font-semibold text-white/50 mb-1.5">{label}{hand ? ` — ${hand}` : ""}</p>
-      <div className="flex gap-1.5">
-        {(cards || Array(nCards).fill(null)).map((c, i) => (
-          <motion.div key={`${label}-${i}-${c || "x"}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <PlayingCard code={c} size={nCards === 3 ? "lg" : "md"} dimmed={highlight === false} />
-          </motion.div>
-        ))}
+  const Row = ({ label, seat, cards, hand, dealtFn, flipFn }) => {
+    const isWinner = showHands && winner === seat;
+    const isLoser = showHands && winner !== seat && winner !== "tie";
+    return (
+      <div className={`rounded-xl p-2 -m-2 transition-[background-color] duration-300 ${isWinner ? "bg-[hsl(var(--emerald)/0.07)]" : ""}`}>
+        <div className="flex items-center gap-2 mb-1.5 min-h-[18px]">
+          <p className="text-[11px] font-semibold text-white/50">{label}</p>
+          {showHands && hand && <span className="text-[11px] font-bold text-primary">{hand}</span>}
+          {isWinner && (
+            <span className="text-[9px] font-extrabold tracking-wider text-[hsl(var(--emerald))] border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.12)] rounded-full px-1.5 py-0.5">
+              WINNER
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1.5">
+          {Array.from({ length: nCards }, (_, i) => (
+            <FlipCard
+              key={i}
+              code={outcome ? cards[i] : null}
+              size={nCards === 3 ? "lg" : "md"}
+              dealt={dealtFn(i)}
+              flipped={flipFn(i)}
+              dim={isLoser}
+            />
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
 
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-4">
-        <Row label="Dealer" cards={reveal ? outcome.dealer : null} hand={reveal ? outcome.dealer_hand : null} highlight={reveal ? outcome.winner === "dealer" : undefined} />
-        <div className="border-t border-white/8" />
-        <Row label="Player" cards={reveal ? outcome.player : null} hand={reveal ? outcome.player_hand : null} highlight={reveal ? outcome.winner === "player" : undefined} />
+        <Row label="Dealer" seat="dealer" cards={outcome?.dealer || []} hand={outcome?.dealer_hand} dealtFn={dealtD} flipFn={flipD} />
+        <div className="relative border-t border-white/8">
+          {showHands && winner === "tie" && (
+            <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 text-[9px] font-extrabold tracking-widest text-primary border border-primary/40 bg-black/60 rounded-full px-2 py-0.5">
+              TIE
+            </span>
+          )}
+        </div>
+        <Row label="Player" seat="player" cards={outcome?.player || []} hand={outcome?.player_hand} dealtFn={dealtP} flipFn={flipP} />
         <div className="flex items-center justify-between">
-          <p className="text-[11px] text-white/45">Back player, dealer or tie — one universal deal per round</p>
+          <p className="text-[11px] text-white/45">One universal deal per round — dealt live, card by card</p>
           <LastResults
             items={lastResults.slice(0, 6)}
             render={(r) => (

@@ -125,6 +125,16 @@ export const sfx = {
   deal: () => {
     [0, 0.12, 0.24].forEach((w) => noise({ dur: 0.055, vol: 0.11, when: w, freq: 3400, q: 1.4 }));
   },
+  flick: () => {
+    noise({ dur: 0.05, vol: 0.1, freq: 3200, q: 1.6 });
+  },
+  flip: () => {
+    noise({ dur: 0.06, vol: 0.08, freq: 2400, q: 1.2 });
+    tone({ freq: 1500, dur: 0.05, type: "triangle", vol: 0.05, when: 0.02 });
+  },
+  hold: () => {
+    tone({ freq: 1200, dur: 0.07, type: "triangle", vol: 0.1 });
+  },
   spin: () => {
     noise({ dur: 0.8, vol: 0.05, freq: 900, q: 0.8 });
     for (let i = 0; i < 8; i++) tone({ freq: 2100, dur: 0.02, type: "square", vol: 0.05, when: i * 0.12 });
