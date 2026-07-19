@@ -123,3 +123,10 @@
 - System enforcement: maintenance/update-required blocks player navigation.
 - No payment/deposit/withdraw/cash-out functionality or routes exist.
 - Tests cover key invariants (status gating, 18 games present, no gameplay start, chip ledger correctness).
+---
+## STATUS LOG
+- [DONE] Phase 1 POC: backend built, test_core.py 37/37 checks green (auth, onboarding approval, chip ledger, gating, maintenance, no payment routes)
+- [DONE] Phase 2: full player frontend (welcome/register/verify/login/forgot, onboarding x3, home lobby w/ hero carousel + rails, games grid 18, game detail, search, favorites, recent, chips wallet, announcements, notifications, profile/security/settings, maintenance/offline/update-required) + admin panel (dashboard, users, chip-requests, games, announcements, system)
+- [IN PROGRESS] Phase 2: E2E testing via testing agent
+- [PENDING] Phase 4: real email provider (user will supply SendGrid/SMTP creds at the end; demo mode active: dev_code shown on screen)
+- Credentials: admin@fungame.app / FunGame@Admin2025 ; player@fungame.app / Player@123 (see /app/memory/test_credentials.md)

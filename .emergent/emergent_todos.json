@@ -9,23 +9,23 @@
   },
   {
     "content": "Phase 2: Get design guidelines from design_agent",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Build frontend player app (auth, onboarding, lobby with 18 games, chips, announcements, notifications, profile, settings, system screens)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Build admin panel (users, chip requests, games, announcements, maintenance)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: All user stories covered in development",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Phase 4 (later): SendGrid/SMTP email integration when user provides credentials",

@@ -1,75 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Gloock&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
     margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
-}
-
 @layer base {
     :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
+        --background: 222 55% 6%;
+        --foreground: 210 40% 98%;
+        --card: 222 45% 9%;
+        --card-foreground: 210 40% 98%;
+        --popover: 222 45% 9%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 43 92% 56%;
+        --primary-foreground: 222 55% 8%;
+        --secondary: 222 30% 14%;
+        --secondary-foreground: 210 40% 98%;
+        --muted: 222 28% 12%;
+        --muted-foreground: 215 20% 72%;
+        --accent: 222 28% 12%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 72% 52%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 222 22% 18%;
+        --input: 222 22% 18%;
+        --ring: 43 92% 56%;
+        --gold-2: 38 78% 48%;
+        --cyan: 190 92% 55%;
+        --emerald: 152 62% 46%;
+        --magenta: 325 78% 58%;
+        --radius: 14px;
+        --chart-1: 43 92% 56%;
+        --chart-2: 190 92% 55%;
+        --chart-3: 152 62% 46%;
+        --chart-4: 325 78% 58%;
+        --chart-5: 222 30% 40%;
     }
     .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
+        --background: 222 55% 6%;
+        --foreground: 210 40% 98%;
+        --card: 222 45% 9%;
+        --card-foreground: 210 40% 98%;
+        --popover: 222 45% 9%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 43 92% 56%;
+        --primary-foreground: 222 55% 8%;
+        --secondary: 222 30% 14%;
+        --secondary-foreground: 210 40% 98%;
+        --muted: 222 28% 12%;
+        --muted-foreground: 215 20% 72%;
+        --accent: 222 28% 12%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 72% 52%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 222 22% 18%;
+        --input: 222 22% 18%;
+        --ring: 43 92% 56%;
     }
 }
 
@@ -80,6 +73,113 @@ code {
     body {
         @apply bg-background text-foreground;
     }
+}
+
+.font-display {
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+}
+
+/* Subtle CSS-only grain overlay */
+.fg-noise::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+}
+
+/* Aurora hero backdrop (top strip only) */
+.fg-aurora {
+    background:
+        radial-gradient(900px 240px at 20% 0%, rgba(0, 229, 255, 0.14), transparent 60%),
+        radial-gradient(700px 220px at 80% 10%, rgba(34, 197, 94, 0.10), transparent 55%),
+        radial-gradient(600px 220px at 55% 0%, rgba(255, 199, 64, 0.10), transparent 60%);
+}
+
+/* Game key-art container */
+.game-art {
+    position: relative;
+    overflow: hidden;
+}
+.game-art::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(600px 220px at 20% 10%, rgba(255, 255, 255, 0.10), transparent 55%);
+    mix-blend-mode: screen;
+    pointer-events: none;
+}
+.game-art::after {
+    content: "";
+    position: absolute;
+    inset: -40%;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 199, 64, 0.08), transparent 55%);
+    transform: rotate(12deg);
+    pointer-events: none;
+}
+
+@keyframes fg-glint {
+    0%, 100% { opacity: 0.25; transform: scale(0.9); }
+    50% { opacity: 0.9; transform: scale(1.15); }
+}
+.fg-glint {
+    animation: fg-glint 2.8s ease-in-out infinite;
+}
+
+@keyframes fg-badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.72; }
+}
+.fg-badge-pulse {
+    animation: fg-badge-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes fg-shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+}
+.fg-shimmer {
+    background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 75%);
+    background-size: 800px 100%;
+    animation: fg-shimmer 1.8s linear infinite;
+}
+
+/* Reduced motion: user toggle + system preference */
+.rm *, .rm *::before, .rm *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001s !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001s !important;
+    }
+}
+
+/* High contrast mode */
+.hc .text-white\/70, .hc .text-white\/60, .hc .text-muted-foreground {
+    color: rgba(255, 255, 255, 0.92) !important;
+}
+.hc .border-white\/10 {
+    border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbar for horizontal rails */
+.fg-rail {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.fg-rail::-webkit-scrollbar {
+    display: none;
 }
 
 @layer base {
