@@ -6,6 +6,7 @@ import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
+import { CoinShower, WinBurst } from "./slotFx";
 import { FitWidth } from "@/components/FitWidth";
 
 /**
@@ -159,17 +160,29 @@ export default function Lucky8LineGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "FORTUNE SPINNING\u2026" }} />
 
-      {/* ---- Asian fortune cabinet ---- */}
+      {/* ---- cinematic Asian fortune cabinet (3D tilt + gold frame depth) ---- */}
+      <div style={{ perspective: "1100px" }}>
       <div
         data-testid="lucky8-cabinet"
-        className="rounded-2xl overflow-hidden border-2 relative"
-        style={{ borderColor: `${GOLD}55`, background: `linear-gradient(180deg, ${CRIMSON} 0%, #450a0a 40%, #2b0707 100%)` }}
+        className={`rounded-2xl overflow-hidden border-2 relative ${isWin && outcome.multiplier >= 18 ? "fg-jackpot-pulse" : ""}`}
+        style={{
+          borderColor: `${GOLD}aa`,
+          background: `linear-gradient(180deg, ${CRIMSON} 0%, #450a0a 40%, #2b0707 100%)`,
+          transform: "rotateX(6deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 18px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)",
+        }}
       >
+        {isWin && <WinBurst mult={outcome.multiplier} showAt={7} />}
+        {isWin && <CoinShower />}
+        {/* gold side rails */}
+        <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5" style={{ background: `linear-gradient(90deg, ${GOLD}, #b45309)` }} />
+        <span aria-hidden="true" className="absolute right-0 top-0 bottom-0 w-1.5" style={{ background: `linear-gradient(270deg, ${GOLD}, #b45309)` }} />
         {/* header with lanterns */}
         <div className="flex items-start justify-between px-4 pt-2 pb-1" style={{ borderBottom: `1px solid ${GOLD}33` }}>
           <Lantern />
           <div className="text-center pt-1">
-            <p className="font-display text-2xl" style={{ color: GOLD, textShadow: `0 0 16px ${GOLD}66` }} data-testid="lucky8-marquee">
+            <p className="font-display text-2xl fg-neon" style={{ color: GOLD }} data-testid="lucky8-marquee">
               LUCKY 8 LINE
             </p>
             <p className="text-[9px] font-extrabold tracking-[0.35em]" style={{ color: "#fca5a5" }}>
@@ -194,10 +207,11 @@ export default function Lucky8LineGame({ game }) {
               {[0, 1, 2].map((col) => (
                 <div
                   key={col}
-                  className="w-[72px] rounded-md overflow-hidden"
+                  className={`w-[72px] rounded-md overflow-hidden relative ${spinningPhase && col >= stoppedCount ? "fg-reel-spinning" : ""}`}
                   style={{ background: "linear-gradient(180deg, #2b0707, #160303 50%, #2b0707)", boxShadow: "inset 0 4px 8px rgba(0,0,0,0.5), inset 0 -4px 8px rgba(0,0,0,0.5)" }}
                   data-testid={`lucky8-col-${col}`}
                 >
+                  <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/3 z-10" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.18), transparent)" }} />
                   {columnCells(col)}
                 </div>
               ))}
@@ -225,6 +239,7 @@ export default function Lucky8LineGame({ game }) {
             <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 1 ? "gold" : r.multiplier === 1 ? "cyan" : "neutral"} />} />
           </div>
         </div>
+      </div>
       </div>
 
       <ResultBanner result={result} />
