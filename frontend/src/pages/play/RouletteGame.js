@@ -348,7 +348,8 @@ export default function RouletteGame({ game }) {
         ballAnimRef.current = requestAnimationFrame(frame);
       } else {
         sfx.ballLand();
-        setLanded(true); // reveal the number only now — the wheel has visually stopped
+        // NOTE: the reveal itself is fired by the land timer in spinTo (dur + settle
+        // buffer) so the number never appears until the wheel has fully come to rest.
       }
     };
     ballAnimRef.current = requestAnimationFrame(frame);
@@ -377,9 +378,10 @@ export default function RouletteGame({ game }) {
       setWheelRot(next);
       sfx.ballSpin();
       animateBall();
-      // safety net: guarantee the reveal even if a rAF frame is dropped
+      // reveal the number a clear beat AFTER the wheel's transition fully settles,
+      // so it can never flash while the wheel is still visibly moving.
       clearTimeout(landTimerRef.current);
-      landTimerRef.current = setTimeout(() => setLanded(true), dur + 120);
+      landTimerRef.current = setTimeout(() => setLanded(true), dur + 300);
     },
     [animateBall]
   );
@@ -543,7 +545,7 @@ export default function RouletteGame({ game }) {
         <div className="flex items-center gap-2">
           <Timer className={`h-4 w-4 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
           <span data-testid="roulette-phase" className={`text-xs font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
-            {betting ? "PLACE YOUR BETS" : state?.phase === "SPINNING" ? "NO MORE BETS" : "RESULT"}
+            {betting ? "PLACE YOUR BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
           </span>
         </div>
         <div className="flex items-center gap-2">
