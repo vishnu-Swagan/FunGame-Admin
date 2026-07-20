@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Coins, ArrowDownToLine, History, CircleCheck, CircleX, CircleEllipsis, Star, ArrowLeftRight } from "lucide-react";
+import { Coins, ArrowDownToLine, History, CircleCheck, CircleX, CircleEllipsis } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,16 +26,11 @@ export default function ChipsPage() {
   const initialTab = location.pathname.endsWith("/request") ? "request" : location.pathname.endsWith("/history") ? "history" : "request";
   const [tab, setTab] = useState(initialTab);
   const [balance, setBalance] = useState(user?.chip_balance ?? 0);
-  const [points, setPoints] = useState(user?.points_balance ?? 0);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [requests, setRequests] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  // chips -> points: admin-approved sell request | points -> chips: instant (1:1, min 500)
-  const [convertDir, setConvertDir] = useState("CHIPS_TO_POINTS");
-  const [convertAmt, setConvertAmt] = useState("");
-  const [convertBusy, setConvertBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -45,7 +40,6 @@ export default function ChipsPage() {
         api.get("/chips/transactions"),
       ]);
       setBalance(b.data.balance);
-      setPoints(b.data.points ?? 0);
       setRequests(r.data.requests || []);
       setTransactions(t.data.transactions || []);
     } catch (e) {
@@ -81,38 +75,6 @@ export default function ChipsPage() {
     }
   };
 
-  const convert = async (e) => {
-    e.preventDefault();
-    const amt = parseInt(convertAmt, 10);
-    if (!amt || amt < 500) {
-      toast.error("Minimum amount is 500");
-      return;
-    }
-    setConvertBusy(true);
-    try {
-      if (convertDir === "CHIPS_TO_POINTS") {
-        // Selling chips requires operator approval — chips are deducted only when approved.
-        const { data } = await api.post("/chips/sell-request", { amount: amt });
-        toast.success(data.message || "Sell request submitted — an operator will review it.");
-        setConvertAmt("");
-        await load();
-        setTab("history");
-        navigate("/chips/history", { replace: true });
-      } else {
-        const { data } = await api.post("/chips/convert", { direction: "POINTS_TO_CHIPS", amount: amt });
-        setBalance(data.chip_balance);
-        setPoints(data.points_balance);
-        setConvertAmt("");
-        toast.success(data.message);
-        await refreshUser();
-      }
-    } catch (err) {
-      toast.error(errMsg(err));
-    } finally {
-      setConvertBusy(false);
-    }
-  };
-
   return (
     <PageTransition className="space-y-5">
       <h1 className="text-2xl font-bold tracking-tight">Chips wallet</h1>
@@ -129,75 +91,6 @@ export default function ChipsPage() {
           <span data-testid="chips-balance-value" className="tabular-nums text-4xl font-extrabold text-primary">{formatChips(balance)}</span>
         </div>
         <Disclaimer className="mt-3" />
-      </div>
-
-      {/* Points wallet + instant converter */}
-      <div className="rounded-2xl border border-white/10 bg-card/55 backdrop-blur-md p-4 space-y-3.5" data-testid="points-card">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-full bg-white/5 border border-white/12 flex items-center justify-center">
-              <Star className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-xs text-white/55">Points balance</p>
-              <p data-testid="points-balance-value" className="tabular-nums text-xl font-extrabold text-white leading-tight">{formatChips(points)}</p>
-            </div>
-          </div>
-          <span className="text-[10px] font-bold tracking-wider text-white/40 border border-white/10 rounded-full px-2 py-0.5">1 CHIP = 1 POINT</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            data-testid="convert-dir-chips-to-points"
-            onClick={() => setConvertDir("CHIPS_TO_POINTS")}
-            className={`rounded-xl border px-2 py-2.5 min-h-[44px] text-xs font-bold transition-[background-color,border-color] duration-150 ${
-              convertDir === "CHIPS_TO_POINTS" ? "bg-primary/15 border-primary/50 text-primary" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
-            }`}
-          >
-            Sell chips → points
-          </button>
-          <button
-            type="button"
-            data-testid="convert-dir-points-to-chips"
-            onClick={() => setConvertDir("POINTS_TO_CHIPS")}
-            className={`rounded-xl border px-2 py-2.5 min-h-[44px] text-xs font-bold transition-[background-color,border-color] duration-150 ${
-              convertDir === "POINTS_TO_CHIPS" ? "bg-primary/15 border-primary/50 text-primary" : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
-            }`}
-          >
-            Points → chips
-          </button>
-        </div>
-        <form onSubmit={convert} className="flex gap-2">
-          <Input
-            data-testid="convert-amount-input"
-            type="number"
-            min="500"
-            max="1000000"
-            placeholder="Amount (min 500)"
-            value={convertAmt}
-            onChange={(e) => setConvertAmt(e.target.value)}
-            className="h-11 rounded-xl bg-white/5 border-white/12 tabular-nums"
-            aria-label="Conversion amount"
-          />
-          <Button
-            data-testid="convert-submit-button"
-            type="submit"
-            disabled={convertBusy || !convertAmt || parseInt(convertAmt, 10) < 500}
-            className="h-11 rounded-xl font-bold shrink-0 hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150"
-          >
-            <ArrowLeftRight className="h-4 w-4 mr-1.5" />
-            {convertBusy
-              ? "Working…"
-              : convertDir === "CHIPS_TO_POINTS"
-                ? "Request sale"
-                : "Convert"}
-          </Button>
-        </form>
-        <p className="text-[11px] text-white/40">
-          {convertDir === "CHIPS_TO_POINTS"
-            ? "Sell requests are reviewed by an operator. Chips are deducted only when your request is approved (1 chip = 1 point, minimum 500)."
-            : "Convert points back into play chips instantly. Minimum 500 points."}
-        </p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => { setTab(v); navigate(v === "request" ? "/chips/request" : "/chips/history", { replace: true }); }} data-testid="chips-wallet-tabs">
@@ -265,24 +158,13 @@ export default function ChipsPage() {
               <EmptyState icon={ArrowDownToLine} title="No requests yet" subtitle="Your chip requests will appear here." />
             ) : (
               <div data-testid="chips-requests-list" className="space-y-2.5">
-                {requests.map((r) => {
+                {requests.filter((r) => r.type !== "SELL").map((r) => {
                   const S = REQ_STATUS[r.status] || REQ_STATUS.PENDING;
                   const SIcon = S.icon;
-                  const isSell = r.type === "SELL";
                   return (
                     <div key={r.id} data-testid="chips-request-item" className="flex items-center justify-between rounded-xl bg-card/55 border border-white/10 p-3.5">
                       <div>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            data-testid="chips-request-type-badge"
-                            className={`text-[9px] font-bold tracking-wider rounded-full border px-1.5 py-0.5 ${
-                              isSell ? "text-[hsl(var(--magenta))] border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.1)]" : "text-primary border-primary/35 bg-primary/10"
-                            }`}
-                          >
-                            {isSell ? "SELL" : "BUY"}
-                          </span>
-                          <p className="tabular-nums font-bold">{formatChips(r.amount)} {isSell ? "chips → points" : "chips"}</p>
-                        </div>
+                        <p className="tabular-nums font-bold">{formatChips(r.amount)} chips</p>
                         <p className="text-[11px] text-white/45 mt-0.5">{timeAgo(r.created_at)}{r.admin_note ? ` · ${r.admin_note}` : ""}</p>
                       </div>
                       <Badge variant="outline" className={`rounded-full border text-[10px] font-bold px-2.5 py-1 flex items-center gap-1 ${S.cls}`}>

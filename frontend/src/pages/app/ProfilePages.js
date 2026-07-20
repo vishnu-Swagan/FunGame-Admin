@@ -47,14 +47,10 @@ export function Profile() {
             </div>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4">
           <div className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
             <p className="text-xs text-white/55">Play chips</p>
             <p className="tabular-nums font-bold text-primary" data-testid="profile-chip-balance">{formatChips(user?.chip_balance)}</p>
-          </div>
-          <div className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
-            <p className="text-xs text-white/55">Points</p>
-            <p className="tabular-nums font-bold text-white" data-testid="profile-points-balance">{formatChips(user?.points_balance || 0)}</p>
           </div>
         </div>
       </div>
