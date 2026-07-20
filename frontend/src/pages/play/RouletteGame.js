@@ -37,67 +37,101 @@ function wedgePath(cx, cy, r0, r1, a0, a1) {
 const WheelSVG = () => (
   <svg viewBox="0 0 220 220" className="w-full h-full">
     <defs>
-      <radialGradient id="rimWood" cx="50%" cy="42%" r="62%">
-        <stop offset="0%" stopColor="#6b4a12" />
-        <stop offset="70%" stopColor="#4a320c" />
-        <stop offset="100%" stopColor="#2c1d06" />
+      <radialGradient id="rimWood" cx="50%" cy="30%" r="72%">
+        <stop offset="0%" stopColor="#8a5f1c" />
+        <stop offset="52%" stopColor="#573a0e" />
+        <stop offset="100%" stopColor="#221606" />
       </radialGradient>
-      <radialGradient id="hubMetal" cx="45%" cy="40%" r="65%">
-        <stop offset="0%" stopColor="#f4d67a" />
-        <stop offset="55%" stopColor="#c9a227" />
-        <stop offset="100%" stopColor="#7a5c12" />
+      <radialGradient id="trackWell" cx="50%" cy="46%" r="55%">
+        <stop offset="72%" stopColor="#0c0904" />
+        <stop offset="100%" stopColor="#000000" />
       </radialGradient>
+      <linearGradient id="fret" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#fbf3d6" />
+        <stop offset="45%" stopColor="#c3ad70" />
+        <stop offset="100%" stopColor="#6b5626" />
+      </linearGradient>
+      <radialGradient id="hubMetal" cx="40%" cy="34%" r="72%">
+        <stop offset="0%" stopColor="#fff2c8" />
+        <stop offset="52%" stopColor="#c9a227" />
+        <stop offset="100%" stopColor="#6b4f10" />
+      </radialGradient>
+      <radialGradient id="coneMetal" cx="42%" cy="36%" r="70%">
+        <stop offset="0%" stopColor="#3b2c0d" />
+        <stop offset="60%" stopColor="#241a06" />
+        <stop offset="100%" stopColor="#120c03" />
+      </radialGradient>
+      <filter id="numSh" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="0.35" stdDeviation="0.35" floodColor="#000" floodOpacity="0.8" />
+      </filter>
     </defs>
-    {/* wooden rim */}
+
+    {/* polished wooden rim + chrome ring */}
     <circle cx="110" cy="110" r="109" fill="url(#rimWood)" />
-    <circle cx="110" cy="110" r="106" fill="none" stroke="#e8c86a" strokeWidth="1.2" opacity="0.8" />
-    <circle cx="110" cy="110" r="103" fill="none" stroke="#c9a227" strokeWidth="2.4" />
-    {/* ball track */}
-    <circle cx="110" cy="110" r="99" fill="#1c1408" />
-    <circle cx="110" cy="110" r="95" fill="none" stroke="#00000055" strokeWidth="6" />
-    {/* deflector studs */}
+    <circle cx="110" cy="110" r="105" fill="none" stroke="#f0d488" strokeWidth="1.6" opacity="0.9" />
+    <circle cx="110" cy="110" r="102" fill="none" stroke="#2e2109" strokeWidth="2" />
+
+    {/* recessed ball track */}
+    <circle cx="110" cy="110" r="99" fill="url(#trackWell)" />
+    <circle cx="110" cy="110" r="99" fill="none" stroke="#000" strokeWidth="2.5" opacity="0.55" />
+    <circle cx="110" cy="110" r="94" fill="none" stroke="#e8c86a" strokeWidth="0.6" opacity="0.45" />
+
+    {/* deflector diamonds */}
     {[22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5].map((a) => {
-      const [dx, dy] = polar(110, 110, 97, a);
-      return <circle key={a} cx={dx} cy={dy} r="2" fill="#e8c86a" />;
+      const [dx, dy] = polar(110, 110, 96, a);
+      return <rect key={a} x={dx - 2.2} y={dy - 2.2} width="4.4" height="4.4" rx="1" transform={`rotate(${a} ${dx} ${dy})`} fill="url(#hubMetal)" stroke="#2e2109" strokeWidth="0.4" />;
     })}
+
+    {/* number pockets — deep casino colours */}
     {EURO_ORDER.map((n, i) => {
       const a0 = i * SEG - SEG / 2;
       const a1 = a0 + SEG;
-      const fill = n === 0 ? "#0a7a3c" : RED.has(n) ? "#b3282d" : "#15181f";
+      const fill = n === 0 ? "#0b7a3b" : RED.has(n) ? "#b0121c" : "#0e1015";
       const mid = i * SEG;
-      const [tx, ty] = polar(110, 110, 84, mid);
+      const [tx, ty] = polar(110, 110, 83, mid);
       return (
         <g key={n}>
-          <path d={wedgePath(110, 110, 54, 92, a0, a1)} fill={fill} stroke="#c9a227" strokeWidth="0.7" />
+          <path d={wedgePath(110, 110, 52, 92, a0, a1)} fill={fill} />
           <text
             x={tx}
             y={ty}
-            fill="#fff"
-            fontSize="8"
+            fill="#f7f2e4"
+            fontSize="8.4"
             fontWeight="700"
             textAnchor="middle"
             dominantBaseline="central"
             transform={`rotate(${mid}, ${tx}, ${ty})`}
+            filter="url(#numSh)"
           >
             {n}
           </text>
         </g>
       );
     })}
-    {/* pocket separators glint */}
-    <circle cx="110" cy="110" r="92" fill="none" stroke="#e8c86a" strokeWidth="0.8" opacity="0.7" />
-    {/* cone centre */}
-    <circle cx="110" cy="110" r="54" fill="#1a1408" stroke="#c9a227" strokeWidth="1.5" />
-    <circle cx="110" cy="110" r="40" fill="#241a06" />
-    <circle cx="110" cy="110" r="28" fill="#2b2005" stroke="#c9a227" strokeWidth="1" />
-    {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
-      const [x1, y1] = polar(110, 110, 28, a);
-      const [x2, y2] = polar(110, 110, 52, a);
-      return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#c9a227" strokeWidth="2" opacity="0.9" />;
+
+    {/* metallic frets separating every pocket */}
+    {EURO_ORDER.map((_, i) => {
+      const a = i * SEG - SEG / 2;
+      const [x0, y0] = polar(110, 110, 52, a);
+      const [x1, y1] = polar(110, 110, 92, a);
+      return <line key={`fr-${i}`} x1={x0} y1={y0} x2={x1} y2={y1} stroke="url(#fret)" strokeWidth="1.1" strokeLinecap="round" />;
     })}
-    {/* turret */}
-    <circle cx="110" cy="110" r="9" fill="url(#hubMetal)" />
-    <circle cx="110" cy="110" r="3.5" fill="#f8e6ae" />
+    <circle cx="110" cy="110" r="92" fill="none" stroke="#e8c86a" strokeWidth="0.8" opacity="0.55" />
+    <circle cx="110" cy="110" r="52" fill="none" stroke="#e8c86a" strokeWidth="0.8" opacity="0.55" />
+
+    {/* metallic cone centre */}
+    <circle cx="110" cy="110" r="52" fill="url(#coneMetal)" stroke="#c9a227" strokeWidth="1.3" />
+    <circle cx="110" cy="110" r="38" fill="url(#coneMetal)" />
+    {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
+      const [x1, y1] = polar(110, 110, 24, a);
+      const [x2, y2] = polar(110, 110, 50, a);
+      return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke="url(#fret)" strokeWidth="1.8" opacity="0.85" />;
+    })}
+    <circle cx="110" cy="110" r="24" fill="url(#coneMetal)" stroke="#c9a227" strokeWidth="0.9" />
+
+    {/* golden turret */}
+    <circle cx="110" cy="110" r="10" fill="url(#hubMetal)" stroke="#5c440d" strokeWidth="0.5" />
+    <circle cx="107" cy="107" r="3" fill="#fff4d2" opacity="0.9" />
   </svg>
 );
 
@@ -252,7 +286,8 @@ export default function RouletteGame({ game }) {
   const camTimerRef = useRef(null);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
-  const [placing, setPlacing] = useState(false);
+  const [landed, setLanded] = useState(false);   // wheel has visually stopped this round
+  const [spinMs, setSpinMs] = useState(5200);     // dynamic: syncs the spin to the server phase
 
   const pollRef = useRef(null);
   const tickRef = useRef(null);
@@ -264,6 +299,10 @@ export default function RouletteGame({ game }) {
   const stateRef = useRef(null);
   const ballRef = useRef(null);
   const ballAnimRef = useRef(null);
+  const betSeqRef = useRef(0);                    // latest bet request wins the reconcile
+  const inFlightRef = useRef(0);                  // # bets awaiting the server (poll won't clobber optimistic state)
+  const spinDurRef = useRef(5200);                // ball animation duration (mirrors spinMs)
+  const landTimerRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -280,7 +319,7 @@ export default function RouletteGame({ game }) {
      finally settles into the winning pocket as the wheel slows. In 3D the
      ball also drops in height (translateZ) from the upper rim into the bowl. */
   const animateBall = useCallback(() => {
-    const DURATION = 5200; // matches the wheel deceleration
+    const DURATION = spinDurRef.current; // matches the wheel deceleration (synced to the round)
     const TOTAL = 6 * 360; // clockwise revolutions (opposite to the wheel)
     const R_TRACK = 101;
     const R_POCKET = 75;
@@ -309,15 +348,20 @@ export default function RouletteGame({ game }) {
         ballAnimRef.current = requestAnimationFrame(frame);
       } else {
         sfx.ballLand();
+        setLanded(true); // reveal the number only now — the wheel has visually stopped
       }
     };
     ballAnimRef.current = requestAnimationFrame(frame);
   }, []);
 
   const spinTo = useCallback(
-    (winning) => {
+    (winning, durMs) => {
       const idx = EURO_ORDER.indexOf(winning);
       if (idx < 0) return;
+      const dur = Math.max(2400, Math.min(5600, durMs || 5200));
+      spinDurRef.current = dur;
+      setSpinMs(dur);
+      setLanded(false);
       const prev = wheelRotRef.current;
       const targetMod = (360 - idx * SEG) % 360;
       // counterclockwise: at least 5 full turns, ending with the winning pocket at the top
@@ -329,10 +373,13 @@ export default function RouletteGame({ game }) {
       // once the ball has landed and the result is showing
       setCameraZoom(true);
       clearTimeout(camTimerRef.current);
-      camTimerRef.current = setTimeout(() => setCameraZoom(false), 5600);
+      camTimerRef.current = setTimeout(() => setCameraZoom(false), dur + 400);
       setWheelRot(next);
       sfx.ballSpin();
       animateBall();
+      // safety net: guarantee the reveal even if a rAF frame is dropped
+      clearTimeout(landTimerRef.current);
+      landTimerRef.current = setTimeout(() => setLanded(true), dur + 120);
     },
     [animateBall]
   );
@@ -340,21 +387,31 @@ export default function RouletteGame({ game }) {
   const applyState = useCallback(
     (data) => {
       stateRef.current = data;
-      setState(data);
-      setBalance(data.balance);
+      // While a bet is awaiting the server, keep the optimistic bets/balance so a
+      // poll landing mid-request can't make the just-placed chip flicker away.
+      setState((prev) =>
+        inFlightRef.current > 0 && prev
+          ? { ...data, my_bets: prev.my_bets, my_total: prev.my_total }
+          : data
+      );
+      if (inFlightRef.current === 0) setBalance(data.balance);
       deadlineRef.current = Date.now() + data.phase_ends_in * 1000;
 
       if (data.my_bets && data.my_bets.length > 0) lastBetsRef.current = data.my_bets;
 
-      // Trigger the wheel animation once per round when spinning starts
-      if (data.phase !== "BETTING" && data.winning_number !== null && spunRoundRef.current !== data.round_number) {
+      // Trigger the wheel animation once per round. Sync its duration to the time
+      // left in the server SPIN phase so the ball lands exactly as the phase ends;
+      // the number is revealed only after the wheel has visually stopped (landed).
+      if (data.phase !== "BETTING" && data.winning_number != null && spunRoundRef.current !== data.round_number) {
         spunRoundRef.current = data.round_number;
-        spinTo(data.winning_number);
+        const durMs = data.phase === "SPINNING" ? Math.round((data.phase_ends_in || 0) * 1000) : 2600;
         setResult(null);
+        spinTo(data.winning_number, durMs);
       }
       if (data.phase === "BETTING") {
         setSpinningAnim(false);
         setCameraZoom(false);
+        setLanded(false);
       }
       // Show settlement result once
       if (data.settled && settledShownRef.current !== data.settled.round_number) {
@@ -391,7 +448,7 @@ export default function RouletteGame({ game }) {
   useEffect(() => {
     poll();
     loadHistory();
-    pollRef.current = setInterval(poll, 2000);
+    pollRef.current = setInterval(poll, 1000);
     tickRef.current = setInterval(() => {
       setCountdown(Math.max(0, (deadlineRef.current - Date.now()) / 1000));
     }, 100);
@@ -399,28 +456,49 @@ export default function RouletteGame({ game }) {
       clearInterval(pollRef.current);
       clearInterval(tickRef.current);
       clearTimeout(camTimerRef.current);
+      clearTimeout(landTimerRef.current);
       cancelAnimationFrame(ballAnimRef.current);
     };
   }, [poll, loadHistory]);
 
-  const placeBet = async (bet_type, value) => {
+  // Optimistic: the chip and sound land instantly on tap; the server response
+  // reconciles the authoritative totals a moment later. Rapid taps are never
+  // dropped — only the latest request's response is applied (the backend is
+  // cumulative, so it always carries every bet).
+  const placeBet = (bet_type, value, amt) => {
     if (!state || state.phase !== "BETTING") {
       toast.info("Bets are closed — wait for the next round");
       return;
     }
-    if (placing) return;
-    setPlacing(true);
-    try {
-      const { data } = await api.post("/games/fun-roulette/bets", { bet_type, value, amount: chip });
-      setState((s) => (s ? { ...s, my_bets: data.my_bets, my_total: data.my_total } : s));
-      setBalance(data.balance);
-      lastBetsRef.current = data.my_bets;
-      sfx.chip();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setPlacing(false);
-    }
+    const amount = amt || chip;
+    sfx.chip();
+    setBalance((b) => (b == null ? b : b - amount));
+    setState((s) =>
+      s
+        ? {
+            ...s,
+            my_bets: [...(s.my_bets || []), { bet_type, value, amount }],
+            my_total: (s.my_total || 0) + amount,
+          }
+        : s
+    );
+    const seq = ++betSeqRef.current;
+    inFlightRef.current += 1;
+    api
+      .post("/games/fun-roulette/bets", { bet_type, value, amount })
+      .then(({ data }) => {
+        if (seq !== betSeqRef.current) return; // a newer tap already owns the truth
+        setState((s) => (s ? { ...s, my_bets: data.my_bets, my_total: data.my_total } : s));
+        setBalance(data.balance);
+        lastBetsRef.current = data.my_bets;
+      })
+      .catch((e) => {
+        toast.error(errMsg(e));
+        poll(); // reconcile to server truth on failure
+      })
+      .finally(() => {
+        inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+      });
   };
 
   const clearBets = async () => {
@@ -435,13 +513,10 @@ export default function RouletteGame({ game }) {
     }
   };
 
-  const rebet = async () => {
+  const rebet = () => {
     const bets = lastBetsRef.current;
     if (!bets.length) return;
-    for (const b of bets) {
-      // eslint-disable-next-line no-await-in-loop
-      await placeBet(b.bet_type, b.value);
-    }
+    bets.forEach((b) => placeBet(b.bet_type, b.value, b.amount));
   };
 
   // Aggregate my bets per spot for chip display
@@ -520,25 +595,39 @@ export default function RouletteGame({ game }) {
                 style={{
                   transform: `rotateZ(${wheelRot}deg)`,
                   transformStyle: "preserve-3d",
-                  transition: spinningAnim ? "transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1)" : "none",
+                  transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
                   willChange: "transform",
                 }}
               >
                 <WheelSVG />
                 <Turret3D />
               </div>
-              {/* white ball — launched clockwise, spirals down into the winning pocket */}
+              {/* fixed ambient light + rim vignette — stays put while the wheel spins,
+                  so the highlight reads like real light instead of a flat cartoon fill */}
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{
+                  transform: "translateZ(3px)",
+                  background:
+                    "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
+                }}
+              />
+              {/* pearl ball — launched clockwise, spirals down into the winning pocket */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
                 <div
                   ref={ballRef}
-                  className="h-3.5 w-3.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.95),inset_-1px_-1px_2px_rgba(0,0,0,0.25)]"
-                  style={{ transform: "rotate(0deg) translateY(-75px) translateZ(5px)" }}
+                  className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
+                  style={{
+                    transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
+                    background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
+                  }}
                 />
               </div>
             </div>
           </div>
-          {/* landed number — screen-space overlay */}
-          {!betting && winning !== null && !spinningAnimActive(countdown, state) && (
+          {/* landed number — shown only after the wheel has visually stopped */}
+          {!betting && winning != null && landed && (
             <div className="absolute inset-0 z-20 flex items-center justify-center">
               <ResultDot n={winning} big />
             </div>
@@ -718,12 +807,4 @@ export default function RouletteGame({ game }) {
       <HistoryStrip history={history} />
     </PlayShell>
   );
-}
-
-// Ball/wheel animation lasts ~5.2s of the 6s spin phase; show the landed number
-// once the spin phase is nearly over or during the result phase.
-function spinningAnimActive(countdown, state) {
-  if (!state) return false;
-  if (state.phase === "SPINNING") return countdown > 0.7;
-  return false;
 }
