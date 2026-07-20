@@ -20,18 +20,49 @@ const crashTone = (c) =>
     ? "border-primary/40 text-primary"
     : "border-[hsl(var(--magenta)/0.4)] text-[hsl(var(--magenta))]";
 
-/* ---------------- Spribe-style multiplier curve scene ---------------- */
+/* ---------------- Realistic multiplier flight scene ---------------- */
+const heatColor = (m) => {
+  if (m >= 10) return { c: "#ff5a5f", g: "rgba(230,57,70,0.65)", fill: "rgba(230,57,70,0.22)" };
+  if (m >= 5) return { c: "#ff7ac0", g: "rgba(255,79,154,0.60)", fill: "rgba(255,79,154,0.18)" };
+  if (m >= 2) return { c: "#ffc740", g: "rgba(255,199,64,0.55)", fill: "rgba(255,199,64,0.16)" };
+  return { c: "#7cf6c9", g: "rgba(52,211,153,0.50)", fill: "rgba(52,211,153,0.14)" };
+};
+
+// two full-width drifting cloud bands (compositor-only translateX)
+const CloudBand = ({ cls, top, opacity }) => (
+  <div
+    aria-hidden="true"
+    className={`absolute ${cls}`}
+    style={{
+      top,
+      left: 0,
+      width: "200%",
+      height: 70,
+      opacity,
+      background:
+        "radial-gradient(60px 22px at 12% 50%, rgba(255,255,255,0.9), transparent 72%)," +
+        "radial-gradient(90px 30px at 40% 60%, rgba(255,255,255,0.8), transparent 72%)," +
+        "radial-gradient(54px 20px at 68% 42%, rgba(255,255,255,0.7), transparent 72%)," +
+        "radial-gradient(76px 26px at 90% 58%, rgba(255,255,255,0.75), transparent 72%)",
+      filter: "blur(2px)",
+    }}
+  />
+);
+
 const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
   const flying = phase === "FLYING";
   const crashed = phase === "CRASHED";
+  const betting = phase === "BETTING";
   const W = 100;
   const H = 56;
   const g = growth || 0.12;
+  const shown = crashed ? crashPoint : mult;
+  const heat = heatColor(shown);
   const elapsed = flying || crashed ? Math.log(Math.max(mult, 1.0001)) / g : 0;
   const T = Math.max(elapsed, 4);
   const M = Math.max(mult, 1.9);
   const pts = [];
-  const steps = 36;
+  const steps = 40;
   for (let i = 0; i <= steps; i++) {
     const t = (elapsed * i) / steps;
     const x = 4 + (t / T) * (W - 16);
@@ -41,70 +72,130 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
   const tip = pts[pts.length - 1];
   const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
   const area = `${line} L ${tip[0].toFixed(2)} ${H - 6} L 4 ${H - 6} Z`;
+  // sky warms as the plane climbs (danger builds)
+  const warm = Math.min(0.6, Math.max(0, (shown - 1.4) / 12));
+  const ring = betting ? Math.min(1, countdown / 6) : 0;
+  const R = 26, CIRC = 2 * Math.PI * R;
 
   return (
     <div
       data-testid="aviator-stage"
-      className={`relative overflow-hidden rounded-2xl border min-h-[240px] ${
-        crashed ? "border-destructive/40" : flying ? "border-[hsl(var(--emerald)/0.35)]" : "border-white/10"
+      className={`relative overflow-hidden rounded-2xl border min-h-[248px] ${crashed ? "fg-av-shake" : ""} ${
+        crashed ? "border-destructive/45" : flying ? "border-[hsl(var(--emerald)/0.35)]" : "border-white/10"
       }`}
-      style={{ background: "radial-gradient(130% 120% at 20% 100%, #101c3a 0%, #0a1226 45%, #060b18 100%)" }}
+      style={{
+        background:
+          "radial-gradient(120% 90% at 50% 118%, rgba(255,150,60," + warm + ") 0%, transparent 55%)," +
+          "radial-gradient(130% 130% at 22% 108%, #16244e 0%, #0d1834 42%, #060b1a 100%)",
+      }}
     >
-      {/* star field */}
-      <div className="absolute inset-0 opacity-50" aria-hidden="true">
-        {[...Array(18)].map((_, i) => (
+      {/* stars */}
+      <div className="absolute inset-0" aria-hidden="true">
+        {[...Array(22)].map((_, i) => (
           <span
             key={i}
-            className="absolute h-[2px] w-[2px] rounded-full bg-white/60"
-            style={{ left: `${(i * 53) % 100}%`, top: `${(i * 37) % 90}%`, opacity: 0.2 + ((i * 13) % 10) / 20 }}
+            className="absolute rounded-full bg-white"
+            style={{
+              left: `${(i * 41) % 100}%`,
+              top: `${(i * 29) % 70}%`,
+              height: i % 5 === 0 ? 2.5 : 1.5,
+              width: i % 5 === 0 ? 2.5 : 1.5,
+              animation: `fg-av-twinkle ${2 + (i % 4)}s ease-in-out ${i * 0.13}s infinite`,
+            }}
           />
         ))}
       </div>
+      {/* drifting cloud parallax */}
+      <CloudBand cls="fg-av-cloud2" top="18%" opacity={0.1} />
+      <CloudBand cls="fg-av-cloud" top="52%" opacity={0.14} />
+      {/* faint altitude grid */}
+      <div
+        className="absolute inset-0 opacity-[0.12]"
+        aria-hidden="true"
+        style={{
+          backgroundImage: "linear-gradient(rgba(255,255,255,0.4) 1px, transparent 1px)",
+          backgroundSize: "100% 28px",
+          maskImage: "linear-gradient(to top, black, transparent 85%)",
+          WebkitMaskImage: "linear-gradient(to top, black, transparent 85%)",
+        }}
+      />
 
-      {/* curve */}
+      {/* the climbing curve with glowing gradient fill + hot leading edge */}
       {(flying || crashed) && (
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-          <path d={area} fill={crashed ? "rgba(230,57,70,0.14)" : "rgba(255,79,154,0.16)"} />
-          <path d={line} fill="none" stroke={crashed ? "#e63946" : "#ff4f9a"} strokeWidth="1.4" strokeLinecap="round" />
+          <defs>
+            <linearGradient id="avFill" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor={heat.fill} stopOpacity="0.05" />
+              <stop offset="100%" stopColor={heat.fill} />
+            </linearGradient>
+          </defs>
+          <path d={area} fill="url(#avFill)" />
+          <path
+            d={line}
+            fill="none"
+            stroke={crashed ? "#e63946" : heat.c}
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ filter: `drop-shadow(0 0 2px ${crashed ? "rgba(230,57,70,0.8)" : heat.g})` }}
+          />
+          {!crashed && <circle cx={tip[0]} cy={tip[1]} r="1.8" fill="#fff" style={{ filter: `drop-shadow(0 0 3px ${heat.g})` }} />}
         </svg>
       )}
 
-      {/* the Aviator plane at the curve tip */}
+      {/* plane at the curve tip — banks while flying, rockets off on crash */}
       {(flying || crashed) && (
-        <div
-          className={`absolute transition-[transform,opacity] duration-300 ${crashed ? "opacity-0 translate-x-20 -translate-y-12" : ""}`}
-          style={{ left: `${tip[0]}%`, top: `${(tip[1] / H) * 100}%`, transform: "translate(-42%, -78%)" }}
-        >
-          <img
-            src={PLANE_SRC}
-            alt=""
-            draggable="false"
-            className={`h-14 w-auto select-none drop-shadow-[0_6px_16px_rgba(255,79,154,0.45)] ${crashed ? "-rotate-[13deg]" : "fg-plane-bob"}`}
-          />
+        <div className="absolute" style={{ left: `${tip[0]}%`, top: `${(tip[1] / H) * 100}%` }}>
+          <div className={crashed ? "fg-av-flyaway" : "fg-av-fly"}>
+            {/* prop wash glow */}
+            {flying && (
+              <span
+                className="absolute left-1/2 top-1/2 h-3 w-8 -translate-x-[130%] -translate-y-1/2 rounded-full fg-av-prop"
+                style={{ background: `radial-gradient(closest-side, ${heat.g}, transparent)` }}
+              />
+            )}
+            <img
+              src={PLANE_SRC}
+              alt=""
+              draggable="false"
+              className="h-14 w-auto select-none"
+              style={{ filter: `drop-shadow(0 4px 12px ${heat.g})` }}
+            />
+          </div>
         </div>
       )}
 
+      {/* crash red flash */}
+      {crashed && <div className="absolute inset-0 bg-red-500/40 fg-av-flash pointer-events-none" aria-hidden="true" />}
+
       {/* center readout */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        {phase === "BETTING" ? (
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        {betting ? (
           <>
-            <img src={PLANE_SRC} alt="" draggable="false" className="h-16 w-auto mb-1 fg-plane-idle select-none drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]" />
-            <p className="text-[11px] font-bold tracking-[0.2em] text-white/55">TAKING OFF IN</p>
-            <p data-testid="aviator-countdown" className="font-display text-5xl text-white/90 tabular-nums">
-              {countdown.toFixed(1)}s
-            </p>
-            <div className="mt-2 h-1 w-40 rounded-full bg-white/10 overflow-hidden">
-              <div className="h-full bg-[hsl(var(--emerald))] transition-[width] duration-150" style={{ width: `${Math.min(100, (countdown / 6) * 100)}%` }} />
+            <img src={PLANE_SRC} alt="" draggable="false" className="h-16 w-auto mb-2 fg-av-idle select-none drop-shadow-[0_10px_18px_rgba(0,0,0,0.55)]" />
+            {/* moving runway speed lines */}
+            <div
+              className="h-[3px] w-44 rounded-full fg-av-runway mb-3 opacity-70"
+              style={{ background: "repeating-linear-gradient(90deg, rgba(255,199,64,0.9) 0 14px, transparent 14px 42px)" }}
+            />
+            <div className="relative h-16 w-16 grid place-items-center">
+              <svg viewBox="0 0 64 64" className="absolute inset-0 h-full w-full -rotate-90">
+                <circle cx="32" cy="32" r={R} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="4" />
+                <circle cx="32" cy="32" r={R} fill="none" stroke="hsl(var(--emerald))" strokeWidth="4" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - ring)} style={{ transition: "stroke-dashoffset 0.15s linear" }} />
+              </svg>
+              <span data-testid="aviator-countdown" className="font-display text-2xl text-white/95 tabular-nums">{countdown.toFixed(1)}</span>
             </div>
+            <p className="text-[10px] font-bold tracking-[0.25em] text-white/50 mt-2">TAKING OFF</p>
           </>
         ) : (
           <>
-            {crashed && <p className="text-xs font-extrabold tracking-[0.25em] text-red-400 mb-1">FLEW AWAY!</p>}
+            {crashed && <p className="text-xs font-extrabold tracking-[0.28em] text-red-400 mb-1">FLEW AWAY!</p>}
             <p
               data-testid="aviator-multiplier"
-              className={`font-display text-6xl tabular-nums ${crashed ? "text-red-400" : "text-white"}`}
+              className={`font-display tabular-nums leading-none ${crashed ? "text-red-400" : "fg-av-pulse"}`}
+              style={{ fontSize: `clamp(3rem, ${3 + Math.min(2.4, (shown - 1) * 0.3)}rem, 5.4rem)`, color: crashed ? undefined : heat.c, textShadow: `0 0 22px ${heat.g}` }}
             >
-              {(crashed ? crashPoint : mult).toFixed(2)}x
+              {shown.toFixed(2)}x
             </p>
           </>
         )}

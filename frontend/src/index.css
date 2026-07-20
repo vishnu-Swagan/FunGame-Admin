@@ -148,6 +148,30 @@ body {
     animation: fg-shimmer 1.8s linear infinite;
 }
 
+/* ---------------- Aviator flight scene ---------------- */
+@keyframes fg-av-cloud  { from { transform: translateX(8%); }  to { transform: translateX(-58%); } }
+@keyframes fg-av-cloud2 { from { transform: translateX(28%); } to { transform: translateX(-72%); } }
+@keyframes fg-av-idle   { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-7px) rotate(1deg); } }
+@keyframes fg-av-fly    { 0%,100% { transform: translate(-42%,-76%) rotate(-7deg); } 50% { transform: translate(-42%,-82%) rotate(-11deg); } }
+@keyframes fg-av-prop   { 0%,100% { opacity: .25; transform: translate(-50%,-50%) scaleX(1); } 50% { opacity: .6; transform: translate(-50%,-50%) scaleX(1.3); } }
+@keyframes fg-av-runway { from { background-position: 0 0; } to { background-position: -84px 0; } }
+@keyframes fg-av-shake  { 0%,100% { transform: translate(0,0); } 20% { transform: translate(-6px,3px); } 40% { transform: translate(5px,-4px); } 60% { transform: translate(-4px,-2px); } 80% { transform: translate(4px,3px); } }
+@keyframes fg-av-flash  { 0% { opacity: .55; } 100% { opacity: 0; } }
+@keyframes fg-av-flyaway{ 0% { transform: translate(-42%,-78%) rotate(-8deg); opacity: 1; } 100% { transform: translate(240%,-280%) rotate(26deg); opacity: 0; } }
+@keyframes fg-av-twinkle{ 0%,100% { opacity: .18; } 50% { opacity: .85; } }
+@keyframes fg-av-pulse  { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+
+.fg-av-idle    { animation: fg-av-idle 2.6s ease-in-out infinite; }
+.fg-av-fly     { animation: fg-av-fly 1.5s ease-in-out infinite; }
+.fg-av-prop    { animation: fg-av-prop .12s linear infinite; }
+.fg-av-shake   { animation: fg-av-shake .5s ease-in-out 1; }
+.fg-av-flash   { animation: fg-av-flash .6s ease-out 1 forwards; }
+.fg-av-flyaway { animation: fg-av-flyaway 1.1s cubic-bezier(.4,0,.7,1) 1 forwards; }
+.fg-av-pulse   { animation: fg-av-pulse 1.4s ease-in-out infinite; }
+.fg-av-cloud   { animation: fg-av-cloud 26s linear infinite; }
+.fg-av-cloud2  { animation: fg-av-cloud2 18s linear infinite; }
+.fg-av-runway  { animation: fg-av-runway .5s linear infinite; }
+
 /* Reduced motion: user toggle + system preference */
 .rm *, .rm *::before, .rm *::after {
     animation-duration: 0.001s !important;
