@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Shield, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
-  LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound,
+  LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ export function Profile() {
   const { user, logout } = useAuth();
 
   const links = [
+    { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
     { icon: SettingsIcon, label: "Settings", to: "/settings", testId: "profile-link-settings" },
     { icon: Megaphone, label: "Announcements", to: "/announcements", testId: "profile-link-announcements" },

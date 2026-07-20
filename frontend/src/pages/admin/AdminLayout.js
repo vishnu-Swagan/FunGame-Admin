@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ const NAV = [
   { to: "/admin/signups", label: "Signups", icon: UserPlus, testId: "admin-nav-signups" },
   { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
   { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
+  { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
   { to: "/admin/games", label: "Games", icon: Gamepad2, testId: "admin-nav-games" },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, testId: "admin-nav-announcements" },
   { to: "/admin/settings", label: "System", icon: Settings, testId: "admin-nav-settings" },

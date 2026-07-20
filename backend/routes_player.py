@@ -1,10 +1,11 @@
 """Player routes: onboarding, games, chips, announcements, notifications, settings, system config."""
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
-from models import OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate, ConvertRequest
+from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
+                    ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
 from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
 from ledger import credit_chips, debit_chips, InsufficientChips
 
@@ -206,6 +207,30 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
     return {'message': 'Sell request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
 
 
+@router.post('/chips/return-request')
+async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Depends(require_active_player)):
+    """Player asks the operator to return chips to the admin. Chips are deducted
+    only when the admin approves the request (nothing is credited back)."""
+    if user.get('role') == 'ADMIN':
+        raise HTTPException(status_code=400, detail='Admins do not return chips')
+    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'RETURN'})
+    if pending >= 3:
+        raise HTTPException(status_code=429, detail='You already have 3 pending return requests. Please wait for review.')
+    fresh = await db.users.find_one({'id': user['id']})
+    balance = fresh.get('chip_balance', 0) if fresh else 0
+    if balance < body.amount:
+        raise HTTPException(status_code=400, detail='Not enough chips — you can only return up to your current balance.')
+    req = {
+        'id': str(uuid.uuid4()), 'user_id': user['id'],
+        'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        'type': 'RETURN',
+        'amount': body.amount, 'note': body.note, 'status': 'PENDING',
+        'admin_note': None, 'created_at': _now(), 'resolved_at': None,
+    }
+    await db.chip_requests.insert_one(req)
+    return {'message': 'Return request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
+
+
 @router.get('/chips/requests')
 async def my_chip_requests(user: dict = Depends(require_active_player)):
     reqs = await db.chip_requests.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', -1).to_list(100)
@@ -216,6 +241,40 @@ async def my_chip_requests(user: dict = Depends(require_active_player)):
 async def my_transactions(user: dict = Depends(require_active_player)):
     txs = await db.chip_transactions.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', -1).to_list(200)
     return {'transactions': serialize_doc(txs)}
+
+
+# ---------- Support / messaging (available to every signed-in user) ----------
+@router.get('/support/thread')
+async def support_thread(user: dict = Depends(get_current_user)):
+    """This user's full conversation with the admin. Marks admin replies read."""
+    msgs = await db.support_messages.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', 1).to_list(500)
+    await db.support_messages.update_many(
+        {'user_id': user['id'], 'sender': 'ADMIN', 'read_user': False}, {'$set': {'read_user': True}})
+    return {'messages': serialize_doc(msgs)}
+
+
+@router.get('/support/unread')
+async def support_unread(user: dict = Depends(get_current_user)):
+    n = await db.support_messages.count_documents({'user_id': user['id'], 'sender': 'ADMIN', 'read_user': False})
+    return {'unread': n}
+
+
+@router.post('/support/message')
+async def support_send(body: SupportMessageCreate, user: dict = Depends(get_current_user)):
+    recent = await db.support_messages.count_documents({
+        'user_id': user['id'], 'sender': 'USER',
+        'created_at': {'$gte': (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
+    })
+    if recent >= 8:
+        raise HTTPException(status_code=429, detail='Please slow down — too many messages in a short time.')
+    msg = {
+        'id': str(uuid.uuid4()), 'user_id': user['id'],
+        'user_email': user['email'], 'user_display_name': user.get('display_name') or user['email'].split('@')[0],
+        'sender': 'USER', 'body': body.body.strip(),
+        'read_admin': False, 'read_user': True, 'created_at': _now(),
+    }
+    await db.support_messages.insert_one(msg)
+    return {'message': 'Sent', 'item': serialize_doc(msg)}
 
 
 # ---------- Announcements ----------

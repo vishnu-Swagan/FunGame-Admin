@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Hourglass, ShieldX, Ban, RefreshCw, LogOut, Pencil } from "lucide-react";
+import { Hourglass, ShieldX, Ban, RefreshCw, LogOut, Pencil, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -88,6 +88,9 @@ export default function OnboardingPending() {
                 <RefreshCw className={`h-4 w-4 mr-2 ${checking ? "animate-spin" : ""}`} /> Check status now
               </Button>
             )}
+            <Button data-testid="pending-support-button" variant="outline" onClick={() => navigate("/support")} className="w-full h-12 rounded-xl border-white/15 bg-white/5 hover:bg-white/10">
+              <MessagesSquare className="h-4 w-4 mr-2" /> Message support
+            </Button>
             <Button
               data-testid="pending-logout-button"
               variant="ghost"

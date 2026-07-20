@@ -50,7 +50,8 @@ export default function AdminChipRequests() {
     setBusy(true);
     try {
       await api.post(`/admin/chip-requests/${action.req.id}/${action.type}`, { note: note || null });
-      toast.success(action.type !== "approve" ? "Request denied" : "Chips credited to player");
+      const isReturn = action.req?.type === "RETURN";
+      toast.success(action.type !== "approve" ? "Request denied" : isReturn ? "Chips returned to operator" : "Chips credited to player");
       setAction(null);
       setNote("");
       await load(filter);
@@ -90,6 +91,7 @@ export default function AdminChipRequests() {
             <TableHeader>
               <TableRow className="border-white/10 hover:bg-transparent">
                 <TableHead className="text-white/50">Player</TableHead>
+                <TableHead className="text-white/50">Type</TableHead>
                 <TableHead className="text-white/50 text-right">Amount</TableHead>
                 <TableHead className="text-white/50">Note</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
@@ -103,6 +105,11 @@ export default function AdminChipRequests() {
                   <TableCell>
                     <p className="font-semibold text-sm">{r.user_display_name || "—"}</p>
                     <p className="text-[11px] text-white/45">{r.user_email}</p>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={`rounded-full border text-[10px] font-bold px-2.5 py-1 ${r.type === "RETURN" ? "border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.1)] text-[hsl(var(--magenta))]" : "border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.1)] text-[hsl(var(--emerald))]"}`}>
+                      {r.type === "RETURN" ? "RETURN" : "BUY"}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-bold text-primary">{formatChips(r.amount)}</TableCell>
                   <TableCell className="text-xs text-white/60 max-w-[180px] truncate">{r.note || "—"}</TableCell>
@@ -146,12 +153,16 @@ export default function AdminChipRequests() {
         <DialogContent className="rounded-2xl border-white/10 bg-card">
           <DialogHeader>
             <DialogTitle>
-              {action?.type === "approve" ? "Approve chip request" : "Deny chip request"}
+              {action?.type === "approve"
+                ? action?.req?.type === "RETURN" ? "Approve chip return" : "Approve chip request"
+                : action?.req?.type === "RETURN" ? "Deny chip return" : "Deny chip request"}
             </DialogTitle>
             <DialogDescription>
               {action?.type === "approve"
-                ? `Credit ${formatChips(action?.req?.amount)} play chips to ${action?.req?.user_email}. This settles the request permanently.`
-                : `Deny the ${formatChips(action?.req?.amount)} chip request from ${action?.req?.user_email}.`}
+                ? action?.req?.type === "RETURN"
+                  ? `Deduct ${formatChips(action?.req?.amount)} chips from ${action?.req?.user_email} — returned to the operator. This settles the request permanently.`
+                  : `Credit ${formatChips(action?.req?.amount)} play chips to ${action?.req?.user_email}. This settles the request permanently.`
+                : `Deny the ${formatChips(action?.req?.amount)} ${action?.req?.type === "RETURN" ? "return" : "chip"} request from ${action?.req?.user_email}.`}
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -169,7 +180,7 @@ export default function AdminChipRequests() {
               disabled={busy}
               className={`rounded-xl font-bold ${action?.type === "approve" ? "bg-[hsl(var(--emerald))] text-black hover:brightness-110" : "bg-destructive text-white hover:brightness-110"}`}
             >
-              {busy ? "Working…" : action?.type === "approve" ? "Approve & credit" : "Deny request"}
+              {busy ? "Working…" : action?.type === "approve" ? (action?.req?.type === "RETURN" ? "Approve & deduct" : "Approve & credit") : "Deny request"}
             </Button>
           </DialogFooter>
         </DialogContent>

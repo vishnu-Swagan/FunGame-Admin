@@ -188,3 +188,15 @@ class SettingsUpdate(BaseModel):
 class AdminSetPassword(BaseModel):
     """Admin-initiated password reset for an existing account."""
     password: str = Field(min_length=8, max_length=128)
+
+
+class ReturnChipsRequestCreate(BaseModel):
+    """Player asks the operator to return chips to the admin. Chips stay in the
+    player's balance until the admin approves, then they are deducted."""
+    amount: int = Field(ge=1, le=1_000_000)
+    note: Optional[str] = Field(default=None, max_length=280)
+
+
+class SupportMessageCreate(BaseModel):
+    """A support/inbox message between a user and the admin."""
+    body: str = Field(min_length=1, max_length=2000)

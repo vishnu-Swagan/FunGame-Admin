@@ -29,6 +29,7 @@ import ChipsPage from "@/pages/app/ChipsPage";
 import Announcements from "@/pages/app/Announcements";
 import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
+import Support from "@/pages/app/Support";
 import GamePlay from "@/pages/play/GamePlay";
 
 // System
@@ -43,6 +44,7 @@ import AdminChipRequests from "@/pages/admin/AdminChipRequests";
 import AdminGames from "@/pages/admin/AdminGames";
 import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
 import AdminSettings from "@/pages/admin/AdminSettings";
+import AdminSupport from "@/pages/admin/AdminSupport";
 
 // Onboarding-only gate: ACTIVE users and admins are redirected away
 function OnboardingRoute({ children }) {
@@ -97,6 +99,9 @@ function App() {
             <Route path="/settings" element={<Settings />} />
           </Route>
 
+          {/* Support — available to any signed-in user (incl. pending onboarding) */}
+          <Route path="/support" element={<RequireAuth><Support /></RequireAuth>} />
+
           {/* System */}
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/offline" element={<Offline />} />
@@ -108,6 +113,7 @@ function App() {
             <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="support" element={<AdminSupport />} />
             <Route path="games" element={<AdminGames />} />
             <Route path="announcements" element={<AdminAnnouncements />} />
             <Route path="settings" element={<AdminSettings />} />

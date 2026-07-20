@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
-                    AdminSignupApprove, AdminPointsAdjust, AdminSetPassword)
+                    AdminSignupApprove, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 
@@ -331,6 +331,20 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
                       f"Your request to sell {req['amount']} chips was approved. {req['amount']} points credited (new points balance: {points_balance}). PLAY CHIPS — NO CASH VALUE.", 'POINTS')
         return {'message': 'Sell request approved — chips deducted and points credited', 'chip_balance': chip_balance, 'points_balance': points_balance}
 
+    if req_type == 'RETURN':
+        # Return chips to the admin — deduct from the player, credit nothing.
+        try:
+            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Returned {req['amount']} chips to operator — approved", ref=request_id)
+        except InsufficientChips:
+            await db.chip_requests.update_one(
+                {'id': request_id},
+                {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}},
+            )
+            raise HTTPException(status_code=400, detail='Player no longer has enough chips to cover this return. Ask them to adjust or deny the request.')
+        await _notify(req['user_id'], 'Return approved',
+                      f"Your request to return {req['amount']} chips was approved. {req['amount']} chips were returned to the operator. New balance: {chip_balance}.", 'CHIPS')
+        return {'message': 'Return approved — chips deducted from the player', 'chip_balance': chip_balance}
+
     # BUY (default): credit chips
     balance = await _credit_chips(req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)", ref=request_id)
     await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}. PLAY CHIPS — NO CASH VALUE.", 'CHIPS')
@@ -353,9 +367,64 @@ async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None
         raise HTTPException(status_code=400, detail='Request already resolved')
     if req.get('type') == 'SELL':
         await _notify(req['user_id'], 'Sell request update', f"Your request to sell {req['amount']} chips was denied. Your chips were not deducted. Note: {note}", 'POINTS')
+    elif req.get('type') == 'RETURN':
+        await _notify(req['user_id'], 'Return request update', f"Your request to return {req['amount']} chips was denied. Your chips were not deducted. Note: {note}", 'CHIPS')
     else:
         await _notify(req['user_id'], 'Chip request update', f"Your request for {req['amount']} play chips was denied. Note: {note}", 'CHIPS')
     return {'message': 'Request denied'}
+
+
+# ---------- Support / messaging ----------
+@router.get('/support/threads')
+async def support_threads(admin: dict = Depends(require_admin)):
+    """One thread per user who has ever messaged — newest activity first, with
+    the last message preview and the count of unread (user->admin) messages."""
+    pipeline = [
+        {'$sort': {'created_at': 1}},
+        {'$group': {
+            '_id': '$user_id',
+            'user_email': {'$last': '$user_email'},
+            'user_display_name': {'$last': '$user_display_name'},
+            'last_body': {'$last': '$body'},
+            'last_sender': {'$last': '$sender'},
+            'last_at': {'$last': '$created_at'},
+            'unread': {'$sum': {'$cond': [{'$and': [{'$eq': ['$sender', 'USER']}, {'$eq': ['$read_admin', False]}]}, 1, 0]}},
+        }},
+        {'$sort': {'last_at': -1}},
+        {'$limit': 300},
+    ]
+    rows = await db.support_messages.aggregate(pipeline).to_list(300)
+    threads = [{
+        'user_id': r['_id'], 'user_email': r.get('user_email'), 'user_display_name': r.get('user_display_name'),
+        'last_body': r.get('last_body'), 'last_sender': r.get('last_sender'), 'last_at': r.get('last_at'),
+        'unread': r.get('unread', 0),
+    } for r in rows]
+    return {'threads': threads, 'total_unread': sum(t['unread'] for t in threads)}
+
+
+@router.get('/support/threads/{user_id}')
+async def support_thread_detail(user_id: str, admin: dict = Depends(require_admin)):
+    msgs = await db.support_messages.find({'user_id': user_id}, {'_id': 0}).sort('created_at', 1).to_list(500)
+    await db.support_messages.update_many(
+        {'user_id': user_id, 'sender': 'USER', 'read_admin': False}, {'$set': {'read_admin': True}})
+    u = await db.users.find_one({'id': user_id}, {'_id': 0, 'email': 1, 'display_name': 1, 'status': 1})
+    return {'messages': serialize_doc(msgs), 'user': serialize_doc(u)}
+
+
+@router.post('/support/threads/{user_id}/reply')
+async def support_reply(user_id: str, body: SupportMessageCreate, admin: dict = Depends(require_admin)):
+    u = await db.users.find_one({'id': user_id})
+    if not u:
+        raise HTTPException(status_code=404, detail='User not found')
+    msg = {
+        'id': str(uuid.uuid4()), 'user_id': user_id,
+        'user_email': u['email'], 'user_display_name': u.get('display_name') or u['email'].split('@')[0],
+        'sender': 'ADMIN', 'body': body.body.strip(),
+        'read_admin': True, 'read_user': False, 'created_at': _now(),
+    }
+    await db.support_messages.insert_one(msg)
+    await _notify(user_id, 'New reply from support', body.body.strip()[:140], 'INFO')
+    return {'message': 'Reply sent', 'item': serialize_doc(msg)}
 
 
 # ---------- Games ----------

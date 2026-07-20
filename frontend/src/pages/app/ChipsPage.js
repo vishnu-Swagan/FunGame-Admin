@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Coins, ArrowDownToLine, History, CircleCheck, CircleX, CircleEllipsis } from "lucide-react";
+import { Coins, ArrowDownToLine, ArrowUpFromLine, History, CircleCheck, CircleX, CircleEllipsis } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +31,9 @@ export default function ChipsPage() {
   const [busy, setBusy] = useState(false);
   const [requests, setRequests] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [returnAmt, setReturnAmt] = useState("");
+  const [returnNote, setReturnNote] = useState("");
+  const [returnBusy, setReturnBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -75,6 +78,33 @@ export default function ChipsPage() {
     }
   };
 
+  const submitReturn = async (e) => {
+    e.preventDefault();
+    const amt = parseInt(returnAmt, 10);
+    if (!amt || amt <= 0) {
+      toast.error("Enter a valid amount to return");
+      return;
+    }
+    if (amt > balance) {
+      toast.error("You can only return up to your current balance");
+      return;
+    }
+    setReturnBusy(true);
+    try {
+      await api.post("/chips/return-request", { amount: amt, note: returnNote || null });
+      toast.success("Return request submitted — chips are deducted only on approval.");
+      setReturnAmt("");
+      setReturnNote("");
+      await load();
+      setTab("history");
+      navigate("/chips/history", { replace: true });
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setReturnBusy(false);
+    }
+  };
+
   return (
     <PageTransition className="space-y-5">
       <h1 className="text-2xl font-bold tracking-tight">Chips wallet</h1>
@@ -93,13 +123,16 @@ export default function ChipsPage() {
         <Disclaimer className="mt-3" />
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => { setTab(v); navigate(v === "request" ? "/chips/request" : "/chips/history", { replace: true }); }} data-testid="chips-wallet-tabs">
-        <TabsList className="w-full grid grid-cols-2 bg-white/5 border border-white/10 rounded-xl h-11">
-          <TabsTrigger value="request" data-testid="chips-tab-request" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-semibold">
-            <ArrowDownToLine className="h-4 w-4 mr-1.5" /> Request
+      <Tabs value={tab} onValueChange={(v) => { setTab(v); if (v !== "return") navigate(v === "request" ? "/chips/request" : "/chips/history", { replace: true }); }} data-testid="chips-wallet-tabs">
+        <TabsList className="w-full grid grid-cols-3 bg-white/5 border border-white/10 rounded-xl h-11">
+          <TabsTrigger value="request" data-testid="chips-tab-request" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-semibold text-xs sm:text-sm">
+            <ArrowDownToLine className="h-4 w-4 mr-1" /> Request
           </TabsTrigger>
-          <TabsTrigger value="history" data-testid="chips-tab-history" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-semibold">
-            <History className="h-4 w-4 mr-1.5" /> History
+          <TabsTrigger value="return" data-testid="chips-tab-return" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-semibold text-xs sm:text-sm">
+            <ArrowUpFromLine className="h-4 w-4 mr-1" /> Return
+          </TabsTrigger>
+          <TabsTrigger value="history" data-testid="chips-tab-history" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-semibold text-xs sm:text-sm">
+            <History className="h-4 w-4 mr-1" /> History
           </TabsTrigger>
         </TabsList>
 
@@ -150,6 +183,39 @@ export default function ChipsPage() {
           </form>
         </TabsContent>
 
+        <TabsContent value="return" className="mt-4">
+          <form data-testid="chips-return-form" onSubmit={submitReturn} className="rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4 space-y-4">
+            <div>
+              <p className="text-sm font-semibold">Return chips to the operator</p>
+              <p className="text-xs text-white/55 mt-0.5">Request to return chips. An operator reviews it, and chips are deducted only when approved.</p>
+            </div>
+            <Input
+              data-testid="chips-return-amount-input"
+              type="number"
+              min="1"
+              max={balance || undefined}
+              placeholder={`Amount to return (max ${formatChips(balance)})`}
+              value={returnAmt}
+              onChange={(e) => setReturnAmt(e.target.value)}
+              className="h-12 rounded-xl bg-white/5 border-white/12 tabular-nums"
+              aria-label="Return amount"
+            />
+            <Textarea
+              data-testid="chips-return-note-input"
+              placeholder="Reason / note for the operator (optional)"
+              value={returnNote}
+              maxLength={280}
+              onChange={(e) => setReturnNote(e.target.value)}
+              className="rounded-xl bg-white/5 border-white/12 min-h-[70px]"
+              aria-label="Return note"
+            />
+            <Button data-testid="chips-return-submit-button" type="submit" disabled={returnBusy || !returnAmt} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
+              {returnBusy ? "Submitting…" : "Request return"}
+            </Button>
+            <p className="text-[11px] text-white/40">Your chips stay in your balance until the operator approves the return.</p>
+          </form>
+        </TabsContent>
+
         <TabsContent value="history" className="mt-4 space-y-5">
           {/* Requests */}
           <section>
@@ -164,7 +230,12 @@ export default function ChipsPage() {
                   return (
                     <div key={r.id} data-testid="chips-request-item" className="flex items-center justify-between rounded-xl bg-card/55 border border-white/10 p-3.5">
                       <div>
-                        <p className="tabular-nums font-bold">{formatChips(r.amount)} chips</p>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[9px] font-bold tracking-wider rounded-full border px-1.5 py-0.5 ${r.type === "RETURN" ? "text-[hsl(var(--magenta))] border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.1)]" : "text-[hsl(var(--emerald))] border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.1)]"}`}>
+                            {r.type === "RETURN" ? "RETURN" : "BUY"}
+                          </span>
+                          <p className="tabular-nums font-bold">{formatChips(r.amount)} chips</p>
+                        </div>
                         <p className="text-[11px] text-white/45 mt-0.5">{timeAgo(r.created_at)}{r.admin_note ? ` · ${r.admin_note}` : ""}</p>
                       </div>
                       <Badge variant="outline" className={`rounded-full border text-[10px] font-bold px-2.5 py-1 flex items-center gap-1 ${S.cls}`}>
