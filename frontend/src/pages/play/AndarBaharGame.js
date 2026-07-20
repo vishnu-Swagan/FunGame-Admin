@@ -63,9 +63,23 @@ export default function AndarBaharGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-3">
-        <div className="flex items-center justify-center gap-3">
-          <p className="text-[11px] font-semibold text-white/50">JOKER CARD</p>
+      {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
+      <div style={{ perspective: "1200px" }}>
+      <div
+        className="relative rounded-2xl border-2 p-4 space-y-3 overflow-hidden"
+        style={{
+          borderColor: "#c9a22788",
+          background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
+          transform: "rotateX(5deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)",
+        }}
+        data-testid="andar-bahar-table"
+      >
+        <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
+        <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
+        <div className="flex items-center justify-center gap-3 relative">
+          <p className="text-[11px] font-semibold text-white/70">JOKER CARD</p>
           <FlipCard code={outcome?.joker || null} size="sm" dealt={!!outcome && phase !== "BETTING"} flipped={jokerFlipped} />
           {phase === "REVEAL" && !allDealt && jokerFlipped && (
             <span className="text-[10px] font-bold text-white/45 tabular-nums" data-testid="andar-bahar-dealt-count">
@@ -111,6 +125,7 @@ export default function AndarBaharGame({ game }) {
         <div className="flex justify-center">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "andar" ? "A" : "B"} tone={r.winner === "andar" ? "cyan" : "magenta"} />} />
         </div>
+      </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

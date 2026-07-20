@@ -35,9 +35,18 @@ export default function KenoGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DRAWING 20 BALLS…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-3">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[11px] font-semibold text-white/50">Pick up to 10 · 20 universal balls per round</p>
+      <div
+        className="relative rounded-2xl border-2 p-3 overflow-hidden"
+        style={{
+          borderColor: "#c9a22766",
+          background: "radial-gradient(130% 100% at 50% 0%, #10224a 0%, #0a1430 55%, #060b1c 100%)",
+          boxShadow: "0 14px 34px rgba(0,0,0,0.45), inset 0 0 50px rgba(0,0,0,0.35)",
+        }}
+        data-testid="keno-board"
+      >
+        <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.3)" }} />
+        <div className="flex items-center justify-between mb-2 relative">
+          <p className="text-[11px] font-semibold text-white/60">Pick up to 10 · 20 universal balls per round</p>
           <button data-testid="keno-clear-button" onClick={() => setPicks([])} disabled={!betting} className="text-[11px] font-bold text-primary hover:underline disabled:opacity-50">
             Clear ({picks.length}/10)
           </button>
@@ -52,13 +61,13 @@ export default function KenoGame({ game }) {
                 key={n}
                 data-testid={`keno-number-${n}`}
                 onClick={() => toggle(n)}
-                className={`rounded-md text-[10px] font-bold py-1.5 min-h-[26px] tabular-nums border transition-[background-color] duration-100 ${
+                className={`rounded-full text-[10px] font-bold py-1.5 min-h-[26px] tabular-nums border transition-[background-color,box-shadow,transform] duration-150 ${
                   isMatch
-                    ? "bg-primary text-primary-foreground border-primary"
+                    ? "bg-primary text-primary-foreground border-yellow-200 scale-110 shadow-[0_0_12px_rgba(255,199,64,0.9)] fg-line-flash"
                     : picked
-                    ? "bg-[hsl(var(--cyan)/0.25)] border-[hsl(var(--cyan)/0.5)] text-[hsl(var(--cyan))]"
+                    ? "bg-[hsl(var(--cyan)/0.25)] border-[hsl(var(--cyan)/0.6)] text-[hsl(var(--cyan))] shadow-[0_0_6px_hsl(var(--cyan)/0.4)]"
                     : isDrawn
-                    ? "bg-white/15 border-white/25 text-white/85"
+                    ? "bg-white/20 border-white/40 text-white shadow-[0_0_8px_rgba(255,255,255,0.35)]"
                     : "bg-white/5 border-white/10 text-white/55 hover:bg-white/10"
                 }`}
               >

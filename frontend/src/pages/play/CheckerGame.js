@@ -31,10 +31,29 @@ export default function CheckerGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "CAPTURING…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-5">
+      {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
+      <div style={{ perspective: "1200px" }}>
+      <div
+        className="relative rounded-2xl border-2 p-5 overflow-hidden"
+        style={{
+          borderColor: "#c9a22788",
+          background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
+          transform: "rotateX(5deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)",
+        }}
+        data-testid="checker-table"
+      >
+        <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
+        <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
         <div
-          className="mx-auto h-28 w-28 rounded-xl border border-white/15 mb-4"
-          style={{ background: "conic-gradient(rgba(224,170,95,0.35) 90deg, rgba(255,255,255,0.06) 90deg 180deg, rgba(224,170,95,0.35) 180deg 270deg, rgba(255,255,255,0.06) 270deg)", backgroundSize: "28px 28px" }}
+          className="mx-auto h-28 w-28 rounded-xl border-2 relative mb-4"
+          style={{
+            borderColor: "#c9a22766",
+            boxShadow: "0 6px 16px rgba(0,0,0,0.4)",
+            background: "conic-gradient(#3b2a12 90deg, #f0e4c8 90deg 180deg, #3b2a12 180deg 270deg, #f0e4c8 270deg)",
+            backgroundSize: "28px 28px",
+          }}
         />
         <div className="flex justify-center gap-1.5 min-h-[36px] flex-wrap" data-testid="checker-captures">
           {shown.map((w, i) => (
@@ -52,6 +71,7 @@ export default function CheckerGame({ game }) {
         <div className="flex justify-center mt-2">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "gold" ? "G" : "S"} tone={r.winner === "gold" ? "gold" : "neutral"} />} />
         </div>
+      </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
