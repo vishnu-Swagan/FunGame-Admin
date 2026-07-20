@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Cherry, Citrus, Bell, Star, Sparkles, Coins, Gem, Crown, Diamond, Grape, Apple, Flower2, Fish, Flame, Zap, Circle,
 } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
 const SYMBOLS = {
   "fever-joker-bonus": {
@@ -70,37 +72,84 @@ export default function SlotGame({ game }) {
   const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
   const spinning = phase === "REVEAL" && !showFinal;
   const reels = showFinal ? outcome.reels : spinning ? anim : [ids[0], ids[1], ids[2]];
+  const isWin = showFinal && outcome.multiplier > 1;
+
+  // reel-stop clacks + payout celebration sound, once per winning round
+  const winKeyRef = useRef(null);
+  const roundNo = state?.round_number || 0;
+  useEffect(() => {
+    if (!showFinal || winKeyRef.current === roundNo) return;
+    winKeyRef.current = roundNo;
+    if (outcome.multiplier >= 20) { sfx.gong(); sfx.coinShower(); sfx.slotBell(); }
+    else if (outcome.multiplier > 1) { sfx.slotBell(); sfx.coinShower(); }
+  }, [showFinal, outcome, roundNo]);
 
   return (
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "SPINNING…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-5">
-        <div className="flex justify-center gap-2.5" data-testid="slot-reels">
-          {reels.map((r, i) => (
-            <div
-              key={i}
-              className={`h-24 w-20 rounded-xl border flex items-center justify-center bg-black/35 ${spinning ? "border-white/20" : "border-primary/35 shadow-[0_0_18px_rgba(255,199,64,0.12)]"}`}
-            >
-              <Symbol id={r} map={map} size={56} />
+      {/* ---- cinematic jackpot cabinet (3D tilt + chrome frame) ---- */}
+      <div style={{ perspective: "1100px" }}>
+        <div
+          data-testid="slot-cabinet"
+          className={`relative rounded-2xl overflow-hidden border-2 ${isWin && outcome.multiplier >= 20 ? "fg-jackpot-pulse" : ""}`}
+          style={{
+            borderColor: "#c9a227aa",
+            background: "linear-gradient(180deg, #2a1856 0%, #1a1035 45%, #120a24 100%)",
+            transform: "rotateX(6deg)",
+            transformStyle: "preserve-3d",
+            boxShadow: "0 18px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)",
+          }}
+        >
+          {isWin && <WinBurst mult={outcome.multiplier} color="#ffd447" showAt={10} />}
+          {isWin && <CoinShower />}
+          <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5" style={{ background: "linear-gradient(90deg, #ffe08a, #b8860b)" }} />
+          <span aria-hidden="true" className="absolute right-0 top-0 bottom-0 w-1.5" style={{ background: "linear-gradient(270deg, #ffe08a, #b8860b)" }} />
+
+          {/* marquee */}
+          <div className="text-center pt-2.5 pb-2" style={{ borderBottom: "1px solid #c9a22733" }}>
+            <p className="font-display text-2xl fg-neon" style={{ color: "#ffd447" }} data-testid="slot-marquee">{game.name}</p>
+            <p className="text-[9px] font-extrabold tracking-[0.35em]" style={{ color: "#c4b5fd" }}>★ JACKPOT REELS ★</p>
+          </div>
+
+          {/* reels in a chrome bezel */}
+          <div className="p-4">
+            <div className="rounded-xl p-1.5 mx-auto w-fit" style={{ background: "linear-gradient(180deg, #e2e8f0, #64748b 45%, #94a3b8)" }}>
+              <div className="rounded-lg p-2 flex justify-center gap-2" style={{ background: "#0d0820" }} data-testid="slot-reels">
+                {reels.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`h-24 w-20 rounded-lg flex items-center justify-center relative overflow-hidden ${spinning ? "fg-reel-spinning" : ""}`}
+                    style={{ background: "linear-gradient(180deg, #1e1440, #140d2c 50%, #1e1440)", boxShadow: isWin ? "0 0 16px rgba(255,212,71,0.4), inset 0 0 0 1px rgba(255,212,71,0.5)" : "inset 0 4px 8px rgba(0,0,0,0.5)" }}
+                  >
+                    <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/3 z-10" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.22), transparent)" }} />
+                    <Symbol id={r} map={map} size={56} />
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
-        {showFinal && phase === "RESULT" && (
-          <p className="text-center text-sm font-bold text-white/85 mt-2" data-testid="slot-label">
-            {outcome.label}{outcome.multiplier > 1 ? ` — ${outcome.multiplier}x` : ""}
-          </p>
-        )}
-        <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1">
-          {ids.map((id) => (
-            <span key={id} className="flex items-center gap-1 text-[10px] text-white/50">
-              <Symbol id={id} map={map} size={20} /> {map[id].wild ? "WILD" : id.toUpperCase()}
-            </span>
-          ))}
-        </div>
-        <p className="text-[11px] text-white/45 text-center mt-2">One universal spin per round · 3 of a kind pays · pairs return your stake · wilds substitute</p>
-        <div className="flex justify-center mt-2">
-          <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 1 ? "gold" : r.multiplier === 1 ? "cyan" : "neutral"} />} />
+          </div>
+
+          {/* result plate */}
+          <div className="px-4 pb-3">
+            <div className="rounded-lg border text-center py-1.5" style={{ borderColor: "#c9a22733", background: "rgba(0,0,0,0.3)" }}>
+              <p className="text-xs font-extrabold tracking-wider" style={{ color: isWin ? "#ffd447" : "rgba(196,181,253,0.7)" }} data-testid="slot-label">
+                {showFinal
+                  ? outcome.label + (outcome.multiplier > 1 ? ` — PAYS ${outcome.multiplier}x` : "")
+                  : spinning ? "GOOD LUCK…" : "ONE UNIVERSAL SPIN PER ROUND · 3 OF A KIND PAYS"}
+              </p>
+            </div>
+            <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1">
+              {ids.map((id) => (
+                <span key={id} className="flex items-center gap-1 text-[10px] text-white/50">
+                  <Symbol id={id} map={map} size={18} /> {map[id].wild ? "WILD" : id.toUpperCase()}
+                </span>
+              ))}
+            </div>
+            <div className="flex justify-center mt-2">
+              <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 1 ? "gold" : r.multiplier === 1 ? "cyan" : "neutral"} />} />
+            </div>
+          </div>
         </div>
       </div>
 
