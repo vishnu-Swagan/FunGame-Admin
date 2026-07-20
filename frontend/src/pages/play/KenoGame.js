@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
@@ -25,6 +26,20 @@ export default function KenoGame({ game }) {
   const drawn = drawnAll.slice(0, shownCount);
 
   const myPicks = myBets.length > 0 ? myBets[0].selection || [] : picks;
+  const matchCount = drawn.filter((n) => myPicks.includes(n)).length;
+
+  // ball pop as each of the 20 is drawn; a bright ding when one of your picks hits
+  const prevShownRef = useRef(0);
+  const prevMatchRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "REVEAL") { prevShownRef.current = 0; prevMatchRef.current = 0; return; }
+    if (shownCount > prevShownRef.current) {
+      if (matchCount > prevMatchRef.current) sfx.slotBell();
+      else sfx.chip();
+    }
+    prevShownRef.current = shownCount;
+    prevMatchRef.current = matchCount;
+  }, [shownCount, matchCount, phase]);
 
   const toggle = (n) => {
     if (!betting) return;
@@ -51,7 +66,37 @@ export default function KenoGame({ game }) {
             Clear ({picks.length}/10)
           </button>
         </div>
-        <div className="grid grid-cols-10 gap-1">
+        {/* live draw rack + match counter */}
+        {phase !== "BETTING" && (
+          <div className="relative mb-2 rounded-lg px-2 py-1.5 flex items-center gap-2" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(201,162,39,0.25)" }}>
+            <span className="text-[9px] font-bold tracking-widest text-white/45 shrink-0">DRAWN</span>
+            <div className="flex-1 flex gap-1 overflow-hidden">
+              {drawn.slice(-12).map((n, i, arr) => {
+                const hit = myPicks.includes(n);
+                const newest = i === arr.length - 1 && shownCount < 20;
+                return (
+                  <span
+                    key={`${n}-${i}`}
+                    className={`shrink-0 h-6 w-6 rounded-full grid place-items-center text-[9px] font-bold tabular-nums ${newest ? "fg-line-flash scale-110" : ""}`}
+                    style={{
+                      color: hit ? "#3a2a00" : "#0a1430",
+                      background: hit ? "radial-gradient(circle at 35% 30%, #fff6c8, #ffd447 60%, #b8860b)" : "radial-gradient(circle at 35% 30%, #eef4ff, #a9bce0 65%, #6b7ea0)",
+                      boxShadow: hit ? "0 0 10px rgba(255,212,71,0.85)" : "0 0 5px rgba(255,255,255,0.25)",
+                    }}
+                  >
+                    {n}
+                  </span>
+                );
+              })}
+            </div>
+            {myPicks.length > 0 && (
+              <span className="shrink-0 text-[10px] font-extrabold tabular-nums px-2 py-0.5 rounded-full" style={{ color: "#ffd447", background: "rgba(255,212,71,0.12)", border: "1px solid rgba(255,212,71,0.35)" }} data-testid="keno-match-count">
+                {matchCount} HIT{matchCount === 1 ? "" : "S"}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="grid grid-cols-10 gap-1 relative">
           {Array.from({ length: 80 }, (_, i) => i + 1).map((n) => {
             const picked = picks.includes(n) || (myBets.length > 0 && myPicks.includes(n));
             const isDrawn = drawn.includes(n);

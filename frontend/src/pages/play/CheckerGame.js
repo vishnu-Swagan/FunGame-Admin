@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Crown } from "lucide-react";
-import { motion } from "framer-motion";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
@@ -46,29 +45,60 @@ export default function CheckerGame({ game }) {
       >
         <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
         <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
-        <div
-          className="mx-auto h-28 w-28 rounded-xl border-2 relative mb-4"
-          style={{
-            borderColor: "#c9a22766",
-            boxShadow: "0 6px 16px rgba(0,0,0,0.4)",
-            background: "conic-gradient(#3b2a12 90deg, #f0e4c8 90deg 180deg, #3b2a12 180deg 270deg, #f0e4c8 270deg)",
-            backgroundSize: "28px 28px",
-          }}
-        />
-        <div className="flex justify-center gap-1.5 min-h-[36px] flex-wrap" data-testid="checker-captures">
-          {shown.map((w, i) => (
-            <motion.div
-              key={i}
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className={`h-8 w-8 rounded-full border-2 flex items-center justify-center ${w === "gold" ? "bg-primary/25 border-primary" : "bg-white/10 border-white/40"}`}
-            >
-              <Crown className={`h-3.5 w-3.5 ${w === "gold" ? "text-primary" : "text-white/70"}`} />
-            </motion.div>
-          ))}
-        </div>
-        <p className="text-[11px] text-white/45 text-center mt-2">Best of 7 captures — winning side pays 1.9x · universal duel every round</p>
-        <div className="flex justify-center mt-2">
+        {(() => {
+          const goldCount = shown.filter((w) => w === "gold").length;
+          const steelCount = shown.filter((w) => w === "steel").length;
+          const showWinner = phase === "RESULT" && !!outcome;
+          const winner = outcome?.winner;
+          const Medallion = ({ gold, count, win }) => (
+            <div className={`flex flex-col items-center gap-1.5 rounded-2xl px-3 py-2 transition-[background-color,box-shadow] duration-300 ${win ? (gold ? "bg-primary/10 shadow-[0_0_24px_rgba(255,199,64,0.4)]" : "bg-white/10 shadow-[0_0_24px_rgba(255,255,255,0.25)]") : ""}`} data-testid={`checker-${gold ? "gold" : "steel"}`}>
+              <div
+                className="relative h-16 w-16 rounded-full flex items-center justify-center"
+                style={{
+                  background: gold ? "radial-gradient(circle at 35% 30%, #ffe9ad, #ffca3a 55%, #a9781a)" : "radial-gradient(circle at 35% 30%, #eef2f7, #9aa7b8 55%, #566173)",
+                  boxShadow: "0 5px 14px rgba(0,0,0,0.5), inset 0 -3px 6px rgba(0,0,0,0.3), inset 0 3px 5px rgba(255,255,255,0.5)",
+                  border: gold ? "3px solid #b8860b" : "3px solid #47505f",
+                }}
+              >
+                <Crown className="h-6 w-6" style={{ color: gold ? "#7a5200" : "#2b3240" }} />
+                {win && <span className="absolute -top-2 -right-2 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--emerald))", color: "#000" }}>WIN</span>}
+              </div>
+              <p className="text-[11px] font-extrabold tracking-wider" style={{ color: gold ? "#ffd447" : "#cbd5e1" }}>{gold ? "GOLD" : "STEEL"}</p>
+              <p className="font-display text-2xl tabular-nums leading-none" style={{ color: gold ? "#ffd447" : "#e2e8f0" }}>{count}</p>
+            </div>
+          );
+          return (
+            <div className="relative flex items-center justify-between gap-1">
+              <Medallion gold count={goldCount} win={showWinner && winner === "gold"} />
+              <div className="flex-1 flex flex-col items-center gap-2">
+                <p className="text-[9px] font-bold tracking-[0.3em] text-white/45">BEST OF 7</p>
+                <div className="flex gap-1.5" data-testid="checker-track">
+                  {Array.from({ length: 7 }, (_, i) => {
+                    const w = shown[i];
+                    const justFell = i === shownCount - 1 && phase === "REVEAL";
+                    return (
+                      <span
+                        key={i}
+                        className={`h-6 w-6 rounded-full border-2 transition-[background-color,box-shadow,transform] duration-200 ${justFell ? "scale-125" : ""}`}
+                        style={{
+                          borderColor: w ? (w === "gold" ? "#ffca3a" : "#9aa7b8") : "rgba(255,255,255,0.15)",
+                          background: w ? (w === "gold" ? "radial-gradient(circle at 35% 30%, #ffe9ad, #ffca3a)" : "radial-gradient(circle at 35% 30%, #eef2f7, #9aa7b8)") : "rgba(0,0,0,0.25)",
+                          boxShadow: w ? `0 0 9px ${w === "gold" ? "rgba(255,202,58,0.7)" : "rgba(154,167,184,0.55)"}` : "none",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-white/50 tabular-nums min-h-[14px]">
+                  {showWinner ? `${winner.toUpperCase()} takes the board` : shownCount > 0 ? `Capture ${shownCount} of ${rounds.length || 7}` : "Duel begins…"}
+                </p>
+              </div>
+              <Medallion count={steelCount} win={showWinner && winner === "steel"} />
+            </div>
+          );
+        })()}
+        <p className="text-[11px] text-white/45 text-center mt-3 relative">Winning side pays 1.9x · one universal duel every round</p>
+        <div className="flex justify-center mt-2 relative">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "gold" ? "G" : "S"} tone={r.winner === "gold" ? "gold" : "neutral"} />} />
         </div>
       </div>
