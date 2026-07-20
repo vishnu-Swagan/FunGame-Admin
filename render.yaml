@@ -7,6 +7,7 @@ services:
     name: fungame-api
     runtime: docker
     plan: free
+    region: singapore              # near India players; MUST match the MongoDB Atlas region
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /api/health

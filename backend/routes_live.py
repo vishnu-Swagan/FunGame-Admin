@@ -9,6 +9,7 @@ All chip movement is server-authoritative through the ledger.
 """
 import uuid
 import time
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -165,16 +166,23 @@ async def aviator_state(user: dict = Depends(require_active_player)):
     phase, t = _av_phase(r, now)
     rn = r['round_number']
 
-    my = await db.aviator_bets.find(
-        {'user_id': user['id'], 'round_number': {'$in': [rn, rn + 1]}},
-        {'_id': 0, 'user_id': 0},
-    ).sort('created_at', 1).to_list(20)
+    # Independent reads run concurrently (one DB round-trip window instead of four).
+    my, feed_raw, hist, balance = await asyncio.gather(
+        db.aviator_bets.find(
+            {'user_id': user['id'], 'round_number': {'$in': [rn, rn + 1]}},
+            {'_id': 0, 'user_id': 0},
+        ).sort('created_at', 1).to_list(20),
+        db.aviator_bets.find(
+            {'round_number': rn, 'status': {'$in': ['OPEN', 'CASHED', 'LOST']}}, {'_id': 0}
+        ).sort('amount', -1).to_list(40),
+        db.aviator_rounds.find(
+            {'status': 'SETTLED'}, {'_id': 0, 'round_number': 1, 'crash_point': 1}
+        ).sort('round_number', -1).to_list(20),
+        _fresh_balance(user['id']),
+    )
     for b in my:
         b['queued'] = b['round_number'] > rn
 
-    feed_raw = await db.aviator_bets.find(
-        {'round_number': rn, 'status': {'$in': ['OPEN', 'CASHED', 'LOST']}}, {'_id': 0}
-    ).sort('amount', -1).to_list(40)
     ids = list({b['user_id'] for b in feed_raw})
     names = {}
     if ids:
@@ -184,12 +192,6 @@ async def aviator_state(user: dict = Depends(require_active_player)):
         'name': _mask(names.get(b['user_id'], 'Player')), 'amount': b['amount'],
         'status': b['status'], 'multiplier': b.get('multiplier'), 'payout': b.get('payout', 0),
     } for b in feed_raw]
-
-    hist = await db.aviator_rounds.find(
-        {'status': 'SETTLED'}, {'_id': 0, 'round_number': 1, 'crash_point': 1}
-    ).sort('round_number', -1).to_list(20)
-
-    balance = await _fresh_balance(user['id'])
     resp = {
         'round_number': rn, 'phase': phase, 'server_now': now,
         'betting_seconds': AV_BETTING, 'result_seconds': AV_RESULT, 'growth': AVIATOR_GROWTH,
@@ -410,11 +412,13 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
             {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
         ).sort('round_number', -1).to_list(10)
 
-    my_bets = await db.live_bets.find(
-        {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': {'$in': ['OPEN', 'SETTLED']}},
-        {'_id': 0, 'user_id': 0},
-    ).to_list(50)
-    balance = await _fresh_balance(user['id'])
+    my_bets, balance = await asyncio.gather(
+        db.live_bets.find(
+            {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': {'$in': ['OPEN', 'SETTLED']}},
+            {'_id': 0, 'user_id': 0},
+        ).to_list(50),
+        _fresh_balance(user['id']),
+    )
     cfg = LIVE_GAMES[slug]
     return {
         'round_number': rn, 'phase': phase, 'phase_ends_in': ends_in,
