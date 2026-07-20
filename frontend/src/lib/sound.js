@@ -41,6 +41,29 @@ const bus = (c) => {
     masterBus.gain.value = 1.5;
     masterBus.connect(comp);
     comp.connect(c.destination);
+    // Subtle hall reverb send — makes the synth SFX sound spacious/"real" instead
+    // of dry beeps. Impulse response is generated (decaying stereo noise), no files.
+    try {
+      const conv = c.createConvolver();
+      const rate = c.sampleRate;
+      const len = Math.floor(rate * 1.6);
+      const ir = c.createBuffer(2, len, rate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+      }
+      conv.buffer = ir;
+      const preDelay = c.createDelay();
+      preDelay.delayTime.value = 0.012;
+      const wet = c.createGain();
+      wet.gain.value = 0.18;
+      masterBus.connect(preDelay);
+      preDelay.connect(conv);
+      conv.connect(wet);
+      wet.connect(comp);
+    } catch (e) {
+      /* reverb is optional polish */
+    }
   }
   return masterBus;
 };
