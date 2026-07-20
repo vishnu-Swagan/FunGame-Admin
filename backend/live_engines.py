@@ -45,9 +45,14 @@ SLOT_SLUGS = {"fever-joker-bonus", "giant-jackpot", "joker-bonus", "lucky-8-line
 SIDE_OPTIONS = {
     "seven-up-down": {"down": 2.3, "seven": 5.8, "up": 2.3},
     "checker": {"gold": 1.9, "steel": 1.9},
-    "andar-bahar": {"andar": 1.9, "bahar": 1.9},
-    "teen-patti": {"player": 1.95, "dealer": 1.95, "tie": 8},
-    "poker": {"player": 1.95, "dealer": 1.95, "tie": 20},
+    # Andar is dealt first and wins slightly more often, so it pays less than
+    # Bahar — the authentic Andar-Bahar asymmetry (evens out the house edge).
+    "andar-bahar": {"andar": 1.85, "bahar": 1.9},
+    # Player/Dealer pay 1.90x — a 5% house commission (baccarat-standard). Ties
+    # are a house win for Player/Dealer bets (see settle_bet). Only the Tie bet
+    # wins on a tie.
+    "teen-patti": {"player": 1.90, "dealer": 1.90, "tie": 8},
+    "poker": {"player": 1.90, "dealer": 1.90, "tie": 20},
 }
 
 

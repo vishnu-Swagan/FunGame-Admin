@@ -66,7 +66,7 @@ export default function CardDuelGame({ game }) {
     });
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
-  const options = state?.options || { player: 1.95, dealer: 1.95, tie: game.slug === "teen-patti" ? 8 : 20 };
+  const options = state?.options || { player: 1.9, dealer: 1.9, tie: game.slug === "teen-patti" ? 8 : 20 };
 
   /* ---------- universal dealing timeline (monotonic server clock) ---------- */
   const elapsed = revealElapsed;
@@ -173,6 +173,7 @@ export default function CardDuelGame({ game }) {
           </button>
         ))}
       </div>
+      <p className="text-[11px] text-white/45 text-center">Player/Dealer pay 1.90x (5% house commission). A tie is a house win — only the Tie bet wins on a tie.</p>
 
       <ResultBanner result={result} />
       <LiveBetPanel

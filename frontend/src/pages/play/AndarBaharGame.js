@@ -53,6 +53,7 @@ export default function AndarBaharGame({ game }) {
   }, [jokerFlipped, phase, shownCount]);
 
   const sideCards = (s) => shown.map((c, i) => ({ ...c, idx: i })).filter((c) => c.side === s);
+  const abPays = state?.options || { andar: 1.85, bahar: 1.9 };
   const sideTotals = {};
   myBets.forEach((b) => {
     sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
@@ -127,7 +128,7 @@ export default function AndarBaharGame({ game }) {
             } ${!betting ? "opacity-70" : ""}`}
           >
             <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
-            <p className="text-[10px] text-white/45">pays 1.9x</p>
+            <p className="text-[10px] text-white/45">pays {abPays[s.id]}x</p>
             {sideTotals[s.id] > 0 && (
               <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
                 {formatChips(sideTotals[s.id])}
