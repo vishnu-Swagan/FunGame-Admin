@@ -189,8 +189,8 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     if kind == "sides":
         winner = outcome["winner"]
         mults = SIDE_OPTIONS[slug]
-        if slug in ("teen-patti", "poker") and winner == "tie" and selection in ("player", "dealer"):
-            return amount, {"result": "push"}  # tie pushes side bets
+        # Tougher: a tie is a HOUSE win — Player/Dealer bets lose on a tie
+        # (only the explicit Tie bet wins). Raises the ~2.5% edge to ~5%.
         if selection == winner:
             return int(round(amount * mults[selection])), {"result": "win"}
         return 0, {"result": "lose"}

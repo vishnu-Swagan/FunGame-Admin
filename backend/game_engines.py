@@ -82,9 +82,9 @@ def eval_poker5(cards):
 
 
 VP_PAYTABLE = [
-    (9, "ROYAL FLUSH", 300), (8, "STRAIGHT FLUSH", 60), (7, "FOUR OF A KIND", 30),
-    (6, "FULL HOUSE", 10), (5, "FLUSH", 7), (4, "STRAIGHT", 5),
-    (3, "THREE OF A KIND", 4), (2, "TWO PAIR", 3),
+    (9, "ROYAL FLUSH", 200), (8, "STRAIGHT FLUSH", 40), (7, "FOUR OF A KIND", 20),
+    (6, "FULL HOUSE", 8), (5, "FLUSH", 5), (4, "STRAIGHT", 4),
+    (3, "THREE OF A KIND", 3), (2, "TWO PAIR", 2),
 ]
 
 
@@ -95,7 +95,7 @@ def vp_result(cards):
         if ev[0] == cat:
             return label, mult
     if ev[0] == 1 and ev[1] >= 11:
-        return "JACKS OR BETTER", 2
+        return "JACKS OR BETTER", 1
     return "NO WIN", 0
 
 
@@ -143,13 +143,13 @@ SLOT_CONFIGS = {
         ],
     },
     "giant-jackpot": {
-        "wild": "diamond", "wild_pay": 100,
+        "wild": "diamond", "wild_pay": 65,
         "symbols": [
-            {"id": "coin", "glyph": "CO", "weight": 30, "pay": 2},
-            {"id": "bar", "glyph": "BR", "weight": 24, "pay": 4},
-            {"id": "bell", "glyph": "BL", "weight": 16, "pay": 6},
-            {"id": "gem", "glyph": "GM", "weight": 12, "pay": 10},
-            {"id": "crown", "glyph": "CR", "weight": 12, "pay": 20},
+            {"id": "coin", "glyph": "CO", "weight": 32, "pay": 2},
+            {"id": "bar", "glyph": "BR", "weight": 26, "pay": 3},
+            {"id": "bell", "glyph": "BL", "weight": 16, "pay": 5},
+            {"id": "gem", "glyph": "GM", "weight": 12, "pay": 8},
+            {"id": "crown", "glyph": "CR", "weight": 10, "pay": 16},
             {"id": "diamond", "glyph": "DI", "weight": 6, "pay": 0},
         ],
     },
@@ -165,13 +165,13 @@ SLOT_CONFIGS = {
         ],
     },
     "lucky-8-line": {
-        "wild": "dragon", "wild_pay": 60,
+        "wild": "dragon", "wild_pay": 30,
         "symbols": [
-            {"id": "blossom", "glyph": "BS", "weight": 30, "pay": 2},
-            {"id": "ingot", "glyph": "IG", "weight": 24, "pay": 4},
-            {"id": "coin", "glyph": "CO", "weight": 16, "pay": 6},
-            {"id": "fish", "glyph": "FI", "weight": 12, "pay": 10},
-            {"id": "eight", "glyph": "88", "weight": 10, "pay": 25},
+            {"id": "blossom", "glyph": "BS", "weight": 30, "pay": 1},
+            {"id": "ingot", "glyph": "IG", "weight": 24, "pay": 3},
+            {"id": "coin", "glyph": "CO", "weight": 16, "pay": 4},
+            {"id": "fish", "glyph": "FI", "weight": 12, "pay": 7},
+            {"id": "eight", "glyph": "88", "weight": 10, "pay": 18},
             {"id": "dragon", "glyph": "DR", "weight": 8, "pay": 0},
         ],
     },

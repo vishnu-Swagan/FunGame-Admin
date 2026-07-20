@@ -18,8 +18,8 @@ const IDS = ["blossom", "ingot", "coin", "fish", "eight", "dragon"];
 const NICE = { BLOSSOM: "BLOSSOM", INGOT: "GOLD INGOT", COIN: "FORTUNE COIN", FISH: "KOI FISH", EIGHT: "LUCKY 8", DRAGON: "DRAGON WILD" };
 const nice = (label) => label.replace(/3x (\w+)/, (_, id) => `3\u00d7 ${NICE[id] || id}`);
 const PAYS = [
-  ["3\u00d7 Blossom", "2x"], ["3\u00d7 Gold Ingot", "4x"], ["3\u00d7 Fortune Coin", "6x"],
-  ["3\u00d7 Koi Fish", "10x"], ["3\u00d7 Lucky 8", "25x"], ["3\u00d7 Dragon", "60x"],
+  ["3\u00d7 Blossom", "1x"], ["3\u00d7 Gold Ingot", "3x"], ["3\u00d7 Fortune Coin", "4x"],
+  ["3\u00d7 Koi Fish", "7x"], ["3\u00d7 Lucky 8", "18x"], ["3\u00d7 Dragon", "30x"],
 ];
 
 const GOLD = "#ffd447";
