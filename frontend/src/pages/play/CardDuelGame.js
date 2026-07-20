@@ -104,7 +104,22 @@ export default function CardDuelGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-4">
+      {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
+      <div style={{ perspective: "1200px" }}>
+      <div
+        className="relative rounded-2xl border-2 p-4 space-y-3 overflow-hidden"
+        style={{
+          borderColor: "#c9a22788",
+          background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
+          transform: "rotateX(5deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)",
+        }}
+        data-testid="duel-table"
+      >
+        {/* felt texture + inner gold trim */}
+        <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
+        <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
         <SeatRow
           label="Dealer"
           seat="dealer"
@@ -149,6 +164,7 @@ export default function CardDuelGame({ game }) {
           />
         </div>
       </div>
+      </div>
 
       <div className="grid grid-cols-3 gap-2">
         {[
@@ -185,7 +201,7 @@ export default function CardDuelGame({ game }) {
         disabled={!side}
         label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
         myTotal={myTotal}
-        hint="Player/Dealer side bets push on a tie"
+        hint="Player/Dealer pay 1.90x · a tie is a house win"
       />
       {betting && myBets.length > 0 && (
         <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">

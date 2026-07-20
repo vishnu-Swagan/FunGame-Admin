@@ -6,6 +6,7 @@ import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/pla
 import { FlipCard } from "@/components/play/FlipCard";
 import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
 /**
  * Champion Poker with a REAL hold-and-draw flow on the universal clock:
@@ -64,11 +65,37 @@ export default function ChampionPokerGame({ game }) {
     prevRef.current = { d: dealtCount, r: redrawnCount, h: showHolds };
   }, [dealtCount, redrawnCount, showHolds, phase]);
 
+  const isWin = showHand && outcome.multiplier > 0;
+  const roundNo = state?.round_number || 0;
+  const winKeyRef = useRef(null);
+  useEffect(() => {
+    if (!isWin || winKeyRef.current === roundNo) return;
+    winKeyRef.current = roundNo;
+    if (outcome.multiplier >= 8) { sfx.gong(); sfx.coinShower(); }
+    else sfx.slotBell();
+  }, [isWin, outcome, roundNo]);
+
   return (
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "HOLD & DRAW…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
+      {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
+      <div style={{ perspective: "1200px" }}>
+      <div
+        className={`relative rounded-2xl border-2 p-4 overflow-hidden ${isWin && outcome.multiplier >= 8 ? "fg-jackpot-pulse" : ""}`}
+        style={{
+          borderColor: "#c9a22788",
+          background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
+          transform: "rotateX(5deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)",
+        }}
+        data-testid="champion-table"
+      >
+        <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
+        <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
+        {isWin && <WinBurst mult={outcome.multiplier} color="#ffd447" showAt={5} />}
+        {isWin && outcome.multiplier >= 8 && <CoinShower />}
         <FitWidth>
           <div className="flex gap-1.5">
             {[0, 1, 2, 3, 4].map((i) => (
@@ -93,6 +120,7 @@ export default function ChampionPokerGame({ game }) {
         <div className="flex justify-center mt-2">
           <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 0 ? "gold" : "neutral"} />} />
         </div>
+      </div>
       </div>
 
       <ResultBanner result={result} />
