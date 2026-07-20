@@ -61,10 +61,17 @@ async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_a
 # ---------------- Live Fun Roulette (universal synchronized rounds) ----------------
 # Rounds are derived from universal epoch time: every player worldwide sees the
 # same round number, the same countdown and the same winning number.
-ROUND_SECONDS = 30
+ROUND_SECONDS = 35
 BETTING_SECONDS = 20   # 0-20s: bets open
-SPIN_SECONDS = 6       # 20-26s: wheel spins (bets locked)
-# 26-30s: result display, then the next round starts automatically
+SPIN_SECONDS = 10      # 20-30s: long, dramatic wheel spin (bets locked)
+# 30-35s: result display, then the next round starts automatically
+
+# Table limits (anti-Martingale). Even-money positions (red/black, odd/even,
+# 1-18/19-36) are capped so that doubling on loss hits the ceiling within a few
+# rounds and cannot be exploited. Inside/other positions get a higher ceiling.
+EVEN_MONEY_TYPES = {"color", "parity", "range"}
+EVEN_MONEY_MAX = MIN_BET * 200   # 2000 — 10,20,40,...,1280 then blocked
+POSITION_MAX = MIN_BET * 1000    # 10000 — general per-position table max
 
 
 class RouletteBet(BaseModel):
@@ -201,6 +208,20 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
         raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
     # Validate the bet shape now (winning number irrelevant, just validation)
     roulette_multiplier(body.bet_type, body.value, 0)
+    # Table limit — cap cumulative stake on this exact position. Even-money
+    # positions get the lower ceiling so Martingale doubling cannot run away.
+    cap = EVEN_MONEY_MAX if body.bet_type in EVEN_MONEY_TYPES else POSITION_MAX
+    existing_pos = await db.roulette_bets.find(
+        {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN',
+         'bet_type': body.bet_type, 'value': body.value}, {'amount': 1},
+    ).to_list(300)
+    staked = sum(b['amount'] for b in existing_pos)
+    if staked + body.amount > cap:
+        kind = 'even-money' if body.bet_type in EVEN_MONEY_TYPES else 'table'
+        raise HTTPException(status_code=400, detail={
+            'code': 'TABLE_LIMIT',
+            'message': f'Table limit — max {cap} chips on this position ({kind} limit). You have {staked} here.',
+        })
     bet_id = str(uuid.uuid4())
     try:
         await debit_chips(user['id'], body.amount, f'Fun Roulette bet (round {round_number})', ref=bet_id)
@@ -234,6 +255,30 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
         await credit_chips(user['id'], refunded, f'Fun Roulette bets refunded (round {round_number})', ref=str(round_number))
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
+
+
+@router.post('/games/fun-roulette/bets/undo')
+async def roulette_undo_bet(user: dict = Depends(require_active_player)):
+    """Undo the most-recently placed chip this round (refund just that one bet)."""
+    round_number, phase, phase_ends_in, _ = _roulette_clock()
+    if phase != 'BETTING' or phase_ends_in < 0.4:
+        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+    last = await db.roulette_bets.find(
+        {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}
+    ).sort('created_at', -1).to_list(1)
+    refunded = 0
+    if last:
+        b = last[0]
+        res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
+        if res.modified_count:
+            refunded = b['amount']
+            await credit_chips(user['id'], refunded, f'Fun Roulette undo (round {round_number})', ref=b['id'])
+    my_bets = await db.roulette_bets.find(
+        {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
+        {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},
+    ).to_list(100)
+    balance = await _fresh_balance(user['id'])
+    return {'message': 'Last bet undone', 'refunded': refunded, 'my_bets': my_bets, 'my_total': sum(b['amount'] for b in my_bets), 'balance': balance}
 
 
 # ---------------- Round history ----------------

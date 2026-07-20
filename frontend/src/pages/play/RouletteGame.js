@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Timer, RotateCcw, Repeat } from "lucide-react";
+import { Timer, RotateCcw, Repeat, Undo2 } from "lucide-react";
 import { FitWidth } from "@/components/FitWidth";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
@@ -299,6 +299,9 @@ export default function RouletteGame({ game }) {
   const stateRef = useRef(null);
   const ballRef = useRef(null);
   const ballAnimRef = useRef(null);
+  const spinParamsRef = useRef({ ballTurns: 6, bounceAmp: 2.6, bounceFreq: 55, dropAt: 0.55, hopStart: 0.62, hopEnd: 0.92 });
+  const [spinBlur, setSpinBlur] = useState(false); // motion blur during the fast part of the spin
+  const blurTimerRef = useRef(null);
   const betSeqRef = useRef(0);                    // latest bet request wins the reconcile
   const inFlightRef = useRef(0);                  // # bets awaiting the server (poll won't clobber optimistic state)
   const spinDurRef = useRef(5200);                // ball animation duration (mirrors spinMs)
@@ -320,7 +323,12 @@ export default function RouletteGame({ game }) {
      ball also drops in height (translateZ) from the upper rim into the bowl. */
   const animateBall = useCallback(() => {
     const DURATION = spinDurRef.current; // matches the wheel deceleration (synced to the round)
-    const TOTAL = 6 * 360; // clockwise revolutions (opposite to the wheel)
+    // Per-spin randomized physics (anti-botting): the ball's revolution count,
+    // deflector-bounce pattern and drop point differ every spin, so the journey
+    // is never a repeatable visual loop — yet it always seats in the SAME final
+    // pocket (an integer number of turns ends exactly at the top pointer).
+    const pp = spinParamsRef.current;
+    const TOTAL = pp.ballTurns * 360; // clockwise revolutions (opposite to the wheel)
     const R_TRACK = 101;
     const R_POCKET = 75;
     const Z_TRACK = 20; // height on the outer rim edge
@@ -333,13 +341,13 @@ export default function RouletteGame({ game }) {
       const ang = TOTAL * ease; // ends exactly at the top pointer
       let r = R_TRACK;
       let z = Z_TRACK;
-      if (p > 0.55) {
-        const q = Math.min(1, (p - 0.55) / 0.35);
+      if (p > pp.dropAt) {
+        const q = Math.min(1, (p - pp.dropAt) / (0.92 - pp.dropAt));
         r = R_TRACK - (R_TRACK - R_POCKET) * q;
         z = Z_TRACK - (Z_TRACK - Z_POCKET) * q;
-        if (p > 0.62 && p < 0.92) {
-          const hop = Math.sin(p * 55) * (1 - p);
-          r += hop * 2.6; // deflector bounces
+        if (p > pp.hopStart && p < pp.hopEnd) {
+          const hop = Math.sin(p * pp.bounceFreq) * (1 - p);
+          r += hop * pp.bounceAmp; // randomized deflector bounces
           z += Math.abs(hop) * 5; // little vertical hops
         }
       }
@@ -359,19 +367,35 @@ export default function RouletteGame({ game }) {
     (winning, durMs) => {
       const idx = EURO_ORDER.indexOf(winning);
       if (idx < 0) return;
-      const dur = Math.max(2400, Math.min(5600, durMs || 5200));
+      // long, dramatic spin — clamp raised so the full 10s server spin plays out
+      const dur = Math.max(2600, Math.min(10500, durMs || 9500));
       spinDurRef.current = dur;
       setSpinMs(dur);
       setLanded(false);
+      // Randomized per-spin physics (variable wheel speed Wv + ball launch Bv +
+      // bounce jitter). Integer turn counts keep the exact landing pocket, but the
+      // journey is unique every time — no visual loop for bots to lock onto.
+      const wheelTurns = 5 + Math.floor(Math.random() * 5); // 5..9 CCW turns
+      spinParamsRef.current = {
+        ballTurns: 7 + Math.floor(Math.random() * 5), // 7..11 CW revolutions (Bv)
+        bounceAmp: 2.0 + Math.random() * 1.8, // deflector kick strength
+        bounceFreq: 42 + Math.random() * 28, // bounce cadence
+        dropAt: 0.5 + Math.random() * 0.12, // when the ball spirals off the track
+        hopStart: 0.6 + Math.random() * 0.05,
+        hopEnd: 0.9 + Math.random() * 0.04,
+      };
       const prev = wheelRotRef.current;
       const targetMod = (360 - idx * SEG) % 360;
-      // counterclockwise: at least 5 full turns, ending with the winning pocket at the top
-      const delta = 5 * 360 + (((((prev % 360) + 360) % 360) - targetMod + 360) % 360);
+      // counterclockwise: randomized full turns (Wv), ending with the winning pocket at the top
+      const delta = wheelTurns * 360 + (((((prev % 360) + 360) % 360) - targetMod + 360) % 360);
       const next = prev - delta;
       wheelRotRef.current = next;
       setSpinningAnim(true);
-      // cinematic camera: dolly in on the numbers for the spin, pull back
-      // once the ball has landed and the result is showing
+      // motion blur while the wheel is at speed, easing off over the first ~55%
+      setSpinBlur(true);
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = setTimeout(() => setSpinBlur(false), dur * 0.55);
+      // cinematic camera: dolly in for the spin, pull back once the ball lands
       setCameraZoom(true);
       clearTimeout(camTimerRef.current);
       camTimerRef.current = setTimeout(() => setCameraZoom(false), dur + 400);
@@ -459,6 +483,7 @@ export default function RouletteGame({ game }) {
       clearInterval(tickRef.current);
       clearTimeout(camTimerRef.current);
       clearTimeout(landTimerRef.current);
+      clearTimeout(blurTimerRef.current);
       cancelAnimationFrame(ballAnimRef.current);
     };
   }, [poll, loadHistory]);
@@ -510,6 +535,18 @@ export default function RouletteGame({ game }) {
       setState((s) => (s ? { ...s, my_bets: [], my_total: 0 } : s));
       sfx.chip();
       toast.success(`Refunded ${formatChips(data.refunded)} chips`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const undoBet = async () => {
+    try {
+      const { data } = await api.post("/games/fun-roulette/bets/undo");
+      setBalance(data.balance);
+      setState((s) => (s ? { ...s, my_bets: data.my_bets, my_total: data.my_total } : s));
+      sfx.chip();
+      if (data.refunded > 0) toast.success(`Undid last chip — ${formatChips(data.refunded)} back`);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -601,7 +638,10 @@ export default function RouletteGame({ game }) {
                   willChange: "transform",
                 }}
               >
-                <WheelSVG />
+                {/* motion blur on the 2D number face only (keeps the 3D turret crisp) */}
+                <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
+                  <WheelSVG />
+                </div>
                 <Turret3D />
               </div>
               {/* fixed ambient light + rim vignette — stays put while the wheel spins,
@@ -787,7 +827,15 @@ export default function RouletteGame({ game }) {
             disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0}
             className="h-10 px-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-bold text-white/75 disabled:opacity-40 flex items-center gap-1.5"
           >
-            <Repeat className="h-3.5 w-3.5" /> Rebet
+            <Repeat className="h-3.5 w-3.5" /> Repeat
+          </button>
+          <button
+            data-testid="roulette-undo-bet"
+            onClick={undoBet}
+            disabled={!betting || (state?.my_bets || []).length === 0}
+            className="h-10 px-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-bold text-white/75 disabled:opacity-40 flex items-center gap-1.5"
+          >
+            <Undo2 className="h-3.5 w-3.5" /> Undo
           </button>
           <button
             data-testid="roulette-clear-bets"
