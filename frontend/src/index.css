@@ -172,6 +172,29 @@ body {
 .fg-av-cloud2  { animation: fg-av-cloud2 18s linear infinite; }
 .fg-av-runway  { animation: fg-av-runway .5s linear infinite; }
 
+/* ---------------- Slot / casino cinematics ---------------- */
+@keyframes fg-coin-fall {
+  0%   { transform: translateY(-20px) rotateY(0deg) scale(1); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(230px) rotateY(540deg) scale(0.7); opacity: 0; }
+}
+@keyframes fg-win-flash { 0% { opacity: 0; transform: scale(0.6); } 30% { opacity: 0.85; } 100% { opacity: 0; transform: scale(1.6); } }
+@keyframes fg-jackpot-pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
+@keyframes fg-reel-blur { 0%,100% { filter: blur(0); } 50% { filter: blur(1.4px); } }
+@keyframes fg-neon-throb { 0%,100% { opacity: 0.85; text-shadow: 0 0 12px currentColor, 0 0 26px currentColor; } 50% { opacity: 1; text-shadow: 0 0 20px currentColor, 0 0 44px currentColor; } }
+@keyframes fg-payline-sweep { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+.fg-coin { position: absolute; will-change: transform, opacity; animation: fg-coin-fall linear 1 forwards; }
+.fg-win-flash { animation: fg-win-flash 0.9s ease-out 1 forwards; }
+.fg-jackpot-pulse { animation: fg-jackpot-pulse 0.5s ease-in-out infinite; }
+.fg-reel-spinning { animation: fg-reel-blur 0.28s linear infinite; }
+.fg-neon { animation: fg-neon-throb 1.8s ease-in-out infinite; }
+.fg-payline-live {
+  background: linear-gradient(90deg, transparent, rgba(255,212,71,0.85), transparent);
+  background-size: 200% 100%;
+  animation: fg-payline-sweep 1s linear infinite;
+}
+
 /* Reduced motion: user toggle + system preference */
 .rm *, .rm *::before, .rm *::after {
     animation-duration: 0.001s !important;

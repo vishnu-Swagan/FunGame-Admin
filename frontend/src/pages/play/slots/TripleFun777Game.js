@@ -65,6 +65,47 @@ const Sym = ({ id, size = 44 }) => {
   }
 };
 
+// cinematic coin shower + gold flash on a win
+const COIN_SEED = Array.from({ length: 26 }, (_, i) => ({
+  left: (i * 37) % 100,
+  delay: ((i * 53) % 100) / 100 * 0.5,
+  dur: 0.9 + ((i * 29) % 60) / 100,
+  size: 12 + ((i * 17) % 10),
+}));
+const CoinShower = () => (
+  <div className="pointer-events-none absolute inset-0 overflow-hidden z-30" aria-hidden="true">
+    {COIN_SEED.map((c, i) => (
+      <span
+        key={i}
+        className="fg-coin rounded-full"
+        style={{
+          left: `${c.left}%`,
+          top: -20,
+          width: c.size,
+          height: c.size,
+          animationDelay: `${c.delay}s`,
+          animationDuration: `${c.dur}s`,
+          background: "radial-gradient(circle at 35% 30%, #fff6c8, #ffd447 45%, #b8860b)",
+          boxShadow: "0 0 6px rgba(255,212,71,0.8), inset -1px -2px 2px rgba(0,0,0,0.3)",
+        }}
+      />
+    ))}
+  </div>
+);
+const WinBurst = ({ mult }) => (
+  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" aria-hidden="true">
+    <div
+      className="fg-win-flash absolute h-40 w-40 rounded-full"
+      style={{ background: "radial-gradient(circle, rgba(255,212,71,0.9), rgba(255,150,60,0.3) 45%, transparent 70%)" }}
+    />
+    {mult >= 12 && (
+      <p className="relative font-display text-5xl fg-neon" style={{ color: "#ffd447" }}>
+        {mult}x
+      </p>
+    )}
+  </div>
+);
+
 const Bulbs = ({ fast }) => (
   <div className="flex justify-between px-3" aria-hidden="true">
     {Array.from({ length: 14 }, (_, i) => (
@@ -118,7 +159,8 @@ export default function TripleFun777Game({ game }) {
   useEffect(() => {
     if (!allStopped || winKeyRef.current === roundNo) return;
     winKeyRef.current = roundNo;
-    if (outcome.multiplier > 1) sfx.slotBell();
+    if (outcome.multiplier >= 30) { sfx.gong(); sfx.coinShower(); sfx.slotBell(); }
+    else if (outcome.multiplier > 1) { sfx.slotBell(); sfx.coinShower(); }
   }, [allStopped, outcome, roundNo]);
 
   const reelCell = (i) => {
@@ -141,19 +183,32 @@ export default function TripleFun777Game({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "REELS SPINNING\u2026" }} />
 
-      {/* ---- classic Vegas cabinet ---- */}
+      {/* ---- cinematic Vegas cabinet (3D tilt + chrome sheen) ---- */}
+      <div style={{ perspective: "1100px" }}>
       <div
         data-testid="slot777-cabinet"
-        className="rounded-2xl overflow-hidden border-2"
-        style={{ borderColor: "#b4530966", background: "linear-gradient(180deg, #450a0a 0%, #2b0707 55%, #1a0404 100%)" }}
+        className={`relative rounded-2xl overflow-hidden border-2 ${isWin && outcome.multiplier >= 30 ? "fg-jackpot-pulse" : ""}`}
+        style={{
+          borderColor: "#b45309aa",
+          background: "linear-gradient(180deg, #450a0a 0%, #2b0707 55%, #1a0404 100%)",
+          transform: "rotateX(6deg)",
+          transformStyle: "preserve-3d",
+          boxShadow: "0 18px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)",
+        }}
       >
+        {/* win celebration */}
+        {isWin && <WinBurst mult={outcome.multiplier} />}
+        {isWin && <CoinShower />}
+        {/* chrome side rails */}
+        <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1.5" style={{ background: "linear-gradient(90deg, #e2e8f0, #64748b)" }} />
+        <span aria-hidden="true" className="absolute right-0 top-0 bottom-0 w-1.5" style={{ background: "linear-gradient(270deg, #e2e8f0, #64748b)" }} />
         {/* marquee */}
         <div className="pt-2.5 pb-2 space-y-1.5" style={{ background: "linear-gradient(180deg, #7f1d1d, #450a0a)", borderBottom: "1px solid #b4530955" }}>
           <Bulbs fast={isWin} />
           <div className="text-center leading-none">
             <p
-              className="font-display text-4xl"
-              style={{ color: "#ffd447", textShadow: "0 0 18px rgba(255,212,71,0.55), 0 2px 0 rgba(0,0,0,0.5)" }}
+              className="font-display text-4xl fg-neon"
+              style={{ color: "#ffd447" }}
               data-testid="slot777-marquee"
             >
               777
@@ -180,10 +235,12 @@ export default function TripleFun777Game({ game }) {
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="w-[76px] rounded-md overflow-hidden relative"
+                  className={`w-[76px] rounded-md overflow-hidden relative ${spinningPhase && i >= stoppedCount ? "fg-reel-spinning" : ""}`}
                   style={{ background: "linear-gradient(180deg, #d9cfb2, #f5efdc 30%, #f5efdc 70%, #d9cfb2)", boxShadow: "inset 0 6px 10px rgba(0,0,0,0.3), inset 0 -6px 10px rgba(0,0,0,0.3)" }}
                   data-testid={`slot777-reel-${i}`}
                 >
+                  {/* glass reflection */}
+                  <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/2 z-10" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.35), transparent)" }} />
                   {reelCell(i)}
                 </div>
               ))}
@@ -220,6 +277,7 @@ export default function TripleFun777Game({ game }) {
             <LastResults items={lastResults} render={(r) => <ResultPill label={`${r.multiplier}x`} tone={r.multiplier > 1 ? "gold" : r.multiplier === 1 ? "cyan" : "neutral"} />} />
           </div>
         </div>
+      </div>
       </div>
 
       <ResultBanner result={result} />
