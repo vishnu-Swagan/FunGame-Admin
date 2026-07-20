@@ -23,3 +23,21 @@ services:
         value: development
       - key: EMAIL_PROVIDER
         value: demo
+
+  # Static frontend (CDN-served, always on). Built by Render; serves the PWA
+  # that PWABuilder wraps into the Android APK.
+  - type: web
+    name: fungame-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: yarn install --network-timeout 600000 && yarn build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        value: https://fungame-api.onrender.com
+      - key: GENERATE_SOURCEMAP
+        value: "false"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
