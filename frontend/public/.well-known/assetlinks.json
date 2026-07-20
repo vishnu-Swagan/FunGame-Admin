@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.onrender.fungame_web.twa",
+        "sha256_cert_fingerprints": ["22:02:A2:30:13:2C:B4:FD:CF:C3:B4:75:53:C9:A7:93:61:36:5F:36:71:9F:AA:67:D1:8D:E4:85:50:1B:2F:77"]
+      }
+    }]
