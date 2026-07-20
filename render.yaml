@@ -1,0 +1,25 @@
+# Render Blueprint — deploys the FunGame FastAPI backend as a Docker web service.
+# 1. Push this repo to GitHub (already done).
+# 2. On render.com: New + > Blueprint > pick this repo. Render reads this file.
+# 3. Fill in MONGO_URL (from MongoDB Atlas) and JWT_SECRET when prompted.
+services:
+  - type: web
+    name: fungame-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URL
+        sync: false          # set in dashboard — MongoDB Atlas connection string
+      - key: DB_NAME
+        value: fungame
+      - key: JWT_SECRET
+        sync: false          # set in dashboard — long random string
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: APP_ENV
+        value: development
+      - key: EMAIL_PROVIDER
+        value: demo
