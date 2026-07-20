@@ -16,6 +16,7 @@ import routes_player
 import routes_admin
 import routes_games
 import routes_live
+import routes_security
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,12 +84,27 @@ api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
+api_router.include_router(routes_security.router)
 app.include_router(api_router)
 
+# --- Security middleware ---
+# Order matters: last-added runs first. We want CORS outermost, then rate limit,
+# then security headers on the way out.
+from security import RateLimitMiddleware, SecurityHeadersMiddleware
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
+# CORS locked to explicit origins in production. Wildcard is refused when
+# credentials are allowed, so we only enable credentials for a concrete allowlist.
+_cors_origins = [o.strip() for o in os.environ.get('CORS_ORIGINS', '*').split(',') if o.strip()]
+_wildcard = _cors_origins == ['*']
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=not _wildcard,
+    allow_origins=_cors_origins,
     allow_methods=['*'],
     allow_headers=['*'],
 )
+if _wildcard:
+    logger.warning('CORS is wildcard (*). Set CORS_ORIGINS to your frontend origin in production.')

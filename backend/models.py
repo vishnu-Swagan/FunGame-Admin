@@ -183,3 +183,8 @@ class SettingsUpdate(BaseModel):
     haptics_enabled: Optional[bool] = None
     reduced_motion: Optional[bool] = None
     high_contrast: Optional[bool] = None
+
+
+class AdminSetPassword(BaseModel):
+    """Admin-initiated password reset for an existing account."""
+    password: str = Field(min_length=8, max_length=128)

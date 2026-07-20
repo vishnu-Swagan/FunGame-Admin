@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
-                    AdminSignupApprove, AdminPointsAdjust)
+                    AdminSignupApprove, AdminPointsAdjust, AdminSetPassword)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 
@@ -155,6 +155,26 @@ async def suspend_user(user_id: str, body: AdminUserAction = None, admin: dict =
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'SUSPENDED'}})
     await _notify(user_id, 'Account suspended', 'Your FunGame account has been suspended. Contact support for details.', 'SUSPENSION')
     return {'message': 'User suspended'}
+
+
+@router.post('/users/{user_id}/reset-password')
+async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict = Depends(require_admin)):
+    """Admin sets a new password for an account and forces re-login on all devices.
+    Replaces self-service email-code resets (no verification code is ever exposed)."""
+    user = await db.users.find_one({'id': user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    await db.users.update_one({'id': user_id}, {
+        '$set': {
+            'password_hash': hash_password(body.password),
+            # revoke every outstanding session/token
+            'active_session_id': f'revoked-{uuid.uuid4()}',
+        },
+        '$unset': {'reset_code_hash': '', 'reset_expires_at': ''},
+    })
+    await _notify(user_id, 'Password changed', 'An administrator reset your FunGame password. Please log in with your new password.', 'INFO')
+    logger.info(f'admin {admin.get("email")} reset password for user {user_id}')
+    return {'message': 'Password reset. The user must log in again with the new password.'}
 
 
 # ---------- Signup requests (admin-provisioned accounts) ----------

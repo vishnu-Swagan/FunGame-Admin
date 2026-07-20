@@ -1,5 +1,6 @@
 // craco.config.js
 const path = require("path");
+const WebpackObfuscator = require("webpack-obfuscator");
 require("dotenv").config();
 
 // Check if we're in development/preview mode (not production build)
@@ -101,6 +102,32 @@ let webpackConfig = {
       // Add health check plugin to webpack if enabled
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
+      }
+
+      // Obfuscate the app's own JS in production builds to make the copied
+      // frontend source hard to read. Vendor (node_modules) is excluded to
+      // keep React/deps intact and avoid runtime breakage + bloat.
+      if (process.env.NODE_ENV === "production") {
+        webpackConfig.plugins.push(
+          new WebpackObfuscator(
+            {
+              rotateStringArray: true,
+              stringArray: true,
+              stringArrayEncoding: ["base64"],
+              stringArrayThreshold: 0.75,
+              identifierNamesGenerator: "hexadecimal",
+              // Deliberately conservative: these break React/bloat badly if on.
+              controlFlowFlattening: false,
+              deadCodeInjection: false,
+              debugProtection: false,
+              selfDefending: false,
+              disableConsoleOutput: false,
+              transformObjectKeys: false,
+            },
+            // exclude patterns: never obfuscate vendor chunks
+            ["**/node_modules/**"]
+          )
+        );
       }
       return webpackConfig;
     },
