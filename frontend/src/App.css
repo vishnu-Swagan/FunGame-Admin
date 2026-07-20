@@ -12,19 +12,50 @@
   height: 68px;
   position: relative;
   transform-style: preserve-3d;
-  transition: transform 0.7s cubic-bezier(0.2, 0.7, 0.3, 1);
+  /* natural landing: a little overshoot, then settle (like a real die coming to rest) */
+  transition: transform 0.62s cubic-bezier(0.18, 1.5, 0.4, 1);
 }
+/* Two throw variants + randomized duration (set inline) so no two rolls look alike,
+   like real dice tumbling and bouncing on a table at home. */
 .fg-die.rolling {
-  animation: fg-dice-tumble 0.72s linear infinite;
+  animation-name: fg-dice-throw-a;
+  animation-timing-function: cubic-bezier(0.32, 0.12, 0.4, 0.94);
+  animation-iteration-count: infinite;
   transition: none;
 }
-@keyframes fg-dice-tumble {
-  from {
-    transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg);
-  }
-  to {
-    transform: rotateX(360deg) rotateY(720deg) rotateZ(180deg);
-  }
+.fg-die.rolling.v2 { animation-name: fg-dice-throw-b; }
+@keyframes fg-dice-throw-a {
+  0%   { transform: translateY(0)     rotateX(0deg)   rotateY(0deg)   rotateZ(0deg); }
+  22%  { transform: translateY(-38px) rotateX(250deg) rotateY(150deg) rotateZ(70deg); }
+  48%  { transform: translateY(1px)   rotateX(430deg) rotateY(360deg) rotateZ(180deg); }
+  68%  { transform: translateY(-18px) rotateX(590deg) rotateY(520deg) rotateZ(250deg); }
+  85%  { transform: translateY(0)     rotateX(690deg) rotateY(650deg) rotateZ(320deg); }
+  100% { transform: translateY(-6px)  rotateX(720deg) rotateY(720deg) rotateZ(360deg); }
+}
+@keyframes fg-dice-throw-b {
+  0%   { transform: translateY(0)     rotateX(0deg)    rotateY(0deg)    rotateZ(0deg); }
+  20%  { transform: translateY(-30px) rotateX(-180deg) rotateY(260deg)  rotateZ(-90deg); }
+  46%  { transform: translateY(2px)   rotateX(-320deg) rotateY(430deg)  rotateZ(-200deg); }
+  66%  { transform: translateY(-22px) rotateX(-500deg) rotateY(610deg)  rotateZ(-300deg); }
+  86%  { transform: translateY(0)     rotateX(-640deg) rotateY(700deg)  rotateZ(-360deg); }
+  100% { transform: translateY(-8px)  rotateX(-720deg) rotateY(720deg)  rotateZ(-360deg); }
+}
+/* grounding shadow that squashes as the die lands */
+.fg-die-shadow {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  width: 58px;
+  height: 12px;
+  margin-left: -29px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.5), transparent 75%);
+  filter: blur(2px);
+}
+.fg-die-shadow.rolling { animation: fg-dice-shadow 0.8s ease-in-out infinite; }
+@keyframes fg-dice-shadow {
+  0%, 48%, 85%, 100% { transform: scale(1); opacity: 0.5; }
+  22%, 68% { transform: scale(0.6); opacity: 0.25; }
 }
 .fg-die-face {
   position: absolute;

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Dices } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
@@ -43,9 +44,13 @@ const DieFace = ({ value }) => (
   </div>
 );
 
-const Die = ({ value, rolling, duration = "0.72s" }) => (
-  <div className="fg-die-scene">
-    <div className={`fg-die ${rolling ? "rolling" : ""}`} style={rolling ? { animationDuration: duration } : { transform: FACE_ROT[value] }}>
+const Die = ({ value, rolling, variant, duration = "0.8s" }) => (
+  <div className="fg-die-scene relative">
+    <div className={`fg-die-shadow ${rolling ? "rolling" : ""}`} style={rolling ? { animationDuration: duration } : {}} />
+    <div
+      className={`fg-die ${rolling ? `rolling ${variant ? "v2" : ""}` : ""}`}
+      style={rolling ? { animationDuration: duration } : { transform: FACE_ROT[value] }}
+    >
       {[1, 2, 3, 4, 5, 6].map((v) => (
         <DieFace key={v} value={v} />
       ))}
@@ -58,15 +63,28 @@ export default function DiceGame({ game }) {
     useLiveRound(game.slug, {
       formatResult: (s) => ({
         title: s.payout > 0 ? "You won!" : "Not this time",
-        subtitle: `Rolled ${s.outcome.dice[0]} + ${s.outcome.dice[1]} = ${s.outcome.total} — ${s.outcome.winner.toUpperCase()}`,
+        subtitle:
+          s.outcome.winner === "double"
+            ? `Double ${s.outcome.dice[0]} & ${s.outcome.dice[1]} — matching dice, the house wins`
+            : `Rolled ${s.outcome.dice[0]} + ${s.outcome.dice[1]} = ${s.outcome.total} — ${s.outcome.winner.toUpperCase()}`,
       }),
     });
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
+  // fresh random throw config per roll so no two rolls look identical
+  const [rollCfg, setRollCfg] = useState([{ v: false, d: "0.8s" }, { v: true, d: "0.9s" }]);
 
   const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
   const rolling = phase === "REVEAL" && !showFinal;
   const dice = showFinal ? outcome.dice : [3, 4];
+  const isDouble = showFinal && outcome.winner === "double";
+
+  useEffect(() => {
+    if (rolling) {
+      const mk = () => ({ v: Math.random() < 0.5, d: (0.66 + Math.random() * 0.34).toFixed(2) + "s" });
+      setRollCfg([mk(), mk()]);
+    }
+  }, [rolling]);
 
   // dice rattle while tumbling, thud when they land
   useEffect(() => {
@@ -88,20 +106,41 @@ export default function DiceGame({ game }) {
     <PlayShell game={game} balance={balance}>
       <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "ROLLING…" }} />
 
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-6 flex flex-col items-center gap-4">
-        <div className="flex items-center justify-center gap-8 py-2" data-testid="dice-stage">
-          <Die value={dice[0]} rolling={rolling} duration="0.72s" />
-          <Die value={dice[1]} rolling={rolling} duration="0.87s" />
+      <div
+        className="rounded-2xl border border-white/10 p-6 flex flex-col items-center gap-4"
+        style={{ background: "radial-gradient(120% 90% at 50% 20%, #15653a 0%, #0f4e2d 55%, #0a3a21 100%)" }}
+      >
+        {/* felt table */}
+        <div className="flex items-center justify-center gap-9 py-5" data-testid="dice-stage">
+          <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
+          <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
         </div>
         {showFinal && (
-          <p className="text-sm font-bold text-white/80 tabular-nums" data-testid="dice-total">
-            {outcome.total} — {outcome.winner.toUpperCase()}
-          </p>
+          isDouble ? (
+            <p className="text-sm font-extrabold text-red-300 tracking-wide" data-testid="dice-total">
+              DOUBLE {outcome.dice[0]} · {outcome.dice[1]} — HOUSE WINS
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-white/90 tabular-nums" data-testid="dice-total">
+              {outcome.total} — {outcome.winner.toUpperCase()}
+            </p>
+          )
         )}
         <LastResults
           items={lastResults}
-          render={(r) => <ResultPill label={r.total} tone={r.winner === "seven" ? "gold" : r.winner === "up" ? "magenta" : "cyan"} />}
+          render={(r) => (
+            <ResultPill
+              label={r.winner === "double" ? `${r.total}` : r.total}
+              tone={r.winner === "double" ? "red" : r.winner === "seven" ? "gold" : r.winner === "up" ? "magenta" : "cyan"}
+            />
+          )}
         />
+      </div>
+      <div className="rounded-xl border border-[hsl(var(--magenta)/0.3)] bg-[hsl(var(--magenta)/0.08)] px-3 py-2 flex items-center gap-2">
+        <Dices className="h-4 w-4 text-[hsl(var(--magenta))] shrink-0" />
+        <p className="text-[11px] text-white/70">
+          <span className="font-bold text-[hsl(var(--magenta))]">Matching dice (a double) = house wins</span> — Up, Down and Lucky 7 all lose on a double. Real dice, truly random.
+        </p>
       </div>
 
       <div className="grid grid-cols-3 gap-2">

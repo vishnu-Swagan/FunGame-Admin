@@ -97,7 +97,13 @@ def generate_outcome(slug):
     if slug == "seven-up-down":
         d1, d2 = RNG.randint(1, 6), RNG.randint(1, 6)
         total = d1 + d2
-        winner = "seven" if total == 7 else ("up" if total > 7 else "down")
+        # Tough logic: matching dice (a "double") is a HOUSE win — up/down/seven
+        # all lose. This drops the ~42% up/down win rate to ~33% without changing
+        # any payout. Fair for everyone; the RNG is untouched (secrets.SystemRandom).
+        if d1 == d2:
+            winner = "double"
+        else:
+            winner = "seven" if total == 7 else ("up" if total > 7 else "down")
         return {"dice": [d1, d2], "total": total, "winner": winner}
     if slug == "fun-target":
         return {"result": RNG.randint(0, 9)}
