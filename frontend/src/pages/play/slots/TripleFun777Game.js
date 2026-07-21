@@ -3,9 +3,10 @@ import { motion } from "framer-motion";
 import { Zap, Star } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
 import { FitWidth } from "@/components/FitWidth";
 
@@ -180,9 +181,48 @@ export default function TripleFun777Game({ game }) {
   };
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "REELS SPINNING\u2026" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "REELS SPINNING\u2026" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => placeBet(null, amount)}
+            betting={betting}
+            placing={placing}
+            label={"Pull the lever \u2014 join this spin"}
+            myTotal={myTotal}
+            hint={"Pairs return your stake \u00b7 Wild Star substitutes"}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={
+        <div className="space-y-3">
+          {/* classic paytable */}
+          <div className="rounded-2xl border p-3.5" style={{ borderColor: "#b4530933", background: "rgba(69,10,10,0.35)" }} data-testid="slot777-paytable">
+            <p className="text-xs font-extrabold tracking-wider mb-2" style={{ color: "#ffd447" }}>{"PAYS \u2014 CENTER LINE"}</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {PAYS.map(([h, p]) => (
+                <div key={h} className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/60">{h}</span>
+                  <span className="tabular-nums font-bold" style={{ color: "#ffd447" }}>{p}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <HistoryStrip history={history} />
+        </div>
+      }
+    >
       {/* ---- cinematic Vegas cabinet (3D tilt + chrome sheen) ---- */}
       <div style={{ perspective: "1100px" }}>
       <div
@@ -281,35 +321,6 @@ export default function TripleFun777Game({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => placeBet(null, amount)}
-        betting={betting}
-        placing={placing}
-        label={"Pull the lever \u2014 join this spin"}
-        myTotal={myTotal}
-        hint={"Pairs return your stake \u00b7 Wild Star substitutes"}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-
-      {/* classic paytable */}
-      <div className="rounded-2xl border p-3.5" style={{ borderColor: "#b4530933", background: "rgba(69,10,10,0.35)" }} data-testid="slot777-paytable">
-        <p className="text-xs font-extrabold tracking-wider mb-2" style={{ color: "#ffd447" }}>{"PAYS \u2014 CENTER LINE"}</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          {PAYS.map(([h, p]) => (
-            <div key={h} className="flex items-center justify-between text-[11px]">
-              <span className="text-white/60">{h}</span>
-              <span className="tabular-nums font-bold" style={{ color: "#ffd447" }}>{p}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
