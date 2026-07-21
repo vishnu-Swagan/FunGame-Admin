@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { FlipCard } from "@/components/play/FlipCard";
 import { PlayingCard } from "@/components/play/PlayingCard";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 import { formatChips } from "@/components/common";
 
 /**
@@ -60,9 +61,57 @@ export default function AndarBaharGame({ game }) {
   });
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "DEALING…" }}
+      betDock={
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { id: "andar", label: "Andar", cls: "text-[hsl(var(--cyan))]" },
+              { id: "bahar", label: "Bahar", cls: "text-[hsl(var(--magenta))]" },
+            ].map((s) => (
+              <button
+                key={s.id}
+                data-testid={`andar-bahar-side-${s.id}`}
+                onClick={() => setSide(s.id)}
+                disabled={!betting}
+                className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${
+                  side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"
+                } ${!betting ? "opacity-70" : ""}`}
+              >
+                <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
+                <p className="text-[10px] text-white/45">pays {abPays[s.id]}x</p>
+                {sideTotals[s.id] > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
+                    {formatChips(sideTotals[s.id])}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => side && placeBet(side, amount)}
+            betting={betting}
+            placing={placing}
+            disabled={!side}
+            label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
+            myTotal={myTotal}
+            hint="One universal joker + deal per round for all players"
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={<HistoryStrip history={history} />}
+    >
       {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
       <div style={{ perspective: "1200px" }}>
       <div
@@ -128,49 +177,7 @@ export default function AndarBaharGame({ game }) {
       </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {[
-          { id: "andar", label: "Andar", cls: "text-[hsl(var(--cyan))]" },
-          { id: "bahar", label: "Bahar", cls: "text-[hsl(var(--magenta))]" },
-        ].map((s) => (
-          <button
-            key={s.id}
-            data-testid={`andar-bahar-side-${s.id}`}
-            onClick={() => setSide(s.id)}
-            disabled={!betting}
-            className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${
-              side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"
-            } ${!betting ? "opacity-70" : ""}`}
-          >
-            <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
-            <p className="text-[10px] text-white/45">pays {abPays[s.id]}x</p>
-            {sideTotals[s.id] > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
-                {formatChips(sideTotals[s.id])}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => side && placeBet(side, amount)}
-        betting={betting}
-        placing={placing}
-        disabled={!side}
-        label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
-        myTotal={myTotal}
-        hint="One universal joker + deal per round for all players"
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
