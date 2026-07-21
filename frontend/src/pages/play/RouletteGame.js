@@ -619,23 +619,17 @@ export default function RouletteGame({ game }) {
       <div
         className="relative rounded-2xl border overflow-hidden transition-[height,border-color,background] duration-700"
         style={{
-          height: focused ? 372 : 206,
+          // Hidden entirely while betting (board takes the whole stage); grows into
+          // the spotlit cinema wheel once bets close.
+          height: focused ? 372 : 0,
           transitionTimingFunction: "cubic-bezier(0.3,0.7,0.25,1)",
-          borderColor: focused ? "rgba(201,162,39,0.5)" : "rgba(255,255,255,0.1)",
+          borderColor: focused ? "rgba(201,162,39,0.5)" : "transparent",
           background: focused
             ? "radial-gradient(120% 88% at 50% 26%, #241a08 0%, #0c0a05 58%, #050403 100%)"
-            : "hsl(var(--card) / 0.55)",
+            : "transparent",
         }}
         data-testid="roulette-wheel"
       >
-        {/* recent results stay visible in cinema mode */}
-        {history.length > 0 && (
-          <div className="absolute left-3 top-3 z-30 flex items-center gap-1">
-            {history.slice(0, 5).map((h, i) => (
-              <ResultDot key={`${h.round_number}-${i}`} n={h.winning_number} />
-            ))}
-          </div>
-        )}
         {/* stage-light cone from the top — fades in when focused */}
         <div
           aria-hidden="true"
@@ -660,7 +654,7 @@ export default function RouletteGame({ game }) {
         <div
           className="absolute inset-0 flex items-center justify-center"
           style={{
-            transform: `scale(${focused ? 1.08 : 0.8})`,
+            transform: `scale(${focused ? 1.04 : 0.8})`,
             transformOrigin: "50% 44%",
             transition: "transform 700ms cubic-bezier(0.3,0.7,0.25,1)",
             willChange: "transform",
@@ -669,7 +663,7 @@ export default function RouletteGame({ game }) {
           <div
             className="relative h-[212px] w-[264px] z-10"
             style={{
-              transform: cameraZoom ? "scale(1.24)" : "scale(1)",
+              transform: cameraZoom ? "scale(1.2)" : "scale(1)",
               transformOrigin: "50% 34%",
               transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
               willChange: "transform",
@@ -757,7 +751,7 @@ export default function RouletteGame({ game }) {
       >
         <FitWidth>
           <div className="w-[600px] select-none">
-          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "44px 44px 44px 42px 42px" }}>
+          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "58px 58px 58px 52px 52px" }}>
             {/* zero wedge */}
             <BoardCell
               {...cellCommon}
