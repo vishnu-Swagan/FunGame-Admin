@@ -67,7 +67,7 @@ export default function CardDuelGame({ game }) {
     });
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
-  const options = state?.options || { player: 1.9, dealer: 1.9, tie: game.slug === "teen-patti" ? 8 : 20 };
+  const options = state?.options || { player: 1.4, dealer: 1.4, tie: game.slug === "teen-patti" ? 6 : 15 };
 
   /* ---------- universal dealing timeline (monotonic server clock) ---------- */
   const elapsed = revealElapsed;
@@ -132,7 +132,7 @@ export default function CardDuelGame({ game }) {
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-white/45 text-center">Player/Dealer pay 1.90x (5% house commission). A tie is a house win — only the Tie bet wins on a tie.</p>
+          <p className="text-[11px] text-white/45 text-center">Player/Dealer pay 1.40x. A tie is a house win — only the Tie bet wins on a tie.</p>
           <LiveBetPanel
             amount={amount}
             setAmount={setAmount}
@@ -142,7 +142,7 @@ export default function CardDuelGame({ game }) {
             disabled={!side}
             label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
             myTotal={myTotal}
-            hint="Player/Dealer pay 1.90x · a tie is a house win"
+            hint="Player/Dealer pay 1.40x · a tie is a house win"
           />
           {betting && myBets.length > 0 && (
             <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">

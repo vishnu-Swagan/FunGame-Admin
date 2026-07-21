@@ -9,19 +9,19 @@ import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
 // 24-segment wheel face — every possible multiplier appears at least once so the
 // wheel can visibly land on the server's chosen result (blanks are the commonest).
-const WHEEL_FACE = [0, 2, 0, 5, 0, 1.5, 3, 0, 10, 0, 1.5, 2, 0, 3, 0, 20, 1.5, 0, 5, 2, 0, 1.5, 3, 50];
+const WHEEL_FACE = [0, 1.5, 0, 4, 0, 1.2, 2.3, 0, 8, 0, 1.2, 1.5, 0, 2.3, 0, 15, 1.2, 0, 4, 1.5, 0, 1.2, 2.3, 40];
 const N = WHEEL_FACE.length;
 const SEG = 360 / N;
 
 // colour per multiplier tier
 const segColor = (m) =>
   m === 0 ? "#161c2b" :
-  m >= 50 ? "#ffd447" :
-  m >= 20 ? "#e0533f" :
-  m >= 10 ? "#8b5cf6" :
-  m >= 5 ? "#2a7de1" :
-  m >= 3 ? "#0ea5a3" : "#1f9d55";
-const segText = (m) => (m >= 50 ? "#3a2a00" : "#ffffff");
+  m >= 40 ? "#ffd447" :
+  m >= 15 ? "#e0533f" :
+  m >= 8 ? "#8b5cf6" :
+  m >= 4 ? "#2a7de1" :
+  m >= 2.3 ? "#0ea5a3" : "#1f9d55";
+const segText = (m) => (m >= 40 ? "#3a2a00" : "#ffffff");
 
 const polar = (cx, cy, r, deg) => {
   const a = ((deg - 90) * Math.PI) / 180;
@@ -65,7 +65,7 @@ const WheelFace = ({ landedIdx }) => (
           />
           <text
             x={tx} y={ty}
-            fill={segText(m)} fontSize={m >= 10 ? "11" : "10"} fontWeight="800"
+            fill={segText(m)} fontSize={m >= 8 ? "11" : "10"} fontWeight="800"
             textAnchor="middle" dominantBaseline="central"
             transform={`rotate(${mid}, ${tx}, ${ty})`}
             filter="url(#wsh)"
@@ -235,7 +235,7 @@ export default function WheelGame({ game }) {
 
         {/* paytable chips */}
         <div className="flex flex-wrap justify-center gap-1.5">
-          {[1.5, 2, 3, 5, 10, 20, 50].map((m) => (
+          {[1.2, 1.5, 2.3, 4, 8, 15, 40].map((m) => (
             <span key={m} className={`rounded-full border px-2.5 py-1 text-[10px] font-bold tabular-nums ${landedMult === m ? "fg-neon" : "text-white/55"}`}
               style={{ borderColor: segColor(m) + "88", background: landedMult === m ? segColor(m) : "rgba(255,255,255,0.04)", color: landedMult === m ? segText(m) : undefined }}>
               {m}×

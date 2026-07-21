@@ -9,10 +9,10 @@ import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
-// Matches the backend NH_PAYTABLE (Vegas-tuned, ~89% RTP).
+// Matches the backend NH_PAYTABLE (house-favorable, ~72% RTP).
 const PAYTABLE = [
-  ["Royal Flush", "500×"], ["Straight Flush", "120×"], ["Four of a Kind", "60×"], ["Full House", "14×"],
-  ["Flush", "9×"], ["Straight", "6×"], ["Three of a Kind", "4×"], ["Two Pair", "2×"], ["Pair", "1.5×"],
+  ["Royal Flush", "400×"], ["Straight Flush", "90×"], ["Four of a Kind", "45×"], ["Full House", "11×"],
+  ["Flush", "7×"], ["Straight", "5×"], ["Three of a Kind", "3×"], ["Two Pair", "2×"], ["Pair", "1.2×"],
 ];
 
 /**

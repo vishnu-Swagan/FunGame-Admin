@@ -82,9 +82,9 @@ def eval_poker5(cards):
 
 
 VP_PAYTABLE = [
-    (9, "ROYAL FLUSH", 200), (8, "STRAIGHT FLUSH", 40), (7, "FOUR OF A KIND", 20),
-    (6, "FULL HOUSE", 8), (5, "FLUSH", 5), (4, "STRAIGHT", 4),
-    (3, "THREE OF A KIND", 3), (2, "TWO PAIR", 2),
+    (9, "ROYAL FLUSH", 152), (8, "STRAIGHT FLUSH", 30), (7, "FOUR OF A KIND", 15),
+    (6, "FULL HOUSE", 6), (5, "FLUSH", 4), (4, "STRAIGHT", 3),
+    (3, "THREE OF A KIND", 2), (2, "TWO PAIR", 2),
 ]
 
 
@@ -154,13 +154,13 @@ SLOT_CONFIGS = {
         ],
     },
     "joker-bonus": {
-        "wild": "joker", "wild_pay": 40,
+        "wild": "joker", "wild_pay": 16,
         "symbols": [
-            {"id": "plum", "glyph": "PL", "weight": 30, "pay": 2},
-            {"id": "grape", "glyph": "GR", "weight": 25, "pay": 3},
-            {"id": "melon", "glyph": "ME", "weight": 18, "pay": 5},
-            {"id": "bell", "glyph": "BL", "weight": 12, "pay": 10},
-            {"id": "seven", "glyph": "77", "weight": 8, "pay": 18},
+            {"id": "plum", "glyph": "PL", "weight": 30, "pay": 1},
+            {"id": "grape", "glyph": "GR", "weight": 25, "pay": 1},
+            {"id": "melon", "glyph": "ME", "weight": 18, "pay": 2},
+            {"id": "bell", "glyph": "BL", "weight": 12, "pay": 4},
+            {"id": "seven", "glyph": "77", "weight": 8, "pay": 7},
             {"id": "joker", "glyph": "JK", "weight": 7, "pay": 0},
         ],
     },
@@ -176,13 +176,13 @@ SLOT_CONFIGS = {
         ],
     },
     "triple-fun": {
-        "wild": "trifun", "wild_pay": 75,
+        "wild": "trifun", "wild_pay": 30,
         "symbols": [
-            {"id": "dot", "glyph": "DT", "weight": 32, "pay": 2},
-            {"id": "duo", "glyph": "DU", "weight": 24, "pay": 4},
-            {"id": "trio", "glyph": "TR", "weight": 18, "pay": 6},
-            {"id": "spark", "glyph": "SP", "weight": 12, "pay": 12},
-            {"id": "tri7", "glyph": "37", "weight": 9, "pay": 30},
+            {"id": "dot", "glyph": "DT", "weight": 32, "pay": 1},
+            {"id": "duo", "glyph": "DU", "weight": 24, "pay": 2},
+            {"id": "trio", "glyph": "TR", "weight": 18, "pay": 2},
+            {"id": "spark", "glyph": "SP", "weight": 12, "pay": 5},
+            {"id": "tri7", "glyph": "37", "weight": 9, "pay": 12},
             {"id": "trifun", "glyph": "TF", "weight": 5, "pay": 0},
         ],
     },
@@ -230,18 +230,18 @@ def play_slot(slug, bet, payload):
 # player's stake). One universal synced grid per round; payout = stake x total
 # multiplier. Tuned to ~90% RTP (see the Monte-Carlo check in the repo).
 GJ_SYMBOLS = [
-    {"id": "coin",    "weight": 30, "pay": {3: 3,  4: 7,   5: 20}},
-    {"id": "bar",     "weight": 24, "pay": {3: 4,  4: 12,  5: 35}},
-    {"id": "bell",    "weight": 18, "pay": {3: 7,  4: 22,  5: 70}},
-    {"id": "gem",     "weight": 12, "pay": {3: 14, 4: 45,  5: 145}},
-    {"id": "crown",   "weight": 8,  "pay": {3: 30, 4: 85,  5: 285}},
-    {"id": "diamond", "weight": 5,  "pay": {3: 36, 4: 145, 5: 575}, "wild": True},
+    {"id": "coin",    "weight": 30, "pay": {3: 2,  4: 5,   5: 15}},
+    {"id": "bar",     "weight": 24, "pay": {3: 3,  4: 9,   5: 26}},
+    {"id": "bell",    "weight": 18, "pay": {3: 5,  4: 16,  5: 52}},
+    {"id": "gem",     "weight": 12, "pay": {3: 10, 4: 33,  5: 107}},
+    {"id": "crown",   "weight": 8,  "pay": {3: 22, 4: 63,  5: 211}},
+    {"id": "diamond", "weight": 5,  "pay": {3: 27, 4: 107, 5: 426}, "wild": True},
     {"id": "scatter", "weight": 3,  "scatter": True},
 ]
 GJ_WILD = "diamond"
 GJ_SCAT = "scatter"
 GJ_JACKPOT_MULT = 1000
-GJ_SCATTER_PAY = {3: 2, 4: 10, 5: GJ_JACKPOT_MULT}  # x total stake; 5 = jackpot
+GJ_SCATTER_PAY = {3: 1, 4: 7, 5: GJ_JACKPOT_MULT}  # x total stake; 5 = jackpot
 GJ_PAY = {s["id"]: s.get("pay") for s in GJ_SYMBOLS}
 GJ_STRIP = [(s["id"], s["weight"]) for s in GJ_SYMBOLS]
 # 10 fixed paylines over a 5-reel x 3-row grid (row index per reel; 0=top).
@@ -321,12 +321,12 @@ def play_giant_jackpot(bet, payload):
 # jokers anywhere multiply the whole spin's win by 2x/3x/5x. Distinct from the
 # Giant Jackpot (no scatter); tuned to ~88% RTP.
 FJ_SYMBOLS = [
-    {"id": "cherry", "weight": 30, "pay": {3: 3,  4: 7,   5: 20}},
-    {"id": "lemon",  "weight": 24, "pay": {3: 4,  4: 12,  5: 34}},
-    {"id": "bell",   "weight": 18, "pay": {3: 7,  4: 22,  5: 70}},
-    {"id": "star",   "weight": 12, "pay": {3: 14, 4: 43,  5: 140}},
-    {"id": "seven",  "weight": 9,  "pay": {3: 31, 4: 90,  5: 297}},
-    {"id": "joker",  "weight": 4,  "pay": {3: 40, 4: 144, 5: 558}, "wild": True},
+    {"id": "cherry", "weight": 30, "pay": {3: 2,  4: 6,   5: 16}},
+    {"id": "lemon",  "weight": 24, "pay": {3: 3,  4: 9,   5: 27}},
+    {"id": "bell",   "weight": 18, "pay": {3: 6,  4: 17,  5: 55}},
+    {"id": "star",   "weight": 12, "pay": {3: 11, 4: 34,  5: 111}},
+    {"id": "seven",  "weight": 9,  "pay": {3: 24, 4: 71,  5: 235}},
+    {"id": "joker",  "weight": 4,  "pay": {3: 32, 4: 114, 5: 441}, "wild": True},
 ]
 FJ_WILD = "joker"
 FJ_FEVER = {3: 2, 4: 3, 5: 5}  # jokers on grid -> total-win multiplier
@@ -388,11 +388,11 @@ def play_fever_joker(bet, payload):
 # Each line is 3 cells → pays on 3-of-a-kind (Dragon is Wild). Tuned to ~88% RTP.
 L8_SYMBOLS = [
     {"id": "blossom", "weight": 30, "pay": 2},
-    {"id": "ingot",   "weight": 24, "pay": 5},
-    {"id": "coin",    "weight": 16, "pay": 10},
-    {"id": "fish",    "weight": 12, "pay": 21},
-    {"id": "eight",   "weight": 10, "pay": 52},
-    {"id": "dragon",  "weight": 8,  "pay": 74, "wild": True},
+    {"id": "ingot",   "weight": 24, "pay": 4},
+    {"id": "coin",    "weight": 16, "pay": 8},
+    {"id": "fish",    "weight": 12, "pay": 16},
+    {"id": "eight",   "weight": 10, "pay": 40},
+    {"id": "dragon",  "weight": 8,  "pay": 57, "wild": True},
 ]
 L8_WILD = "dragon"
 L8_PAY = {s["id"]: s["pay"] for s in L8_SYMBOLS}
@@ -502,14 +502,14 @@ def roulette_multiplier(btype, value, n):
     if btype == "straight":
         if not isinstance(value, int) or value < 0 or value > 36:
             bad("Straight bet needs a number 0-36")
-        return 36 if n == value else 0
+        return 26 if n == value else 0
     if btype == "split":
         # two adjacent numbers on the table (chip on the shared line)
         a, b = _roulette_nums(value, 2)
         ok = (a == 0 and b in (1, 2, 3)) or (b == a + 3) or (b == a + 1 and a % 3 != 0)
         if not ok:
             bad("Split must cover two adjacent numbers")
-        return 18 if n in (a, b) else 0
+        return 13 if n in (a, b) else 0
     if btype == "corner":
         # four adjoining numbers (chip on the shared cross), incl. first-four 0-1-2-3
         nums = _roulette_nums(value, 4)
@@ -517,28 +517,28 @@ def roulette_multiplier(btype, value, n):
         ok = nums == [0, 1, 2, 3] or (a % 3 != 0 and a + 4 <= 36 and nums == [a, a + 1, a + 3, a + 4])
         if not ok:
             bad("Corner must cover four adjoining numbers")
-        return 9 if n in nums else 0
+        return 6.5 if n in nums else 0
     if btype == "color":
         if value not in ("red", "black"):
             bad("Color bet must be red or black")
-        return 2 if roulette_color(n) == value else 0
+        return 1.5 if roulette_color(n) == value else 0
     if btype == "parity":
         if value not in ("odd", "even"):
             bad("Parity bet must be odd or even")
-        return 2 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
+        return 1.5 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
     if btype == "range":
         if value not in ("low", "high"):
             bad("Range bet must be low or high")
         won = (1 <= n <= 18) if value == "low" else (19 <= n <= 36)
-        return 2 if won else 0
+        return 1.5 if won else 0
     if btype == "dozen":
         if value not in (1, 2, 3):
             bad("Dozen must be 1, 2 or 3")
-        return 3 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
+        return 2.1 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
     if btype == "column":
         if value not in (1, 2, 3):
             bad("Column must be 1, 2 or 3")
-        return 3 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
+        return 2.1 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
     bad("Invalid bet type")
 
 
@@ -547,7 +547,7 @@ def play_fun_roulette(bet, payload):
     value = payload.get("value")
     n = RNG.randint(0, 36)
     mult = roulette_multiplier(btype, value, n)
-    payout = bet * mult
+    payout = int(round(bet * mult))
     return {"number": n, "color": roulette_color(n), "bet_type": btype, "value": value, "won": mult > 0}, payout
 
 
@@ -602,8 +602,8 @@ def play_bingo(bet, payload):
 
 
 WHEEL_SEGMENTS = [
-    {"m": 0, "w": 670}, {"m": 1.5, "w": 150}, {"m": 2, "w": 90}, {"m": 3, "w": 50},
-    {"m": 5, "w": 25}, {"m": 10, "w": 10}, {"m": 20, "w": 4}, {"m": 50, "w": 1},
+    {"m": 0, "w": 670}, {"m": 1.2, "w": 150}, {"m": 1.5, "w": 90}, {"m": 2.3, "w": 50},
+    {"m": 4, "w": 25}, {"m": 8, "w": 10}, {"m": 15, "w": 4}, {"m": 40, "w": 1},
 ]
 
 
@@ -668,7 +668,7 @@ def play_checker(bet, payload):
 # champion-poker is unaffected). One straight 5-card deal, no draws. Any-pair
 # pays — Monte-Carlo tuned to ~89% RTP (the old shared table left it at a brutal
 # ~33% RTP / 67% house edge).
-NH_PAYTABLE = {9: 500, 8: 120, 7: 60, 6: 14, 5: 9, 4: 6, 3: 4, 2: 2, 1: 1.5, 0: 0}
+NH_PAYTABLE = {9: 400, 8: 90, 7: 45, 6: 11, 5: 7, 4: 5, 3: 3, 2: 2, 1: 1.2, 0: 0}
 NH_LABELS = {9: "ROYAL FLUSH", 8: "STRAIGHT FLUSH", 7: "FOUR OF A KIND", 6: "FULL HOUSE",
              5: "FLUSH", 4: "STRAIGHT", 3: "THREE OF A KIND", 2: "TWO PAIR", 1: "PAIR", 0: "NO WIN"}
 
@@ -689,7 +689,7 @@ AVIATOR_GROWTH = 0.12  # m(t) = e^(0.12 * t)
 
 def aviator_crash_point():
     u = RNG.random()
-    crash = max(1.0, 0.96 / max(1e-9, 1 - u))
+    crash = max(1.0, 0.70 / max(1e-9, 1 - u))
     return round(min(crash, 200.0), 2)
 
 

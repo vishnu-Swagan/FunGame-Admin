@@ -43,16 +43,16 @@ LIVE_GAMES = {
 SLOT_SLUGS = {"joker-bonus", "triple-fun"}  # giant-jackpot, fever-joker-bonus, lucky-8-line have their own engines
 
 SIDE_OPTIONS = {
-    "seven-up-down": {"down": 2.3, "seven": 5.8, "up": 2.3},
-    "checker": {"gold": 1.9, "steel": 1.9},
+    "seven-up-down": {"down": 2.1, "seven": 4.2, "up": 2.1},
+    "checker": {"gold": 1.4, "steel": 1.4},
     # Andar is dealt first and wins slightly more often, so it pays less than
     # Bahar — the authentic Andar-Bahar asymmetry (evens out the house edge).
-    "andar-bahar": {"andar": 1.85, "bahar": 1.9},
-    # Player/Dealer pay 1.90x — a 5% house commission (baccarat-standard). Ties
-    # are a house win for Player/Dealer bets (see settle_bet). Only the Tie bet
+    "andar-bahar": {"andar": 1.35, "bahar": 1.44},
+    # House-favorable ~70% RTP: Player/Dealer pay 1.40x, and a tie is a house
+    # win for Player/Dealer bets (see settle_bet). Only the explicit Tie bet
     # wins on a tie.
-    "teen-patti": {"player": 1.90, "dealer": 1.90, "tie": 8},
-    "poker": {"player": 1.90, "dealer": 1.90, "tie": 20},
+    "teen-patti": {"player": 1.40, "dealer": 1.40, "tie": 6},
+    "poker": {"player": 1.40, "dealer": 1.40, "tie": 15},
 }
 
 
@@ -193,7 +193,7 @@ def count_bingo_lines(grid, drawn):
     return lines
 
 
-BINGO_TABLE = {0: 0, 1: 5, 2: 16, 3: 45, 4: 150}  # Vegas-tuned to ~88% RTP (was ~33%)
+BINGO_TABLE = {0: 0, 1: 4, 2: 13, 3: 36, 4: 118}  # house-favorable ~70% RTP
 
 
 # ---------------- Settlement: bet + universal outcome -> payout ----------------
@@ -210,7 +210,7 @@ def settle_bet(slug, outcome, selection, amount, card=None):
         return 0, {"result": "lose"}
     if kind == "pick":
         won = selection == outcome["result"]
-        return (amount * 9 if won else 0), {"result": "win" if won else "lose"}
+        return (amount * 7 if won else 0), {"result": "win" if won else "lose"}
     if kind == "picks":
         matches = sorted(set(selection) & set(outcome["drawn"]))
         mult = KENO_PAYTABLE[len(selection)].get(len(matches), 0)

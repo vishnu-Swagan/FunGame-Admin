@@ -139,7 +139,7 @@ export default function BingoGame({ game }) {
             Balls drawn: {shownCount}/30
           </p>
         )}
-        <p className="text-[11px] text-white/45 mt-2 text-center">1 line 5× · 2 lines 16× · 3 lines 45× · 4 lines 150× · 5+ lines 400×</p>
+        <p className="text-[11px] text-white/45 mt-2 text-center">1 line 4× · 2 lines 13× · 3 lines 36× · 4 lines 118× · 5+ lines 400×</p>
       </div>
 
       <ResultBanner result={result} />

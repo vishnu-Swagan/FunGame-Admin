@@ -48,7 +48,7 @@ export default function CheckerGame({ game }) {
                 className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"} ${!betting ? "opacity-70" : ""}`}
               >
                 <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
-                <p className="text-[10px] text-white/45">pays 1.9x</p>
+                <p className="text-[10px] text-white/45">pays 1.4x</p>
                 {sideTotals[s.id] > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
                     {sideTotals[s.id]}
@@ -143,7 +143,7 @@ export default function CheckerGame({ game }) {
             </div>
           );
         })()}
-        <p className="text-[11px] text-white/45 text-center mt-3 relative">Winning side pays 1.9x · one universal duel every round</p>
+        <p className="text-[11px] text-white/45 text-center mt-3 relative">Winning side pays 1.4x · one universal duel every round</p>
         <div className="flex justify-center mt-2 relative">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "gold" ? "G" : "S"} tone={r.winner === "gold" ? "gold" : "neutral"} />} />
         </div>

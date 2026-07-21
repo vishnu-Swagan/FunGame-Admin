@@ -137,7 +137,7 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
                 mult = roulette_multiplier(b['bet_type'], b['value'], winning)
             except HTTPException:
                 mult = 0
-            payout = b['amount'] * mult
+            payout = int(round(b['amount'] * mult))
             res = await db.roulette_bets.update_one(
                 {'id': b['id'], 'status': 'OPEN'},
                 {'$set': {'status': 'SETTLED', 'payout': payout, 'winning_number': winning, 'settled_at': _now_iso()}},

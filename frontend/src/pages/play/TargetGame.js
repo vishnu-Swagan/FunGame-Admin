@@ -55,7 +55,7 @@ export default function TargetGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing } =
     useLiveRound(game.slug, {
       formatResult: (s) => ({
-        title: s.payout > 0 ? "★ BULLSEYE! 9× ★" : "Missed",
+        title: s.payout > 0 ? "★ BULLSEYE! 7× ★" : "Missed",
         subtitle: `The target landed on ${s.outcome.result}`,
         big: s.payout > 0,
       }),
@@ -146,10 +146,10 @@ export default function TargetGame({ game }) {
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             {landed && <span className="font-display text-2xl" style={{ color: "#ffd447", textShadow: "0 0 10px rgba(0,0,0,0.7)" }} data-testid="target-result">{landedNum}</span>}
           </div>
-          {isWin && <WinBurst mult={9} color="#ffd447" showAt={0} />}
+          {isWin && <WinBurst mult={7} color="#ffd447" showAt={0} />}
           {isWin && <CoinShower />}
         </div>
-        <p className="text-[11px] text-white/50">Exact hit pays 9× — one universal number per round</p>
+        <p className="text-[11px] text-white/50">Exact hit pays 7× — one universal number per round</p>
         <LastResults items={lastResults} render={(r) => <ResultPill label={r.result} tone="gold" />} />
       </div>
 
