@@ -383,6 +383,59 @@ def play_fever_joker(bet, payload):
     return outcome, payout
 
 
+# ---------------- Lucky 8 Line: 3x3 with 8 paylines ----------------
+# True to its name: 3 reels x 3 rows, 8 lines (3 rows + 3 columns + 2 diagonals).
+# Each line is 3 cells → pays on 3-of-a-kind (Dragon is Wild). Tuned to ~88% RTP.
+L8_SYMBOLS = [
+    {"id": "blossom", "weight": 30, "pay": 2},
+    {"id": "ingot",   "weight": 24, "pay": 5},
+    {"id": "coin",    "weight": 16, "pay": 10},
+    {"id": "fish",    "weight": 12, "pay": 21},
+    {"id": "eight",   "weight": 10, "pay": 52},
+    {"id": "dragon",  "weight": 8,  "pay": 74, "wild": True},
+]
+L8_WILD = "dragon"
+L8_PAY = {s["id"]: s["pay"] for s in L8_SYMBOLS}
+L8_STRIP = [(s["id"], s["weight"]) for s in L8_SYMBOLS]
+# 8 lines over a 3-reel x 3-row grid, as (reel, row) cell tuples.
+L8_LINES = [
+    [(0, 0), (1, 0), (2, 0)], [(0, 1), (1, 1), (2, 1)], [(0, 2), (1, 2), (2, 2)],  # rows
+    [(0, 0), (0, 1), (0, 2)], [(1, 0), (1, 1), (1, 2)], [(2, 0), (2, 1), (2, 2)],  # columns
+    [(0, 0), (1, 1), (2, 2)], [(0, 2), (1, 1), (2, 0)],  # diagonals
+]
+
+
+def _l8_grid():
+    return [[weighted_choice(L8_STRIP) for _ in range(3)] for _ in range(3)]  # 3 reels x 3 rows
+
+
+def _l8_score(grid):
+    win_lines = []
+    units = 0
+    for li, cells in enumerate(L8_LINES):
+        syms = [grid[r][c] for (r, c) in cells]
+        base = None
+        for s in syms:
+            if s != L8_WILD:
+                base = s
+                break
+        if base is None:
+            base = L8_WILD
+        if all(s == base or s == L8_WILD for s in syms):
+            units += L8_PAY[base]
+            win_lines.append({"line": li, "symbol": base, "pay": L8_PAY[base]})
+    return win_lines, units / 8.0
+
+
+def play_lucky8(bet, payload):
+    grid = _l8_grid()
+    win_lines, total = _l8_score(grid)
+    label = f"{len(win_lines)} lines!" if len(win_lines) > 1 else ("Line win" if win_lines else "No win")
+    payout = int(round(bet * total))
+    outcome = {"grid": grid, "win_lines": win_lines, "lines": len(win_lines), "multiplier": round(total, 4), "label": label}
+    return outcome, payout
+
+
 # ---------------- Instant game engines ----------------
 def play_seven_up_down(bet, payload):
     side = payload.get("side")
@@ -659,7 +712,7 @@ ENGINES = {
     "fever-joker-bonus": play_fever_joker,
     "giant-jackpot": play_giant_jackpot,
     "joker-bonus": make_slot_engine("joker-bonus"),
-    "lucky-8-line": make_slot_engine("lucky-8-line"),
+    "lucky-8-line": play_lucky8,
     "triple-fun": make_slot_engine("triple-fun"),
 }
 # aviator + champion-poker are stateful and handled in routes_games.py
