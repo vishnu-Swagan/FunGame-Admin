@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Home, Gamepad2, Search, Coins, User, Bell, WifiOff, Wrench } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -19,6 +19,8 @@ export default function AppShell() {
   const location = useLocation();
   const [unread, setUnread] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
+  const headerRef = useRef(null);
+  const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
 
   const loadInbox = useCallback(async () => {
     try {
@@ -53,6 +55,22 @@ export default function AppShell() {
     }
   }, [config, user, navigate]);
 
+  // Publish sticky header height as --fg-header-h on the .App root
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const root = el.closest(".App") || document.documentElement;
+    const set = () => root.style.setProperty("--fg-header-h", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    window.addEventListener("orientationchange", set);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("orientationchange", set);
+    };
+  }, []);
+
   // Online/offline
   useEffect(() => {
     const on = () => setOnline(true);
@@ -67,9 +85,9 @@ export default function AppShell() {
 
   return (
     <div className="App fg-noise relative min-h-dvh bg-background">
-      <div className="mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 pb-[calc(96px+env(safe-area-inset-bottom))] relative z-[2]">
+      <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(96px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
         {/* Header */}
-        <header className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
+        <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
             <button data-testid="header-logo" onClick={() => navigate("/home")} className="font-display text-xl text-primary leading-none" aria-label="FunGame home">
               FunGame
@@ -122,28 +140,30 @@ export default function AppShell() {
       </div>
 
       {/* Bottom navigation */}
-      <nav data-testid="bottom-nav" aria-label="Main navigation" className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/60 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl">
-        <div className="mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] h-[72px] pb-[env(safe-area-inset-bottom)] grid grid-cols-5">
-          {NAV.map(({ to, label, icon: Icon, testId }) => (
-            <NavLink
-              key={to}
-              to={to}
-              data-testid={testId}
-              aria-label={label}
-              className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[44px] transition-[color] duration-150 ${isActive ? "text-primary" : "text-white/55 hover:text-white/80"}`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon className="h-5 w-5" strokeWidth={isActive ? 2.4 : 2} />
-                  <span className={`text-[10px] tracking-wide ${isActive ? "font-bold" : "font-medium"}`}>{label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      {!onPlay && (
+        <nav data-testid="bottom-nav" aria-label="Main navigation" className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/60 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl">
+          <div className="mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] h-[72px] pb-[env(safe-area-inset-bottom)] grid grid-cols-5">
+            {NAV.map(({ to, label, icon: Icon, testId }) => (
+              <NavLink
+                key={to}
+                to={to}
+                data-testid={testId}
+                aria-label={label}
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[44px] transition-[color] duration-150 ${isActive ? "text-primary" : "text-white/55 hover:text-white/80"}`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <Icon className="h-5 w-5" strokeWidth={isActive ? 2.4 : 2} />
+                    <span className={`text-[10px] tracking-wide ${isActive ? "font-bold" : "font-medium"}`}>{label}</span>
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
