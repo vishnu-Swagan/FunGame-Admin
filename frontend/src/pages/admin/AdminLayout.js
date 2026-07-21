@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
-  { to: "/admin/signups", label: "Signups", icon: UserPlus, testId: "admin-nav-signups" },
+  { to: "/admin/signups", label: "Create User", icon: UserPlus, testId: "admin-nav-signups" },
   { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
   { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
   { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },

@@ -9,7 +9,6 @@ import AppShell from "@/components/AppShell";
 
 // Auth
 import Welcome from "@/pages/auth/Welcome";
-import Register from "@/pages/auth/Register";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import Login from "@/pages/auth/Login";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
@@ -70,7 +69,8 @@ function App() {
           {/* Public / auth */}
           <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
           <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
-          <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+          {/* Signup removed — accounts are provisioned by the admin. Old links go to login. */}
+          <Route path="/register" element={<Navigate to="/login" replace />} />
           <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
           <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />

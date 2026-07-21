@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
-                    AdminSignupApprove, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate)
+                    AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 
@@ -177,7 +177,44 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
     return {'message': 'Password reset. The user must log in again with the new password.'}
 
 
-# ---------- Signup requests (admin-provisioned accounts) ----------
+# ---------- Direct account provisioning (admin creates the login) ----------
+@router.post('/users')
+async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require_admin)):
+    """Create a player account directly with an admin-assigned Login ID + password.
+    No signup request needed — the account is ACTIVE and pre-verified, and the
+    player logs in with the Login ID and password the admin hands them."""
+    username = body.username  # validated + lowercased by the model
+    if await db.users.find_one({'username': username}):
+        raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
+    # Email is optional; the account logs in by Login ID. Synthesize a unique
+    # placeholder when none is given so the unique email index is satisfied.
+    email = body.email or f'{username}@fungame.local'
+    if await db.users.find_one({'email': email}):
+        raise HTTPException(status_code=409, detail='A user with this email already exists')
+    user = {
+        'id': str(uuid.uuid4()),
+        'email': email,
+        'username': username,
+        'password_hash': hash_password(body.password),
+        'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
+        'display_name': body.full_name, 'full_name': body.full_name,
+        'country': None, 'date_of_birth': None, 'phone': None,
+        'avatar': 'star',
+        'chip_balance': 0, 'points_balance': 0,
+        'favorites': [], 'recent_games': [],
+        'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
+        'accepted_terms': True,
+        'approved_at': _now(), 'created_at': _now(),
+        'provisioned_by': admin['id'], 'admin_note': body.note,
+    }
+    await db.users.insert_one(user)
+    if body.starting_chips > 0:
+        await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
+    logger.info(f'admin {admin.get("email")} created account -> {username}')
+    return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}
+
+
+# ---------- Signup requests (legacy; kept for any pending requests) ----------
 @router.get('/signup-requests')
 async def list_signup_requests(status: str = Query(default=None), admin: dict = Depends(require_admin)):
     query = {}

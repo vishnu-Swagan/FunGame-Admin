@@ -102,9 +102,7 @@ export default function Login() {
         <Link data-testid="login-forgot-link" to="/forgot-password" className="text-white/60 hover:text-white/85">
           Forgot password?
         </Link>
-        <Link data-testid="login-register-link" to="/register" className="text-primary font-semibold hover:underline">
-          Request an account
-        </Link>
+        <span className="text-white/40">Accounts are issued by the operator</span>
       </div>
     </AuthShell>
   );
