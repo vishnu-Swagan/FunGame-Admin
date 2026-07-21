@@ -193,7 +193,7 @@ def count_bingo_lines(grid, drawn):
     return lines
 
 
-BINGO_TABLE = {0: 0, 1: 2, 2: 5, 3: 10, 4: 25}
+BINGO_TABLE = {0: 0, 1: 5, 2: 16, 3: 45, 4: 150}  # Vegas-tuned to ~88% RTP (was ~33%)
 
 
 # ---------------- Settlement: bet + universal outcome -> payout ----------------
@@ -218,9 +218,7 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     # stake-only
     if slug == "bingo":
         lines = count_bingo_lines(card, outcome["drawn"])
-        mult = 100 if lines >= 12 else BINGO_TABLE.get(lines, 50 if lines >= 5 else 0)
-        if lines >= 5 and lines < 12:
-            mult = 50
+        mult = 1000 if lines >= 12 else (400 if lines >= 5 else BINGO_TABLE.get(lines, 0))
         return amount * mult, {"lines": lines, "multiplier": mult}
     mult = outcome.get("multiplier", 0)
     return int(round(amount * mult)), {"multiplier": mult}

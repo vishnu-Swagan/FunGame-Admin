@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
+import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
 export default function BingoGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, placing, revealProgress } =
@@ -23,6 +25,29 @@ export default function BingoGame({ game }) {
   const drawnAll = outcome?.drawn || [];
   const shownCount = phase === "RESULT" ? drawnAll.length : Math.floor(revealProgress * drawnAll.length);
   const drawn = new Set(drawnAll.slice(0, shownCount));
+
+  // ball-call sound + haptic as each new ball is revealed
+  const prevBalls = useRef(0);
+  useEffect(() => {
+    if (phase === "BETTING") { prevBalls.current = 0; return; }
+    if (shownCount > prevBalls.current) {
+      sfx.flick && sfx.flick();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }
+    prevBalls.current = shownCount;
+  }, [shownCount, phase]);
+
+  // win celebration once per round
+  const isWin = result && result.win;
+  const bigWin = result && result.big;
+  const celebRef = useRef(null);
+  useEffect(() => {
+    if (!isWin || celebRef.current === state?.round_number) return;
+    celebRef.current = state?.round_number;
+    if (bigWin) { sfx.gong && sfx.gong(); sfx.coinShower && sfx.coinShower(); if (navigator.vibrate) navigator.vibrate([0, 90, 40, 140]); }
+    else { sfx.slotBell && sfx.slotBell(); if (navigator.vibrate) navigator.vibrate(50); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWin, bigWin, state?.round_number]);
 
   const card = myBets.length > 0 ? myBets[0].card : null;
   const grid = card || Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => (r === 2 && c === 2 ? 0 : "?")));
@@ -68,6 +93,8 @@ export default function BingoGame({ game }) {
         data-testid="bingo-board"
       >
         <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.3)" }} />
+        {isWin && <WinBurst mult={result.payout} color="#ffd447" showAt={0} />}
+        {bigWin && <CoinShower />}
         {/* live ball caller */}
         {phase !== "BETTING" && lastBall != null && (
           <div className="flex items-center justify-center gap-2 mb-3 relative">
@@ -112,7 +139,7 @@ export default function BingoGame({ game }) {
             Balls drawn: {shownCount}/30
           </p>
         )}
-        <p className="text-[11px] text-white/45 mt-2 text-center">1 line 2x · 2 lines 5x · 3 lines 10x · 4 lines 25x · 5+ lines 50x</p>
+        <p className="text-[11px] text-white/45 mt-2 text-center">1 line 5× · 2 lines 16× · 3 lines 45× · 4 lines 150× · 5+ lines 400×</p>
       </div>
 
       <ResultBanner result={result} />
