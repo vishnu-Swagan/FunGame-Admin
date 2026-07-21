@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Timer, Repeat, Undo2, X } from "lucide-react";
+import { Timer, Repeat, Undo2, X, ArrowLeft, Coins, RotateCw } from "lucide-react";
 import { FitWidth } from "@/components/FitWidth";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
-import { PlayShell } from "@/components/play/PlayShell";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
@@ -282,7 +282,61 @@ const BoardCell = ({ type, value, label, className = "", style, testId, betting,
   </button>
 );
 
+/** Auto-hiding "turn your phone" hint (shown while the viewport is portrait). */
+const RotateHint = () => {
+  const [show, setShow] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setShow(false), 3800);
+    return () => clearTimeout(t);
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="fixed left-1/2 top-3 -translate-x-1/2 z-[70] flex items-center gap-2 rounded-full bg-black/80 border border-[#c9a227]/50 px-4 py-2 text-[12px] font-bold text-[#f5e9c8] shadow-lg pointer-events-none">
+      <RotateCw className="h-4 w-4 animate-spin" style={{ animationDuration: "2.4s" }} />
+      Turn your phone sideways to play
+    </div>
+  );
+};
+
+/** Full-screen landscape canvas. On a portrait viewport the content is rotated
+    90° and sized to the swapped dimensions, so a phone held sideways shows an
+    upright, full-screen landscape table (with big, tappable cells). If the device
+    reports landscape (unlocked orientation), it fills natively without rotating. */
+function LandscapeStage({ children }) {
+  const [portrait, setPortrait] = useState(
+    typeof window !== "undefined" ? window.innerHeight > window.innerWidth : false
+  );
+  useEffect(() => {
+    const update = () => setPortrait(window.innerHeight > window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    // best-effort: some Android WebViews honour a landscape request
+    try {
+      const p = window.screen && window.screen.orientation && window.screen.orientation.lock
+        ? window.screen.orientation.lock("landscape")
+        : null;
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) { /* locked/unsupported — CSS rotation handles it */ }
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      try { window.screen && window.screen.orientation && window.screen.orientation.unlock && window.screen.orientation.unlock(); } catch (e) { /* noop */ }
+    };
+  }, []);
+  const inner = portrait
+    ? { position: "absolute", top: "50%", left: "50%", width: "100vh", height: "100vw", transform: "translate(-50%, -50%) rotate(90deg)", transformOrigin: "center center" }
+    : { position: "absolute", inset: 0 };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "#0c0a14", overflow: "hidden" }} data-testid="roulette-landscape">
+      <div style={inner}>{children}</div>
+      {portrait && <RotateHint />}
+    </div>
+  );
+}
+
 export default function RouletteGame({ game }) {
+  const navigate = useNavigate();
   const [state, setState] = useState(null);
   const [balance, setBalance] = useState(null);
   const [chip, setChip] = useState(100);
@@ -577,221 +631,222 @@ export default function RouletteGame({ game }) {
   const winning = state?.winning_number;
   const cellCommon = { betting, onPlace: placeBet };
 
-  return (
-    <PlayShell game={game} balance={balance}>
-      {/* ===== Vertical roulette: tall number board (left) + wheel & bets rail (right) ===== */}
-      {/* overflow-x:clip here is safe — it's a mid-page element, not the scroll
-          root, so it contains the wheel's spin-growth without touching page scroll */}
-      <div className="flex gap-2 items-start" data-testid="roulette-live" style={{ overflowX: "clip" }}>
-        {/* -------- LEFT: tall number board, big tap cells -------- */}
-        <div className="flex-1 min-w-0">
+  // The 3D wheel scene (shared) — placed in the landscape header band.
+  const wheelScene = (
+    <div
+      className="relative h-[212px] w-[264px] z-10"
+      data-testid="roulette-wheel"
+      style={{
+        transform: cameraZoom ? "scale(1.28)" : "scale(1)",
+        transformOrigin: "50% 46%",
+        transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+        willChange: "transform",
+      }}
+    >
+      <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
+      <div className="absolute inset-0" style={{ perspective: "860px" }}>
+        <div
+          className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
+          style={{ transform: `rotateX(${cameraZoom ? 45 : 52}deg)`, transformStyle: "preserve-3d", transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)" }}
+        >
+          <RimWall3D />
           <div
-            className="rounded-2xl p-2.5 pt-2"
-            style={{
-              /* thick polished-gold rail around rich casino felt (reference look) */
-              border: "3px solid transparent",
-              borderRadius: "18px",
-              backgroundImage:
-                "radial-gradient(130% 120% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%), linear-gradient(145deg, #f6e08a 0%, #c9a227 30%, #8a6a14 55%, #e7c66a 100%)",
-              backgroundOrigin: "border-box",
-              backgroundClip: "padding-box, border-box",
-              boxShadow: betting
-                ? "0 0 0 1px rgba(201,162,39,0.5), 0 0 22px rgba(201,162,39,0.3), inset 0 2px 10px rgba(0,0,0,0.35)"
-                : "0 0 0 1px rgba(201,162,39,0.35), inset 0 2px 10px rgba(0,0,0,0.35)",
-            }}
-            data-testid="roulette-board"
+            className="absolute inset-0"
+            style={{ transform: `rotateZ(${wheelRot}deg)`, transformStyle: "preserve-3d", transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none", willChange: "transform" }}
           >
-            {/* branding — European Roulette (gold, matches the reference) */}
-            <div className="text-center mb-1.5 leading-none">
-              <div className="text-[9px] font-extrabold tracking-[0.3em] text-[#f0d488]" style={{ fontFamily: "Georgia, serif" }}>EUROPEAN</div>
-              <div className="font-display text-[15px] tracking-wide" style={{ background: "linear-gradient(180deg, #fff6d8, #e7c66a 55%, #a9801e)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>ROULETTE</div>
+            <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
+              <WheelSVG />
             </div>
-            <div className="grid grid-cols-3 gap-1 select-none">
-              {/* zero — spans the three columns */}
-              <BoardCell
-                {...cellCommon}
-                type="straight"
-                value={0}
-                chipTotal={spotTotals["straight:0"]}
-                label={<span className="pointer-events-none font-display text-lg">0</span>}
-                testId="roulette-cell-straight-0"
-                className={`col-span-3 h-8 rounded-md text-white border border-white/20 ${isResult && winning === 0 ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
-                style={{ background: glossy(R_GREEN) }}
-              />
-              {/* numbers 1..36, row-major → tidy rows of three */}
-              {Array.from({ length: 36 }, (_, i) => i + 1).map((n) => (
-                <BoardCell
-                  {...cellCommon}
-                  key={n}
-                  type="straight"
-                  value={n}
-                  chipTotal={spotTotals[`straight:${n}`]}
-                  label={<span className="pointer-events-none text-[15px] font-bold tabular-nums" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.6)" }}>{n}</span>}
-                  className={`h-8 rounded-[5px] text-white border border-white/20 ${isResult && winning === n ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
-                  style={{ background: glossy(numColor(n)) }}
-                />
-              ))}
-              {/* column (2~1) bets, one under each visual column */}
-              {[1, 2, 3].map((c) => (
-                <BoardCell
-                  {...cellCommon}
-                  key={`col-${c}`}
-                  type="column"
-                  value={c}
-                  chipTotal={spotTotals[`column:${c}`]}
-                  label={<span className="pointer-events-none text-[12px] font-extrabold text-[#f5e9c8]" style={{ fontFamily: "Georgia, serif" }}>2~1</span>}
-                  className="h-7 rounded-[5px] border border-[#c9a227]/50"
-                  style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.15))" }}
-                />
-              ))}
-            </div>
+            <Turret3D />
+          </div>
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 rounded-full pointer-events-none"
+            style={{ transform: "translateZ(3px)", background: "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)" }}
+          />
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
+            <div
+              ref={ballRef}
+              className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
+              style={{ transform: "rotate(0deg) translateY(-75px) translateZ(5px)", background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)" }}
+            />
+          </div>
+        </div>
+      </div>
+      {!betting && winning != null && landed && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center">
+          <ResultDot n={winning} big />
+        </div>
+      )}
+    </div>
+  );
 
-            {/* Reference-style circular red-gem actions: undo · clear · repeat */}
-            <div className="flex items-center justify-center gap-4 mt-3">
-              <GemButton testId="roulette-undo-bet" icon={Undo2} label="Undo" onClick={undoBet} disabled={!betting || (state?.my_bets || []).length === 0} />
-              <GemButton testId="roulette-clear-bets" icon={X} label="Clear" onClick={clearBets} disabled={!betting || (state?.my_bets || []).length === 0} />
-              <GemButton testId="roulette-rebet-button" icon={Repeat} label="Repeat" onClick={rebet} disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0} />
+  // one straight-number cell — placed directly in the grid so it stretches to fill
+  const numberCell = (n, place) => (
+    <BoardCell
+      {...cellCommon}
+      key={n}
+      type="straight"
+      value={n}
+      chipTotal={spotTotals[`straight:${n}`]}
+      label={<span className="pointer-events-none text-[15px] font-bold tabular-nums" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.65)" }}>{n}</span>}
+      className={`rounded-[4px] text-white border border-white/20 flex items-center justify-center ${isResult && winning === n ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+      style={{ ...place, background: glossy(numColor(n)) }}
+    />
+  );
+
+  const outsideCls = (active) =>
+    `rounded-[4px] text-white/90 border border-[#c9a227]/45 flex items-center justify-center ${active ? "ring-2 ring-primary fg-neon" : ""}`;
+  const outsideStyle = { background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.2))" };
+  const serif = { fontFamily: "Georgia, serif" };
+
+  return (
+    <LandscapeStage>
+      <div
+        className="w-full h-full flex flex-col text-white select-none"
+        style={{ background: "radial-gradient(120% 130% at 50% -10%, #3a1524 0%, #1c0f1e 58%, #0c0a14 100%)", padding: "6px 10px" }}
+      >
+        {/* ---- top bar: back · title · timer · balance ---- */}
+        <div className="flex items-center justify-between gap-2 shrink-0" style={{ height: 34 }}>
+          <button
+            data-testid="play-back-button"
+            onClick={() => navigate(`/games/${game.slug}`)}
+            aria-label="Back"
+            className="h-8 w-8 flex items-center justify-center rounded-full border border-white/15 bg-white/5 active:scale-95"
+          >
+            <ArrowLeft className="h-4 w-4 text-white/85" />
+          </button>
+          <div className="text-center leading-none">
+            <div className="text-[8px] font-extrabold tracking-[0.32em] text-[#f0d488]" style={serif}>EUROPEAN</div>
+            <div className="font-display text-[14px] tracking-wide" style={{ background: "linear-gradient(180deg, #fff6d8, #e7c66a 55%, #a9801e)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>ROULETTE</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-1 rounded-full border px-2 py-1 ${betting ? "border-[hsl(var(--emerald)/0.5)] bg-[hsl(var(--emerald)/0.12)]" : "border-[hsl(var(--magenta)/0.5)] bg-[hsl(var(--magenta)/0.12)]"}`}>
+              <Timer className={`h-3.5 w-3.5 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
+              <span data-testid="roulette-timer" className={`tabular-nums font-display text-lg leading-none ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>{Math.ceil(countdown)}</span>
+            </div>
+            <div data-testid="play-balance" className="flex items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-1">
+              <Coins className="h-3.5 w-3.5 text-primary" />
+              <span className="tabular-nums text-xs font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>
             </div>
           </div>
         </div>
 
-        {/* -------- RIGHT rail: wheel, timer, chips, outside bets -------- */}
-        <div className="w-[43%] max-w-[176px] shrink-0 flex flex-col gap-2" style={{ overflow: "visible" }}>
-          {/* compact 3D wheel — grows + glows during the spin (4DX) */}
+        {/* ---- wheel band ---- */}
+        <div className="flex-1 min-h-0 flex items-center justify-center relative" style={{ overflow: "hidden" }}>
           <div
-            className="relative rounded-2xl bg-card/60 border border-white/10 p-1.5"
-            style={{ overflow: "visible", boxShadow: spinningAnim ? "0 0 26px rgba(255,199,64,0.5)" : "none", transition: "box-shadow 400ms" }}
+            className="relative"
+            style={{ width: 188, boxShadow: spinningAnim ? "0 0 30px rgba(255,199,64,0.5)" : "none", borderRadius: "50%", transition: "box-shadow 400ms" }}
             data-testid="roulette-wheel-slot"
           >
-            <div
-              aria-hidden="true"
-              className="absolute inset-0 rounded-2xl pointer-events-none"
-              style={{ background: "radial-gradient(circle at 50% 42%, rgba(255,199,64,0.20), transparent 66%)", opacity: spinningAnim ? 1 : 0.4, transition: "opacity 400ms" }}
+            <div aria-hidden="true" className="absolute inset-0 rounded-full pointer-events-none" style={{ background: "radial-gradient(circle at 50% 46%, rgba(255,199,64,0.22), transparent 66%)", opacity: spinningAnim ? 1 : 0.4, transition: "opacity 400ms" }} />
+            <FitWidth>{wheelScene}</FitWidth>
+          </div>
+          <div className={`absolute right-1 top-1 text-[9px] font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
+            {betting ? "PLACE YOUR BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
+          </div>
+        </div>
+
+        {/* ---- horizontal European table (big cells, reference layout) ---- */}
+        <div
+          className="shrink-0"
+          style={{ border: "3px solid transparent", borderRadius: 12, backgroundImage: "radial-gradient(130% 160% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%), linear-gradient(145deg, #f6e08a 0%, #c9a227 32%, #8a6a14 58%, #e7c66a 100%)", backgroundOrigin: "border-box", backgroundClip: "padding-box, border-box", padding: 5, boxShadow: "inset 0 2px 10px rgba(0,0,0,0.4)" }}
+          data-testid="roulette-board"
+        >
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "0.85fr repeat(12, 1fr) 0.95fr", gridTemplateRows: "26px 26px 26px 20px 20px", gap: 3 }}
+          >
+            {/* zero */}
+            <BoardCell
+              {...cellCommon}
+              type="straight"
+              value={0}
+              chipTotal={spotTotals["straight:0"]}
+              label={<span className="pointer-events-none font-display text-lg">0</span>}
+              testId="roulette-cell-straight-0"
+              className={`rounded-l-lg text-white border border-white/20 flex items-center justify-center ${isResult && winning === 0 ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+              style={{ gridColumn: 1, gridRow: "1 / span 3", background: glossy(R_GREEN) }}
             />
-            <FitWidth>
-              <div
-                className="relative h-[212px] w-[264px] z-10"
-                data-testid="roulette-wheel"
-                style={{
-                  transform: cameraZoom ? "scale(1.34)" : "scale(1)",
-                  transformOrigin: "50% 40%",
-                  transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
-                  willChange: "transform",
-                }}
-              >
-                {/* screen-space pointer above the far edge of the tilted wheel */}
-                <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
-                <div className="absolute inset-0" style={{ perspective: "860px" }}>
-                  <div
-                    className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
-                    style={{
-                      transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
-                      transformStyle: "preserve-3d",
-                      transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
-                    }}
-                  >
-                    <RimWall3D />
-                    <div
-                      className="absolute inset-0"
-                      style={{
-                        transform: `rotateZ(${wheelRot}deg)`,
-                        transformStyle: "preserve-3d",
-                        transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
-                        willChange: "transform",
-                      }}
-                    >
-                      <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
-                        <WheelSVG />
-                      </div>
-                      <Turret3D />
-                    </div>
-                    <div
-                      aria-hidden="true"
-                      className="absolute inset-0 rounded-full pointer-events-none"
-                      style={{
-                        transform: "translateZ(3px)",
-                        background:
-                          "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
-                      }}
-                    />
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
-                      <div
-                        ref={ballRef}
-                        className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
-                        style={{
-                          transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
-                          background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-                {!betting && winning != null && landed && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center">
-                    <ResultDot n={winning} big />
-                  </div>
-                )}
-              </div>
-            </FitWidth>
+            {/* numbers: top row 3..36, mid 2..35, bottom 1..34 */}
+            {[0, 1, 2].map((row) =>
+              Array.from({ length: 12 }, (_, j) => {
+                const n = 3 * (j + 1) - row;
+                return numberCell(n, { gridColumn: j + 2, gridRow: row + 1 });
+              })
+            )}
+            {/* 2~1 columns (top row = column 3) */}
+            {[0, 1, 2].map((row) => (
+              <BoardCell
+                {...cellCommon}
+                key={`col-${row}`}
+                type="column"
+                value={3 - row}
+                chipTotal={spotTotals[`column:${3 - row}`]}
+                label={<span className="pointer-events-none text-[11px] font-extrabold text-[#f5e9c8]" style={serif}>2~1</span>}
+                className="rounded-[4px] border border-[#c9a227]/50 flex items-center justify-center"
+                style={{ gridColumn: 14, gridRow: row + 1, background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.15))" }}
+              />
+            ))}
+            {/* dozens */}
+            {[1, 2, 3].map((d) => (
+              <BoardCell
+                {...cellCommon}
+                key={`dozen-${d}`}
+                type="dozen"
+                value={d}
+                chipTotal={spotTotals[`dozen:${d}`]}
+                label={<span className="pointer-events-none text-[11px] font-extrabold text-[#f5e9c8]" style={serif}>{d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"}</span>}
+                className="rounded-[4px] border border-[#c9a227]/45 flex items-center justify-center"
+                style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 4, background: outsideStyle.background }}
+              />
+            ))}
+            {/* outside bets */}
+            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold" style={serif}>1~18</span>} className={outsideCls(isResult && winning != null && winning >= 1 && winning <= 18)} style={{ gridColumn: "2 / span 2", gridRow: 5, ...outsideStyle }} />
+            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold" style={serif}>Even</span>} className={outsideCls(isResult && winning != null && winning !== 0 && winning % 2 === 0)} style={{ gridColumn: "4 / span 2", gridRow: 5, ...outsideStyle }} />
+            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} className={outsideCls(isResult && winning != null && winning !== 0 && RED.has(winning))} style={{ gridColumn: "6 / span 2", gridRow: 5, ...outsideStyle }} />
+            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} className={outsideCls(isResult && winning != null && winning !== 0 && !RED.has(winning))} style={{ gridColumn: "8 / span 2", gridRow: 5, ...outsideStyle }} />
+            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold" style={serif}>Odd</span>} className={outsideCls(isResult && winning != null && winning % 2 === 1)} style={{ gridColumn: "10 / span 2", gridRow: 5, ...outsideStyle }} />
+            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold" style={serif}>19~36</span>} className={outsideCls(isResult && winning != null && winning >= 19 && winning <= 36)} style={{ gridColumn: "12 / span 2", gridRow: 5, ...outsideStyle }} />
           </div>
+        </div>
 
-          {/* timer + phase + running stake */}
-          <div className={`rounded-xl border px-2 py-1.5 text-center ${betting ? "border-[hsl(var(--emerald)/0.45)] bg-[hsl(var(--emerald)/0.1)]" : "border-[hsl(var(--magenta)/0.45)] bg-[hsl(var(--magenta)/0.1)]"}`}>
-            <div className={`text-[10px] font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
-              {betting ? "PLACE BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
-            </div>
-            <div className="flex items-center justify-center gap-1.5">
-              <Timer className={`h-3.5 w-3.5 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
-              <span data-testid="roulette-timer" className={`tabular-nums font-display text-2xl leading-none ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>{Math.ceil(countdown)}</span>
-            </div>
-            <div className="text-[9px] text-white/50">stake <span data-testid="roulette-my-total" className="tabular-nums font-bold text-primary">{formatChips(state?.my_total || 0)}</span></div>
-          </div>
-
-          {/* chip selector — our chips (10/50/100/500/1000) as premium casino chips */}
-          <div className="grid grid-cols-3 gap-1.5 justify-items-center" data-testid="roulette-chip-tray">
+        {/* ---- bottom: chips (left) · stake · gem actions (right) ---- */}
+        <div className="shrink-0 flex items-center justify-between gap-2" style={{ height: 52, marginTop: 4 }}>
+          <div className="flex items-center gap-1.5" data-testid="roulette-chip-tray">
             {CHIPS.map((c) => (
               <button
                 key={c.v}
                 data-testid={`roulette-chip-${c.v}`}
                 onClick={() => setChip(c.v)}
                 aria-label={`Chip ${c.v}`}
-                className={`relative h-[46px] w-[46px] rounded-full font-extrabold text-[11px] tabular-nums border-[3px] border-dashed transition-transform duration-100 ${chip === c.v ? "scale-110 z-10" : "opacity-90 active:scale-95"}`}
+                className={`relative h-[42px] w-[42px] rounded-full font-extrabold text-[11px] tabular-nums border-[3px] border-dashed transition-transform duration-100 ${chip === c.v ? "scale-110 z-10" : "opacity-90 active:scale-95"}`}
                 style={{
                   background: `radial-gradient(circle at 50% 38%, rgba(255,255,255,0.55), ${c.bg} 60%, rgba(0,0,0,0.28))`,
                   color: c.fg,
                   borderColor: "rgba(255,255,255,0.85)",
-                  boxShadow: chip === c.v
-                    ? "0 0 0 2px #ffd447, 0 4px 10px rgba(0,0,0,0.55), inset 0 0 0 4px rgba(255,255,255,0.28)"
-                    : "0 2px 6px rgba(0,0,0,0.45), inset 0 0 0 4px rgba(255,255,255,0.22)",
+                  boxShadow: chip === c.v ? "0 0 0 2px #ffd447, 0 4px 10px rgba(0,0,0,0.55), inset 0 0 0 4px rgba(255,255,255,0.28)" : "0 2px 6px rgba(0,0,0,0.45), inset 0 0 0 4px rgba(255,255,255,0.22)",
                 }}
               >
                 {c.v >= 1000 ? `${c.v / 1000}k` : c.v}
               </button>
             ))}
+            <div className="ml-1 text-[10px] text-white/55 leading-tight">
+              stake<br /><span data-testid="roulette-my-total" className="tabular-nums font-bold text-primary text-xs">{formatChips(state?.my_total || 0)}</span>
+            </div>
           </div>
-
-          {/* even-money + range bets (reference: 1~18 · Even · ◆ · ◆ · Odd · 19~36) */}
-          <div className="grid grid-cols-2 gap-1.5">
-            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>1~18</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning >= 1 && winning <= 18 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>Even</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && winning % 2 === 0 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} className={`h-9 rounded-[5px] border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} className={`h-9 rounded-[5px] border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && !RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>Odd</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning % 2 === 1 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>19~36</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning >= 19 && winning <= 36 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+          <div className="flex items-center gap-3">
+            <GemButton testId="roulette-undo-bet" icon={Undo2} label="Undo" onClick={undoBet} disabled={!betting || (state?.my_bets || []).length === 0} />
+            <GemButton testId="roulette-clear-bets" icon={X} label="Clear" onClick={clearBets} disabled={!betting || (state?.my_bets || []).length === 0} />
+            <GemButton testId="roulette-rebet-button" icon={Repeat} label="Repeat" onClick={rebet} disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0} />
           </div>
+        </div>
 
-          {/* dozens */}
-          <div className="grid grid-cols-3 gap-1.5">
-            {[1, 2, 3].map((d) => (
-              <BoardCell {...cellCommon} key={`dozen-${d}`} type="dozen" value={d} chipTotal={spotTotals[`dozen:${d}`]} label={<span className="pointer-events-none text-[10px] font-extrabold text-[#f5e9c8]" style={{ fontFamily: "Georgia, serif" }}>{d === 1 ? "1st" : d === 2 ? "2nd" : "3rd"} 12</span>} className="h-8 rounded-[5px] border border-[#c9a227]/40" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
-            ))}
-          </div>
-
+        {/* winner / win-loss declaration — floats over the felt, the only info shown */}
+        <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 40, width: "min(420px, 80%)", zIndex: 40, pointerEvents: "none" }}>
+          <ResultBanner result={result} />
         </div>
       </div>
-
-      {/* The ONLY unhidden information — winner announcement + win/loss declaration */}
-      <ResultBanner result={result} />
-    </PlayShell>
+    </LandscapeStage>
   );
 }
