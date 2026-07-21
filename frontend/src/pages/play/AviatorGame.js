@@ -3,7 +3,8 @@ import { toast } from "sonner";
 import { Users, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { flight } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { GameStage } from "@/components/play/GameStage";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -448,64 +449,78 @@ export default function AviatorGame({ game }) {
   };
 
   return (
-    <PlayShell game={game} balance={balance}>
-      {/* universal crash history */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="aviator-history-strip">
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/8 px-2 py-1 text-[9px] font-bold tracking-widest text-white/60 shrink-0">
-          <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--emerald))] animate-pulse" /> LIVE 24/7
-        </span>
-        {(st?.history || []).map((h) => (
-          <span
-            key={h.round_number}
-            className={`shrink-0 rounded-full border bg-black/30 px-2 py-1 text-[10px] font-extrabold tabular-nums ${crashTone(h.crash_point)}`}
-          >
-            {h.crash_point.toFixed(2)}x
-          </span>
-        ))}
-      </div>
-
-      <CurveScene phase={st?.phase} mult={mult} growth={st?.growth} countdown={countdown} crashPoint={st?.crash_point ?? mult} />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <BetSlot panel={1} st={st} mult={mult} busy={busy} onBet={placeBet} onCancel={cancelBet} onCashout={cashout} />
-        <BetSlot panel={2} st={st} mult={mult} busy={busy} onBet={placeBet} onCancel={cancelBet} onCashout={cashout} />
-      </div>
-
-      {/* all bets feed */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-3.5" data-testid="aviator-feed">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-semibold text-white/60 flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5 text-white/45" /> Bets this round
-          </p>
-          <p className="text-[11px] text-white/45 tabular-nums">
-            {st?.players || 0} bets · {formatChips(st?.total_staked || 0)} staked
-          </p>
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{
+        phase: st?.phase,
+        countdown,
+        timings: { bet: st?.betting_seconds || 6 },
+        roundNumber: st?.round_number,
+      }}
+      labels={{ FLYING: "IN FLIGHT", CRASHED: "CRASHED" }}
+      betDock={
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <BetSlot panel={1} st={st} mult={mult} busy={busy} onBet={placeBet} onCancel={cancelBet} onCashout={cashout} />
+          <BetSlot panel={2} st={st} mult={mult} busy={busy} onBet={placeBet} onCancel={cancelBet} onCashout={cashout} />
         </div>
-        {(st?.all_bets || []).length === 0 ? (
-          <p className="text-[11px] text-white/35 text-center py-2">No bets yet — be the first aboard</p>
-        ) : (
-          <div className="space-y-1 max-h-[150px] overflow-y-auto">
-            {(st?.all_bets || []).map((b, i) => (
-              <div key={i} className="flex items-center justify-between text-[11px]">
-                <span className="text-white/60">{b.name}</span>
-                <span className="tabular-nums text-white/50">{formatChips(b.amount)}</span>
-                <span
-                  className={`tabular-nums font-bold ${
-                    b.status === "CASHED" ? "text-[hsl(var(--emerald))]" : b.status === "LOST" ? "text-red-400" : "text-white/45"
-                  }`}
-                >
-                  {b.status === "CASHED" ? `${b.multiplier}x +${formatChips(b.payout)}` : b.status === "LOST" ? "flew away" : "flying…"}
-                </span>
-              </div>
+      }
+      extras={
+        <>
+          {/* universal crash history */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="aviator-history-strip">
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/8 px-2 py-1 text-[9px] font-bold tracking-widest text-white/60 shrink-0">
+              <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--emerald))] animate-pulse" /> LIVE 24/7
+            </span>
+            {(st?.history || []).map((h) => (
+              <span
+                key={h.round_number}
+                className={`shrink-0 rounded-full border bg-black/30 px-2 py-1 text-[10px] font-extrabold tabular-nums ${crashTone(h.crash_point)}`}
+              >
+                {h.crash_point.toFixed(2)}x
+              </span>
             ))}
           </div>
-        )}
-      </div>
 
-      <p className="text-[11px] text-white/40">
-        One universal plane for all players, 24/7. Bet before takeoff, cash out before it flies away. Auto cashout locks your multiplier automatically.
-      </p>
-      <HistoryStrip history={history} />
-    </PlayShell>
+          {/* all bets feed */}
+          <div className="rounded-2xl bg-card/55 border border-white/10 p-3.5" data-testid="aviator-feed">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-white/60 flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5 text-white/45" /> Bets this round
+              </p>
+              <p className="text-[11px] text-white/45 tabular-nums">
+                {st?.players || 0} bets · {formatChips(st?.total_staked || 0)} staked
+              </p>
+            </div>
+            {(st?.all_bets || []).length === 0 ? (
+              <p className="text-[11px] text-white/35 text-center py-2">No bets yet — be the first aboard</p>
+            ) : (
+              <div className="space-y-1 max-h-[150px] overflow-y-auto">
+                {(st?.all_bets || []).map((b, i) => (
+                  <div key={i} className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/60">{b.name}</span>
+                    <span className="tabular-nums text-white/50">{formatChips(b.amount)}</span>
+                    <span
+                      className={`tabular-nums font-bold ${
+                        b.status === "CASHED" ? "text-[hsl(var(--emerald))]" : b.status === "LOST" ? "text-red-400" : "text-white/45"
+                      }`}
+                    >
+                      {b.status === "CASHED" ? `${b.multiplier}x +${formatChips(b.payout)}` : b.status === "LOST" ? "flew away" : "flying…"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <p className="text-[11px] text-white/40">
+            One universal plane for all players, 24/7. Bet before takeoff, cash out before it flies away. Auto cashout locks your multiplier automatically.
+          </p>
+          <HistoryStrip history={history} />
+        </>
+      }
+    >
+      <CurveScene phase={st?.phase} mult={mult} growth={st?.growth} countdown={countdown} crashPoint={st?.crash_point ?? mult} />
+    </GameStage>
   );
 }
