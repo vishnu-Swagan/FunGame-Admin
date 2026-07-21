@@ -71,16 +71,13 @@ body {
     * {
         @apply border-border;
     }
-    html, body {
-        /* Every player is on a phone: never allow a sideways scroll/jiggle,
-           and honour the notch/home-indicator safe areas on all screens. */
-        overflow-x: hidden;
-        overscroll-behavior-y: none;
-    }
     body {
         @apply bg-background text-foreground;
         -webkit-text-size-adjust: 100%;   /* stop iOS auto-zooming text on rotate */
         text-size-adjust: 100%;
+        /* NOTE: never put overflow-x:hidden on html/body — it freezes vertical
+           scroll in Android WebView/TWA. Horizontal overflow is clipped on .App
+           via overflow-x:clip, which does not create a scroll container. */
     }
     /* Inputs must be ≥16px or mobile browsers zoom the page when focused. */
     input, select, textarea {
