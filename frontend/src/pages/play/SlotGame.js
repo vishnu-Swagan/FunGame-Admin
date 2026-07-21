@@ -8,6 +8,7 @@ import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
+import { FitWidth } from "@/components/FitWidth";
 
 const SYMBOLS = {
   "fever-joker-bonus": {
@@ -112,8 +113,9 @@ export default function SlotGame({ game }) {
             <p className="text-[9px] font-extrabold tracking-[0.35em]" style={{ color: "#c4b5fd" }}>★ JACKPOT REELS ★</p>
           </div>
 
-          {/* reels in a chrome bezel */}
+          {/* reels in a chrome bezel — FitWidth keeps the fixed-width reels on any phone */}
           <div className="p-4">
+            <FitWidth>
             <div className="rounded-xl p-1.5 mx-auto w-fit" style={{ background: "linear-gradient(180deg, #e2e8f0, #64748b 45%, #94a3b8)" }}>
               <div className="rounded-lg p-2 flex justify-center gap-2" style={{ background: "#0d0820" }} data-testid="slot-reels">
                 {reels.map((r, i) => (
@@ -128,6 +130,7 @@ export default function SlotGame({ game }) {
                 ))}
               </div>
             </div>
+            </FitWidth>
           </div>
 
           {/* result plate */}

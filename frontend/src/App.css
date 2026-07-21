@@ -1,6 +1,7 @@
 /* FunGame app-level styles (design system lives in index.css) */
 .App {
-    min-height: 100vh;
+    min-height: 100vh;      /* fallback */
+    min-height: 100dvh;     /* dynamic viewport: no jump as mobile browser chrome shows/hides */
 }
 
 /* ---------- Real 3D dice ---------- */

@@ -71,9 +71,26 @@ body {
     * {
         @apply border-border;
     }
+    html, body {
+        /* Every player is on a phone: never allow a sideways scroll/jiggle,
+           and honour the notch/home-indicator safe areas on all screens. */
+        overflow-x: hidden;
+        overscroll-behavior-y: none;
+    }
     body {
         @apply bg-background text-foreground;
+        -webkit-text-size-adjust: 100%;   /* stop iOS auto-zooming text on rotate */
+        text-size-adjust: 100%;
     }
+    /* Inputs must be ≥16px or mobile browsers zoom the page when focused. */
+    input, select, textarea {
+        font-size: max(16px, 1rem);
+    }
+}
+
+/* Top safe-area (notch / status bar) — matters most in the fullscreen APK. */
+.fg-safe-top {
+    padding-top: calc(var(--fg-top, 0px) + env(safe-area-inset-top));
 }
 
 .font-display {
