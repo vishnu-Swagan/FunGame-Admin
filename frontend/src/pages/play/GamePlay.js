@@ -19,6 +19,7 @@ import SlotGame from "@/pages/play/SlotGame";
 import TripleFun777Game from "@/pages/play/slots/TripleFun777Game";
 import JokerBonusGame from "@/pages/play/slots/JokerBonusGame";
 import Lucky8LineGame from "@/pages/play/slots/Lucky8LineGame";
+import GiantJackpotGame from "@/pages/play/slots/GiantJackpotGame";
 import AviatorGame from "@/pages/play/AviatorGame";
 import CheckerGame from "@/pages/play/CheckerGame";
 
@@ -35,7 +36,7 @@ const COMPONENTS = {
   "champion-poker": ChampionPokerGame,
   "andar-bahar": AndarBaharGame,
   "fever-joker-bonus": SlotGame,
-  "giant-jackpot": SlotGame,
+  "giant-jackpot": GiantJackpotGame,
   "joker-bonus": JokerBonusGame,
   "lucky-8-line": Lucky8LineGame,
   "triple-fun": TripleFun777Game,

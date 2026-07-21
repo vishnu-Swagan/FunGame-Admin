@@ -224,6 +224,98 @@ def play_slot(slug, bet, payload):
     return {"reels": reels, "label": label, "multiplier": mult}, payout
 
 
+# ---------------- Giant Jackpot: 5x3, 10-line video slot ----------------
+# A real 5-reel x 3-row slot: 10 fixed paylines, Diamond wild (substitutes on
+# lines), Scatter that pays anywhere; 5 scatters = the GIANT JACKPOT (1000x the
+# player's stake). One universal synced grid per round; payout = stake x total
+# multiplier. Tuned to ~90% RTP (see the Monte-Carlo check in the repo).
+GJ_SYMBOLS = [
+    {"id": "coin",    "weight": 30, "pay": {3: 3,  4: 7,   5: 20}},
+    {"id": "bar",     "weight": 24, "pay": {3: 4,  4: 12,  5: 35}},
+    {"id": "bell",    "weight": 18, "pay": {3: 7,  4: 22,  5: 70}},
+    {"id": "gem",     "weight": 12, "pay": {3: 14, 4: 45,  5: 145}},
+    {"id": "crown",   "weight": 8,  "pay": {3: 30, 4: 85,  5: 285}},
+    {"id": "diamond", "weight": 5,  "pay": {3: 36, 4: 145, 5: 575}, "wild": True},
+    {"id": "scatter", "weight": 3,  "scatter": True},
+]
+GJ_WILD = "diamond"
+GJ_SCAT = "scatter"
+GJ_JACKPOT_MULT = 1000
+GJ_SCATTER_PAY = {3: 2, 4: 10, 5: GJ_JACKPOT_MULT}  # x total stake; 5 = jackpot
+GJ_PAY = {s["id"]: s.get("pay") for s in GJ_SYMBOLS}
+GJ_STRIP = [(s["id"], s["weight"]) for s in GJ_SYMBOLS]
+# 10 fixed paylines over a 5-reel x 3-row grid (row index per reel; 0=top).
+GJ_LINES = [
+    [1, 1, 1, 1, 1], [0, 0, 0, 0, 0], [2, 2, 2, 2, 2],
+    [0, 1, 2, 1, 0], [2, 1, 0, 1, 2],
+    [0, 0, 1, 2, 2], [2, 2, 1, 0, 0],
+    [1, 0, 0, 0, 1], [1, 2, 2, 2, 1], [1, 2, 1, 0, 1],
+]
+
+
+def _gj_grid():
+    """5 reels x 3 rows of weighted symbols. grid[reel][row]."""
+    return [[weighted_choice(GJ_STRIP) for _ in range(3)] for _ in range(5)]
+
+
+def _gj_score(grid):
+    """Score the 10 lines + scatters. Returns (win_lines, scatter_count,
+    total_multiplier, jackpot). total_multiplier is per unit stake."""
+    win_lines = []
+    line_units = 0  # sum of per-line pays (each line is 1/10 of the stake)
+    for li, pattern in enumerate(GJ_LINES):
+        syms = [grid[r][pattern[r]] for r in range(5)]
+        if syms[0] == GJ_SCAT:
+            continue  # scatters never start/pay a line
+        # base symbol = first non-wild; wild substitutes. all-wild => wild line.
+        base = None
+        for s in syms:
+            if s == GJ_SCAT:
+                break
+            if s != GJ_WILD:
+                base = s
+                break
+        if base is None:
+            base = GJ_WILD
+        count = 0
+        for s in syms:
+            if s == base or s == GJ_WILD:
+                count += 1
+            else:
+                break
+        pay = GJ_PAY.get(base)
+        if pay and count >= 3 and pay.get(count, 0) > 0:
+            m = pay[count]
+            line_units += m
+            win_lines.append({"line": li, "symbol": base, "count": count, "mult": m})
+    scat = sum(1 for reel in grid for cell in reel if cell == GJ_SCAT)
+    scat_mult = GJ_SCATTER_PAY.get(scat, 0)
+    jackpot = scat >= 5
+    total_mult = line_units / 10.0 + scat_mult
+    return win_lines, scat, total_mult, jackpot
+
+
+def play_giant_jackpot(bet, payload):
+    grid = _gj_grid()
+    win_lines, scat, total_mult, jackpot = _gj_score(grid)
+    if jackpot:
+        label = "GIANT JACKPOT!"
+    elif win_lines and scat >= 3:
+        label = f"{len(win_lines)} lines + scatter"
+    elif win_lines:
+        label = f"{len(win_lines)} line win" if len(win_lines) > 1 else "Line win"
+    elif scat >= 3:
+        label = f"{scat} scatters"
+    else:
+        label = "No win"
+    payout = int(round(bet * total_mult))
+    outcome = {
+        "grid": grid, "win_lines": win_lines, "scatters": scat,
+        "multiplier": round(total_mult, 4), "jackpot": jackpot, "label": label,
+    }
+    return outcome, payout
+
+
 # ---------------- Instant game engines ----------------
 def play_seven_up_down(bet, payload):
     side = payload.get("side")
@@ -498,7 +590,7 @@ ENGINES = {
     "checker": play_checker,
     "no-hold": play_no_hold,
     "fever-joker-bonus": make_slot_engine("fever-joker-bonus"),
-    "giant-jackpot": make_slot_engine("giant-jackpot"),
+    "giant-jackpot": play_giant_jackpot,
     "joker-bonus": make_slot_engine("joker-bonus"),
     "lucky-8-line": make_slot_engine("lucky-8-line"),
     "triple-fun": make_slot_engine("triple-fun"),
