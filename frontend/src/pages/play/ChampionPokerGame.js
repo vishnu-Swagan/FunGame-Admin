@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { FlipCard } from "@/components/play/FlipCard";
 import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
 
 /**
@@ -76,9 +77,31 @@ export default function ChampionPokerGame({ game }) {
   }, [isWin, outcome, roundNo]);
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "HOLD & DRAW…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "HOLD & DRAW…" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => placeBet(null, amount)}
+            betting={betting}
+            placing={placing}
+            label="Join this hand"
+            myTotal={myTotal}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={<HistoryStrip history={history} />}
+    >
       {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
       <div style={{ perspective: "1200px" }}>
       <div
@@ -124,21 +147,6 @@ export default function ChampionPokerGame({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => placeBet(null, amount)}
-        betting={betting}
-        placing={placing}
-        label="Join this hand"
-        myTotal={myTotal}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
