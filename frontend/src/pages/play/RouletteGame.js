@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Timer, RotateCcw, Repeat, Undo2 } from "lucide-react";
+import { Timer, Repeat, Undo2, X } from "lucide-react";
 import { FitWidth } from "@/components/FitWidth";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
@@ -19,8 +19,26 @@ const CHIPS = [
   { v: 500, bg: "#f472b6", fg: "#500724" },
   { v: 1000, bg: "#4ade80", fg: "#052e16" },
 ];
-// felt colour for a straight number cell (0 is handled with its own green gradient)
-const numColor = (n) => (RED.has(n) ? "#b0121c" : "#15181f");
+// Reference "European Roulette" palette
+const R_RED = "#c42130";
+const R_BLACK = "#1b1b22";
+const R_GREEN = "#0a8f4f";
+// felt colour for a straight number cell (0 gets its own green gradient)
+const numColor = (n) => (RED.has(n) ? R_RED : R_BLACK);
+// glossy top-highlight over a solid felt colour (casino-tile sheen)
+const glossy = (color) => `linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.02) 42%, rgba(0,0,0,0.22)), ${color}`;
+
+// Red/black betting diamond (reference uses ◆ for the colour bets)
+const Diamond = ({ color }) => (
+  <span
+    className="pointer-events-none inline-block h-4 w-4 rotate-45 rounded-[2px]"
+    style={{
+      background: color === "red" ? `linear-gradient(135deg, #e24a56, ${R_RED})` : `linear-gradient(135deg, #34343f, ${R_BLACK})`,
+      boxShadow: "inset 0 1px 1px rgba(255,255,255,0.4), 0 1px 2px rgba(0,0,0,0.5)",
+      border: "1px solid rgba(255,255,255,0.55)",
+    }}
+  />
+);
 
 // ---------------- SVG European wheel ----------------
 function polar(cx, cy, r, deg) {
@@ -58,10 +76,10 @@ const WheelSVG = () => (
         <stop offset="52%" stopColor="#c9a227" />
         <stop offset="100%" stopColor="#6b4f10" />
       </radialGradient>
-      <radialGradient id="coneMetal" cx="42%" cy="36%" r="70%">
-        <stop offset="0%" stopColor="#3b2c0d" />
-        <stop offset="60%" stopColor="#241a06" />
-        <stop offset="100%" stopColor="#120c03" />
+      <radialGradient id="coneMetal" cx="42%" cy="34%" r="72%">
+        <stop offset="0%" stopColor="#fff4cf" />
+        <stop offset="52%" stopColor="#d8b34a" />
+        <stop offset="100%" stopColor="#8a6a14" />
       </radialGradient>
       <filter id="numSh" x="-40%" y="-40%" width="180%" height="180%">
         <feDropShadow dx="0" dy="0.35" stdDeviation="0.35" floodColor="#000" floodOpacity="0.8" />
@@ -231,6 +249,25 @@ const BetChip = ({ total }) => {
     </motion.span>
   );
 };
+
+/** Reference-style circular red-gem action button with a gold icon + bevel. */
+const GemButton = ({ icon: Icon, label, onClick, disabled, testId }) => (
+  <button
+    data-testid={testId}
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={label}
+    className="relative h-[52px] w-[52px] rounded-full flex items-center justify-center transition-transform duration-100 disabled:opacity-40 active:scale-90"
+    style={{
+      background: "radial-gradient(circle at 38% 30%, #e04b53 0%, #b01b25 46%, #7c0f18 100%)",
+      border: "2px solid #e7c66a",
+      boxShadow: "0 3px 8px rgba(0,0,0,0.5), inset 0 2px 3px rgba(255,255,255,0.35), inset 0 -3px 5px rgba(0,0,0,0.45)",
+    }}
+  >
+    <span aria-hidden="true" className="absolute inset-[3px] rounded-full pointer-events-none" style={{ background: "radial-gradient(circle at 42% 26%, rgba(255,255,255,0.4), transparent 46%)" }} />
+    <Icon className="h-5 w-5 relative" strokeWidth={2.6} style={{ color: "#f7e2a0" }} />
+  </button>
+);
 
 const BoardCell = ({ type, value, label, className = "", style, testId, betting, onPlace, chipTotal }) => (
   <button
@@ -543,18 +580,32 @@ export default function RouletteGame({ game }) {
   return (
     <PlayShell game={game} balance={balance}>
       {/* ===== Vertical roulette: tall number board (left) + wheel & bets rail (right) ===== */}
-      <div className="flex gap-2 items-start" data-testid="roulette-live" style={{ overflow: "visible" }}>
+      {/* overflow-x:clip here is safe — it's a mid-page element, not the scroll
+          root, so it contains the wheel's spin-growth without touching page scroll */}
+      <div className="flex gap-2 items-start" data-testid="roulette-live" style={{ overflowX: "clip" }}>
         {/* -------- LEFT: tall number board, big tap cells -------- */}
         <div className="flex-1 min-w-0">
           <div
-            className="rounded-2xl p-2 border-2"
+            className="rounded-2xl p-2.5 pt-2"
             style={{
-              borderColor: "#c9a227",
-              background: "radial-gradient(130% 120% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%)",
-              boxShadow: betting ? "0 0 0 1px rgba(201,162,39,0.45), 0 0 20px rgba(201,162,39,0.28)" : "0 0 0 1px rgba(201,162,39,0.3)",
+              /* thick polished-gold rail around rich casino felt (reference look) */
+              border: "3px solid transparent",
+              borderRadius: "18px",
+              backgroundImage:
+                "radial-gradient(130% 120% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%), linear-gradient(145deg, #f6e08a 0%, #c9a227 30%, #8a6a14 55%, #e7c66a 100%)",
+              backgroundOrigin: "border-box",
+              backgroundClip: "padding-box, border-box",
+              boxShadow: betting
+                ? "0 0 0 1px rgba(201,162,39,0.5), 0 0 22px rgba(201,162,39,0.3), inset 0 2px 10px rgba(0,0,0,0.35)"
+                : "0 0 0 1px rgba(201,162,39,0.35), inset 0 2px 10px rgba(0,0,0,0.35)",
             }}
             data-testid="roulette-board"
           >
+            {/* branding — European Roulette (gold, matches the reference) */}
+            <div className="text-center mb-1.5 leading-none">
+              <div className="text-[9px] font-extrabold tracking-[0.3em] text-[#f0d488]" style={{ fontFamily: "Georgia, serif" }}>EUROPEAN</div>
+              <div className="font-display text-[15px] tracking-wide" style={{ background: "linear-gradient(180deg, #fff6d8, #e7c66a 55%, #a9801e)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>ROULETTE</div>
+            </div>
             <div className="grid grid-cols-3 gap-1 select-none">
               {/* zero — spans the three columns */}
               <BoardCell
@@ -564,8 +615,8 @@ export default function RouletteGame({ game }) {
                 chipTotal={spotTotals["straight:0"]}
                 label={<span className="pointer-events-none font-display text-lg">0</span>}
                 testId="roulette-cell-straight-0"
-                className={`col-span-3 h-8 rounded-lg text-white ${isResult && winning === 0 ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
-                style={{ background: "linear-gradient(180deg, #0e9a4e, #0b7a3b)" }}
+                className={`col-span-3 h-8 rounded-md text-white border border-white/20 ${isResult && winning === 0 ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+                style={{ background: glossy(R_GREEN) }}
               />
               {/* numbers 1..36, row-major → tidy rows of three */}
               {Array.from({ length: 36 }, (_, i) => i + 1).map((n) => (
@@ -575,12 +626,12 @@ export default function RouletteGame({ game }) {
                   type="straight"
                   value={n}
                   chipTotal={spotTotals[`straight:${n}`]}
-                  label={<span className="pointer-events-none text-[15px] font-bold tabular-nums">{n}</span>}
-                  className={`h-8 rounded-md text-white border border-white/15 ${isResult && winning === n ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
-                  style={{ background: numColor(n) }}
+                  label={<span className="pointer-events-none text-[15px] font-bold tabular-nums" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.6)" }}>{n}</span>}
+                  className={`h-8 rounded-[5px] text-white border border-white/20 ${isResult && winning === n ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+                  style={{ background: glossy(numColor(n)) }}
                 />
               ))}
-              {/* column (2:1) bets, one under each visual column */}
+              {/* column (2~1) bets, one under each visual column */}
               {[1, 2, 3].map((c) => (
                 <BoardCell
                   {...cellCommon}
@@ -588,30 +639,18 @@ export default function RouletteGame({ game }) {
                   type="column"
                   value={c}
                   chipTotal={spotTotals[`column:${c}`]}
-                  label={<span className="pointer-events-none text-[11px] font-extrabold">2:1</span>}
-                  className="h-7 rounded-md text-white/90 border border-white/25 bg-white/5"
+                  label={<span className="pointer-events-none text-[12px] font-extrabold text-[#f5e9c8]" style={{ fontFamily: "Georgia, serif" }}>2~1</span>}
+                  className="h-7 rounded-[5px] border border-[#c9a227]/50"
+                  style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.15))" }}
                 />
               ))}
             </div>
 
-            {/* Undo / Clear right under the board (thumb-reachable while betting) */}
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <button
-                data-testid="roulette-undo-bet"
-                onClick={undoBet}
-                disabled={!betting || (state?.my_bets || []).length === 0}
-                className="h-11 rounded-xl border border-white/20 bg-black/25 text-sm font-bold text-white/85 disabled:opacity-40 active:scale-[0.97] flex items-center justify-center gap-1.5"
-              >
-                <Undo2 className="h-4 w-4" /> Undo
-              </button>
-              <button
-                data-testid="roulette-clear-bets"
-                onClick={clearBets}
-                disabled={!betting || (state?.my_bets || []).length === 0}
-                className="h-11 rounded-xl border border-destructive/45 bg-destructive/15 text-sm font-bold text-red-300 disabled:opacity-40 active:scale-[0.97] flex items-center justify-center gap-1.5"
-              >
-                <RotateCcw className="h-4 w-4" /> Clear
-              </button>
+            {/* Reference-style circular red-gem actions: undo · clear · repeat */}
+            <div className="flex items-center justify-center gap-4 mt-3">
+              <GemButton testId="roulette-undo-bet" icon={Undo2} label="Undo" onClick={undoBet} disabled={!betting || (state?.my_bets || []).length === 0} />
+              <GemButton testId="roulette-clear-bets" icon={X} label="Clear" onClick={clearBets} disabled={!betting || (state?.my_bets || []).length === 0} />
+              <GemButton testId="roulette-rebet-button" icon={Repeat} label="Repeat" onClick={rebet} disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0} />
             </div>
           </div>
         </div>
@@ -708,48 +747,46 @@ export default function RouletteGame({ game }) {
             <div className="text-[9px] text-white/50">stake <span data-testid="roulette-my-total" className="tabular-nums font-bold text-primary">{formatChips(state?.my_total || 0)}</span></div>
           </div>
 
-          {/* chip selector */}
-          <div className="grid grid-cols-3 gap-1.5" data-testid="roulette-chip-tray">
+          {/* chip selector — our chips (10/50/100/500/1000) as premium casino chips */}
+          <div className="grid grid-cols-3 gap-1.5 justify-items-center" data-testid="roulette-chip-tray">
             {CHIPS.map((c) => (
               <button
                 key={c.v}
                 data-testid={`roulette-chip-${c.v}`}
                 onClick={() => setChip(c.v)}
                 aria-label={`Chip ${c.v}`}
-                className={`h-11 rounded-full font-extrabold text-[11px] tabular-nums border-[3px] border-dashed shadow transition-transform duration-100 ${chip === c.v ? "scale-105 ring-2 ring-primary" : "opacity-85 active:scale-95"}`}
-                style={{ background: c.bg, color: c.fg, borderColor: "rgba(255,255,255,0.6)" }}
+                className={`relative h-[46px] w-[46px] rounded-full font-extrabold text-[11px] tabular-nums border-[3px] border-dashed transition-transform duration-100 ${chip === c.v ? "scale-110 z-10" : "opacity-90 active:scale-95"}`}
+                style={{
+                  background: `radial-gradient(circle at 50% 38%, rgba(255,255,255,0.55), ${c.bg} 60%, rgba(0,0,0,0.28))`,
+                  color: c.fg,
+                  borderColor: "rgba(255,255,255,0.85)",
+                  boxShadow: chip === c.v
+                    ? "0 0 0 2px #ffd447, 0 4px 10px rgba(0,0,0,0.55), inset 0 0 0 4px rgba(255,255,255,0.28)"
+                    : "0 2px 6px rgba(0,0,0,0.45), inset 0 0 0 4px rgba(255,255,255,0.22)",
+                }}
               >
                 {c.v >= 1000 ? `${c.v / 1000}k` : c.v}
               </button>
             ))}
           </div>
 
-          {/* even-money + range bets (big, tappable) */}
+          {/* even-money + range bets (reference: 1~18 · Even · ◆ · ◆ · Odd · 19~36) */}
           <div className="grid grid-cols-2 gap-1.5">
-            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<span className="pointer-events-none text-[11px] font-extrabold">RED</span>} className={`h-9 rounded-md text-white ${isResult && winning != null && winning !== 0 && RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "#b0121c" }} />
-            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<span className="pointer-events-none text-[11px] font-extrabold">BLACK</span>} className={`h-9 rounded-md text-white border border-white/25 ${isResult && winning != null && winning !== 0 && !RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "#15181f" }} />
-            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
-            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
-            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1-18</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
-            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19-36</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
+            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>1~18</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning >= 1 && winning <= 18 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>Even</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && winning % 2 === 0 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} className={`h-9 rounded-[5px] border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} className={`h-9 rounded-[5px] border border-[#c9a227]/40 ${isResult && winning != null && winning !== 0 && !RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>Odd</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning % 2 === 1 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
+            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[12px] font-extrabold" style={{ fontFamily: "Georgia, serif" }}>19~36</span>} className={`h-9 rounded-[5px] text-white/90 border border-[#c9a227]/40 ${isResult && winning != null && winning >= 19 && winning <= 36 ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
           </div>
 
           {/* dozens */}
           <div className="grid grid-cols-3 gap-1.5">
             {[1, 2, 3].map((d) => (
-              <BoardCell {...cellCommon} key={`dozen-${d}`} type="dozen" value={d} chipTotal={spotTotals[`dozen:${d}`]} label={<span className="pointer-events-none text-[10px] font-extrabold">{d === 1 ? "1st" : d === 2 ? "2nd" : "3rd"}12</span>} className="h-8 rounded-md text-white/90 bg-white/10 border border-white/15" />
+              <BoardCell {...cellCommon} key={`dozen-${d}`} type="dozen" value={d} chipTotal={spotTotals[`dozen:${d}`]} label={<span className="pointer-events-none text-[10px] font-extrabold text-[#f5e9c8]" style={{ fontFamily: "Georgia, serif" }}>{d === 1 ? "1st" : d === 2 ? "2nd" : "3rd"} 12</span>} className="h-8 rounded-[5px] border border-[#c9a227]/40" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18))" }} />
             ))}
           </div>
 
-          {/* repeat last bets */}
-          <button
-            data-testid="roulette-rebet-button"
-            onClick={rebet}
-            disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0}
-            className="h-9 rounded-xl border border-white/15 bg-white/5 text-xs font-bold text-white/75 disabled:opacity-40 active:scale-[0.98] flex items-center justify-center gap-1.5"
-          >
-            <Repeat className="h-3.5 w-3.5" /> Repeat last
-          </button>
         </div>
       </div>
 
