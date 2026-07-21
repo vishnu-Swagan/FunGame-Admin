@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 
 export default function KenoGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, placing, revealProgress } =
@@ -47,9 +48,32 @@ export default function KenoGame({ game }) {
   };
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DRAWING 20 BALLS…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "DRAWING 20 BALLS…" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => picks.length > 0 && placeBet(picks, amount)}
+            betting={betting}
+            placing={placing}
+            disabled={picks.length === 0}
+            label={picks.length === 0 ? "Pick numbers first" : `Play ${picks.length} pick${picks.length > 1 ? "s" : ""}`}
+            myTotal={myTotal}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={<HistoryStrip history={history} />}
+    >
       <div
         className="relative rounded-2xl border-2 p-3 overflow-hidden"
         style={{
@@ -129,22 +153,6 @@ export default function KenoGame({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => picks.length > 0 && placeBet(picks, amount)}
-        betting={betting}
-        placing={placing}
-        disabled={picks.length === 0}
-        label={picks.length === 0 ? "Pick numbers first" : `Play ${picks.length} pick${picks.length > 1 ? "s" : ""}`}
-        myTotal={myTotal}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
