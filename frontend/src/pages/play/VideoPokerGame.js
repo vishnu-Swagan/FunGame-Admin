@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { FlipCard } from "@/components/play/FlipCard";
 import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 
 const PAYTABLE = [
   ["Royal Flush", "300x"], ["Straight Flush", "60x"], ["Four of a Kind", "30x"], ["Full House", "10x"],
@@ -45,9 +46,46 @@ export default function VideoPokerGame({ game }) {
   }, [dealtCount, phase]);
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DEALING…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "DEALING…" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => placeBet(null, amount)}
+            betting={betting}
+            placing={placing}
+            label="Join this deal"
+            myTotal={myTotal}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={
+        <div className="space-y-3">
+          <div className="rounded-2xl bg-card/55 border border-white/10 p-3.5">
+            <p className="text-xs font-semibold text-white/60 mb-2">Paytable</p>
+            <div className="grid grid-cols-3 gap-x-3 gap-y-1">
+              {PAYTABLE.map(([h, p]) => (
+                <div key={h} className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/55">{h}</span>
+                  <span className="tabular-nums font-bold text-primary">{p}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <HistoryStrip history={history} />
+        </div>
+      }
+    >
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <FitWidth>
           <div className="flex gap-1.5">
@@ -69,33 +107,6 @@ export default function VideoPokerGame({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => placeBet(null, amount)}
-        betting={betting}
-        placing={placing}
-        label="Join this deal"
-        myTotal={myTotal}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-3.5">
-        <p className="text-xs font-semibold text-white/60 mb-2">Paytable</p>
-        <div className="grid grid-cols-3 gap-x-3 gap-y-1">
-          {PAYTABLE.map(([h, p]) => (
-            <div key={h} className="flex items-center justify-between text-[11px]">
-              <span className="text-white/55">{h}</span>
-              <span className="tabular-nums font-bold text-primary">{p}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
