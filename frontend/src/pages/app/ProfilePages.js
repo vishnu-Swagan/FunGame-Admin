@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { setHaptics, setMuted } from "@/lib/sound";
 import { toast } from "sonner";
 import {
   Shield, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
@@ -160,12 +161,25 @@ const TOGGLES = [
   { key: "high_contrast", label: "High contrast", icon: Contrast, hint: "Boost text and border visibility" },
 ];
 
+function applyEngineSetting(key, value) {
+  if (key === "haptics_enabled") setHaptics(value);
+  if (key === "sound_enabled") setMuted(!value);
+}
+
 export function Settings() {
   const { user, setUser } = useAuth();
   const settings = user?.settings || {};
 
+  // apply stored sound/haptics prefs to the engines on load
+  useEffect(() => {
+    if (settings.haptics_enabled === false) setHaptics(false);
+    if (settings.sound_enabled === false) setMuted(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const toggle = async (key, value) => {
     const prev = { ...settings };
+    applyEngineSetting(key, value);
     setUser({ ...user, settings: { ...settings, [key]: value } });
     try {
       const { data } = await api.patch("/settings", { [key]: value });

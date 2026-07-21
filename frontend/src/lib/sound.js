@@ -22,6 +22,28 @@ export const onMuteChange = (f) => {
   return () => listeners.delete(f);
 };
 
+/* ---------------- Haptics (the "4DX rumble" on a phone) ----------------
+   Device vibration paired with the audio. On by default; independent of the
+   sound mute so players can feel the game even with sound off. */
+let hapticsOff = typeof localStorage !== "undefined" && localStorage.getItem("fg_haptics") === "0";
+export const hapticsEnabled = () => !hapticsOff && typeof navigator !== "undefined" && !!navigator.vibrate;
+export const setHaptics = (on) => {
+  hapticsOff = !on;
+  try {
+    localStorage.setItem("fg_haptics", on ? "1" : "0");
+  } catch (e) {
+    /* private mode */
+  }
+};
+export function vibe(pattern) {
+  if (hapticsOff) return; // independent of the sound mute
+  try {
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+  } catch (e) {
+    /* unsupported */
+  }
+}
+
 const ac = () => {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
@@ -132,13 +154,16 @@ function noise({ dur = 0.2, vol = 0.12, when = 0, freq = 1800, q = 1, filter = "
 export const sfx = {
   /* chips + outcomes (all games) */
   chip: () => {
+    vibe(9);
     tone({ freq: 1900, dur: 0.05, type: "triangle", vol: 0.12 });
     tone({ freq: 2600, dur: 0.06, type: "triangle", vol: 0.09, when: 0.035 });
   },
   win: () => {
+    vibe([0, 35, 25, 55]);
     [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, dur: 0.2, type: "triangle", vol: 0.16, when: i * 0.085 }));
   },
   bigWin: () => {
+    vibe([0, 60, 30, 70, 30, 110]);
     [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone({ freq: f, dur: 0.22, type: "triangle", vol: 0.17, when: i * 0.08 }));
   },
   lose: () => {
@@ -149,11 +174,13 @@ export const sfx = {
 
   /* reveal effects */
   dice: () => {
+    vibe([0, 10, 55, 10, 55, 10]); // tumbling rattle
     for (let i = 0; i < 9; i++) {
       noise({ dur: 0.05, vol: 0.13, when: i * 0.12 + Math.random() * 0.04, freq: 900 + Math.random() * 2200, q: 2 });
     }
   },
   diceLand: () => {
+    vibe([0, 45, 25, 70]); // thud + settle
     noise({ dur: 0.09, vol: 0.22, freq: 450, filter: "lowpass" });
     noise({ dur: 0.07, vol: 0.12, when: 0.09, freq: 600, filter: "lowpass" });
   },
@@ -164,6 +191,7 @@ export const sfx = {
     [0, 0.12, 0.24].forEach((w) => noise({ dur: 0.055, vol: 0.11, when: w, freq: 3400, q: 1.4 }));
   },
   flick: () => {
+    vibe(7); // card flick
     noise({ dur: 0.05, vol: 0.1, freq: 3200, q: 1.6 });
   },
   flip: () => {
@@ -194,6 +222,7 @@ export const sfx = {
     noise({ dur: 0.4, vol: 0.06, when: 4.5, freq: 700, filter: "lowpass" });
   },
   ballLand: () => {
+    vibe(24); // ball drops into the pocket
     noise({ dur: 0.08, vol: 0.18, freq: 500, filter: "lowpass" });
     tone({ freq: 1200, dur: 0.06, type: "triangle", vol: 0.1, when: 0.04 });
   },
@@ -204,11 +233,14 @@ export const sfx = {
     noise({ dur: 1.2, vol: 0.045, freq: 800, q: 0.6 });
   },
   cashout: () => {
+    vibe([0, 30, 20, 55]);
     [880, 1174, 1568].forEach((f, i) => tone({ freq: f, dur: 0.14, type: "triangle", vol: 0.18, when: i * 0.07 }));
   },
   crash: () => {
+    vibe([0, 150, 50, 90, 40, 70]); // heavy 4DX rumble
     noise({ dur: 0.5, vol: 0.25, freq: 320, filter: "lowpass", q: 0.7 });
     tone({ freq: 130, dur: 0.5, type: "sawtooth", vol: 0.14, slideTo: 55 });
+    tone({ freq: 55, dur: 0.55, type: "sine", vol: 0.18, slideTo: 32 }); // sub-bass floor
   },
 
   /* crowd atmosphere */
@@ -255,16 +287,19 @@ export const sfx = {
 
   /* ---- slot cabinets (distinct per machine) ---- */
   lever: () => {
+    vibe([0, 26, 16, 46]); // arm pull clunk
     // mechanical arm pull: clunk + spring + latch
     noise({ dur: 0.09, vol: 0.18, freq: 650, filter: "lowpass" });
     tone({ freq: 230, dur: 0.14, type: "square", vol: 0.07, when: 0.05, slideTo: 110 });
     noise({ dur: 0.06, vol: 0.13, when: 0.18, freq: 1500, q: 2 });
   },
   reelStop: () => {
+    vibe(16); // reel clunks to a stop
     noise({ dur: 0.05, vol: 0.2, freq: 900, filter: "lowpass" });
     tone({ freq: 330, dur: 0.05, type: "square", vol: 0.09 });
   },
   slotBell: () => {
+    vibe([0, 40, 30, 60, 30, 80]); // payout jingle
     // classic Vegas payout bell
     [1568, 1568, 2093].forEach((f, i) => tone({ freq: f, dur: 0.38, type: "triangle", vol: 0.16, when: i * 0.17 }));
   },
@@ -283,12 +318,15 @@ export const sfx = {
     noise({ dur: 1.2, vol: 0.03, freq: 1700, q: 0.8 });
   },
   gong: () => {
+    vibe([0, 130, 70, 200]); // deep jackpot rumble
+    tone({ freq: 65, dur: 1.4, type: "sine", vol: 0.16, slideTo: 40 }); // sub-bass floor
     tone({ freq: 196, dur: 1.7, type: "sine", vol: 0.2 });
     tone({ freq: 294, dur: 1.25, type: "sine", vol: 0.09, when: 0.02 });
     tone({ freq: 392, dur: 0.9, type: "triangle", vol: 0.05, when: 0.05 });
     noise({ dur: 0.22, vol: 0.08, freq: 2600, q: 0.8 });
   },
   coinShower: () => {
+    vibe([0, 14, 16, 14, 16, 14, 16, 14, 16, 14]); // cascading coins
     for (let i = 0; i < 11; i++)
       tone({ freq: 2100 + Math.random() * 1500, dur: 0.05, type: "triangle", vol: 0.07, when: i * 0.06 + Math.random() * 0.03 });
   },
@@ -383,6 +421,7 @@ export const flight = {
   /* the plane flew away: doppler pitch drop + long fade into the distance */
   flyAway() {
     if (!flightNodes) return;
+    vibe([0, 150, 50, 90, 40, 70]); // plane flies away — heavy rumble
     try {
       const { c, out, o1, o2, lp } = flightNodes;
       const t = c.currentTime;
