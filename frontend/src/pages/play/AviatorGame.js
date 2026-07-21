@@ -452,6 +452,7 @@ export default function AviatorGame({ game }) {
     <GameStage
       game={game}
       balance={balance}
+      alarm={false}
       live={{
         phase: st?.phase,
         countdown,

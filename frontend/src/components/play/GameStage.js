@@ -8,11 +8,11 @@ import { BetDock } from "@/components/play/BetDock";
 import { ExtrasSheet } from "@/components/play/ExtrasSheet";
 import { useBettingAlarm } from "@/lib/useBettingAlarm";
 
-export const GameStage = ({ game, balance, live, betDock, extras, labels, children }) => {
+export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm = true, children }) => {
   const navigate = useNavigate();
   const [muted, setMuted] = useState(isMuted());
   useEffect(() => onMuteChange(setMuted), []);
-  useBettingAlarm({ phase: live?.phase, countdown: live?.countdown ?? 0, roundNumber: live?.roundNumber });
+  useBettingAlarm({ phase: alarm ? live?.phase : "OFF", countdown: live?.countdown ?? 0, roundNumber: live?.roundNumber });
 
   return (
     <div
