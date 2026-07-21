@@ -5,7 +5,7 @@ import { Timer, RotateCcw, Repeat, Undo2 } from "lucide-react";
 import { FitWidth } from "@/components/FitWidth";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
+import { PlayShell } from "@/components/play/PlayShell";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
@@ -19,6 +19,8 @@ const CHIPS = [
   { v: 500, bg: "#f472b6", fg: "#500724" },
   { v: 1000, bg: "#4ade80", fg: "#052e16" },
 ];
+// felt colour for a straight number cell (0 is handled with its own green gradient)
+const numColor = (n) => (RED.has(n) ? "#b0121c" : "#15181f");
 
 // ---------------- SVG European wheel ----------------
 function polar(cx, cy, r, deg) {
@@ -208,9 +210,6 @@ const ResultDot = ({ n, big = false }) => (
   </span>
 );
 
-/* ---- Module-level board pieces (stable identity = no remount flicker) ---- */
-const FELT_CELL = "border border-white/60 bg-[#127a43] text-white flex items-center justify-center";
-
 /** Pick the chip colour that matches the staked total (largest denom <= total). */
 const chipLook = (v) => CHIPS.reduce((acc, c) => (v >= c.v ? c : acc), CHIPS[0]);
 
@@ -233,20 +232,6 @@ const BetChip = ({ total }) => {
   );
 };
 
-const NumberSpot = ({ n }) => (
-  <span
-    className={`pointer-events-none inline-flex items-center justify-center w-[26px] h-[32px] rounded-[50%] text-white text-[13px] font-bold tabular-nums ${
-      RED.has(n) ? "bg-[#c22c31]" : "bg-[#101318]"
-    }`}
-  >
-    {n}
-  </span>
-);
-
-const Diamond = ({ color }) => (
-  <span className="pointer-events-none inline-block h-4 w-4 rotate-45 border border-white/80" style={{ background: color === "red" ? "#c22c31" : "#101318" }} />
-);
-
 const BoardCell = ({ type, value, label, className = "", style, testId, betting, onPlace, chipTotal }) => (
   <button
     data-testid={testId || `roulette-cell-${type}-${value}`}
@@ -256,21 +241,6 @@ const BoardCell = ({ type, value, label, className = "", style, testId, betting,
     className={`relative font-bold transition-[filter] duration-100 ${betting ? "hover:brightness-125 active:scale-[0.97]" : "opacity-85"} ${className}`}
   >
     {label}
-    <AnimatePresence>{chipTotal ? <BetChip total={chipTotal} /> : null}</AnimatePresence>
-  </button>
-);
-
-/** Invisible hit zone straddling a line (split) or a cross (corner) between
-    numbers - exactly like placing a chip on the felt lines in a real casino. */
-const BetSpot = ({ type, nums, pos, style, betting, onPlace, chipTotal }) => (
-  <button
-    data-testid={`roulette-spot-${type}-${nums.join("-")}`}
-    aria-label={`${type} bet on ${nums.join(", ")}`}
-    onClick={() => onPlace(type, nums.join("-"))}
-    disabled={!betting}
-    style={style}
-    className={`relative z-10 h-7 w-7 rounded-full ${pos} ${betting ? "active:scale-110" : ""}`}
-  >
     <AnimatePresence>{chipTotal ? <BetChip total={chipTotal} /> : null}</AnimatePresence>
   </button>
 );
@@ -572,289 +542,219 @@ export default function RouletteGame({ game }) {
 
   return (
     <PlayShell game={game} balance={balance}>
-      {/* Phase + universal timer */}
-      <div
-        data-testid="roulette-phase-bar"
-        className={`rounded-2xl border p-3 flex items-center justify-between gap-3 ${
-          betting ? "border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.08)]" : "border-[hsl(var(--magenta)/0.4)] bg-[hsl(var(--magenta)/0.08)]"
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <Timer className={`h-4 w-4 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
-          <span data-testid="roulette-phase" className={`text-xs font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
-            {betting ? "PLACE YOUR BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-white/45">round #{state?.round_number ?? "…"}</span>
-          <span data-testid="roulette-timer" className={`tabular-nums font-display text-2xl ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
-            {Math.ceil(countdown)}
-          </span>
-        </div>
-      </div>
-      {betting && (
-        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden -mt-2">
+      {/* ===== Vertical roulette: tall number board (left) + wheel & bets rail (right) ===== */}
+      <div className="flex gap-2 items-start" data-testid="roulette-live" style={{ overflow: "visible" }}>
+        {/* -------- LEFT: tall number board, big tap cells -------- */}
+        <div className="flex-1 min-w-0">
           <div
-            className="h-full bg-[hsl(var(--emerald))] rounded-full transition-[width] duration-200"
-            style={{ width: `${Math.min(100, (countdown / (state?.betting_seconds || 20)) * 100)}%` }}
-          />
-        </div>
-      )}
+            className="rounded-2xl p-2 border-2"
+            style={{
+              borderColor: "#c9a227",
+              background: "radial-gradient(130% 120% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%)",
+              boxShadow: betting ? "0 0 0 1px rgba(201,162,39,0.45), 0 0 20px rgba(201,162,39,0.28)" : "0 0 0 1px rgba(201,162,39,0.3)",
+            }}
+            data-testid="roulette-board"
+          >
+            <div className="grid grid-cols-3 gap-1 select-none">
+              {/* zero — spans the three columns */}
+              <BoardCell
+                {...cellCommon}
+                type="straight"
+                value={0}
+                chipTotal={spotTotals["straight:0"]}
+                label={<span className="pointer-events-none font-display text-lg">0</span>}
+                testId="roulette-cell-straight-0"
+                className={`col-span-3 h-8 rounded-lg text-white ${isResult && winning === 0 ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+                style={{ background: "linear-gradient(180deg, #0e9a4e, #0b7a3b)" }}
+              />
+              {/* numbers 1..36, row-major → tidy rows of three */}
+              {Array.from({ length: 36 }, (_, i) => i + 1).map((n) => (
+                <BoardCell
+                  {...cellCommon}
+                  key={n}
+                  type="straight"
+                  value={n}
+                  chipTotal={spotTotals[`straight:${n}`]}
+                  label={<span className="pointer-events-none text-[15px] font-bold tabular-nums">{n}</span>}
+                  className={`h-8 rounded-md text-white border border-white/15 ${isResult && winning === n ? "ring-2 ring-primary z-10 fg-neon" : ""}`}
+                  style={{ background: numColor(n) }}
+                />
+              ))}
+              {/* column (2:1) bets, one under each visual column */}
+              {[1, 2, 3].map((c) => (
+                <BoardCell
+                  {...cellCommon}
+                  key={`col-${c}`}
+                  type="column"
+                  value={c}
+                  chipTotal={spotTotals[`column:${c}`]}
+                  label={<span className="pointer-events-none text-[11px] font-extrabold">2:1</span>}
+                  className="h-7 rounded-md text-white/90 border border-white/25 bg-white/5"
+                />
+              ))}
+            </div>
 
-      {/* 3D Wheel with cinematic camera: dollies in on the numbers while the
-          ball is spinning, pulls back out once the result lands */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-2 overflow-hidden">
-        <div
-          className="relative h-[212px] w-[264px] z-10"
-          data-testid="roulette-wheel"
-          style={{
-            transform: cameraZoom ? "scale(1.34)" : "scale(1)",
-            transformOrigin: "50% 34%",
-            transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
-            willChange: "transform",
-          }}
-        >
-          {/* screen-space pointer above the far edge of the tilted wheel */}
-          <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
-          {/* perspective scene */}
-          <div className="absolute inset-0" style={{ perspective: "860px" }}>
+            {/* Undo / Clear right under the board (thumb-reachable while betting) */}
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                data-testid="roulette-undo-bet"
+                onClick={undoBet}
+                disabled={!betting || (state?.my_bets || []).length === 0}
+                className="h-11 rounded-xl border border-white/20 bg-black/25 text-sm font-bold text-white/85 disabled:opacity-40 active:scale-[0.97] flex items-center justify-center gap-1.5"
+              >
+                <Undo2 className="h-4 w-4" /> Undo
+              </button>
+              <button
+                data-testid="roulette-clear-bets"
+                onClick={clearBets}
+                disabled={!betting || (state?.my_bets || []).length === 0}
+                className="h-11 rounded-xl border border-destructive/45 bg-destructive/15 text-sm font-bold text-red-300 disabled:opacity-40 active:scale-[0.97] flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw className="h-4 w-4" /> Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* -------- RIGHT rail: wheel, timer, chips, outside bets -------- */}
+        <div className="w-[43%] max-w-[176px] shrink-0 flex flex-col gap-2" style={{ overflow: "visible" }}>
+          {/* compact 3D wheel — grows + glows during the spin (4DX) */}
+          <div
+            className="relative rounded-2xl bg-card/60 border border-white/10 p-1.5"
+            style={{ overflow: "visible", boxShadow: spinningAnim ? "0 0 26px rgba(255,199,64,0.5)" : "none", transition: "box-shadow 400ms" }}
+            data-testid="roulette-wheel-slot"
+          >
             <div
-              className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
-              style={{
-                transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
-                transformStyle: "preserve-3d",
-                transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
-              }}
-            >
-              {/* extruded wooden bowl + ground shadow */}
-              <RimWall3D />
-              {/* wheel head — spins counterclockwise like a real European wheel */}
+              aria-hidden="true"
+              className="absolute inset-0 rounded-2xl pointer-events-none"
+              style={{ background: "radial-gradient(circle at 50% 42%, rgba(255,199,64,0.20), transparent 66%)", opacity: spinningAnim ? 1 : 0.4, transition: "opacity 400ms" }}
+            />
+            <FitWidth>
               <div
-                className="absolute inset-0"
+                className="relative h-[212px] w-[264px] z-10"
+                data-testid="roulette-wheel"
                 style={{
-                  transform: `rotateZ(${wheelRot}deg)`,
-                  transformStyle: "preserve-3d",
-                  transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
+                  transform: cameraZoom ? "scale(1.34)" : "scale(1)",
+                  transformOrigin: "50% 40%",
+                  transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
                   willChange: "transform",
                 }}
               >
-                {/* motion blur on the 2D number face only (keeps the 3D turret crisp) */}
-                <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
-                  <WheelSVG />
+                {/* screen-space pointer above the far edge of the tilted wheel */}
+                <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
+                <div className="absolute inset-0" style={{ perspective: "860px" }}>
+                  <div
+                    className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
+                    style={{
+                      transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
+                      transformStyle: "preserve-3d",
+                      transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+                    }}
+                  >
+                    <RimWall3D />
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        transform: `rotateZ(${wheelRot}deg)`,
+                        transformStyle: "preserve-3d",
+                        transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
+                        willChange: "transform",
+                      }}
+                    >
+                      <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
+                        <WheelSVG />
+                      </div>
+                      <Turret3D />
+                    </div>
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{
+                        transform: "translateZ(3px)",
+                        background:
+                          "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
+                      }}
+                    />
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
+                      <div
+                        ref={ballRef}
+                        className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
+                        style={{
+                          transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
+                          background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <Turret3D />
+                {!betting && winning != null && landed && (
+                  <div className="absolute inset-0 z-20 flex items-center justify-center">
+                    <ResultDot n={winning} big />
+                  </div>
+                )}
               </div>
-              {/* fixed ambient light + rim vignette — stays put while the wheel spins,
-                  so the highlight reads like real light instead of a flat cartoon fill */}
-              <div
-                aria-hidden="true"
-                className="absolute inset-0 rounded-full pointer-events-none"
-                style={{
-                  transform: "translateZ(3px)",
-                  background:
-                    "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
-                }}
-              />
-              {/* pearl ball — launched clockwise, spirals down into the winning pocket */}
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
-                <div
-                  ref={ballRef}
-                  className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
-                  style={{
-                    transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
-                    background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
-                  }}
-                />
-              </div>
-            </div>
+            </FitWidth>
           </div>
-          {/* landed number — shown only after the wheel has visually stopped */}
-          {!betting && winning != null && landed && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center">
-              <ResultDot n={winning} big />
+
+          {/* timer + phase + running stake */}
+          <div className={`rounded-xl border px-2 py-1.5 text-center ${betting ? "border-[hsl(var(--emerald)/0.45)] bg-[hsl(var(--emerald)/0.1)]" : "border-[hsl(var(--magenta)/0.45)] bg-[hsl(var(--magenta)/0.1)]"}`}>
+            <div className={`text-[10px] font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
+              {betting ? "PLACE BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
             </div>
-          )}
-        </div>
-        {/* last results */}
-        <div className="flex items-center gap-1.5 flex-wrap justify-center" data-testid="roulette-last-results">
-          <span className="text-[10px] text-white/40 mr-1">LAST</span>
-          {(state?.last_results || []).map((r) => (
-            <ResultDot key={r.round_number} n={r.winning_number} />
-          ))}
-        </div>
-      </div>
+            <div className="flex items-center justify-center gap-1.5">
+              <Timer className={`h-3.5 w-3.5 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
+              <span data-testid="roulette-timer" className={`tabular-nums font-display text-2xl leading-none ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>{Math.ceil(countdown)}</span>
+            </div>
+            <div className="text-[9px] text-white/50">stake <span data-testid="roulette-my-total" className="tabular-nums font-bold text-primary">{formatChips(state?.my_total || 0)}</span></div>
+          </div>
 
-      <ResultBanner result={result} />
+          {/* chip selector */}
+          <div className="grid grid-cols-3 gap-1.5" data-testid="roulette-chip-tray">
+            {CHIPS.map((c) => (
+              <button
+                key={c.v}
+                data-testid={`roulette-chip-${c.v}`}
+                onClick={() => setChip(c.v)}
+                aria-label={`Chip ${c.v}`}
+                className={`h-11 rounded-full font-extrabold text-[11px] tabular-nums border-[3px] border-dashed shadow transition-transform duration-100 ${chip === c.v ? "scale-105 ring-2 ring-primary" : "opacity-85 active:scale-95"}`}
+                style={{ background: c.bg, color: c.fg, borderColor: "rgba(255,255,255,0.6)" }}
+              >
+                {c.v >= 1000 ? `${c.v / 1000}k` : c.v}
+              </button>
+            ))}
+          </div>
 
-      {/* Classic European table — auto-fits any screen width */}
-      <div
-        className="rounded-2xl border-2 border-[#c9a227]/50 p-2.5"
-        style={{ background: "radial-gradient(130% 140% at 50% 0%, #1d8a4f 0%, #14713e 55%, #0c5a2f 100%)" }}
-        data-testid="roulette-board"
-      >
-        <FitWidth>
-          <div className="w-[600px] select-none">
-          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "44px 44px 44px 42px 42px" }}>
-            {/* zero wedge */}
-            <BoardCell
-              {...cellCommon}
-              type="straight"
-              value={0}
-              chipTotal={spotTotals["straight:0"]}
-              label={<span className="pointer-events-none font-display text-xl">0</span>}
-              testId="roulette-cell-straight-0"
-              style={{ gridColumn: 1, gridRow: "1 / span 3" }}
-              className={`${FELT_CELL} rounded-l-[24px] ${isResult && winning === 0 ? "ring-2 ring-primary z-10" : ""}`}
-            />
-            {/* number grid — classic layout, top row 3..36 */}
-            {[0, 1, 2].map((row) =>
-              Array.from({ length: 12 }, (_, j) => {
-                const n = 3 * (j + 1) - row;
-                return (
-                  <BoardCell
-                    {...cellCommon}
-                    key={n}
-                    type="straight"
-                    value={n}
-                    chipTotal={spotTotals[`straight:${n}`]}
-                    label={<NumberSpot n={n} />}
-                    style={{ gridColumn: j + 2, gridRow: row + 1 }}
-                    className={`${FELT_CELL} ${isResult && winning === n ? "ring-2 ring-primary z-10" : ""}`}
-                  />
-                );
-              })
-            )}
-            {/* 2 to 1 column bets (top row = column 3) */}
-            {[0, 1, 2].map((row) => (
-              <BoardCell
-                {...cellCommon}
-                key={`col-${row}`}
-                type="column"
-                value={3 - row}
-                chipTotal={spotTotals[`column:${3 - row}`]}
-                label={<span className="pointer-events-none text-[10px] font-extrabold tracking-tight">2 to 1</span>}
-                style={{ gridColumn: 14, gridRow: row + 1 }}
-                className={FELT_CELL}
-              />
-            ))}
-            {/* split + corner hit zones — chips land on the lines between numbers */}
-            {[0, 1, 2].map((row) =>
-              Array.from({ length: 12 }, (_, j) => {
-                const n = 3 * (j + 1) - row;
-                const spots = [];
-                if (j < 11) spots.push({ type: "split", nums: [n, n + 3], pos: "justify-self-end self-center translate-x-1/2" });
-                if (row < 2) spots.push({ type: "split", nums: [n - 1, n], pos: "self-end justify-self-center translate-y-1/2" });
-                if (j < 11 && row < 2)
-                  spots.push({ type: "corner", nums: [n - 1, n, n + 2, n + 3], pos: "justify-self-end self-end translate-x-1/2 translate-y-1/2" });
-                return spots.map((s) => (
-                  <BetSpot
-                    key={`${s.type}-${s.nums.join("-")}`}
-                    type={s.type}
-                    nums={s.nums}
-                    pos={s.pos}
-                    betting={betting}
-                    onPlace={placeBet}
-                    chipTotal={spotTotals[`${s.type}:${s.nums.join("-")}`]}
-                    style={{ gridColumn: j + 2, gridRow: row + 1 }}
-                  />
-                ));
-              })
-            )}
-            {/* zero splits on the 0 wedge boundary */}
-            {[3, 2, 1].map((z, row) => (
-              <BetSpot
-                key={`zero-split-${z}`}
-                type="split"
-                nums={[0, z]}
-                pos="justify-self-start self-center -translate-x-1/2"
-                betting={betting}
-                onPlace={placeBet}
-                chipTotal={spotTotals[`split:0-${z}`]}
-                style={{ gridColumn: 2, gridRow: row + 1 }}
-              />
-            ))}
-            {/* dozens */}
+          {/* even-money + range bets (big, tappable) */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<span className="pointer-events-none text-[11px] font-extrabold">RED</span>} className={`h-9 rounded-md text-white ${isResult && winning != null && winning !== 0 && RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "#b0121c" }} />
+            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<span className="pointer-events-none text-[11px] font-extrabold">BLACK</span>} className={`h-9 rounded-md text-white border border-white/25 ${isResult && winning != null && winning !== 0 && !RED.has(winning) ? "ring-2 ring-primary fg-neon" : ""}`} style={{ background: "#15181f" }} />
+            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
+            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
+            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1-18</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
+            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19-36</span>} className="h-9 rounded-md text-white/90 bg-white/10 border border-white/15" />
+          </div>
+
+          {/* dozens */}
+          <div className="grid grid-cols-3 gap-1.5">
             {[1, 2, 3].map((d) => (
-              <BoardCell
-                {...cellCommon}
-                key={`dozen-${d}`}
-                type="dozen"
-                value={d}
-                chipTotal={spotTotals[`dozen:${d}`]}
-                label={<span className="pointer-events-none text-[12px] font-extrabold tracking-wide">{d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"}</span>}
-                style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 4 }}
-                className={FELT_CELL}
-              />
+              <BoardCell {...cellCommon} key={`dozen-${d}`} type="dozen" value={d} chipTotal={spotTotals[`dozen:${d}`]} label={<span className="pointer-events-none text-[10px] font-extrabold">{d === 1 ? "1st" : d === 2 ? "2nd" : "3rd"}12</span>} className="h-8 rounded-md text-white/90 bg-white/10 border border-white/15" />
             ))}
-            {/* outside bets */}
-            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={FELT_CELL} />
           </div>
-          </div>
-        </FitWidth>
-        <p className="text-[10px] text-white/50 mt-1.5">The table auto-fits your screen — every bet is always reachable</p>
-      </div>
 
-      {/* Chip selector + actions */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 space-y-3" data-testid="roulette-chip-tray">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold text-white/60">Select chip, then tap the board</p>
-          <p className="text-xs text-white/60">
-            My bets: <span data-testid="roulette-my-total" className="tabular-nums font-bold text-primary">{formatChips(state?.my_total || 0)}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {CHIPS.map((c) => (
-            <button
-              key={c.v}
-              data-testid={`roulette-chip-${c.v}`}
-              onClick={() => setChip(c.v)}
-              aria-label={`Chip ${c.v}`}
-              className={`h-12 w-12 rounded-full font-extrabold text-[11px] tabular-nums border-4 border-dashed shadow-md transition-transform duration-100 ${chip === c.v ? "scale-110 ring-2 ring-primary" : "opacity-85 hover:opacity-100"}`}
-              style={{ background: c.bg, color: c.fg, borderColor: "rgba(255,255,255,0.55)" }}
-            >
-              {c.v >= 1000 ? `${c.v / 1000}k` : c.v}
-            </button>
-          ))}
-          <div className="flex-1" />
+          {/* repeat last bets */}
           <button
             data-testid="roulette-rebet-button"
             onClick={rebet}
             disabled={!betting || (state?.my_bets || []).length > 0 || lastBetsRef.current.length === 0}
-            className="h-10 px-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-bold text-white/75 disabled:opacity-40 flex items-center gap-1.5"
+            className="h-9 rounded-xl border border-white/15 bg-white/5 text-xs font-bold text-white/75 disabled:opacity-40 active:scale-[0.98] flex items-center justify-center gap-1.5"
           >
-            <Repeat className="h-3.5 w-3.5" /> Repeat
-          </button>
-          <button
-            data-testid="roulette-undo-bet"
-            onClick={undoBet}
-            disabled={!betting || (state?.my_bets || []).length === 0}
-            className="h-10 px-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-bold text-white/75 disabled:opacity-40 flex items-center gap-1.5"
-          >
-            <Undo2 className="h-3.5 w-3.5" /> Undo
-          </button>
-          <button
-            data-testid="roulette-clear-bets"
-            onClick={clearBets}
-            disabled={!betting || (state?.my_bets || []).length === 0}
-            className="h-10 px-3 rounded-xl border border-destructive/40 bg-destructive/10 hover:bg-destructive/20 text-xs font-bold text-red-400 disabled:opacity-40 flex items-center gap-1.5"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Clear
+            <Repeat className="h-3.5 w-3.5" /> Repeat last
           </button>
         </div>
-        <p className="text-[11px] text-white/40">
-          Straight 36x · Split 18x · Corner 9x · Dozen/Column 3x · Red/Black/Odd/Even/1-18/19-36 2x
-        </p>
-        <p className="text-[10px] text-white/35">
-          Tap a number for straight-up · tap the line between two numbers for a split · tap the cross where four numbers meet for a corner
-        </p>
       </div>
 
-      <HistoryStrip history={history} />
+      {/* The ONLY unhidden information — winner announcement + win/loss declaration */}
+      <ResultBanner result={result} />
     </PlayShell>
   );
 }
