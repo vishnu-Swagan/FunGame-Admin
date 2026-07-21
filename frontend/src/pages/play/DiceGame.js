@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { Dices } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 import { formatChips } from "@/components/common";
 
 const SIDES = [
@@ -103,9 +104,64 @@ export default function DiceGame({ game }) {
   });
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "ROLLING…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "ROLLING…" }}
+      betDock={
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            {SIDES.map((s) => (
+              <button
+                key={s.id}
+                data-testid={`dice-side-${s.id}`}
+                onClick={() => setSide(s.id)}
+                disabled={!betting}
+                className={`relative rounded-xl border p-3 min-h-[64px] text-center transition-[background-color,border-color] duration-150 ${
+                  side === s.id ? "bg-primary/15 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"
+                } ${!betting ? "opacity-70" : ""}`}
+              >
+                <p className={`text-sm font-bold ${side === s.id ? "text-primary" : "text-white/85"}`}>{s.label}</p>
+                <p className="text-[11px] text-white/50 mt-0.5">pays {s.pays}</p>
+                {sideTotals[s.id] > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 h-6 min-w-6 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border-2 border-yellow-200 shadow-md tabular-nums">
+                    {formatChips(sideTotals[s.id])}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => side && placeBet(side, amount)}
+            betting={betting}
+            placing={placing}
+            disabled={!side}
+            label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
+            myTotal={myTotal}
+            hint="Universal dice — everyone sees the same roll"
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={
+        <>
+          <div className="rounded-xl border border-[hsl(var(--magenta)/0.3)] bg-[hsl(var(--magenta)/0.08)] px-3 py-2 flex items-center gap-2">
+            <Dices className="h-4 w-4 text-[hsl(var(--magenta))] shrink-0" />
+            <p className="text-[11px] text-white/70">
+              <span className="font-bold text-[hsl(var(--magenta))]">Matching dice (a double) = house wins</span> — Up, Down and Lucky 7 all lose on a double. Real dice, truly random.
+            </p>
+          </div>
+          <HistoryStrip history={history} />
+        </>
+      }
+    >
       <div
         className="rounded-2xl border border-white/10 p-6 flex flex-col items-center gap-4"
         style={{ background: "radial-gradient(120% 90% at 50% 20%, #15653a 0%, #0f4e2d 55%, #0a3a21 100%)" }}
@@ -136,53 +192,8 @@ export default function DiceGame({ game }) {
           )}
         />
       </div>
-      <div className="rounded-xl border border-[hsl(var(--magenta)/0.3)] bg-[hsl(var(--magenta)/0.08)] px-3 py-2 flex items-center gap-2">
-        <Dices className="h-4 w-4 text-[hsl(var(--magenta))] shrink-0" />
-        <p className="text-[11px] text-white/70">
-          <span className="font-bold text-[hsl(var(--magenta))]">Matching dice (a double) = house wins</span> — Up, Down and Lucky 7 all lose on a double. Real dice, truly random.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2">
-        {SIDES.map((s) => (
-          <button
-            key={s.id}
-            data-testid={`dice-side-${s.id}`}
-            onClick={() => setSide(s.id)}
-            disabled={!betting}
-            className={`relative rounded-xl border p-3 min-h-[64px] text-center transition-[background-color,border-color] duration-150 ${
-              side === s.id ? "bg-primary/15 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"
-            } ${!betting ? "opacity-70" : ""}`}
-          >
-            <p className={`text-sm font-bold ${side === s.id ? "text-primary" : "text-white/85"}`}>{s.label}</p>
-            <p className="text-[11px] text-white/50 mt-0.5">pays {s.pays}</p>
-            {sideTotals[s.id] > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 h-6 min-w-6 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border-2 border-yellow-200 shadow-md tabular-nums">
-                {formatChips(sideTotals[s.id])}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => side && placeBet(side, amount)}
-        betting={betting}
-        placing={placing}
-        disabled={!side}
-        label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
-        myTotal={myTotal}
-        hint="Universal dice — everyone sees the same roll"
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
