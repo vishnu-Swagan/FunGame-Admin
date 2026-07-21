@@ -86,6 +86,29 @@ body {
     }
 }
 
+/* ---- Accessibility baseline (app-wide) ---- */
+/* Visible keyboard focus on every interactive element (backs up component rings). */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+}
+/* Honor the OS "reduce motion" setting everywhere (animations/scroll). */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
 /* Top safe-area (notch / status bar) — matters most in the fullscreen APK. */
 .fg-safe-top {
     padding-top: calc(var(--fg-top, 0px) + env(safe-area-inset-top));
