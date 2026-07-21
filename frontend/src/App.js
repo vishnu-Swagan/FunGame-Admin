@@ -11,6 +11,7 @@ import AppShell from "@/components/AppShell";
 import Welcome from "@/pages/auth/Welcome";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import Login from "@/pages/auth/Login";
+import AdminLogin from "@/pages/auth/AdminLogin";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
 
 // Onboarding
@@ -73,6 +74,8 @@ function App() {
           <Route path="/register" element={<Navigate to="/login" replace />} />
           <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+          {/* Private operator sign-in — separate, unlinked admin URL */}
+          <Route path="/gk-admin-portal" element={<PublicOnly><AdminLogin /></PublicOnly>} />
           <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
 
           {/* Onboarding */}

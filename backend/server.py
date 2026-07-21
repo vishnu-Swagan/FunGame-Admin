@@ -2,12 +2,16 @@
 
 PLAY CHIPS — NO CASH VALUE. No payments, deposits, withdrawals or transfers exist.
 """
+import os
+import time
+import uuid
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
-import os
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from db import client, db
 from seed import run_seed
@@ -25,12 +29,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_WORKER_ID = f'{os.getpid()}-{uuid.uuid4().hex[:6]}'
+
+
+async def _hold_keepalive_lock():
+    """Best-effort single-leader lock: only one worker/instance drives the
+    Aviator machine. Advancing is idempotent anyway, but at scale this avoids
+    every worker doing the same work each tick. Fails over via a short TTL."""
+    now = time.time()
+    ttl = 4.0
+    try:
+        doc = await db.system_locks.find_one_and_update(
+            {'_id': 'aviator_keepalive', '$or': [{'expires_at': {'$lt': now}}, {'holder': _WORKER_ID}]},
+            {'$set': {'holder': _WORKER_ID, 'expires_at': now + ttl}},
+            upsert=True, return_document=ReturnDocument.AFTER,
+        )
+        return bool(doc) and doc.get('holder') == _WORKER_ID
+    except DuplicateKeyError:
+        return False  # another worker currently holds the lock
+
+
 async def _aviator_keepalive():
-    """Keep the universal Aviator round machine ticking 24/7."""
+    """Keep the universal Aviator round machine ticking 24/7 (leader only)."""
     from routes_live import advance_aviator
     while True:
         try:
-            await advance_aviator()
+            if await _hold_keepalive_lock():
+                await advance_aviator()
         except asyncio.CancelledError:
             raise
         except Exception as e:

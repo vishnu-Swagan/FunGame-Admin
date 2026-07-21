@@ -1,8 +1,21 @@
 """Idempotent seed data: admin user, test player, 18 games, announcements, system config."""
 import uuid
+import logging
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 from db import db
 from auth_utils import hash_password
+
+logger = logging.getLogger('seed')
+
+
+async def _safe_insert(coro):
+    """Insert that tolerates a concurrent worker/instance winning the race
+    (multi-worker / horizontally-scaled startup) — a duplicate is a no-op."""
+    try:
+        await coro
+    except DuplicateKeyError:
+        pass
 
 GAMES = [
     {"slug": "aviator", "name": "Aviator", "category": "Crash", "tagline": "Fly high, ride the multiplier", "featured": True,
@@ -71,17 +84,22 @@ ANNOUNCEMENTS = [
 async def run_seed():
     now = datetime.now(timezone.utc).isoformat()
 
+    # Unique guards must exist before any insert so concurrent seeders can't
+    # create duplicates (they'll hit the index and no-op instead).
+    await db.system_config.create_index('key', unique=True)
+    await db.users.create_index('email', unique=True)
+
     # System config
     if not await db.system_config.find_one({'key': 'main'}):
-        await db.system_config.insert_one({
+        await _safe_insert(db.system_config.insert_one({
             'key': 'main', 'maintenance_mode': False,
             'maintenance_message': 'FunGame is under scheduled maintenance. Please check back soon.',
             'min_client_version': '1.0.0', 'updated_at': now,
-        })
+        }))
 
     # Admin user
     if not await db.users.find_one({'email': 'admin@fungame.app'}):
-        await db.users.insert_one({
+        await _safe_insert(db.users.insert_one({
             'id': str(uuid.uuid4()), 'email': 'admin@fungame.app',
             'password_hash': hash_password('FunGame@Admin2025'),
             'role': 'ADMIN', 'status': 'ACTIVE', 'email_verified': True,
@@ -89,12 +107,12 @@ async def run_seed():
             'chip_balance': 0, 'favorites': [], 'recent_games': [],
             'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
             'created_at': now,
-        })
+        }))
 
     # Pre-approved test player
     if not await db.users.find_one({'email': 'player@fungame.app'}):
         pid = str(uuid.uuid4())
-        await db.users.insert_one({
+        await _safe_insert(db.users.insert_one({
             'id': pid, 'email': 'player@fungame.app',
             'password_hash': hash_password('Player@123'),
             'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
@@ -102,13 +120,14 @@ async def run_seed():
             'chip_balance': 5000, 'favorites': ['aviator', 'teen-patti'], 'recent_games': [],
             'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
             'created_at': now,
-        })
-        await db.chip_transactions.insert_one({
+        }))
+        await _safe_insert(db.chip_transactions.insert_one({
             'id': str(uuid.uuid4()), 'user_id': pid, 'type': 'CREDIT', 'amount': 5000,
             'balance_after': 5000, 'note': 'Welcome play chips (seed)', 'ref': None, 'created_at': now,
-        })
+        }))
 
     # Games — exactly 18
+    await db.games.create_index('slug', unique=True)
     count = await db.games.count_documents({})
     if count == 0:
         docs = []
@@ -119,7 +138,10 @@ async def run_seed():
                 'status': 'COMING_SOON', 'featured': g['featured'], 'art': g['art'], 'order': i,
                 'created_at': now,
             })
-        await db.games.insert_many(docs)
+        try:
+            await db.games.insert_many(docs, ordered=False)
+        except Exception as e:
+            logger.info(f'games seed race (ok): {e}')
 
     # Announcements
     if await db.announcements.count_documents({}) == 0:
@@ -129,11 +151,15 @@ async def run_seed():
                 'id': str(uuid.uuid4()), 'title': a['title'], 'body': a['body'],
                 'pinned': a['pinned'], 'active': True, 'created_by': 'system', 'created_at': now,
             })
-        await db.announcements.insert_many(docs)
+        try:
+            await db.announcements.insert_many(docs, ordered=False)
+        except Exception as e:
+            logger.info(f'announcements seed race (ok): {e}')
 
-    # Indexes
+    # Indexes (idempotent)
     await db.users.create_index('email', unique=True)
     await db.users.create_index('id')
+    await db.users.create_index('username')  # fast Login-ID lookups / uniqueness checks
     await db.games.create_index('slug', unique=True)
     await db.chip_transactions.create_index([('user_id', 1), ('created_at', -1)])
     await db.chip_requests.create_index([('user_id', 1), ('created_at', -1)])

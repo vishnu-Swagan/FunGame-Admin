@@ -8,7 +8,21 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+# Connection pool + fail-fast timeouts so a slow/unreachable DB errors quickly
+# instead of hanging worker request slots (the classic "server stuck" under load).
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=int(os.environ.get('MONGO_MAX_POOL', '200')),
+    minPoolSize=int(os.environ.get('MONGO_MIN_POOL', '10')),
+    maxIdleTimeMS=60_000,
+    serverSelectionTimeoutMS=6000,
+    connectTimeoutMS=6000,
+    socketTimeoutMS=30_000,
+    waitQueueTimeoutMS=8000,   # don't block forever waiting for a pooled connection
+    retryWrites=True,
+    retryReads=True,
+    appname='fungame-api',
+)
 db = client[os.environ['DB_NAME']]
 
 

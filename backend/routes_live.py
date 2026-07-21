@@ -318,10 +318,28 @@ def _live_clock(slug):
     return rn, phase, round(ends, 2), total
 
 
+# A round's universal outcome is immutable once created, so an in-process cache
+# is always correct and removes one DB read from every player's poll (the single
+# hottest query at scale — thousands of players share the same few live rounds).
+_OUTCOME_CACHE = {}
+_OUTCOME_CACHE_MAX = 5000
+
+
+def _cache_outcome(slug, rn, outcome):
+    if len(_OUTCOME_CACHE) >= _OUTCOME_CACHE_MAX:
+        for k in list(_OUTCOME_CACHE.keys())[:1000]:  # drop the oldest ~1000
+            _OUTCOME_CACHE.pop(k, None)
+    _OUTCOME_CACHE[(slug, rn)] = outcome
+
+
 async def _live_outcome(slug, rn):
     """Get or atomically create the universal outcome for (slug, round)."""
+    hit = _OUTCOME_CACHE.get((slug, rn))
+    if hit is not None:
+        return hit
     ex = await db.live_outcomes.find_one({'slug': slug, 'round_number': rn}, {'_id': 0})
     if ex:
+        _cache_outcome(slug, rn, ex['outcome'])
         return ex['outcome']
     outcome = generate_outcome(slug)
     doc = {
@@ -330,10 +348,13 @@ async def _live_outcome(slug, rn):
     }
     try:
         await db.live_outcomes.insert_one(doc)
+        _cache_outcome(slug, rn, outcome)
         return outcome
     except Exception:
         ex = await db.live_outcomes.find_one({'slug': slug, 'round_number': rn}, {'_id': 0})
-        return ex['outcome'] if ex else outcome
+        final = ex['outcome'] if ex else outcome
+        _cache_outcome(slug, rn, final)
+        return final
 
 
 async def _live_settle_user(user_id, slug, current_rn, phase):
