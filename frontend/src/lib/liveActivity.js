@@ -77,7 +77,7 @@ function ambientEvent(slug, seq, name) {
   const win = Math.random() < 0.82; // feed skews to wins (it's a highlight reel)
   let text;
   if (!win) text = "placed a bet";
-  else if (mult) text = `cashed ${mult}× · +${fmt(amt)}`;
+  else if (mult) text = `won ${mult}× · +${fmt(amt)}`;
   else text = `won +${fmt(amt)}`;
   return { id: `a-${seq}-${Date.now()}`, name, text, amount: win ? amt : 0, tone: big && win ? "gold" : win ? "win" : "neutral" };
 }

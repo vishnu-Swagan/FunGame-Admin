@@ -2,7 +2,7 @@
 
 All outcomes are generated server-side with a cryptographically secure RNG.
 Clients only submit bets/selections - never outcomes.
-All payouts are integer play chips. PLAY CHIPS - NO CASH VALUE.
+All payouts are integer play chips. PLAY CHIPS ONLY.
 """
 import secrets
 import math

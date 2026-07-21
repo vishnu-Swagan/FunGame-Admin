@@ -34,7 +34,7 @@ async def system_config():
         'maintenance_mode': cfg.get('maintenance_mode', False),
         'maintenance_message': cfg.get('maintenance_message', ''),
         'min_client_version': cfg.get('min_client_version', '1.0.0'),
-        'disclaimer': 'PLAY CHIPS — NO CASH VALUE',
+        'disclaimer': 'PLAY CHIPS ONLY',
     }
 
 
@@ -125,7 +125,7 @@ async def chip_balance(user: dict = Depends(require_active_player)):
     return {
         'balance': fresh.get('chip_balance', 0),
         'points': fresh.get('points_balance', 0),
-        'disclaimer': 'PLAY CHIPS — NO CASH VALUE',
+        'disclaimer': 'PLAY CHIPS ONLY',
     }
 
 

@@ -1,6 +1,6 @@
 """FunGame API — play-chip-only amusement platform backend.
 
-PLAY CHIPS — NO CASH VALUE. No payments, deposits, withdrawals or transfers exist.
+PLAY CHIPS ONLY. No payments, deposits, withdrawals or transfers exist.
 """
 import os
 import time
@@ -72,6 +72,17 @@ async def lifespan(app: FastAPI):
         await db.games.update_many({'status': 'COMING_SOON'}, {'$set': {'status': 'ENABLED'}})
         await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
         logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
+    # One-time: strip legacy "no cash value" wording from already-seeded/sent docs.
+    if cfg and not cfg.get('nocash_wording_stripped'):
+        await db.announcements.update_many({}, [{'$set': {'body': {
+            '$replaceAll': {
+                'input': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}},
+                'find': 'have no cash value and ', 'replacement': ''}}}}])
+        await db.notifications.update_many(
+            {'body': {'$regex': 'NO CASH VALUE'}},
+            [{'$set': {'body': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}}}}])
+        await db.system_config.update_one({'key': 'main'}, {'$set': {'nocash_wording_stripped': True}})
+        logger.info('Stripped legacy no-cash-value wording from existing announcements/notifications')
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
@@ -98,7 +109,7 @@ api_router = APIRouter(prefix='/api')
 
 @api_router.get('/')
 async def root():
-    return {'message': 'FunGame API', 'disclaimer': 'PLAY CHIPS — NO CASH VALUE'}
+    return {'message': 'FunGame API', 'disclaimer': 'PLAY CHIPS ONLY'}
 
 
 @api_router.get('/health')

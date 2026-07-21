@@ -30,7 +30,7 @@ const PROMOS = [
   {
     id: "chips",
     icon: Coins,
-    kicker: "PLAY CHIPS — NO CASH VALUE",
+    kicker: "PLAY CHIPS ONLY",
     title: "Top up your play chips",
     text: "Request chips and an operator will review it in minutes.",
     cta: "Request chips",

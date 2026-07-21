@@ -34,7 +34,7 @@ def _code_email_html(title: str, intro: str, code: str) -> str:
         <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#a8977f;margin:20px 0 0;">This code expires in 15 minutes. If you did not request it, you can safely ignore this email.</p>
       </td></tr>
       <tr><td style="background-color:#2b1a0c;padding:14px 28px;text-align:center;border-top:1px solid #b4530955;">
-        <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#a8977f;">PLAY CHIPS — NO CASH VALUE · For entertainment only</span>
+        <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#a8977f;">PLAY CHIPS ONLY · For entertainment only</span>
       </td></tr>
     </table>
   </td></tr>
@@ -46,7 +46,7 @@ class EmailService:
     @staticmethod
     async def send_verification_code(to_email: str, code: str) -> dict:
         subject = 'FunGame — Verify your email'
-        body = f'Your FunGame verification code is: {code}\nThis code expires in 15 minutes.\n\nPLAY CHIPS — NO CASH VALUE'
+        body = f'Your FunGame verification code is: {code}\nThis code expires in 15 minutes.\n\nPLAY CHIPS ONLY'
         html = _code_email_html('Verify your email', 'Welcome to FunGame! Enter this code in the app to verify your email address:', code)
         return await EmailService._send(to_email, subject, body, code, html)
 

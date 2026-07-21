@@ -69,7 +69,7 @@ export default function AdminDashboard() {
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">Foundation build gate</p>
         <p className="text-xs text-white/55 mt-1 leading-relaxed">
-          All 18 games are registered and non-playable until each passes its game-specific build gate. Players can browse the lobby, favorite games and request play chips. PLAY CHIPS — NO CASH VALUE.
+          All 18 games are registered and non-playable until each passes its game-specific build gate. Players can browse the lobby, favorite games and request play chips.
         </p>
       </div>
     </PageTransition>

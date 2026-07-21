@@ -1,7 +1,7 @@
 {
   "short_name": "FunGame",
-  "name": "FunGame — Play Chips, No Cash Value",
-  "description": "Play-chip amusement games. No cash value, no payments.",
+  "name": "FunGame — Play Chips",
+  "description": "Play-chip amusement games.",
   "icons": [
     { "src": "favicon.png", "sizes": "64x64", "type": "image/png" },
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

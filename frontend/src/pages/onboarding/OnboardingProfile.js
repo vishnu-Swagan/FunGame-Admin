@@ -109,7 +109,7 @@ export default function OnboardingProfile() {
             <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5 cursor-pointer">
               <Checkbox data-testid="onboarding-terms-checkbox" checked={terms} onCheckedChange={(v) => setTerms(!!v)} className="mt-0.5" />
               <span className="text-xs text-white/70 leading-relaxed">
-                I understand FunGame uses <strong className="text-white">play chips with no cash value</strong>. There are no payments, prizes, deposits or withdrawals of any kind.
+                I understand FunGame uses <strong className="text-white">play chips only</strong>. There are no payments, prizes, deposits or withdrawals of any kind.
               </span>
             </label>
             <Button data-testid="onboarding-profile-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">

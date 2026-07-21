@@ -138,7 +138,7 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'ACTIVE', 'approved_at': _now()}, '$unset': {'rejection_reason': ''}})
     if not was_approved_before:
         await _credit_chips(user_id, WELCOME_BONUS, 'Welcome play chips — approval bonus')
-        await _notify(user_id, 'Account approved!', f'Welcome to FunGame! Your account is approved and {WELCOME_BONUS} welcome play chips were added. PLAY CHIPS — NO CASH VALUE.', 'APPROVAL')
+        await _notify(user_id, 'Account approved!', f'Welcome to FunGame! Your account is approved and {WELCOME_BONUS} welcome play chips were added.', 'APPROVAL')
     else:
         await _notify(user_id, 'Account reactivated', 'Your FunGame account has been reactivated.', 'APPROVAL')
     updated = await db.users.find_one({'id': user_id}, {'_id': 0, 'password_hash': 0})
@@ -286,7 +286,7 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
     if body.starting_chips > 0:
         await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
     await _notify(user['id'], 'Welcome to FunGame!',
-                  f'Your account is ready. Log in with your assigned Login ID "{username}". PLAY CHIPS — NO CASH VALUE.', 'APPROVAL')
+                  f'Your account is ready. Log in with your assigned Login ID "{username}".', 'APPROVAL')
     logger.info(f'Signup request {request_id} approved -> user {username}')
     return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}
 
@@ -385,7 +385,7 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
             'ref': request_id, 'created_at': _now(),
         })
         await _notify(req['user_id'], 'Sell request approved!',
-                      f"Your request to sell {req['amount']} chips was approved. {req['amount']} points credited (new points balance: {points_balance}). PLAY CHIPS — NO CASH VALUE.", 'POINTS')
+                      f"Your request to sell {req['amount']} chips was approved. {req['amount']} points credited (new points balance: {points_balance}).", 'POINTS')
         return {'message': 'Sell request approved — chips deducted and points credited', 'chip_balance': chip_balance, 'points_balance': points_balance}
 
     if req_type == 'RETURN':
@@ -404,7 +404,7 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
 
     # BUY (default): credit chips
     balance = await _credit_chips(req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)", ref=request_id)
-    await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}. PLAY CHIPS — NO CASH VALUE.", 'CHIPS')
+    await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}.", 'CHIPS')
     return {'message': 'Request approved and chips credited', 'balance_after': balance}
 
 

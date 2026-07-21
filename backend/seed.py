@@ -75,9 +75,9 @@ GAMES = [
 ]
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to FunGame!", "body": "FunGame is a play-chip-only amusement platform. PLAY CHIPS — NO CASH VALUE. Complete onboarding, get approved, and explore the lobby of 18 upcoming games.", "pinned": True},
+    {"title": "Welcome to FunGame!", "body": "FunGame is a play-chip-only amusement platform. Complete onboarding, get approved, and explore the lobby of 18 upcoming games.", "pinned": True},
     {"title": "18 games are on the way", "body": "Aviator, Teen Patti, Fun Roulette, Giant Jackpot and 14 more original games are in production. Watch this space — statuses update in real time from the server.", "pinned": False},
-    {"title": "How play chips work", "body": "Play chips have no cash value and cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
+    {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
 

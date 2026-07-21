@@ -6,7 +6,7 @@ import { Disclaimer } from "@/components/common";
 
 const FEATURES = [
   { icon: Gamepad2, title: "18 original games", text: "Aviator, Teen Patti, Fun Roulette and more — all in production." },
-  { icon: Coins, title: "Play chips only", text: "No payments, no cash-outs. Pure amusement." },
+  { icon: Coins, title: "Play chips only", text: "No payments or withdrawals. Pure amusement." },
   { icon: ShieldCheck, title: "Members only", text: "Accounts are issued by the operator — log in with the Login ID and password you were given." },
 ];
 

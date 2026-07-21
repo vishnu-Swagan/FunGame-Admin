@@ -6,7 +6,7 @@ import {
 
 export const Disclaimer = ({ className = "" }) => (
   <p data-testid="play-chips-disclaimer" className={`text-[11px] tracking-[0.18em] uppercase text-white/70 ${className}`}>
-    PLAY CHIPS — NO CASH VALUE
+    PLAY CHIPS ONLY
   </p>
 );
 

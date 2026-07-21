@@ -140,7 +140,7 @@ export default function ChipsPage() {
           <form data-testid="chips-request-form" onSubmit={submit} className="rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4 space-y-4">
             <div>
               <p className="text-sm font-semibold">Request play chips</p>
-              <p className="text-xs text-white/55 mt-0.5">An operator reviews every request. Chips carry no cash value.</p>
+              <p className="text-xs text-white/55 mt-0.5">An operator reviews every request.</p>
             </div>
             <div className="grid grid-cols-4 gap-2">
               {QUICK_AMOUNTS.map((q) => (
