@@ -234,6 +234,16 @@ summary:focus-visible {
 .fg-av-cloud2  { animation: fg-av-cloud2 18s linear infinite; }
 .fg-av-runway  { animation: fg-av-runway .5s linear infinite; }
 
+/* ---------------- Roulette cinematic stage (4DX focus mode) ---------------- */
+@keyframes fg-roul-sweep   { to { transform: rotate(360deg); } }
+@keyframes fg-roul-beam    { 0%,100% { opacity: .5; } 50% { opacity: .95; } }
+@keyframes fg-roul-land    { 0% { opacity: .9; transform: scale(0.35); } 70% { opacity: .55; } 100% { opacity: 0; transform: scale(1.9); } }
+@keyframes fg-roul-dots    { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+.fg-roul-sweep { animation: fg-roul-sweep 2.6s linear infinite; }
+.fg-roul-beam  { animation: fg-roul-beam 2.4s ease-in-out infinite; }
+.fg-roul-land  { animation: fg-roul-land .9s ease-out 1 forwards; }
+.fg-roul-dot   { animation: fg-roul-dots 1.2s ease-in-out infinite; }
+
 /* ---------------- Slot / casino cinematics ---------------- */
 @keyframes fg-coin-fall {
   0%   { transform: translateY(-20px) rotateY(0deg) scale(1); opacity: 0; }

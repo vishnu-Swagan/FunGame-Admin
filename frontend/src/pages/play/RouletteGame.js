@@ -567,7 +567,11 @@ export default function RouletteGame({ game }) {
 
   const betting = state?.phase === "BETTING";
   const isResult = state?.phase === "RESULT";
+  const isSpinning = state?.phase === "SPINNING";
   const winning = state?.winning_number;
+  // Cinema mode: once bets close (spin/result) the board collapses and the
+  // wheel is spotlit + enlarged. Never focused before the first state loads.
+  const focused = !!state && !betting;
   const cellCommon = { betting, onPlace: placeBet };
 
   return (
@@ -582,7 +586,14 @@ export default function RouletteGame({ game }) {
         <div className="flex items-center gap-2">
           <Timer className={`h-4 w-4 ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`} />
           <span data-testid="roulette-phase" className={`text-xs font-extrabold tracking-wider ${betting ? "text-[hsl(var(--emerald))]" : "text-[hsl(var(--magenta))]"}`}>
-            {betting ? "PLACE YOUR BETS" : state?.phase === "SPINNING" && !landed ? "NO MORE BETS" : "RESULT"}
+            {betting ? "PLACE YOUR BETS" : isSpinning && !landed ? "NO MORE BETS" : "RESULT"}
+            {isSpinning && !landed && (
+              <span aria-hidden className="ml-0.5">
+                <span className="fg-roul-dot">.</span>
+                <span className="fg-roul-dot" style={{ animationDelay: "0.2s" }}>.</span>
+                <span className="fg-roul-dot" style={{ animationDelay: "0.4s" }}>.</span>
+              </span>
+            )}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -601,84 +612,143 @@ export default function RouletteGame({ game }) {
         </div>
       )}
 
-      {/* 3D Wheel with cinematic camera: dollies in on the numbers while the
-          ball is spinning, pulls back out once the result lands */}
-      <div className="rounded-2xl bg-card/55 border border-white/10 p-4 flex flex-col items-center gap-2 overflow-hidden">
+      {/* ---------- Cinematic wheel stage ----------
+          Small and quiet while betting; when bets close it grows, the backdrop
+          darkens to a spotlit well, a stage-light cone falls from the top and a
+          4DX light sweep rotates over the wheel until it lands. */}
+      <div
+        className="relative rounded-2xl border overflow-hidden transition-[height,border-color,background] duration-700"
+        style={{
+          height: focused ? 372 : 206,
+          transitionTimingFunction: "cubic-bezier(0.3,0.7,0.25,1)",
+          borderColor: focused ? "rgba(201,162,39,0.5)" : "rgba(255,255,255,0.1)",
+          background: focused
+            ? "radial-gradient(120% 88% at 50% 26%, #241a08 0%, #0c0a05 58%, #050403 100%)"
+            : "hsl(var(--card) / 0.55)",
+        }}
+        data-testid="roulette-wheel"
+      >
+        {/* recent results stay visible in cinema mode */}
+        {history.length > 0 && (
+          <div className="absolute left-3 top-3 z-30 flex items-center gap-1">
+            {history.slice(0, 5).map((h, i) => (
+              <ResultDot key={`${h.round_number}-${i}`} n={h.winning_number} />
+            ))}
+          </div>
+        )}
+        {/* stage-light cone from the top — fades in when focused */}
         <div
-          className="relative h-[212px] w-[264px] z-10"
-          data-testid="roulette-wheel"
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none transition-opacity duration-700"
           style={{
-            transform: cameraZoom ? "scale(1.34)" : "scale(1)",
-            transformOrigin: "50% 34%",
-            transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+            opacity: focused ? 1 : 0,
+            background: "radial-gradient(62% 80% at 50% -8%, rgba(255,240,200,0.28), rgba(255,236,180,0.06) 42%, transparent 68%)",
+          }}
+        />
+        {/* rotating 4DX light sweep — only while the wheel is actually spinning */}
+        {isSpinning && !landed && (
+          <div
+            aria-hidden="true"
+            className="absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2 w-[560px] h-[560px] pointer-events-none fg-roul-sweep"
+            style={{
+              background: "conic-gradient(from 0deg, transparent 0deg, rgba(255,236,180,0.16) 24deg, transparent 54deg, transparent 180deg, rgba(255,236,180,0.10) 204deg, transparent 234deg)",
+              mixBlendMode: "screen",
+            }}
+          />
+        )}
+        {/* focus scaler (phase) wraps the existing dolly (cameraZoom) wheel scene */}
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{
+            transform: `scale(${focused ? 1.08 : 0.8})`,
+            transformOrigin: "50% 44%",
+            transition: "transform 700ms cubic-bezier(0.3,0.7,0.25,1)",
             willChange: "transform",
           }}
         >
-          {/* screen-space pointer above the far edge of the tilted wheel */}
-          <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
-          {/* perspective scene */}
-          <div className="absolute inset-0" style={{ perspective: "860px" }}>
-            <div
-              className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
-              style={{
-                transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
-                transformStyle: "preserve-3d",
-                transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
-              }}
-            >
-              {/* extruded wooden bowl + ground shadow */}
-              <RimWall3D />
-              {/* wheel head — spins counterclockwise like a real European wheel */}
+          <div
+            className="relative h-[212px] w-[264px] z-10"
+            style={{
+              transform: cameraZoom ? "scale(1.24)" : "scale(1)",
+              transformOrigin: "50% 34%",
+              transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
+              willChange: "transform",
+            }}
+          >
+            {/* screen-space pointer above the far edge of the tilted wheel */}
+            <div className="absolute left-1/2 top-[18px] -translate-x-1/2 z-30 w-0 h-0 border-l-[7px] border-r-[7px] border-t-[11px] border-l-transparent border-r-transparent border-t-primary drop-shadow" />
+            {/* perspective scene */}
+            <div className="absolute inset-0" style={{ perspective: "860px" }}>
               <div
-                className="absolute inset-0"
+                className="absolute left-1/2 top-1/2 h-[230px] w-[230px] -ml-[115px] -mt-[112px]"
                 style={{
-                  transform: `rotateZ(${wheelRot}deg)`,
+                  transform: `rotateX(${cameraZoom ? 45 : 52}deg)`,
                   transformStyle: "preserve-3d",
-                  transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
-                  willChange: "transform",
+                  transition: "transform 1.6s cubic-bezier(0.3, 0.7, 0.25, 1)",
                 }}
               >
-                {/* motion blur on the 2D number face only (keeps the 3D turret crisp) */}
-                <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
-                  <WheelSVG />
-                </div>
-                <Turret3D />
-              </div>
-              {/* fixed ambient light + rim vignette — stays put while the wheel spins,
-                  so the highlight reads like real light instead of a flat cartoon fill */}
-              <div
-                aria-hidden="true"
-                className="absolute inset-0 rounded-full pointer-events-none"
-                style={{
-                  transform: "translateZ(3px)",
-                  background:
-                    "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
-                }}
-              />
-              {/* pearl ball — launched clockwise, spirals down into the winning pocket */}
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
+                {/* extruded wooden bowl + ground shadow */}
+                <RimWall3D />
+                {/* wheel head — spins counterclockwise like a real European wheel */}
                 <div
-                  ref={ballRef}
-                  className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
+                  className="absolute inset-0"
                   style={{
-                    transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
-                    background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
+                    transform: `rotateZ(${wheelRot}deg)`,
+                    transformStyle: "preserve-3d",
+                    transition: spinningAnim ? `transform ${spinMs}ms cubic-bezier(0.12, 0.8, 0.2, 1)` : "none",
+                    willChange: "transform",
+                  }}
+                >
+                  {/* motion blur on the 2D number face only (keeps the 3D turret crisp) */}
+                  <div style={{ filter: spinBlur ? "blur(1.4px)" : "blur(0)", transition: "filter 500ms ease-out", height: "100%", width: "100%" }}>
+                    <WheelSVG />
+                  </div>
+                  <Turret3D />
+                </div>
+                {/* fixed ambient light + rim vignette — stays put while the wheel spins,
+                    so the highlight reads like real light instead of a flat cartoon fill */}
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 rounded-full pointer-events-none"
+                  style={{
+                    transform: "translateZ(3px)",
+                    background:
+                      "radial-gradient(58% 48% at 50% 22%, rgba(255,246,220,0.30), rgba(255,255,255,0.05) 40%, rgba(0,0,0,0) 64%, rgba(0,0,0,0.42) 100%)",
                   }}
                 />
+                {/* pearl ball — launched clockwise, spirals down into the winning pocket */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center" style={{ transformStyle: "preserve-3d" }}>
+                  <div
+                    ref={ballRef}
+                    className="h-3.5 w-3.5 rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.55),0_0_8px_rgba(255,255,255,0.8),inset_-1px_-1.5px_2px_rgba(0,0,0,0.28),inset_1px_1px_1.5px_rgba(255,255,255,0.9)]"
+                    style={{
+                      transform: "rotate(0deg) translateY(-75px) translateZ(5px)",
+                      background: "radial-gradient(circle at 35% 30%, #ffffff, #eae7dd 68%, #c9c4b6)",
+                    }}
+                  />
+                </div>
               </div>
             </div>
+            {/* landed number + golden glow pulse — shown only after the wheel stops */}
+            {!betting && winning != null && landed && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className="fg-roul-land absolute h-16 w-16 rounded-full"
+                  style={{ boxShadow: "0 0 26px 8px rgba(255,215,90,0.7)", background: "radial-gradient(circle, rgba(255,220,120,0.5), transparent 70%)" }}
+                />
+                <ResultDot n={winning} big />
+              </div>
+            )}
           </div>
-          {/* landed number — shown only after the wheel has visually stopped */}
-          {!betting && winning != null && landed && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center">
-              <ResultDot n={winning} big />
-            </div>
-          )}
         </div>
       </div>
 
       <ResultBanner result={result} />
 
+      {/* ---------- Betting board + chips: collapse away when bets close ---------- */}
+      <div style={{ display: "grid", gridTemplateRows: focused ? "0fr" : "1fr", transition: "grid-template-rows 620ms cubic-bezier(0.3,0.7,0.25,1)" }}>
+      <div className={`min-h-0 overflow-hidden space-y-3 transition-opacity duration-500 ${focused ? "opacity-0 pointer-events-none" : "opacity-100"}`} aria-hidden={focused}>
       {/* Classic European table — auto-fits any screen width */}
       <div
         className="rounded-2xl border-2 border-[#c9a227]/50 p-2.5"
@@ -838,6 +908,20 @@ export default function RouletteGame({ game }) {
           </button>
         </div>
       </div>
+      </div>
+      </div>
+
+      {/* Compact status strip while the board is collapsed */}
+      {focused && (
+        <div className="rounded-2xl border border-white/10 bg-card/55 px-4 py-3 flex items-center justify-between" data-testid="roulette-status-strip">
+          <span className="text-xs font-extrabold tracking-wider text-white/70">
+            {isSpinning && !landed ? "SPINNING…" : "ROUND COMPLETE"}
+          </span>
+          <span className="text-xs text-white/60">
+            My bets: <span className="tabular-nums font-bold text-primary">{formatChips(state?.my_total || 0)}</span>
+          </span>
+        </div>
+      )}
     </PlayShell>
   );
 }
