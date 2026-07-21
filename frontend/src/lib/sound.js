@@ -174,6 +174,21 @@ export const sfx = {
   },
   push: () => tone({ freq: 520, dur: 0.14, type: "sine", vol: 0.1 }),
 
+  /* betting countdown alarm (shared across games) */
+  tick: (step = 3) => {
+    // escalating countdown blip: higher pitch + shorter as step -> 1 (final second)
+    const s = Math.max(1, Math.min(5, step));
+    const freq = 520 + (6 - s) * 120; // 5->640, 1->1120 Hz
+    const dur = 0.045 + (s - 1) * 0.006; // shortens toward the final tick
+    tone({ freq, dur, type: "square", vol: 0.16 });
+    vibe([0, s <= 2 ? 30 : 16]); // stronger buzz on the last two ticks
+  },
+  betLock: () => {
+    vibe(60); // bets closed - short low clunk
+    tone({ freq: 150, dur: 0.14, type: "sine", vol: 0.28 });
+    noise({ dur: 0.06, vol: 0.14, freq: 400, filter: "lowpass" });
+  },
+
   /* reveal effects */
   dice: () => {
     vibe([0, 22, 45, 22, 45, 22]); // tumbling rattle
