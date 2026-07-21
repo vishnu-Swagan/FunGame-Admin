@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { VenetianMask, Bell, Grape, Citrus, Apple } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
 import { FitWidth } from "@/components/FitWidth";
 
@@ -116,9 +117,49 @@ export default function JokerBonusGame({ game }) {
   };
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "THE JESTER SPINS\u2026" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "THE JESTER SPINS\u2026" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => placeBet(null, amount)}
+            betting={betting}
+            placing={placing}
+            label="Tempt the Joker"
+            myTotal={myTotal}
+            hint={"Pairs return your stake \u00b7 Joker wild substitutes"}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={
+        <div className="space-y-3">
+          <div className="rounded-2xl border p-3.5" style={{ borderColor: `${NEON}33`, background: "rgba(26,11,46,0.45)" }} data-testid="joker-paytable">
+            <p className="text-xs font-extrabold tracking-wider mb-2" style={{ color: MAGENTA }}>
+              JESTER PAYTABLE
+            </p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {PAYS.map(([h, p]) => (
+                <div key={h} className="flex items-center justify-between text-[11px]">
+                  <span className="text-white/60">{h}</span>
+                  <span className="tabular-nums font-bold" style={{ color: "#facc15" }}>{p}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <HistoryStrip history={history} />
+        </div>
+      }
+    >
       {/* ---- dark jester cabinet ---- */}
       <div
         data-testid="joker-cabinet"
@@ -209,36 +250,6 @@ export default function JokerBonusGame({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => placeBet(null, amount)}
-        betting={betting}
-        placing={placing}
-        label="Tempt the Joker"
-        myTotal={myTotal}
-        hint={"Pairs return your stake \u00b7 Joker wild substitutes"}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-
-      <div className="rounded-2xl border p-3.5" style={{ borderColor: `${NEON}33`, background: "rgba(26,11,46,0.45)" }} data-testid="joker-paytable">
-        <p className="text-xs font-extrabold tracking-wider mb-2" style={{ color: MAGENTA }}>
-          JESTER PAYTABLE
-        </p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          {PAYS.map(([h, p]) => (
-            <div key={h} className="flex items-center justify-between text-[11px]">
-              <span className="text-white/60">{h}</span>
-              <span className="tabular-nums font-bold" style={{ color: "#facc15" }}>{p}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
