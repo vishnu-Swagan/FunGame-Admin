@@ -1,5 +1,7 @@
 """Admin routes: user approvals, chip requests, games, announcements, system config."""
 import uuid
+import string
+import secrets
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -14,6 +16,17 @@ logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
 
 WELCOME_BONUS = 1000
+
+# Fixed issued-credential format: Login ID = "GK" + 7 digits, password = 7 CAPITAL letters.
+_RNG = secrets.SystemRandom()
+
+
+def _issue_username():
+    return "GK" + "".join(_RNG.choice(string.digits) for _ in range(7))
+
+
+def _issue_password():
+    return "".join(_RNG.choice(string.ascii_uppercase) for _ in range(7))
 
 
 def _now():
@@ -180,22 +193,29 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
 # ---------- Direct account provisioning (admin creates the login) ----------
 @router.post('/users')
 async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require_admin)):
-    """Create a player account directly with an admin-assigned Login ID + password.
-    No signup request needed — the account is ACTIVE and pre-verified, and the
-    player logs in with the Login ID and password the admin hands them."""
-    username = body.username  # validated + lowercased by the model
-    if await db.users.find_one({'username': username}):
-        raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
+    """Create a player account directly. The server issues the Login ID
+    (GK + 7 digits) and password (7 CAPITAL letters). The account is ACTIVE and
+    pre-verified; the player logs in with the credentials the admin hands them."""
+    # Allocate a unique GK Login ID.
+    username = None
+    for _ in range(40):
+        cand = _issue_username()
+        if not await db.users.find_one({'username': cand}):
+            username = cand
+            break
+    if not username:
+        raise HTTPException(status_code=503, detail='Could not allocate a Login ID — please try again')
+    password = _issue_password()
     # Email is optional; the account logs in by Login ID. Synthesize a unique
     # placeholder when none is given so the unique email index is satisfied.
-    email = body.email or f'{username}@fungame.local'
+    email = body.email or f'{username.lower()}@fungame.local'
     if await db.users.find_one({'email': email}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
     user = {
         'id': str(uuid.uuid4()),
         'email': email,
         'username': username,
-        'password_hash': hash_password(body.password),
+        'password_hash': hash_password(password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': body.full_name, 'full_name': body.full_name,
         'country': None, 'date_of_birth': None, 'phone': None,
@@ -211,7 +231,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     if body.starting_chips > 0:
         await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
     logger.info(f'admin {admin.get("email")} created account -> {username}')
-    return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}
+    return {'message': f'Account created. Login ID: {username}', 'username': username, 'password': password, 'user': serialize_doc(user)}
 
 
 # ---------- Signup requests (legacy; kept for any pending requests) ----------

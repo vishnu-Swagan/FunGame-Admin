@@ -1,4 +1,5 @@
 """Auth routes: register, verify-email, login, forgot/reset password."""
+import re
 import uuid
 import random
 import hashlib
@@ -120,10 +121,12 @@ async def resend_verification(body: ResendVerificationRequest):
 
 @router.post('/login')
 async def login(body: LoginRequest):
-    ident = body.email.lower().strip()
-    # Login ID (username) or email - legacy accounts keep email login
-    query = {'email': ident} if '@' in ident else {'username': ident}
-    user = await db.users.find_one(query)
+    ident = body.email.strip()
+    # Login ID (username, e.g. GK0297238 — case-insensitive) or email
+    if '@' in ident:
+        user = await db.users.find_one({'email': ident.lower()})
+    else:
+        user = await db.users.find_one({'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'}})
     if not user or not verify_password(body.password, user.get('password_hash', '')):
         raise HTTPException(status_code=401, detail='Invalid login ID or password')
     if not user.get('email_verified'):

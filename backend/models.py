@@ -54,21 +54,12 @@ class AdminSignupApprove(BaseModel):
 
 
 class AdminCreateUser(BaseModel):
-    """Admin provisions an account directly (no signup request)."""
+    """Admin provisions an account directly (no signup request). The Login ID
+    (GK + 7 digits) and password (7 capital letters) are issued by the server."""
     full_name: str = Field(min_length=1, max_length=80)
-    username: str = Field(min_length=3, max_length=24)
-    password: str = Field(min_length=8, max_length=128)
     starting_chips: int = Field(default=1000, ge=0, le=1_000_000)
     email: Optional[str] = Field(default=None, max_length=254)
     note: Optional[str] = Field(default=None, max_length=280)
-
-    @field_validator('username')
-    @classmethod
-    def valid_username(cls, v):
-        v = v.strip().lower()
-        if not re.fullmatch(r'[a-z0-9][a-z0-9._]{2,23}', v):
-            raise ValueError('Login ID must be 3-24 chars: letters, numbers, dot or underscore')
-        return v
 
     @field_validator('email')
     @classmethod
