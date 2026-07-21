@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
+import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 
 export const PlayShell = ({ game, balance, children }) => {
   const navigate = useNavigate();
@@ -39,6 +40,7 @@ export const PlayShell = ({ game, balance, children }) => {
           <span className="tabular-nums text-sm font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>
         </div>
       </div>
+      <LiveActivityBar slug={game.slug} />
       {children}
       <Disclaimer />
     </div>
