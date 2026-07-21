@@ -1,6 +1,7 @@
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
+import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
 import { PublicOnly, RequireAuth, RequireActive, RequireAdmin } from "@/components/RouteGuards";
@@ -125,6 +126,7 @@ function App() {
           {/* Fallback */}
           <Route path="*" element={<FallbackRedirect />} />
         </Routes>
+        <IosInstallHint />
       </AuthProvider>
     </BrowserRouter>
   );
