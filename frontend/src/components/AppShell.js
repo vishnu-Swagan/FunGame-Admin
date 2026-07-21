@@ -20,7 +20,8 @@ export default function AppShell() {
   const [unread, setUnread] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const headerRef = useRef(null);
-  const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
+  // Roulette is exempt (PlayShell landscape/scroll page) — it keeps the bottom nav + safe-area padding.
+  const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname) && !/\/games\/fun-roulette\/play$/.test(location.pathname);
 
   const loadInbox = useCallback(async () => {
     try {
@@ -134,7 +135,7 @@ export default function AppShell() {
           </div>
         )}
 
-        <main className="pt-4">
+        <main className={onPlay ? "" : "pt-4"}>
           <Outlet />
         </main>
       </div>
