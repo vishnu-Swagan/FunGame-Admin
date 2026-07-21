@@ -300,3 +300,7 @@ body {
         border-bottom-color: inherit;
     }
 }
+
+@keyframes fg-timeline-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+.fg-timeline-alarm { animation: fg-timeline-pulse 0.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .fg-timeline-alarm { animation: none; } }
