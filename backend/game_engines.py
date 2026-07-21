@@ -316,6 +316,73 @@ def play_giant_jackpot(bet, payload):
     return outcome, payout
 
 
+# ---------------- Fever Joker Bonus: 5x3, 10-line + FEVER ----------------
+# 5x3, 10 lines. Joker is Wild (substitutes) AND drives the FEVER bonus: 3/4/5
+# jokers anywhere multiply the whole spin's win by 2x/3x/5x. Distinct from the
+# Giant Jackpot (no scatter); tuned to ~88% RTP.
+FJ_SYMBOLS = [
+    {"id": "cherry", "weight": 30, "pay": {3: 3,  4: 7,   5: 20}},
+    {"id": "lemon",  "weight": 24, "pay": {3: 4,  4: 12,  5: 34}},
+    {"id": "bell",   "weight": 18, "pay": {3: 7,  4: 22,  5: 70}},
+    {"id": "star",   "weight": 12, "pay": {3: 14, 4: 43,  5: 140}},
+    {"id": "seven",  "weight": 9,  "pay": {3: 31, 4: 90,  5: 297}},
+    {"id": "joker",  "weight": 4,  "pay": {3: 40, 4: 144, 5: 558}, "wild": True},
+]
+FJ_WILD = "joker"
+FJ_FEVER = {3: 2, 4: 3, 5: 5}  # jokers on grid -> total-win multiplier
+FJ_PAY = {s["id"]: s.get("pay") for s in FJ_SYMBOLS}
+FJ_STRIP = [(s["id"], s["weight"]) for s in FJ_SYMBOLS]
+
+
+def _fj_grid():
+    return [[weighted_choice(FJ_STRIP) for _ in range(3)] for _ in range(5)]
+
+
+def _fj_score(grid):
+    win_lines = []
+    line_units = 0
+    for li, pattern in enumerate(GJ_LINES):  # reuse the 10 line patterns
+        syms = [grid[r][pattern[r]] for r in range(5)]
+        base = None
+        for s in syms:
+            if s != FJ_WILD:
+                base = s
+                break
+        if base is None:
+            base = FJ_WILD
+        count = 0
+        for s in syms:
+            if s == base or s == FJ_WILD:
+                count += 1
+            else:
+                break
+        pay = FJ_PAY.get(base)
+        if pay and count >= 3 and pay.get(count, 0) > 0:
+            line_units += pay[count]
+            win_lines.append({"line": li, "symbol": base, "count": count, "mult": pay[count]})
+    jokers = sum(1 for reel in grid for cell in reel if cell == FJ_WILD)
+    fever = FJ_FEVER.get(jokers, 1) if jokers >= 3 else 1
+    total = (line_units / 10.0) * fever
+    return win_lines, jokers, fever, total
+
+
+def play_fever_joker(bet, payload):
+    grid = _fj_grid()
+    win_lines, jokers, fever, total = _fj_score(grid)
+    if fever > 1 and win_lines:
+        label = f"JOKER FEVER {fever}×!"
+    elif win_lines:
+        label = f"{len(win_lines)} line win" if len(win_lines) > 1 else "Line win"
+    else:
+        label = "No win"
+    payout = int(round(bet * total))
+    outcome = {
+        "grid": grid, "win_lines": win_lines, "jokers": jokers, "fever": fever,
+        "multiplier": round(total, 4), "label": label,
+    }
+    return outcome, payout
+
+
 # ---------------- Instant game engines ----------------
 def play_seven_up_down(bet, payload):
     side = payload.get("side")
@@ -589,7 +656,7 @@ ENGINES = {
     "poker": lambda bet, payload: play_card_duel(bet, payload, "poker"),
     "checker": play_checker,
     "no-hold": play_no_hold,
-    "fever-joker-bonus": make_slot_engine("fever-joker-bonus"),
+    "fever-joker-bonus": play_fever_joker,
     "giant-jackpot": play_giant_jackpot,
     "joker-bonus": make_slot_engine("joker-bonus"),
     "lucky-8-line": make_slot_engine("lucky-8-line"),

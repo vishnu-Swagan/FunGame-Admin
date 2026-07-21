@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from game_engines import (
     RNG, new_deck, draw_cards, card_str, eval_poker5, eval_teen_patti, TP_LABELS,
     vp_result, play_slot, play_no_hold, play_checker, play_andar_bahar,
-    play_giant_jackpot, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
+    play_giant_jackpot, play_fever_joker, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
 )
 
 POKER_LABELS = {9: "Royal Flush", 8: "Straight Flush", 7: "Four of a Kind", 6: "Full House",
@@ -40,7 +40,7 @@ LIVE_GAMES = {
     "triple-fun":        {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
 }
 
-SLOT_SLUGS = {"fever-joker-bonus", "joker-bonus", "lucky-8-line", "triple-fun"}  # giant-jackpot has its own 5x3 engine
+SLOT_SLUGS = {"joker-bonus", "lucky-8-line", "triple-fun"}  # giant-jackpot & fever-joker-bonus have their own 5x3 engines
 
 SIDE_OPTIONS = {
     "seven-up-down": {"down": 2.3, "seven": 5.8, "up": 2.3},
@@ -116,6 +116,9 @@ def generate_outcome(slug):
         return {"multiplier": weighted_choice([(s["m"], s["w"]) for s in WHEEL_SEGMENTS])}
     if slug == "giant-jackpot":
         outcome, _ = play_giant_jackpot(1, {})
+        return outcome
+    if slug == "fever-joker-bonus":
+        outcome, _ = play_fever_joker(1, {})
         return outcome
     if slug in SLOT_SLUGS:
         outcome, _ = play_slot(slug, 1, {})
@@ -234,4 +237,6 @@ def summarize_outcome(slug, outcome):
         return {"balls": len(outcome["drawn"])}
     if slug == "giant-jackpot":
         return {"multiplier": outcome.get("multiplier", 0), "jackpot": outcome.get("jackpot", False)}
+    if slug == "fever-joker-bonus":
+        return {"multiplier": outcome.get("multiplier", 0), "fever": outcome.get("fever", 1)}
     return {"multiplier": outcome.get("multiplier", 0)}
