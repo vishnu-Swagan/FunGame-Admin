@@ -4,6 +4,7 @@ import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
+import { GameIntro } from "@/components/play/GameIntro";
 
 export const PlayShell = ({ game, balance, children }) => {
   const navigate = useNavigate();
