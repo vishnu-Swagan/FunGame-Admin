@@ -664,12 +664,23 @@ def play_checker(bet, payload):
     return {"side": side, "rounds": rounds, "gold": gold_caps, "steel": steel_caps, "winner": winner, "won": won}, payout
 
 
+# No Hold has its own Vegas-tuned paytable (independent of video poker's, so
+# champion-poker is unaffected). One straight 5-card deal, no draws. Any-pair
+# pays — Monte-Carlo tuned to ~89% RTP (the old shared table left it at a brutal
+# ~33% RTP / 67% house edge).
+NH_PAYTABLE = {9: 500, 8: 120, 7: 60, 6: 14, 5: 9, 4: 6, 3: 4, 2: 2, 1: 1.5, 0: 0}
+NH_LABELS = {9: "ROYAL FLUSH", 8: "STRAIGHT FLUSH", 7: "FOUR OF A KIND", 6: "FULL HOUSE",
+             5: "FLUSH", 4: "STRAIGHT", 3: "THREE OF A KIND", 2: "TWO PAIR", 1: "PAIR", 0: "NO WIN"}
+
+
 def play_no_hold(bet, payload):
     deck = new_deck()
     cards = draw_cards(5, deck)
-    label, mult = vp_result(cards)
-    payout = bet * mult
-    return {"cards": [card_str(c) for c in cards], "hand": label, "multiplier": mult}, payout
+    cat = eval_poker5(cards)[0]
+    mult = NH_PAYTABLE.get(cat, 0)
+    label = NH_LABELS.get(cat, "NO WIN")
+    payout = int(round(bet * mult))
+    return {"cards": [card_str(c) for c in cards], "hand": label, "multiplier": mult, "rank": cat}, payout
 
 
 # ---------------- Aviator helpers ----------------
