@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 
 export default function BingoGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, placing, revealProgress } =
@@ -30,9 +31,33 @@ export default function BingoGame({ game }) {
   const ballLetter = (n) => "BINGO"[Math.min(4, Math.floor((n - 1) / 15))];
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "DRAWING 30 BALLS…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "DRAWING 30 BALLS…" }}
+      betDock={
+        <div className="space-y-2">
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => placeBet(null, amount)}
+            betting={betting}
+            placing={placing}
+            disabled={myBets.length > 0}
+            label={myBets.length > 0 ? "Card bought for this round" : "Buy a card"}
+            myTotal={myTotal}
+            hint="Everyone shares the same 30 balls — your card is yours alone"
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={<HistoryStrip history={history} />}
+    >
       <div
         className="relative rounded-2xl border-2 p-4 overflow-hidden"
         style={{
@@ -91,23 +116,6 @@ export default function BingoGame({ game }) {
       </div>
 
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => placeBet(null, amount)}
-        betting={betting}
-        placing={placing}
-        disabled={myBets.length > 0}
-        label={myBets.length > 0 ? "Card bought for this round" : "Buy a card"}
-        myTotal={myTotal}
-        hint="Everyone shares the same 30 balls — your card is yours alone"
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
