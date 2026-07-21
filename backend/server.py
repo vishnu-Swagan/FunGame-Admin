@@ -48,6 +48,8 @@ async def lifespan(app: FastAPI):
         await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
         logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
+    # Live "winners feed": recent settled wins per game (payout>0), newest first.
+    await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
     await db.roulette_rounds.create_index('round_number', unique=True)
     await db.roulette_bets.create_index([('user_id', 1), ('round_number', 1), ('status', 1)])
     # Universal live rounds (all 18 games, 24/7)

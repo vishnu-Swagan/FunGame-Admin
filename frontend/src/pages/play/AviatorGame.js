@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { formatChips } from "@/components/common";
+import { publishWins } from "@/lib/liveActivity";
 
 const PLANE_SRC = "/game-art/aviator-plane.png";
 
@@ -433,6 +434,7 @@ export default function AviatorGame({ game }) {
       setBalance(data.balance);
       if (data.result === "cashed_out") {
         toast.success(`Cashed out at ${data.multiplier}x — +${formatChips(data.payout)} chips`);
+        publishWins("aviator", [{ id: `me-av-${betId}`, mine: true, payout: data.payout, bet: 0 }]);
       } else {
         toast.error(`Too late — crashed at ${data.crash_point}x`);
       }

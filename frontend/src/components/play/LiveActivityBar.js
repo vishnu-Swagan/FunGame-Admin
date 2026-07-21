@@ -3,10 +3,11 @@ import { Users } from "lucide-react";
 import { usePlayersOnline, useWinFeed } from "@/lib/liveActivity";
 
 /** A live "casino floor" strip shown on every game: playing-now count + a
-    rolling win ticker. Ambient by default; pass realEvents to merge live ones. */
-export const LiveActivityBar = ({ slug, realEvents }) => {
+    rolling win ticker. Real round-end wins (own + cross-player) are injected via
+    the win bus; ambient activity fills the gaps. */
+export const LiveActivityBar = ({ slug }) => {
   const online = usePlayersOnline(slug);
-  const feed = useWinFeed(slug, realEvents);
+  const feed = useWinFeed(slug);
   const latest = feed[0];
   return (
     <div

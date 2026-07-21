@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
+import { publishWins } from "@/lib/liveActivity";
 
 /**
  * Universal live-round client. Polls /live/{slug}/state so every player sees
@@ -40,6 +41,8 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     (data) => {
       setState(data);
       setBalance(data.balance);
+      // Feed the live floor with REAL cross-player winners (masked, from server).
+      if (data.winners && data.winners.length) publishWins(slug, data.winners);
       /* Anchor the phase deadline ONCE per (round, phase). Re-anchoring on every
          poll made the countdown jitter with network latency, which rewound the
          card-dealing timelines mid-animation (cards un-dealt / re-flipped =
@@ -73,6 +76,10 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
         const extra = formatRef.current ? formatRef.current(s) : {};
         const merged = { ...base, ...extra };
         setResult(merged);
+        // Announce the player's OWN real win on the live floor with real chips.
+        if (s.payout > 0) {
+          publishWins(slug, [{ id: `me-${slug}-${s.round_number}`, mine: true, payout: s.payout, bet: s.total_bet }]);
+        }
         if (merged.push) sfx.push();
         else if (merged.win) (s.payout >= s.total_bet * 5 ? sfx.bigWinCelebration : sfx.winCelebration)();
         else {
@@ -82,7 +89,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
         loadHistory();
       }
     },
-    [loadHistory]
+    [loadHistory, slug]
   );
 
   const poll = useCallback(async () => {

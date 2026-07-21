@@ -412,13 +412,37 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
             {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
         ).sort('round_number', -1).to_list(10)
 
-    my_bets, balance = await asyncio.gather(
+    my_bets, balance, win_rows = await asyncio.gather(
         db.live_bets.find(
             {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': {'$in': ['OPEN', 'SETTLED']}},
             {'_id': 0, 'user_id': 0},
         ).to_list(50),
         _fresh_balance(user['id']),
+        db.game_rounds.find(
+            {'slug': slug, 'payout': {'$gt': 0}},
+            {'_id': 0, 'id': 1, 'user_id': 1, 'payout': 1, 'bet': 1},
+        ).sort('settled_at', -1).to_list(16),
     )
+
+    # Real cross-player winners for the live floor (masked, excludes self).
+    winners = []
+    win_uids = list({w['user_id'] for w in win_rows if w['user_id'] != user['id']})
+    wnames = {}
+    if win_uids:
+        wus = await db.users.find(
+            {'id': {'$in': win_uids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}
+        ).to_list(40)
+        wnames = {u['id']: (u.get('display_name') or u.get('email', 'Player').split('@')[0]) for u in wus}
+    for w in win_rows:
+        if w['user_id'] == user['id']:
+            continue
+        winners.append({
+            'id': w['id'], 'name': _mask(wnames.get(w['user_id'], 'Player')),
+            'payout': w['payout'], 'bet': w.get('bet', 0),
+        })
+        if len(winners) >= 10:
+            break
+
     cfg = LIVE_GAMES[slug]
     return {
         'round_number': rn, 'phase': phase, 'phase_ends_in': ends_in,
@@ -427,6 +451,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         'outcome': outcome, 'my_bets': my_bets,
         'my_total': sum(b['amount'] for b in my_bets),
         'last_results': [{'round_number': p['round_number'], **(p.get('summary') or {})} for p in prev],
+        'winners': winners,
         'settled': settled, 'balance': balance, 'server_now': time.time(),
     }
 
