@@ -16,6 +16,8 @@ export const PlayShell = ({ game, balance, children }) => {
   }, []);
   return (
     <div className="space-y-4" data-testid="game-play-page">
+      <GameIntro game={game} />
+      <div className="relative rounded-2xl fg-glass px-3 pt-3 pb-2.5 overflow-hidden">
       <div className="flex items-center justify-between gap-3">
         <button
           data-testid="play-back-button"
@@ -41,7 +43,11 @@ export const PlayShell = ({ game, balance, children }) => {
           <span className="tabular-nums text-sm font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>
         </div>
       </div>
-      <LiveActivityBar slug={game.slug} />
+        <div className="mt-2.5">
+          <LiveActivityBar slug={game.slug} />
+        </div>
+        <div className="fg-accent-line mt-2.5" aria-hidden="true" />
+      </div>
       {children}
       <Disclaimer />
     </div>

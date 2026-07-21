@@ -92,6 +92,30 @@ body {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
 }
 
+/* ---- Trendy polish: glass surface + slow animated gradient accent ---- */
+.fg-glass {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+@keyframes fg-accent-slide {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+.fg-accent-line {
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg,
+        hsl(var(--emerald)) 0%, #ffd447 25%, #00e5ff 50%, #ffd447 75%, hsl(var(--emerald)) 100%);
+    background-size: 200% 100%;
+    animation: fg-accent-slide 6s linear infinite;
+    opacity: 0.85;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fg-accent-line { animation: none; }
+}
+
 /* Aurora hero backdrop (top strip only) */
 .fg-aurora {
     background:
