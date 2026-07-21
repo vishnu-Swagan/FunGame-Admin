@@ -29,13 +29,22 @@ const heroAnim = (fam, reduced) => {
   }
 };
 
+// Show the full opening once per game per browser session — after that, jump
+// straight into the live table so a realtime round is never re-gated.
+const seenKey = (slug) => `fg_intro_${slug}`;
+const alreadySeen = (slug) => {
+  try { return sessionStorage.getItem(seenKey(slug)) === "1"; } catch { return false; }
+};
+
 export const GameIntro = ({ game }) => {
   const reduced = useReducedMotion();
-  const [show, setShow] = useState(true);
+  const [show, setShow] = useState(() => !alreadySeen(game.slug));
   useEffect(() => {
+    if (alreadySeen(game.slug)) return;
+    try { sessionStorage.setItem(seenKey(game.slug), "1"); } catch { /* ignore */ }
     const t = setTimeout(() => setShow(false), reduced ? 500 : 1700);
     return () => clearTimeout(t);
-  }, [reduced]);
+  }, [reduced, game.slug]);
 
   const fam = FAMILY[game.slug] || "drop";
   const anim = heroAnim(fam, reduced);
@@ -45,7 +54,10 @@ export const GameIntro = ({ game }) => {
       {show && (
         <motion.div
           data-testid="game-intro"
-          className="fixed inset-0 z-[60] flex flex-col items-center justify-center px-6"
+          onClick={() => setShow(false)}
+          role="button"
+          aria-label="Skip intro"
+          className="fixed inset-0 z-[60] flex flex-col items-center justify-center px-6 cursor-pointer"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.45 } }}
           style={{ background: "radial-gradient(120% 90% at 50% 30%, #14213f 0%, #0a1226 55%, #05070f 100%)" }}
@@ -110,6 +122,16 @@ export const GameIntro = ({ game }) => {
                 style={{ background: "linear-gradient(90deg, hsl(var(--emerald)), #ffd447)" }}
               />
             </div>
+          )}
+          {!reduced && (
+            <motion.span
+              className="absolute bottom-8 text-[10px] tracking-wider text-white/30"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.9 }}
+            >
+              tap to skip
+            </motion.span>
           )}
         </motion.div>
       )}
