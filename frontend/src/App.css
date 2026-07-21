@@ -2,10 +2,8 @@
 .App {
     min-height: 100vh;      /* fallback */
     min-height: 100dvh;     /* dynamic viewport: no jump as mobile browser chrome shows/hides */
-    /* clip sideways overflow WITHOUT creating a scroll container (keeps vertical
-       page scroll working — unlike overflow:hidden on html/body). Falls back to
-       visible on very old WebViews, so it can never freeze scrolling. */
-    overflow-x: clip;
+    /* No overflow guard on the scroll root — it freezes vertical scroll in
+       Android WebView. Any wide element is clipped locally on its own wrapper. */
 }
 
 /* ---------- Real 3D dice ---------- */
