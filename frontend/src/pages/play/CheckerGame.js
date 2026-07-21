@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Crown } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
-import { PlayShell, HistoryStrip } from "@/components/play/PlayShell";
-import { LiveBar, LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
+import { HistoryStrip } from "@/components/play/PlayShell";
+import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
+import { GameStage } from "@/components/play/GameStage";
 
 export default function CheckerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
@@ -27,13 +28,58 @@ export default function CheckerGame({ game }) {
   });
 
   return (
-    <PlayShell game={game} balance={balance}>
-      <LiveBar state={state} countdown={countdown} labels={{ REVEAL: "CAPTURING…" }} />
-
+    <GameStage
+      game={game}
+      balance={balance}
+      live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
+      labels={{ REVEAL: "CAPTURING…" }}
+      betDock={
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { id: "gold", label: "Gold", cls: "text-primary" },
+              { id: "steel", label: "Steel", cls: "text-white/85" },
+            ].map((s) => (
+              <button
+                key={s.id}
+                data-testid={`checker-side-${s.id}`}
+                onClick={() => setSide(s.id)}
+                disabled={!betting}
+                className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"} ${!betting ? "opacity-70" : ""}`}
+              >
+                <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
+                <p className="text-[10px] text-white/45">pays 1.9x</p>
+                {sideTotals[s.id] > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
+                    {sideTotals[s.id]}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <LiveBetPanel
+            amount={amount}
+            setAmount={setAmount}
+            onPlace={() => side && placeBet(side, amount)}
+            betting={betting}
+            placing={placing}
+            disabled={!side}
+            label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
+            myTotal={myTotal}
+          />
+          {betting && myBets.length > 0 && (
+            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+              Clear my bets (refund)
+            </button>
+          )}
+        </div>
+      }
+      extras={<HistoryStrip history={history} />}
+    >
       {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
       <div style={{ perspective: "1200px" }}>
       <div
-        className="relative rounded-2xl border-2 p-5 overflow-hidden"
+        className="relative mx-auto rounded-2xl border-2 p-5 overflow-hidden"
         style={{
           borderColor: "#c9a22788",
           background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
@@ -51,7 +97,7 @@ export default function CheckerGame({ game }) {
           const showWinner = phase === "RESULT" && !!outcome;
           const winner = outcome?.winner;
           const Medallion = ({ gold, count, win }) => (
-            <div className={`flex flex-col items-center gap-1.5 rounded-2xl px-3 py-2 transition-[background-color,box-shadow] duration-300 ${win ? (gold ? "bg-primary/10 shadow-[0_0_24px_rgba(255,199,64,0.4)]" : "bg-white/10 shadow-[0_0_24px_rgba(255,255,255,0.25)]") : ""}`} data-testid={`checker-${gold ? "gold" : "steel"}`}>
+            <div className={`flex flex-col items-center justify-self-center gap-1.5 rounded-2xl px-3 py-2 transition-[background-color,box-shadow] duration-300 ${win ? (gold ? "bg-primary/10 shadow-[0_0_24px_rgba(255,199,64,0.4)]" : "bg-white/10 shadow-[0_0_24px_rgba(255,255,255,0.25)]") : ""}`} data-testid={`checker-${gold ? "gold" : "steel"}`}>
               <div
                 className="relative h-16 w-16 rounded-full flex items-center justify-center"
                 style={{
@@ -68,9 +114,9 @@ export default function CheckerGame({ game }) {
             </div>
           );
           return (
-            <div className="relative flex items-center justify-between gap-1">
+            <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-1">
               <Medallion gold count={goldCount} win={showWinner && winner === "gold"} />
-              <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center gap-2">
                 <p className="text-[9px] font-bold tracking-[0.3em] text-white/45">BEST OF 7</p>
                 <div className="flex gap-1.5" data-testid="checker-track">
                   {Array.from({ length: 7 }, (_, i) => {
@@ -104,46 +150,7 @@ export default function CheckerGame({ game }) {
       </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {[
-          { id: "gold", label: "Gold", cls: "text-primary" },
-          { id: "steel", label: "Steel", cls: "text-white/85" },
-        ].map((s) => (
-          <button
-            key={s.id}
-            data-testid={`checker-side-${s.id}`}
-            onClick={() => setSide(s.id)}
-            disabled={!betting}
-            className={`relative rounded-xl border p-3.5 min-h-[56px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"} ${!betting ? "opacity-70" : ""}`}
-          >
-            <p className={`font-display text-lg ${s.cls}`}>{s.label}</p>
-            <p className="text-[10px] text-white/45">pays 1.9x</p>
-            {sideTotals[s.id] > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 h-5 min-w-5 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-extrabold flex items-center justify-center border border-yellow-200 shadow tabular-nums">
-                {sideTotals[s.id]}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
       <ResultBanner result={result} />
-      <LiveBetPanel
-        amount={amount}
-        setAmount={setAmount}
-        onPlace={() => side && placeBet(side, amount)}
-        betting={betting}
-        placing={placing}
-        disabled={!side}
-        label={side ? `Bet ${side.toUpperCase()}` : "Pick a side first"}
-        myTotal={myTotal}
-      />
-      {betting && myBets.length > 0 && (
-        <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
-          Clear my bets (refund)
-        </button>
-      )}
-      <HistoryStrip history={history} />
-    </PlayShell>
+    </GameStage>
   );
 }
