@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageTransition } from "@/components/common";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GameIntro } from "@/components/play/GameIntro";
 
 import DiceGame from "@/pages/play/DiceGame";
 import TargetGame from "@/pages/play/TargetGame";
@@ -90,7 +91,11 @@ export default function GamePlay() {
 
   return (
     <PageTransition>
+      {/* The live table mounts and starts polling immediately; the cinematic
+          intro plays on top for ~4s, so it dissolves straight onto the round
+          that is already in progress. */}
       <Component game={game} />
+      <GameIntro game={game} />
     </PageTransition>
   );
 }

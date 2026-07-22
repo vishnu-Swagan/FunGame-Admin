@@ -4,7 +4,6 @@ import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
-import { GameIntro } from "@/components/play/GameIntro";
 
 export const PlayShell = ({ game, balance, children }) => {
   const navigate = useNavigate();
@@ -16,7 +15,6 @@ export const PlayShell = ({ game, balance, children }) => {
   }, []);
   return (
     <div className="space-y-4" data-testid="game-play-page">
-      <GameIntro game={game} />
       <div className="relative rounded-2xl fg-glass px-3 pt-3 pb-2.5 overflow-hidden">
       <div className="flex items-center justify-between gap-3">
         <button
