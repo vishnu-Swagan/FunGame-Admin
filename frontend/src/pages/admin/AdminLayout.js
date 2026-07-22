@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { toast } from "sonner";
@@ -24,9 +24,23 @@ export default function AdminLayout() {
       {/* Topbar */}
       <header data-testid="admin-topbar" className="sticky top-0 z-40 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl border-b border-border/60">
         <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="font-display text-lg text-primary">FunGame</span>
-            <span className="text-[10px] font-bold tracking-[0.2em] text-white/45 border border-white/15 rounded-full px-2 py-0.5">OPERATOR</span>
+          <div className="flex items-center gap-2.5" data-testid="admin-logo">
+            <div
+              className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{
+                background: "radial-gradient(circle at 40% 30%, #14324a, #0b1a29)",
+                border: "1px solid rgba(56,189,248,0.45)",
+                boxShadow: "0 0 16px rgba(56,189,248,0.28)",
+              }}
+            >
+              <ShieldCheck className="h-5 w-5 text-sky-400" />
+            </div>
+            <div className="leading-none">
+              <p className="font-tech text-sm tracking-[0.12em] text-white">
+                FUN<span className="text-sky-400">GAME</span> <span className="text-sky-400 font-semibold">ADMIN</span>
+              </p>
+              <p className="font-mono text-[9px] tracking-[0.28em] text-sky-300/60 uppercase mt-1">Operator Console</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Disclaimer className="hidden md:block" />
