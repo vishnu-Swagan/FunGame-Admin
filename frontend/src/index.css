@@ -252,6 +252,12 @@ summary:focus-visible {
 .fg-home-sheen-el { animation: fg-home-sheen 5.2s ease-in-out infinite; }
 .fg-home-frame { animation: fg-home-frame 3.1s ease-in-out infinite; }
 
+/* ---------------- Checker capture duel ---------------- */
+@keyframes fg-checker-jump { 0% { transform: translateY(0) scale(1); } 40% { transform: translateY(-10px) scale(1.18); } 100% { transform: translateY(0) scale(1); } }
+@keyframes fg-checker-burst { 0% { opacity: .85; transform: scale(0.4); } 100% { opacity: 0; transform: scale(1.7); } }
+.fg-checker-jump  { animation: fg-checker-jump .38s ease-out 1; }
+.fg-checker-burst { animation: fg-checker-burst .5s ease-out 1 forwards; }
+
 /* ---------------- Slot / casino cinematics ---------------- */
 @keyframes fg-coin-fall {
   0%   { transform: translateY(-20px) rotateY(0deg) scale(1); opacity: 0; }

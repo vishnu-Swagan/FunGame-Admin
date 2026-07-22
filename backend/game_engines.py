@@ -638,30 +638,32 @@ def play_card_duel(bet, payload, game="teen-patti"):
     }, payout
 
 
+CHECKER_PIECES = 6  # each army fields 6 pieces; clear all 6 opponents to win
+
+
 def play_checker(bet, payload):
     side = payload.get("side")
     if side not in ("gold", "steel"):
         bad("Pick a side: gold or steel")
-    # Simulated capture duel - server decides winner, 1.9x payout
+    # A capture race on the board: each move one side jumps an opposing piece.
+    # The first side to capture all CHECKER_PIECES enemy pieces clears the board
+    # and wins. Symmetric secure RNG => a genuinely fair ~50/50 duel (with real
+    # lead changes) that can never tie. The house edge is purely the payout
+    # multiplier (settled via SIDE_OPTIONS at 1.4x for the live round).
     rounds = []
     gold_caps, steel_caps = 0, 0
-    for _ in range(6):
-        winner = RNG.choice(["gold", "steel"])
-        if winner == "gold":
-            gold_caps += 1
-        else:
-            steel_caps += 1
-        rounds.append(winner)
-    if gold_caps == steel_caps:
-        rounds.append(RNG.choice(["gold", "steel"]))
-        if rounds[-1] == "gold":
+    while gold_caps < CHECKER_PIECES and steel_caps < CHECKER_PIECES:
+        w = RNG.choice(["gold", "steel"])
+        rounds.append(w)
+        if w == "gold":
             gold_caps += 1
         else:
             steel_caps += 1
     winner = "gold" if gold_caps > steel_caps else "steel"
     won = winner == side
-    payout = int(bet * 1.9) if won else 0
-    return {"side": side, "rounds": rounds, "gold": gold_caps, "steel": steel_caps, "winner": winner, "won": won}, payout
+    payout = int(round(bet * 1.4)) if won else 0
+    return {"side": side, "rounds": rounds, "gold": gold_caps, "steel": steel_caps,
+            "winner": winner, "pieces": CHECKER_PIECES, "won": won}, payout
 
 
 # No Hold has its own Vegas-tuned paytable (independent of video poker's, so

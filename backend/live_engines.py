@@ -135,7 +135,7 @@ def generate_outcome(slug):
         return _gen_duel(slug)
     if slug == "checker":
         o, _ = play_checker(1, {"side": "gold"})
-        return {"rounds": o["rounds"], "gold": o["gold"], "steel": o["steel"], "winner": o["winner"]}
+        return {"rounds": o["rounds"], "gold": o["gold"], "steel": o["steel"], "winner": o["winner"], "pieces": o["pieces"]}
     if slug == "andar-bahar":
         o, _ = play_andar_bahar(1, {"side": "andar"})
         return {"joker": o["joker"], "sequence": o["sequence"], "winner": o["winner"]}

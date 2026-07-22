@@ -1,18 +1,63 @@
-import { useState } from "react";
-import { Crown } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Crown, X } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { HistoryStrip } from "@/components/play/PlayShell";
 import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 
+const DISC = {
+  gold: { face: "radial-gradient(circle at 35% 28%, #ffe9ad, #ffca3a 55%, #a9781a)", ring: "rgba(122,82,0,0.55)", border: "#b8860b", crown: "#7a5200", label: "#ffd447" },
+  steel: { face: "radial-gradient(circle at 35% 28%, #eef2f7, #9aa7b8 55%, #566173)", ring: "rgba(43,50,64,0.6)", border: "#47505f", crown: "#2b3240", label: "#cbd5e1" },
+};
+
+/** A single king checker piece; when captured it dims, shrinks and shows an X. */
+const Disc = ({ side, captured, flash }) => {
+  const c = DISC[side];
+  return (
+    <div className={`relative h-8 w-8 rounded-full transition-all duration-300 ${captured ? "opacity-30 scale-[0.72] grayscale" : flash ? "fg-checker-jump" : ""}`}
+      style={{ background: c.face, border: `2px solid ${c.border}`, boxShadow: captured ? "none" : "0 4px 10px rgba(0,0,0,0.5), inset 0 -2px 5px rgba(0,0,0,0.35), inset 0 2px 4px rgba(255,255,255,0.5)" }}
+    >
+      <span className="absolute inset-[3px] rounded-full pointer-events-none" style={{ border: `2px solid ${c.ring}` }} />
+      <span className="absolute inset-0 flex items-center justify-center">
+        <Crown className="h-3.5 w-3.5" style={{ color: c.crown }} />
+      </span>
+      {captured && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <X className="h-4 w-4 text-red-500" strokeWidth={3} />
+        </span>
+      )}
+      {flash && <span aria-hidden className="fg-checker-burst absolute -inset-1.5 rounded-full" style={{ background: "radial-gradient(circle, rgba(255,90,90,0.8), transparent 70%)" }} />}
+    </div>
+  );
+};
+
+/** One side's army row — pieces get captured left-to-right as the duel plays. */
+const Army = ({ side, removed, pieces, isWinner, flashLatest }) => {
+  const c = DISC[side];
+  return (
+    <div className={`rounded-xl px-3 py-2 transition-[background-color,box-shadow] duration-300 ${isWinner ? (side === "gold" ? "bg-primary/10 shadow-[0_0_26px_rgba(255,199,64,0.4)]" : "bg-white/10 shadow-[0_0_26px_rgba(255,255,255,0.22)]") : ""}`} data-testid={`checker-${side}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] font-extrabold tracking-widest" style={{ color: c.label }}>{side.toUpperCase()}{isWinner ? " ♚" : ""}</span>
+        <span className="text-[10px] text-white/45 tabular-nums">{pieces - removed} left</span>
+      </div>
+      <div className="flex gap-1.5 justify-center">
+        {Array.from({ length: pieces }, (_, i) => (
+          <Disc key={i} side={side} captured={i < removed} flash={flashLatest && i === removed - 1} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export default function CheckerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealProgress } =
     useLiveRound(game.slug, {
       revealSound: "draw",
       formatResult: (s) => ({
-        title: s.payout > 0 ? `${s.outcome.winner.toUpperCase()} takes the board!` : `${s.outcome.winner.toUpperCase()} wins the duel`,
+        title: `${s.outcome.winner.toUpperCase()} clears the board!`,
         subtitle: `Captures — Gold ${s.outcome.gold} : Steel ${s.outcome.steel}`,
+        big: s.payout > 0,
       }),
     });
   const [side, setSide] = useState(null);
@@ -21,6 +66,14 @@ export default function CheckerGame({ game }) {
   const rounds = outcome?.rounds || [];
   const shownCount = phase === "RESULT" ? rounds.length : Math.floor(revealProgress * rounds.length);
   const shown = rounds.slice(0, shownCount);
+
+  // capture haptic as each new jump lands during the reveal
+  const prevShown = useRef(0);
+  useEffect(() => {
+    if (phase === "BETTING") { prevShown.current = 0; return; }
+    if (shownCount > prevShown.current && navigator.vibrate) navigator.vibrate(14);
+    prevShown.current = shownCount;
+  }, [shownCount, phase]);
 
   const sideTotals = {};
   myBets.forEach((b) => {
@@ -76,74 +129,58 @@ export default function CheckerGame({ game }) {
       }
       extras={<HistoryStrip history={history} />}
     >
-      {/* ---- cinematic casino felt table (3D tilt + gold rail) ---- */}
+      {/* ---- Checkers capture duel: real board + two armies cleared piece-by-piece ---- */}
       <div style={{ perspective: "1200px" }}>
       <div
-        className="relative mx-auto rounded-2xl border-2 p-5 overflow-hidden"
+        className="relative mx-auto rounded-2xl border-2 p-4 overflow-hidden"
         style={{
           borderColor: "#c9a22788",
-          background: "radial-gradient(120% 95% at 50% 25%, #167d3e 0%, #0f5f2e 48%, #093c1e 100%)",
-          transform: "rotateX(5deg)",
+          background: "#0c3a1e",
+          transform: "rotateX(6deg)",
           transformStyle: "preserve-3d",
-          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)",
+          boxShadow: "0 20px 44px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.45)",
         }}
         data-testid="checker-table"
       >
-        <div aria-hidden="true" className="fg-noise absolute inset-0 rounded-2xl pointer-events-none" style={{ opacity: 0.06 }} />
+        {/* checkerboard surface */}
+        <div aria-hidden="true" className="absolute inset-0 rounded-2xl pointer-events-none" style={{
+          opacity: 0.55,
+          backgroundImage: "linear-gradient(45deg, #0a2c17 25%, transparent 25%, transparent 75%, #0a2c17 75%), linear-gradient(45deg, #0a2c17 25%, transparent 25%, transparent 75%, #0a2c17 75%)",
+          backgroundSize: "46px 46px",
+          backgroundPosition: "0 0, 23px 23px",
+        }} />
         <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
         {(() => {
-          const goldCount = shown.filter((w) => w === "gold").length;
-          const steelCount = shown.filter((w) => w === "steel").length;
+          // gold's captures remove STEEL pieces (and vice-versa)
+          const goldCaps = shown.filter((w) => w === "gold").length;
+          const steelCaps = shown.filter((w) => w === "steel").length;
+          const pieces = outcome?.pieces || 6;
           const showWinner = phase === "RESULT" && !!outcome;
           const winner = outcome?.winner;
-          const Medallion = ({ gold, count, win }) => (
-            <div className={`flex flex-col items-center justify-self-center gap-1.5 rounded-2xl px-3 py-2 transition-[background-color,box-shadow] duration-300 ${win ? (gold ? "bg-primary/10 shadow-[0_0_24px_rgba(255,199,64,0.4)]" : "bg-white/10 shadow-[0_0_24px_rgba(255,255,255,0.25)]") : ""}`} data-testid={`checker-${gold ? "gold" : "steel"}`}>
-              <div
-                className="relative h-16 w-16 rounded-full flex items-center justify-center"
-                style={{
-                  background: gold ? "radial-gradient(circle at 35% 30%, #ffe9ad, #ffca3a 55%, #a9781a)" : "radial-gradient(circle at 35% 30%, #eef2f7, #9aa7b8 55%, #566173)",
-                  boxShadow: "0 5px 14px rgba(0,0,0,0.5), inset 0 -3px 6px rgba(0,0,0,0.3), inset 0 3px 5px rgba(255,255,255,0.5)",
-                  border: gold ? "3px solid #b8860b" : "3px solid #47505f",
-                }}
-              >
-                <Crown className="h-6 w-6" style={{ color: gold ? "#7a5200" : "#2b3240" }} />
-                {win && <span className="absolute -top-2 -right-2 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--emerald))", color: "#000" }}>WIN</span>}
-              </div>
-              <p className="text-[11px] font-extrabold tracking-wider" style={{ color: gold ? "#ffd447" : "#cbd5e1" }}>{gold ? "GOLD" : "STEEL"}</p>
-              <p className="font-display text-2xl tabular-nums leading-none" style={{ color: gold ? "#ffd447" : "#e2e8f0" }}>{count}</p>
-            </div>
-          );
+          const latest = phase === "REVEAL" && shownCount > 0 ? shown[shownCount - 1] : null;
           return (
-            <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-1">
-              <Medallion gold count={goldCount} win={showWinner && winner === "gold"} />
-              <div className="flex flex-col items-center gap-2">
-                <p className="text-[9px] font-bold tracking-[0.3em] text-white/45">BEST OF 7</p>
-                <div className="flex gap-1.5" data-testid="checker-track">
-                  {Array.from({ length: 7 }, (_, i) => {
-                    const w = shown[i];
-                    const justFell = i === shownCount - 1 && phase === "REVEAL";
-                    return (
-                      <span
-                        key={i}
-                        className={`h-6 w-6 rounded-full border-2 transition-[background-color,box-shadow,transform] duration-200 ${justFell ? "scale-125" : ""}`}
-                        style={{
-                          borderColor: w ? (w === "gold" ? "#ffca3a" : "#9aa7b8") : "rgba(255,255,255,0.15)",
-                          background: w ? (w === "gold" ? "radial-gradient(circle at 35% 30%, #ffe9ad, #ffca3a)" : "radial-gradient(circle at 35% 30%, #eef2f7, #9aa7b8)") : "rgba(0,0,0,0.25)",
-                          boxShadow: w ? `0 0 9px ${w === "gold" ? "rgba(255,202,58,0.7)" : "rgba(154,167,184,0.55)"}` : "none",
-                        }}
-                      />
-                    );
-                  })}
+            <div className="relative space-y-2.5">
+              {/* STEEL army (pieces removed = gold's captures) */}
+              <Army side="steel" pieces={pieces} removed={goldCaps} isWinner={showWinner && winner === "steel"} flashLatest={latest === "gold"} />
+
+              {/* capture scoreboard */}
+              <div className="flex flex-col items-center gap-1 py-0.5">
+                <div className="flex items-center gap-3">
+                  <span className="font-display text-2xl tabular-nums leading-none" style={{ color: "#ffd447" }}>{goldCaps}</span>
+                  <span className="text-[9px] font-bold tracking-[0.3em] text-white/40">CAPTURES</span>
+                  <span className="font-display text-2xl tabular-nums leading-none" style={{ color: "#e2e8f0" }}>{steelCaps}</span>
                 </div>
-                <p className="text-[10px] text-white/50 tabular-nums min-h-[14px]">
-                  {showWinner ? `${winner.toUpperCase()} takes the board` : shownCount > 0 ? `Capture ${shownCount} of ${rounds.length || 7}` : "Duel begins…"}
+                <p className="text-[10px] text-white/55 min-h-[14px]">
+                  {showWinner ? `${winner.toUpperCase()} clears the board!` : latest ? `${latest.toUpperCase()} captures!` : "Duel begins…"}
                 </p>
               </div>
-              <Medallion count={steelCount} win={showWinner && winner === "steel"} />
+
+              {/* GOLD army (pieces removed = steel's captures) */}
+              <Army side="gold" pieces={pieces} removed={steelCaps} isWinner={showWinner && winner === "gold"} flashLatest={latest === "steel"} />
             </div>
           );
         })()}
-        <p className="text-[11px] text-white/45 text-center mt-3 relative">Winning side pays 1.4x · one universal duel every round</p>
+        <p className="text-[11px] text-white/45 text-center mt-3 relative">Winning side pays 1.4x · first to clear the board wins</p>
         <div className="flex justify-center mt-2 relative">
           <LastResults items={lastResults} render={(r) => <ResultPill label={r.winner === "gold" ? "G" : "S"} tone={r.winner === "gold" ? "gold" : "neutral"} />} />
         </div>
