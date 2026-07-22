@@ -50,18 +50,30 @@ const Sparks = () => (
   </div>
 );
 
+const seenKey = (slug) => `fg_intro_seen_${slug}`;
+const wasSeen = (slug) => {
+  try { return sessionStorage.getItem(seenKey(slug)) === "1"; } catch { return false; }
+};
+
 export const GameIntro = ({ game }) => {
   const reduced = useReducedMotion();
   const [show, setShow] = useState(true);
-  const DURATION = reduced ? 700 : 4000; // ~4s cinematic (within the 3–5s ask)
+  // Full ~4s cinematic on the first open of each game this session; a quick
+  // ~1.5s replay on later opens so re-entering a live table isn't slow.
+  const [quick, setQuick] = useState(() => wasSeen(game.slug));
+  const DURATION = reduced ? 700 : quick ? 1500 : 4000;
 
-  // Play the full opening every time a game is entered. The table is already
-  // live underneath, so skipping/finishing always lands on the current round.
+  // The table is already live underneath, so skipping/finishing always lands on
+  // the current round.
   useEffect(() => {
+    const seen = wasSeen(game.slug);
+    setQuick(seen);
+    try { sessionStorage.setItem(seenKey(game.slug), "1"); } catch { /* ignore */ }
     setShow(true);
-    const t = setTimeout(() => setShow(false), DURATION);
+    const dur = reduced ? 700 : seen ? 1500 : 4000;
+    const t = setTimeout(() => setShow(false), dur);
     return () => clearTimeout(t);
-  }, [game.slug, DURATION]);
+  }, [game.slug, reduced]);
 
   const fam = FAMILY[game.slug] || "drop";
   const anim = heroAnim(fam, reduced);
