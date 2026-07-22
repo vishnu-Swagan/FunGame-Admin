@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { BrandWordmark } from "@/components/Brand";
 
 /** Private operator sign-in — deliberately distinct from the player login
     (secure "control console" look, no casino branding). Admin-only. */
@@ -68,10 +69,13 @@ export default function AdminLogin() {
         transition={{ duration: 0.35 }}
         className="relative z-[2] w-full max-w-[400px]"
       >
-        {/* wordmark */}
-        <div className="flex items-center justify-center gap-2 mb-6">
-          <Terminal className="h-4 w-4 text-sky-400" />
-          <span className="font-mono text-[11px] tracking-[0.35em] text-sky-300/80">FUNGAME · OPS</span>
+        {/* brand wordmark + ops tag */}
+        <div className="flex items-center justify-center gap-2.5 mb-6">
+          <BrandWordmark logoClassName="h-7 w-7" textClassName="text-base" />
+          <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
+            <Terminal className="h-3 w-3 text-sky-400" />
+            <span className="font-mono text-[9px] tracking-[0.25em] text-sky-300 uppercase">Ops</span>
+          </span>
         </div>
 
         {/* console card */}

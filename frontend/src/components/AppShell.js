@@ -4,6 +4,8 @@ import { Home, Gamepad2, Search, Coins, User, Bell, WifiOff, Wrench } from "luci
 import { useAuth } from "@/context/AuthContext";
 import { api, APP_VERSION, compareVersions } from "@/lib/api";
 import { Disclaimer, formatChips } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
+import { BrandBoot } from "@/components/BrandBoot";
 
 const NAV = [
   { to: "/home", label: "Home", icon: Home, testId: "bottom-nav-home" },
@@ -86,12 +88,13 @@ export default function AppShell() {
 
   return (
     <div className="App fg-noise relative min-h-dvh bg-background">
+      <BrandBoot />
       <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(96px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
         {/* Header */}
         <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
-            <button data-testid="header-logo" onClick={() => navigate("/home")} className="font-display text-xl text-primary leading-none" aria-label="FunGame home">
-              FunGame
+            <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="FunGame home">
+              <BrandWordmark logoClassName="h-8 w-8" textClassName="text-xl" />
             </button>
             <div className="flex items-center gap-2">
               <button

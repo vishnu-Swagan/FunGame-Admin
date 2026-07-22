@@ -71,19 +71,21 @@ function CinematicHero({ games, navigate, userName }) {
           animate={reduced ? {} : { rotateX: tilt.x, rotateY: tilt.y }}
           transition={{ type: "spring", stiffness: 120, damping: 18 }}
         >
-          {/* recessed cinematic art with slow ken-burns */}
-          <div className="absolute inset-0" style={{ transform: "translateZ(-34px) scale(1.16)" }}>
+          {/* cinematic art — minimal upscale + clarity grade for the sharpest
+              possible render of the source art */}
+          <div className="absolute inset-0" style={{ transform: "translateZ(-30px) scale(1.05)" }}>
             <AnimatePresence mode="wait">
               <motion.img
                 key={g.slug}
                 src={`/game-art/${g.slug}.png`}
                 alt=""
                 draggable="false"
-                initial={{ opacity: 0, scale: reduced ? 1 : 1.12 }}
+                initial={{ opacity: 0, scale: reduced ? 1 : 1.06 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: reduced ? 0.2 : 0.9, ease: "easeOut" }}
+                transition={{ duration: reduced ? 0.2 : 1.0, ease: "easeOut" }}
                 className="absolute inset-0 h-full w-full object-cover"
+                style={{ filter: "contrast(1.07) saturate(1.12) brightness(1.02)" }}
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
             </AnimatePresence>
@@ -95,9 +97,8 @@ function CinematicHero({ games, navigate, userName }) {
           {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.13), transparent)" }} />}
           {!reduced && <HeroSparks />}
 
-          {/* top status bar — brand wordmark + live floor */}
-          <div className="fg-safe-top absolute inset-x-0 top-0 px-5 pt-3 flex items-center justify-between" style={{ transform: "translateZ(42px)" }}>
-            <span className="font-tech text-base tracking-[0.22em] text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">FUN<span className="text-primary">GAME</span></span>
+          {/* top status bar — live floor only (brand lives in the app header) */}
+          <div className="fg-safe-top absolute inset-x-0 top-0 px-5 pt-3 flex items-center justify-end" style={{ transform: "translateZ(42px)" }}>
             <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/35 px-2.5 py-1 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />
