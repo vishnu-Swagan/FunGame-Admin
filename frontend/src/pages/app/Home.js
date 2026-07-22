@@ -35,18 +35,20 @@ const HeroSparks = () => (
   </div>
 );
 
-/** Cinematic 3D marquee — parallax mouse/tilt, layered depth, drifting sparks,
-    a sweeping sheen and a pulsing neon frame. The lobby's showpiece. */
-function Spotlight({ games, navigate }) {
+/** Full-bleed cinematic hero — a AAA game-website intro. Rotating featured game
+    behind a heavy cinematic grade, parallax tilt, scanlines + sparks, a bold
+    game-engine title, dual CTAs and a thumbnail reel to jump between titles. */
+function CinematicHero({ games, navigate, userName }) {
   const reduced = useReducedMotion();
-  const [i, setI] = useState(0);
+  const [idx, setIdx] = useState(0);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const paused = useRef(false);
   useEffect(() => {
     if (reduced || games.length <= 1) return;
-    const id = setInterval(() => setI((v) => (v + 1) % games.length), 5200);
+    const id = setInterval(() => { if (!paused.current) setIdx((v) => (v + 1) % games.length); }, 5600);
     return () => clearInterval(id);
   }, [reduced, games.length]);
-  const g = games.length ? games[i % games.length] : null;
+  const g = games.length ? games[idx % games.length] : null;
   const online = usePlayersOnline(g ? g.slug : "lobby");
   if (!g) return null;
 
@@ -55,80 +57,118 @@ function Spotlight({ games, navigate }) {
     const r = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - r.left) / r.width - 0.5;
     const py = (e.clientY - r.top) / r.height - 0.5;
-    setTilt({ x: -py * 9, y: px * 12 });
+    setTilt({ x: -py * 5, y: px * 7 });
   };
   const reset = () => setTilt({ x: 0, y: 0 });
+  const pick = (i) => { paused.current = true; setIdx(i); };
 
   return (
-    <div style={{ perspective: 1100 }} onPointerMove={onMove} onPointerLeave={reset} onPointerCancel={reset} data-testid="home-spotlight">
-      <motion.div
-        className="fg-home-frame relative overflow-hidden rounded-3xl border border-primary/30 shadow-[0_22px_50px_rgba(0,0,0,0.55)]"
-        style={{ height: 244, transformStyle: "preserve-3d" }}
-        animate={reduced ? {} : { rotateX: tilt.x, rotateY: tilt.y }}
-        transition={{ type: "spring", stiffness: 140, damping: 17 }}
-      >
-        {/* recessed art layer (parallax depth) with slow ken-burns */}
-        <div className="absolute inset-0" style={{ transform: "translateZ(-40px) scale(1.16)" }}>
-          <AnimatePresence mode="wait">
-            <motion.img
-              key={g.slug}
-              src={`/game-art/${g.slug}.png`}
-              alt=""
-              draggable="false"
-              initial={{ opacity: 0, scale: reduced ? 1 : 1.1 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: reduced ? 0.2 : 0.8, ease: "easeOut" }}
-              className="absolute inset-0 h-full w-full object-cover"
-              onError={(e) => { e.currentTarget.style.display = "none"; }}
-            />
-          </AnimatePresence>
-        </div>
-        {/* scrim for text contrast */}
-        <div aria-hidden="true" className="absolute inset-0" style={{ background: "linear-gradient(90deg, rgba(6,10,20,0.95) 0%, rgba(6,10,20,0.68) 46%, rgba(6,10,20,0.15) 100%)" }} />
-        {/* top spotlight glow */}
-        <div aria-hidden="true" className="absolute inset-0" style={{ background: "radial-gradient(80% 60% at 18% -10%, rgba(255,199,64,0.22), transparent 60%)" }} />
-        {/* sweeping sheen */}
-        {!reduced && (
-          <div aria-hidden="true" className="absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none fg-home-sheen-el" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.16), transparent)" }} />
-        )}
-        {!reduced && <HeroSparks />}
+    <div className="-mx-4 -mt-4" data-testid="home-hero">
+      <div style={{ perspective: 1200 }} onPointerMove={onMove} onPointerLeave={reset} onPointerCancel={reset}>
+        <motion.div
+          className="relative overflow-hidden rounded-b-[30px] border-b-2 border-primary/30 shadow-[0_26px_60px_rgba(0,0,0,0.6)]"
+          style={{ height: "clamp(384px, 66vh, 540px)", transformStyle: "preserve-3d" }}
+          animate={reduced ? {} : { rotateX: tilt.x, rotateY: tilt.y }}
+          transition={{ type: "spring", stiffness: 120, damping: 18 }}
+        >
+          {/* recessed cinematic art with slow ken-burns */}
+          <div className="absolute inset-0" style={{ transform: "translateZ(-34px) scale(1.16)" }}>
+            <AnimatePresence mode="wait">
+              <motion.img
+                key={g.slug}
+                src={`/game-art/${g.slug}.png`}
+                alt=""
+                draggable="false"
+                initial={{ opacity: 0, scale: reduced ? 1 : 1.12 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: reduced ? 0.2 : 0.9, ease: "easeOut" }}
+                className="absolute inset-0 h-full w-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            </AnimatePresence>
+          </div>
+          {/* cinematic grade: vertical fade to the page + top spotlight */}
+          <div aria-hidden className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(6,10,20,0.55) 0%, rgba(6,10,20,0.15) 30%, rgba(6,10,20,0.8) 72%, #060a14 100%)" }} />
+          <div aria-hidden className="absolute inset-0" style={{ background: "radial-gradient(95% 62% at 22% 8%, rgba(255,199,64,0.18), transparent 55%)" }} />
+          <div aria-hidden className="fg-scanlines absolute inset-0 pointer-events-none opacity-50" />
+          {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.13), transparent)" }} />}
+          {!reduced && <HeroSparks />}
 
-        {/* foreground content lifted toward the viewer for real 3D pop */}
-        <div className="relative z-10 h-full flex flex-col justify-between p-5" style={{ transform: "translateZ(46px)" }}>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] tracking-[0.3em] font-extrabold text-primary drop-shadow-[0_1px_4px_rgba(0,0,0,0.7)]">★ SPOTLIGHT</span>
-            <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.12)] px-2 py-0.5 backdrop-blur-sm">
+          {/* top status bar — brand wordmark + live floor */}
+          <div className="fg-safe-top absolute inset-x-0 top-0 px-5 pt-3 flex items-center justify-between" style={{ transform: "translateZ(42px)" }}>
+            <span className="font-tech text-base tracking-[0.22em] text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">FUN<span className="text-primary">GAME</span></span>
+            <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/35 px-2.5 py-1 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[hsl(var(--emerald))]" />
               </span>
-              <Users className="h-3 w-3 text-white/55" />
-              <span className="tabular-nums text-[10px] font-bold text-[hsl(var(--emerald))]">{online.toLocaleString()}</span>
-              <span className="text-[9px] text-white/50">playing</span>
+              <span className="tabular-nums text-[11px] font-bold text-[hsl(var(--emerald))]">{online.toLocaleString()}</span>
+              <span className="font-gaming text-[9px] tracking-wider text-white/55 uppercase">online</span>
             </span>
           </div>
-          <div>
-            <h2 className="font-display text-[2rem] leading-tight bg-gradient-to-br from-white via-[#ffe9ad] to-primary bg-clip-text text-transparent drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]">{g.name}</h2>
-            {g.tagline && <p className="mt-1 text-sm text-white/75 max-w-[250px] line-clamp-2">{g.tagline}</p>}
-            <button
-              data-testid="home-spotlight-play"
-              onClick={() => navigate(`/games/${g.slug}`)}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm px-5 py-2.5 min-h-[44px] shadow-[0_6px_20px_rgba(255,199,64,0.4)] hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
-              <Play className="h-4 w-4 fill-current" /> Play now
-            </button>
-          </div>
-          {/* progress dots */}
-          {games.length > 1 && (
-            <div className="absolute top-5 right-5 flex gap-1.5">
-              {games.map((_, idx) => (
-                <span key={idx} className={`h-1.5 rounded-full transition-all duration-300 ${idx === i % games.length ? "w-4 bg-primary" : "w-1.5 bg-white/30"}`} />
-              ))}
+
+          {/* headline block, lifted toward the viewer */}
+          <div className="absolute inset-x-0 bottom-0 p-5 pb-4" style={{ transform: "translateZ(48px)" }}>
+            <p className="font-gaming text-[10px] tracking-[0.4em] text-primary uppercase mb-1.5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">◆ Featured on the floor</p>
+            <AnimatePresence mode="wait">
+              <motion.h1
+                key={g.slug}
+                initial={{ opacity: 0, y: reduced ? 0 : 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+                className="font-tech font-black uppercase text-white leading-[0.92] tracking-tight text-[2.3rem] max-w-[320px]"
+                style={{ textShadow: "0 3px 22px rgba(0,0,0,0.75), 0 0 30px rgba(255,199,64,0.18)" }}
+              >
+                {g.name}
+              </motion.h1>
+            </AnimatePresence>
+            {g.tagline && <p className="mt-2 text-sm text-white/75 max-w-[300px] line-clamp-2 leading-snug">{g.tagline}</p>}
+
+            <div className="mt-3.5 flex items-center gap-2.5">
+              <button
+                data-testid="home-spotlight-play"
+                onClick={() => navigate(`/games/${g.slug}`)}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground font-gaming font-bold text-sm tracking-wide uppercase px-6 py-3 min-h-[48px] shadow-[0_8px_24px_rgba(255,199,64,0.45)] hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <Play className="h-4 w-4 fill-current" /> Play now
+              </button>
+              <button
+                data-testid="home-hero-browse"
+                onClick={() => navigate("/games")}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/25 bg-white/5 backdrop-blur-sm text-white font-gaming font-semibold text-sm tracking-wide uppercase px-4 py-3 min-h-[48px] hover:bg-white/12 active:scale-[0.98] transition-[background-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                All games <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
-          )}
-        </div>
-      </motion.div>
+
+            {/* thumbnail reel — jump between featured titles */}
+            {games.length > 1 && (
+              <div className="fg-rail mt-4 flex gap-2 overflow-x-auto -mx-1 px-1 pb-0.5">
+                {games.map((gg, i) => (
+                  <button
+                    key={gg.slug}
+                    data-testid={`home-hero-thumb-${gg.slug}`}
+                    onClick={() => pick(i)}
+                    aria-label={`Show ${gg.name}`}
+                    className={`relative shrink-0 h-12 w-[70px] rounded-lg overflow-hidden border-2 transition-[border-color,transform] duration-150 active:scale-95 ${i === idx ? "border-primary shadow-[0_0_14px_rgba(255,199,64,0.5)]" : "border-white/15 opacity-70 hover:opacity-100"}`}
+                  >
+                    <img src={`/game-art/${gg.slug}.png`} alt="" draggable="false" className="h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    {i !== idx && <span aria-hidden className="absolute inset-0 bg-black/40" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+
+      {/* compact greeting beneath the splash */}
+      <div className="px-4 pt-4">
+        <p className="font-gaming text-[10px] tracking-[0.3em] text-white/40 uppercase">Welcome back, player</p>
+        <h2 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-[#ffe9ad] to-primary bg-clip-text text-transparent">{userName}</h2>
+      </div>
     </div>
   );
 }
@@ -144,14 +184,10 @@ export default function Home() {
 
   return (
     <PageTransition className="space-y-6">
-      {/* Greeting */}
-      <div>
-        <p className="text-xs tracking-[0.2em] text-white/45 font-semibold uppercase">Good to see you</p>
-        <h1 className="text-[1.7rem] font-bold tracking-tight bg-gradient-to-r from-white via-[#ffe9ad] to-primary bg-clip-text text-transparent">{user?.display_name || "Player"}</h1>
-      </div>
-
-      {/* Cinematic 3D spotlight */}
-      {!loading && featured.length > 0 && <Spotlight games={featured} navigate={navigate} />}
+      {/* Full-bleed cinematic game-website hero */}
+      {!loading && featured.length > 0 && (
+        <CinematicHero games={featured} navigate={navigate} userName={user?.display_name || "Player"} />
+      )}
 
       {/* Live floor ticker */}
       <LiveActivityBar slug="fungame-lobby" />
@@ -173,7 +209,7 @@ export default function Home() {
                 </button>
               }
             >
-              Featured
+              Trending now
             </SectionTitle>
             <div className="mt-3">
               <Rail>

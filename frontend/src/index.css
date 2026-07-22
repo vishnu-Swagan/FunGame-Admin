@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Gloock&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Gloock&family=Chakra+Petch:wght@500;600;700&family=Orbitron:wght@700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -116,6 +116,18 @@ summary:focus-visible {
 
 .font-display {
     font-family: 'Gloock', ui-serif, Georgia, serif;
+}
+
+/* Gaming / game-engine display faces (used by the Home cinematic hero) */
+.font-tech {
+    font-family: 'Orbitron', 'Chakra Petch', ui-sans-serif, system-ui, sans-serif;
+}
+.font-gaming {
+    font-family: 'Chakra Petch', ui-sans-serif, system-ui, sans-serif;
+}
+/* CRT-style scanline overlay for the cinematic hero */
+.fg-scanlines {
+    background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.24) 0px, rgba(0,0,0,0.24) 1px, transparent 1px, transparent 3px);
 }
 
 /* Subtle CSS-only grain overlay */
