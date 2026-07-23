@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { VenetianMask } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
@@ -26,6 +25,35 @@ const NEON = "#c084fc";
 const MAGENTA = "#e879f9";
 
 const Sym = ({ id, size = 44 }) => <SlotSymbol id={id} size={size * 0.92} />;
+
+/* Laughing Joker mascot (matches the game logo). Shakes + the mouth pulses when
+   `laughing` is true (on a result). */
+const JokerFace = ({ laughing, size = 54 }) => (
+  <svg viewBox="0 0 100 100" width={size} height={size} className={laughing ? "fg-joker-laugh" : ""} aria-hidden="true" style={{ filter: "drop-shadow(0 3px 6px rgba(0,0,0,0.5))" }}>
+    <defs>
+      <radialGradient id="jkFace" cx="42%" cy="36%" r="66%">
+        <stop offset="0%" stopColor="#fff8ee" /><stop offset="70%" stopColor="#ffe6c8" /><stop offset="100%" stopColor="#dcb283" />
+      </radialGradient>
+    </defs>
+    <path d="M20 46 C4 34 8 12 26 12 L36 44 Z" fill="#7b2fbe" stroke="#4a1873" strokeWidth="1.2" />
+    <path d="M80 46 C96 34 92 12 74 12 L64 44 Z" fill="#facc15" stroke="#9a6c05" strokeWidth="1.2" />
+    <circle cx="8" cy="30" r="5" fill="#facc15" stroke="#9a6c05" strokeWidth="1" />
+    <circle cx="92" cy="30" r="5" fill="#7b2fbe" stroke="#4a1873" strokeWidth="1" />
+    <path d="M42 18 C42 4 58 4 58 18 L60 42 L40 42 Z" fill="#e879f9" stroke="#a21caf" strokeWidth="1" />
+    <circle cx="50" cy="10" r="4.5" fill="#facc15" stroke="#9a6c05" strokeWidth="1" />
+    <path d="M22 44 Q50 34 78 44 L78 52 Q50 43 22 52 Z" fill="#facc15" stroke="#9a6c05" strokeWidth="1" />
+    <circle cx="50" cy="62" r="29" fill="url(#jkFace)" stroke="#c9a06a" strokeWidth="1" />
+    <path d="M35 58 Q41 52 47 58" fill="none" stroke="#2a1c10" strokeWidth="2.6" strokeLinecap="round" />
+    <path d="M53 58 Q59 52 65 58" fill="none" stroke="#2a1c10" strokeWidth="2.6" strokeLinecap="round" />
+    <circle cx="32" cy="68" r="5.5" fill="#ff8a8a" opacity="0.6" />
+    <circle cx="68" cy="68" r="5.5" fill="#ff8a8a" opacity="0.6" />
+    <g className={laughing ? "fg-joker-mouth" : ""} style={{ transformOrigin: "50px 74px" }}>
+      <path d="M34 70 Q50 92 66 70 Q50 78 34 70 Z" fill="#7a1020" />
+      <path d="M39 71 Q50 75 61 71 L60 73 Q50 77 40 73 Z" fill="#fff" />
+      <ellipse cx="50" cy="82" rx="7" ry="4.5" fill="#ff5964" />
+    </g>
+  </svg>
+);
 
 const CELL = 88;
 
@@ -155,12 +183,14 @@ export default function JokerBonusGame({ game }) {
         <div className="relative">
           {/* neon header */}
           <div className="pt-3 pb-2 text-center" style={{ borderBottom: `1px solid ${NEON}33` }}>
+            <div className="flex justify-center mb-1">
+              <JokerFace laughing={allStopped} size={56} />
+            </div>
             <p
-              className="fg-neon font-display text-2xl inline-flex items-center gap-2"
+              className="fg-neon font-display text-2xl"
               style={{ color: MAGENTA, textShadow: `0 0 14px ${MAGENTA}aa, 0 0 30px ${NEON}66` }}
               data-testid="joker-marquee"
             >
-              <VenetianMask className="h-6 w-6" style={{ color: "#facc15", filter: "drop-shadow(0 0 8px rgba(250,204,21,0.7))" }} />
               JOKER BONUS
             </p>
             <p className="text-[9px] font-extrabold tracking-[0.35em] mt-0.5" style={{ color: `${NEON}99` }}>
