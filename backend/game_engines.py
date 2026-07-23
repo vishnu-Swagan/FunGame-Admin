@@ -777,18 +777,18 @@ ENGINES = {
 # Bonuses" covers all three. Tuned to ~70% RTP for leaf + All Bonuses; the
 # individual bonus spots are high-variance lottery bets (see the sim in specs).
 IF_LAYOUT = [
-    'reds', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1',
-    'leaf2', 'blank', 'leaf1', 'blues', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2',
-    'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'oranges', 'leaf2', 'blank',
-    'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2',
-    'blues', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1',
-    'leaf2', 'blank', 'blank',
+    'reds', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'blues',
+    'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'oranges', 'leaf1',
+    'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'blues', 'leaf1', 'leaf2',
+    'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'oranges', 'leaf1', 'leaf2', 'blank',
+    'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'blues', 'leaf1', 'leaf2', 'blank', 'leaf1',
+    'leaf2', 'leaf1', 'leaf2',
 ]
 IF_SPOTS = ("leaf1", "leaf2", "blues", "oranges", "reds", "all-bonuses")
 IF_BONUS_TYPES = ("blues", "oranges", "reds")
 IF_LEAF_MULTS = [3] * 40 + [4] * 25 + [5] * 20 + [7] * 10 + [10] * 5
-IF_BOOST_P = 0.45
-IF_BOOSTS = [2] * 38 + [3] * 26 + [4] * 14 + [5] * 9 + [6] * 6 + [7] * 3 + [8] * 2 + [10] * 1
+IF_BOOST_P = 0.35
+IF_BOOSTS = [2] * 40 + [3] * 26 + [4] * 13 + [5] * 8 + [6] * 5 + [7] * 3 + [8] * 2 + [10] * 1
 
 
 def _if_wl(pairs):
@@ -799,9 +799,9 @@ def _if_wl(pairs):
 
 
 IF_FISH = {
-    "blues":   _if_wl([(3, 105), (4, 80), (5, 50), (6, 28), (8, 14), (10, 7), (15, 3), (25, 1), (50, 1), (100, 1)]),
-    "oranges": _if_wl([(4, 130), (5, 78), (6, 38), (8, 20), (10, 11), (15, 5), (25, 2), (50, 1), (100, 1), (200, 1)]),
-    "reds":    _if_wl([(10, 600), (12, 30), (15, 10), (20, 4), (40, 1), (120, 1), (500, 1)]),
+    "blues":   _if_wl([(3, 340), (4, 70), (5, 22), (6, 8), (8, 3), (10, 2), (20, 1), (50, 1), (100, 1)]),
+    "oranges": _if_wl([(4, 330), (5, 50), (6, 16), (8, 6), (10, 3), (20, 1), (60, 1), (200, 1)]),
+    "reds":    _if_wl([(10, 780), (12, 18), (15, 6), (20, 2), (60, 1), (500, 1)]),
 }
 IF_FISH_RANGE = {"blues": "3x–100x", "oranges": "4x–200x", "reds": "10x–500x"}
 
