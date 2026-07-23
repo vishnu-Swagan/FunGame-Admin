@@ -26,6 +26,7 @@ import AviatorGame from "@/pages/play/AviatorGame";
 import CheckerGame from "@/pages/play/CheckerGame";
 import IceFishingGame from "@/pages/play/IceFishingGame";
 import BlackjackGame from "@/pages/play/BlackjackGame";
+import ChickenRoadGame from "@/pages/play/ChickenRoadGame";
 
 const COMPONENTS = {
   "seven-up-down": DiceGame,
@@ -48,6 +49,7 @@ const COMPONENTS = {
   checker: CheckerGame,
   "ice-fishing": IceFishingGame,
   blackjack: BlackjackGame,
+  "chicken-road": ChickenRoadGame,
 };
 
 export default function GamePlay() {
