@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Plus, Minus, RotateCcw } from "lucide-react";
+import { Plus, Minus, RotateCcw, ChevronRight } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
 import { PlayShell } from "@/components/play/PlayShell";
@@ -15,30 +15,76 @@ const CHIPS = [
 ];
 const SUIT = { S: { ch: "♠", red: false }, H: { ch: "♥", red: true }, D: { ch: "♦", red: true }, C: { ch: "♣", red: false } };
 
-function Card({ code, i = 0, hint }) {
+/* ---- a single dealt card: flips in (scaleX) with a drop, like a real deal ---- */
+function Card({ code, i = 0, big }) {
   const back = code === "??";
   const rank = back ? "" : code.slice(0, -1);
   const suit = back ? null : SUIT[code.slice(-1)];
+  const w = big ? 46 : 42, h = big ? 64 : 58;
   return (
     <motion.div
-      initial={{ y: -30, opacity: 0, rotate: -6 }} animate={{ y: 0, opacity: 1, rotate: 0 }}
-      transition={{ type: "spring", stiffness: 320, damping: 22, delay: i * 0.05 }}
-      className="relative rounded-md flex flex-col justify-between shrink-0"
+      initial={{ scaleX: 0, y: -26, opacity: 0 }}
+      animate={{ scaleX: 1, y: 0, opacity: 1 }}
+      transition={{ type: "spring", stiffness: 300, damping: 24, delay: i * 0.09 }}
+      className="relative rounded-[5px] flex flex-col justify-between shrink-0"
       style={{
-        width: 40, height: 56, marginLeft: i === 0 ? 0 : -14,
-        background: back ? "repeating-linear-gradient(45deg,#7f1d1d,#7f1d1d 4px,#991b1b 4px,#991b1b 8px)" : "linear-gradient(180deg,#fff,#eef1f6)",
-        border: back ? "1.5px solid #ffd447" : "1px solid #c9ccd6",
-        boxShadow: "0 3px 8px rgba(0,0,0,0.45)", padding: 3,
+        width: w, height: h, marginLeft: i === 0 ? 0 : -Math.round(w * 0.42),
+        background: back
+          ? "repeating-linear-gradient(45deg,#7f1d1d,#7f1d1d 4px,#a01823 4px,#a01823 8px)"
+          : "linear-gradient(160deg,#ffffff 0%,#f2f4f9 70%,#e7eaf2 100%)",
+        border: back ? "1.5px solid #ffd447" : "1px solid #c6cad6",
+        boxShadow: "0 4px 10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.7)",
+        padding: 3, transformOrigin: "left center",
       }}
     >
-      {!back && (
+      {!back ? (
         <>
-          <span className="font-bold leading-none" style={{ fontSize: 12, color: suit.red ? "#d61f2b" : "#14151c" }}>{rank}</span>
-          <span className="self-center leading-none" style={{ fontSize: 18, color: suit.red ? "#d61f2b" : "#14151c" }}>{suit.ch}</span>
-          <span className="self-end font-bold leading-none rotate-180" style={{ fontSize: 12, color: suit.red ? "#d61f2b" : "#14151c" }}>{rank}</span>
+          <span className="font-black leading-none" style={{ fontSize: big ? 14 : 12, color: suit.red ? "#d4152a" : "#12131a" }}>{rank}</span>
+          <span className="self-center leading-none" style={{ fontSize: big ? 22 : 19, color: suit.red ? "#d4152a" : "#12131a" }}>{suit.ch}</span>
+          <span className="self-end font-black leading-none rotate-180" style={{ fontSize: big ? 14 : 12, color: suit.red ? "#d4152a" : "#12131a" }}>{rank}</span>
         </>
+      ) : (
+        <span className="absolute inset-0 grid place-items-center text-primary/80" style={{ fontSize: 18 }}>♦</span>
       )}
-      {back && hint && <span className="absolute inset-0 grid place-items-center text-primary text-lg">★</span>}
+    </motion.div>
+  );
+}
+
+/* ---- real shuffle: two halves riffle together, then a cut ---- */
+function ShuffleOverlay() {
+  return (
+    <motion.div
+      className="absolute inset-0 z-30 flex flex-col items-center justify-center"
+      style={{ background: "rgba(4,22,13,0.74)", backdropFilter: "blur(2px)" }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    >
+      <div className="relative" style={{ width: 130, height: 74 }}>
+        {Array.from({ length: 14 }).map((_, k) => {
+          const rightHalf = k % 2 === 0;
+          return (
+            <motion.div
+              key={k}
+              className="absolute rounded-[3px]"
+              style={{
+                width: 36, height: 52, left: 65 - 18, top: 11,
+                background: "linear-gradient(180deg,#c01523,#7f1d1d)",
+                border: "1px solid #ffd447",
+                boxShadow: "0 2px 7px rgba(0,0,0,0.55)",
+                zIndex: k,
+              }}
+              initial={{ x: rightHalf ? 40 : -40, rotate: rightHalf ? 14 : -14 }}
+              animate={{
+                x: [rightHalf ? 40 : -40, 0, rightHalf ? 5 : -5, 0],
+                rotate: [rightHalf ? 14 : -14, 0, 0, 0],
+                y: [0, 0, -2, 0],
+              }}
+              transition={{ duration: 1.05, delay: k * 0.045, repeat: Infinity, repeatDelay: 0.25, ease: "easeInOut" }}
+            />
+          );
+        })}
+      </div>
+      <p className="mt-5 text-xs font-black tracking-[0.34em] text-primary">SHUFFLING</p>
+      <p className="text-[9px] text-white/55 mt-1 tracking-wide">6-deck shoe · freshly shuffled</p>
     </motion.div>
   );
 }
@@ -64,11 +110,13 @@ const Spot = ({ label, sub, total, onAdd, disabled, small }) => (
 export default function BlackjackGame({ game }) {
   const [state, setState] = useState(null);
   const [bets, setBets] = useState([{ bet: 0, pp: 0, t3: 0 }]);
+  const [lastBets, setLastBets] = useState(null);
   const [chip, setChip] = useState(100);
   const [busy, setBusy] = useState(false);
+  const [shuffling, setShuffling] = useState(false);
 
   const refresh = useCallback(async () => {
-    try { const { data } = await api.get("/blackjack/state"); setState(data); if (data.status !== "idle" && data.status !== "done") setBets([{ bet: 0, pp: 0, t3: 0 }]); } catch { /* */ }
+    try { const { data } = await api.get("/blackjack/state"); setState(data); } catch { /* */ }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -76,7 +124,7 @@ export default function BlackjackGame({ game }) {
   const playing = status === "player_turn";
   const insurance = status === "insurance";
   const done = status === "done";
-  const betting = !state || status === "idle" || done;
+  const betting = !state || status === "idle";   // done is its OWN phase now
   const balance = state?.balance;
 
   const addTo = (idx, key) => setBets((b) => b.map((h, i) => (i === idx ? { ...h, [key]: h[key] + chip } : h)));
@@ -88,9 +136,20 @@ export default function BlackjackGame({ game }) {
   const deal = async () => {
     const hands = bets.filter((h) => h.bet > 0).map((h) => ({ bet: h.bet, pp: h.pp, t3: h.t3 }));
     if (!hands.length) { toast.info("Place a bet on at least one hand"); return; }
-    setBusy(true); sfx.chip && sfx.chip();
-    try { const { data } = await api.post("/blackjack/deal", { hands }); setState(data); sfx.flick && sfx.flick(); }
-    catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+    setBusy(true);
+    setLastBets(bets.map((h) => ({ ...h })));   // remember for quick rebet
+    setShuffling(true);
+    (sfx.shuffle ? sfx.shuffle() : sfx.chip && sfx.chip());
+    const minShow = new Promise((r) => setTimeout(r, 1550));   // let the shuffle read
+    try {
+      const [{ data }] = await Promise.all([api.post("/blackjack/deal", { hands }), minShow]);
+      setShuffling(false);
+      setState(data);
+      sfx.flick && sfx.flick();
+    } catch (e) {
+      setShuffling(false);
+      toast.error(errMsg(e));
+    } finally { setBusy(false); }
   };
   const act = async (action) => {
     setBusy(true); sfx.flick && sfx.flick();
@@ -102,9 +161,13 @@ export default function BlackjackGame({ game }) {
     try { const { data } = await api.post("/blackjack/insurance", { take }); setState(data); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  const newHand = () => { setState({ status: "idle", balance: state?.balance }); setBets([{ bet: 0, pp: 0, t3: 0 }]); };
+  // THE fix: after a round, return to a clean betting table with the last
+  // bets pre-filled so the next hand is one tap away (or adjust freely).
+  const nextHand = () => {
+    setState({ status: "idle", balance: state?.balance });
+    setBets(lastBets && lastBets.some((h) => h.bet > 0) ? lastBets.map((h) => ({ ...h })) : [{ bet: 0, pp: 0, t3: 0 }]);
+  };
 
-  // win celebration on settle
   useEffect(() => {
     if (done && state?.net > 0) { sfx.winCelebration ? sfx.winCelebration() : sfx.slotBell && sfx.slotBell(); }
     else if (done && state?.net < 0) { sfx.lose && sfx.lose(); }
@@ -112,69 +175,93 @@ export default function BlackjackGame({ game }) {
 
   const activeIdx = state?.active;
   const activeHand = playing ? state.hands[activeIdx] : null;
+  const showTable = status && status !== "idle";
 
   const OUTCOME_TONE = { BLACKJACK: "#ffd447", WIN: "#4ade80", PUSH: "#a9bce0", LOSE: "#fb7185", BUST: "#fb7185" };
 
   return (
     <PlayShell game={game} balance={balance}>
-      {/* ---- felt table ---- */}
-      <div className="relative rounded-2xl border-2 overflow-hidden p-3"
-        style={{ borderColor: "#c9a22766", background: "radial-gradient(130% 110% at 50% 0%, #1d8a4f 0%, #14713e 48%, #0a4a28 100%)", boxShadow: "0 16px 40px rgba(0,0,0,0.5), inset 0 0 70px rgba(0,0,0,0.4)" }}
-        data-testid="blackjack-table">
-        <div aria-hidden className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.35)" }} />
-        {done && state?.net > 0 && <CoinShower />}
+      {/* ---- 3D felt table ---- */}
+      <div style={{ perspective: "1100px" }}>
+        <div
+          className="relative rounded-2xl border-2 overflow-hidden p-3"
+          style={{
+            borderColor: "#c9a22766",
+            background: "radial-gradient(130% 115% at 50% 2%, #1f9455 0%, #157340 46%, #093f23 100%)",
+            boxShadow: "0 20px 44px rgba(0,0,0,0.55), inset 0 0 80px rgba(0,0,0,0.45)",
+            transform: "rotateX(6deg)", transformStyle: "preserve-3d",
+          }}
+          data-testid="blackjack-table"
+        >
+          <div aria-hidden className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.4)" }} />
+          <div aria-hidden className="absolute inset-0 fg-noise pointer-events-none" style={{ opacity: 0.05 }} />
 
-        {/* rules arc */}
-        <p className="text-center text-[9px] font-extrabold tracking-[0.2em] text-white/70 mb-1">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON ALL 17</p>
-
-        {/* dealer */}
-        <div className="flex flex-col items-center gap-1 min-h-[70px]">
-          <span className="text-[9px] font-bold tracking-widest text-white/55">DEALER {state?.dealer && status !== "idle" ? `· ${state.dealer.value}${!done ? "+" : ""}` : ""}</span>
-          <div className="flex">
-            {(state?.dealer?.cards || []).map((c, i) => <Card key={i} code={c} i={i} />)}
-          </div>
-        </div>
-
-        {/* player hands */}
-        {status && status !== "idle" ? (
-          <div className="mt-3 flex justify-center gap-2 flex-wrap">
-            {state.hands.map((h, i) => (
-              <div key={i} className={`flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 ${playing && i === activeIdx ? "bg-primary/10 ring-1 ring-primary/60" : ""}`}>
-                <div className="flex">{h.cards.map((c, j) => <Card key={j} code={c} i={j} />)}</div>
-                <span className="text-[11px] font-bold text-white tabular-nums">{h.value}{h.soft ? " ·soft" : ""}{h.bust ? " BUST" : ""}</span>
-                <div className="flex items-center gap-1">
-                  <span className="text-[9px] text-white/55 tabular-nums">{formatChips(h.bet)}</span>
-                  {h.outcome && <span className="text-[9px] font-extrabold" style={{ color: OUTCOME_TONE[h.outcome] || "#fff" }}>{h.outcome}{h.payout > 0 ? ` +${formatChips(h.payout)}` : ""}</span>}
-                </div>
-                {(h.pp_mult > 0 || h.t3_mult > 0) && (
-                  <span className="text-[8px] font-bold text-[#ffd447]">{h.pp_label ? `PP ${h.pp_mult}:1` : ""}{h.t3_label ? ` ${h.t3_label} ${h.t3_mult}:1` : ""}</span>
-                )}
-              </div>
+          {/* the shoe, top-right */}
+          <div aria-hidden className="absolute top-2.5 right-2.5 flex" style={{ transform: "rotate(-4deg)" }}>
+            {[0, 1, 2].map((k) => (
+              <span key={k} className="rounded-[3px] block" style={{
+                width: 22, height: 30, marginLeft: k ? -17 : 0,
+                background: "linear-gradient(180deg,#c01523,#7f1d1d)", border: "1px solid #ffd44788",
+                boxShadow: "0 2px 5px rgba(0,0,0,0.5)",
+              }} />
             ))}
           </div>
-        ) : (
-          /* betting spots */
-          <div className="mt-3">
-            <div className="flex justify-center gap-2 flex-wrap">
-              {bets.map((h, i) => (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <Spot label={`HAND ${i + 1}`} total={h.bet} onAdd={() => addTo(i, "bet")} />
-                  {i === 0 && (
-                    <div className="flex gap-1 mt-0.5">
-                      <Spot label="PP" sub="pairs" total={h.pp} onAdd={() => addTo(0, "pp")} small />
-                      <Spot label="21+3" total={h.t3} onAdd={() => addTo(0, "t3")} small />
-                    </div>
+
+          <AnimatePresence>{shuffling && <ShuffleOverlay />}</AnimatePresence>
+          {done && state?.net > 0 && <CoinShower />}
+
+          <p className="text-center text-[9px] font-extrabold tracking-[0.22em] text-white/70 mb-1">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON ALL 17</p>
+
+          {/* dealer */}
+          <div className="flex flex-col items-center gap-1 min-h-[76px]">
+            <span className="text-[9px] font-bold tracking-widest text-white/55">
+              DEALER {state?.dealer && showTable ? `· ${state.dealer.value}${!done ? "+" : ""}` : ""}
+            </span>
+            <div className="flex">
+              {(state?.dealer?.cards || []).map((c, i) => <Card key={`${i}-${c}`} code={c} i={i} big />)}
+            </div>
+          </div>
+
+          {/* player hands / betting spots */}
+          {showTable ? (
+            <div className="mt-3 flex justify-center gap-2 flex-wrap">
+              {state.hands.map((h, i) => (
+                <div key={i} className={`flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition-colors ${playing && i === activeIdx ? "bg-primary/12 ring-1 ring-primary/60" : ""}`}>
+                  <div className="flex">{h.cards.map((c, j) => <Card key={`${j}-${c}`} code={c} i={j} big />)}</div>
+                  <span className="text-[11px] font-bold text-white tabular-nums">{h.value}{h.soft ? " ·soft" : ""}{h.bust ? " BUST" : ""}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-white/55 tabular-nums">{formatChips(h.bet)}</span>
+                    {h.outcome && <span className="text-[9px] font-extrabold" style={{ color: OUTCOME_TONE[h.outcome] || "#fff" }}>{h.outcome}{h.payout > 0 ? ` +${formatChips(h.payout)}` : ""}</span>}
+                  </div>
+                  {(h.pp_mult > 0 || h.t3_mult > 0) && (
+                    <span className="text-[8px] font-bold text-[#ffd447]">{h.pp_label ? `PP ${h.pp_mult}:1` : ""}{h.t3_label ? ` ${h.t3_label} ${h.t3_mult}:1` : ""}</span>
                   )}
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <button onClick={removeHand} disabled={bets.length <= 1} className="h-7 w-7 rounded-full border border-white/20 bg-white/5 grid place-items-center disabled:opacity-40"><Minus className="h-3.5 w-3.5 text-white/80" /></button>
-              <span className="text-[10px] text-white/60 tabular-nums">{bets.length} hand{bets.length > 1 ? "s" : ""}</span>
-              <button onClick={addHand} disabled={bets.length >= 5} className="h-7 w-7 rounded-full border border-white/20 bg-white/5 grid place-items-center disabled:opacity-40"><Plus className="h-3.5 w-3.5 text-white/80" /></button>
+          ) : (
+            <div className="mt-3">
+              <div className="flex justify-center gap-2 flex-wrap">
+                {bets.map((h, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <Spot label={`HAND ${i + 1}`} total={h.bet} onAdd={() => addTo(i, "bet")} />
+                    {i === 0 && (
+                      <div className="flex gap-1 mt-0.5">
+                        <Spot label="PP" sub="pairs" total={h.pp} onAdd={() => addTo(0, "pp")} small />
+                        <Spot label="21+3" total={h.t3} onAdd={() => addTo(0, "t3")} small />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <button onClick={removeHand} disabled={bets.length <= 1} className="h-7 w-7 rounded-full border border-white/20 bg-white/5 grid place-items-center disabled:opacity-40"><Minus className="h-3.5 w-3.5 text-white/80" /></button>
+                <span className="text-[10px] text-white/60 tabular-nums">{bets.length} hand{bets.length > 1 ? "s" : ""}</span>
+                <button onClick={addHand} disabled={bets.length >= 5} className="h-7 w-7 rounded-full border border-white/20 bg-white/5 grid place-items-center disabled:opacity-40"><Plus className="h-3.5 w-3.5 text-white/80" /></button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ---- controls ---- */}
@@ -213,7 +300,7 @@ export default function BlackjackGame({ game }) {
           </div>
           <button onClick={deal} disabled={busy || totalStake === 0} data-testid="blackjack-deal"
             className="w-full rounded-xl bg-primary text-primary-foreground font-extrabold text-base tracking-wide uppercase py-3.5 min-h-[52px] shadow-[0_8px_24px_rgba(255,199,64,0.4)] active:scale-[0.98] disabled:opacity-50">
-            {totalStake > 0 ? `Deal · ${formatChips(totalStake)}` : "Place your bets"}
+            {totalStake > 0 ? `Shuffle & Deal · ${formatChips(totalStake)}` : "Place your bets"}
           </button>
         </div>
       )}
@@ -225,6 +312,10 @@ export default function BlackjackGame({ game }) {
               {state.net > 0 ? `You win +${formatChips(state.net)}` : state.net < 0 ? `Dealer takes ${formatChips(-state.net)}` : "Push — bets returned"}
             </p>
           </div>
+          <button onClick={nextHand} data-testid="blackjack-next"
+            className="w-full rounded-xl bg-primary text-primary-foreground font-extrabold text-base tracking-wide uppercase py-3.5 min-h-[52px] shadow-[0_8px_24px_rgba(255,199,64,0.4)] active:scale-[0.98] flex items-center justify-center gap-1">
+            Next Hand <ChevronRight className="h-5 w-5" />
+          </button>
         </div>
       )}
     </PlayShell>
