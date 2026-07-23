@@ -29,6 +29,15 @@ const GJ_LINES = [
 
 const Sym = ({ id, size = 30, win, dim }) => <SlotSymbol id={id} size={size * 1.3} win={win} dim={dim} />;
 
+// lit marquee bulb row around the reel window
+const Bulbs = ({ live, n = 13 }) => (
+  <div className="flex justify-between px-1" aria-hidden="true">
+    {Array.from({ length: n }, (_, i) => (
+      <span key={i} className={live ? "fg-marquee-fast" : "fg-marquee"} style={{ width: 5, height: 5, borderRadius: "50%", background: "radial-gradient(circle at 35% 30%, #fff6c8, #ffd447 60%, #b8860b)", boxShadow: "0 0 5px rgba(255,212,71,0.9)", animationDelay: `${(i % 3) * 0.25}s` }} />
+    ))}
+  </div>
+);
+
 // cosmetic progressive meter — deterministic from the round number so every
 // player sees the SAME value; sawtooths (grows then "resets") for the feel.
 const meterFor = (rn) => 500000 + ((rn || 0) % 4000) * 1300;
@@ -154,8 +163,9 @@ export default function GiantJackpotGame({ game }) {
           <span aria-hidden className="absolute right-0 top-0 bottom-0 w-1.5" style={{ background: "linear-gradient(270deg, #ffe08a, #b8860b)" }} />
 
           <div className="p-2.5">
-            <div className="rounded-xl p-1.5" style={{ background: "linear-gradient(180deg, #e2e8f0, #64748b 45%, #94a3b8)" }}>
-              <div className="rounded-lg p-1.5 flex gap-1" style={{ background: "#0d0820" }} data-testid="gj-reels">
+            <div className="rounded-xl p-2 space-y-1.5" style={{ background: "linear-gradient(180deg, #ffe8a0, #b8860b 46%, #8a6a14)", boxShadow: "0 6px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -2px 4px rgba(0,0,0,0.4)" }}>
+              <Bulbs live={phase === "REVEAL" || isWin || jackpot} />
+              <div className="rounded-lg p-1.5 flex gap-1" style={{ background: "#0d0820", boxShadow: "inset 0 0 16px rgba(0,0,0,0.85), inset 0 2px 6px rgba(0,0,0,0.7)" }} data-testid="gj-reels">
                 {[0, 1, 2, 3, 4].map((reel) => {
                   const spinning = stopCount <= reel && phase === "REVEAL";
                   return (
@@ -185,6 +195,7 @@ export default function GiantJackpotGame({ game }) {
                   );
                 })}
               </div>
+              <Bulbs live={phase === "REVEAL" || isWin || jackpot} />
             </div>
           </div>
 
