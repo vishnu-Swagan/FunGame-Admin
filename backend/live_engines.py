@@ -150,7 +150,7 @@ def generate_outcome(slug):
         o, _ = play_andar_bahar(1, {"side": "andar"})
         return {"joker": o["joker"], "sequence": o["sequence"], "winner": o["winner"]}
     if slug == "keno":
-        return {"drawn": sorted(RNG.sample(range(1, 81), 20))}
+        return {"drawn": sorted(RNG.sample(range(1, 37), 10))}
     if slug == "bingo":
         return {"drawn": sorted(RNG.sample(range(1, 76), 30))}
     raise ValueError(f"No live outcome generator for {slug}")
@@ -174,8 +174,8 @@ def validate_selection(slug, selection):
     if kind == "picks":  # keno
         if not isinstance(selection, list) or not (1 <= len(selection) <= 10):
             bad("Pick between 1 and 10 numbers")
-        if len(set(selection)) != len(selection) or any(not isinstance(p, int) or p < 1 or p > 80 for p in selection):
-            bad("Picks must be unique numbers 1-80")
+        if len(set(selection)) != len(selection) or any(not isinstance(p, int) or p < 1 or p > 36 for p in selection):
+            bad("Picks must be unique numbers 1-36")
         return sorted(selection)
     return None  # stake-only
 
@@ -231,7 +231,7 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     if kind == "picks":
         matches = sorted(set(selection) & set(outcome["drawn"]))
         mult = KENO_PAYTABLE[len(selection)].get(len(matches), 0)
-        return amount * mult, {"matches": matches, "multiplier": mult}
+        return int(round(amount * mult)), {"matches": matches, "multiplier": mult}
     # stake-only
     if slug == "bingo":
         lines = count_bingo_lines(card, outcome["drawn"])

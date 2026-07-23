@@ -624,11 +624,22 @@ def play_fun_roulette(bet, payload):
     return {"number": n, "color": roulette_color(n), "bet_type": btype, "value": value, "won": mult > 0}, payout
 
 
+# Spribe-style Keno: 36-ball pool, 10 drawn, pick up to 10. Paytable keyed by
+# number of picks -> {hits: multiplier}. Designed by exact hypergeometric
+# enumeration to ~88% RTP for EVERY pick count, with rare "dream" jackpot tops
+# (10/10 = 10,000x) that cost almost nothing in RTP because they are so rare.
+KENO_POOL, KENO_DRAW = 36, 10
 KENO_PAYTABLE = {
-    1: {1: 3}, 2: {2: 9}, 3: {2: 2, 3: 25}, 4: {2: 1, 3: 5, 4: 60},
-    5: {3: 2, 4: 12, 5: 150}, 6: {3: 1, 4: 5, 5: 40, 6: 400},
-    7: {4: 2, 5: 15, 6: 80, 7: 700}, 8: {4: 1, 5: 8, 6: 40, 7: 200, 8: 1000},
-    9: {5: 4, 6: 20, 7: 80, 8: 500, 9: 2000}, 10: {5: 2, 6: 10, 7: 40, 8: 200, 9: 1000, 10: 5000},
+    1:  {1: 3.17},
+    2:  {1: 1.35, 2: 4.51},
+    3:  {2: 1.27, 3: 40},
+    4:  {2: 1.28, 3: 2.55, 4: 120},
+    5:  {2: 0.64, 3: 3.18, 4: 8.27, 5: 350},
+    6:  {3: 2.94, 4: 7.65, 5: 19.5, 6: 700},
+    7:  {3: 1.44, 4: 5.78, 5: 15, 6: 34.5, 7: 1500},
+    8:  {4: 5.07, 5: 12.5, 6: 30.5, 7: 67.5, 8: 3000},
+    9:  {4: 2.34, 5: 9.38, 6: 23.5, 7: 54.5, 8: 125, 9: 6000},
+    10: {4: 1.95, 5: 4.87, 6: 12, 7: 29, 8: 68, 9: 800, 10: 10000},
 }
 
 
@@ -636,12 +647,12 @@ def play_keno(bet, payload):
     picks = payload.get("picks")
     if not isinstance(picks, list) or not (1 <= len(picks) <= 10):
         bad("Pick between 1 and 10 numbers")
-    if len(set(picks)) != len(picks) or any(not isinstance(p, int) or p < 1 or p > 80 for p in picks):
-        bad("Picks must be unique numbers 1-80")
-    drawn = RNG.sample(range(1, 81), 20)
+    if len(set(picks)) != len(picks) or any(not isinstance(p, int) or p < 1 or p > KENO_POOL for p in picks):
+        bad(f"Picks must be unique numbers 1-{KENO_POOL}")
+    drawn = RNG.sample(range(1, KENO_POOL + 1), KENO_DRAW)
     matches = sorted(set(picks) & set(drawn))
     mult = KENO_PAYTABLE[len(picks)].get(len(matches), 0)
-    payout = bet * mult
+    payout = int(round(bet * mult))
     return {"picks": sorted(picks), "drawn": sorted(drawn), "matches": matches, "multiplier": mult}, payout
 
 
