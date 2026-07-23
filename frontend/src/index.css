@@ -270,6 +270,12 @@ summary:focus-visible {
 .fg-checker-jump  { animation: fg-checker-jump .38s ease-out 1; }
 .fg-checker-burst { animation: fg-checker-burst .5s ease-out 1 forwards; }
 
+/* ---------------- 777 cabinet marquee lighting ---------------- */
+@keyframes fg-marquee      { 0%,100% { opacity: .28; } 50% { opacity: .78; } }
+@keyframes fg-marquee-fast { 0%,100% { opacity: .5; }  50% { opacity: 1; } }
+.fg-marquee      { animation: fg-marquee 1.9s ease-in-out infinite; }
+.fg-marquee-fast { animation: fg-marquee-fast .5s ease-in-out infinite; }
+
 /* ---------------- Slot / casino cinematics ---------------- */
 @keyframes fg-coin-fall {
   0%   { transform: translateY(-20px) rotateY(0deg) scale(1); opacity: 0; }

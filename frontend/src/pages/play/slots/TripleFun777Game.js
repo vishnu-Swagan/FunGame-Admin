@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { Zap, Star } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
@@ -58,6 +59,26 @@ const Sym = ({ id, size = 44 }) => {
 
 // live reel window placed over the cabinet art (fractions of the image box)
 const WINDOW = { left: 23, top: 35, width: 60, height: 45 };
+// lever ball position over the printed lever (fractions of the image box)
+const LEVER = { left: 83.5, top: 19, size: 8.5 };
+
+/** Pulsing screen-blend glows that light the printed marquee bulbs (arch + both
+    rails). Staggered timing gives a running-lights chase; faster when live. */
+const MarqueeLights = ({ live }) => {
+  const cls = live ? "fg-marquee-fast" : "fg-marquee";
+  const layers = [
+    { bg: "radial-gradient(58% 42% at 50% 15%, rgba(255,224,120,0.65), transparent 60%)", delay: "0s" },
+    { bg: "radial-gradient(26% 52% at 19% 56%, rgba(255,220,110,0.6), transparent 62%)", delay: "0.25s" },
+    { bg: "radial-gradient(26% 52% at 81% 56%, rgba(255,220,110,0.6), transparent 62%)", delay: "0.5s" },
+  ];
+  return (
+    <>
+      {layers.map((l, i) => (
+        <div key={i} aria-hidden="true" className={`absolute inset-0 pointer-events-none ${cls}`} style={{ background: l.bg, mixBlendMode: "screen", animationDelay: l.delay }} />
+      ))}
+    </>
+  );
+};
 
 export default function TripleFun777Game({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, lastResults, placing, myBets, revealElapsed } =
@@ -176,6 +197,25 @@ export default function TripleFun777Game({ game }) {
           />
           {/* blend the art's light corners into the dark stage */}
           <div aria-hidden="true" className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(74% 66% at 50% 50%, transparent 56%, rgba(6,10,20,0.92) 100%)" }} />
+
+          {/* running marquee lights on the printed bulbs */}
+          <MarqueeLights live={spinningPhase || isWin} />
+
+          {/* pull lever — yanks down when the reels start rolling */}
+          <motion.div
+            aria-hidden="true"
+            className="absolute z-30 rounded-full pointer-events-none"
+            style={{
+              left: `${LEVER.left}%`,
+              top: `${LEVER.top}%`,
+              width: `${LEVER.size}%`,
+              aspectRatio: "1 / 1",
+              background: "radial-gradient(circle at 34% 28%, #ff9a9a, #e11d1d 52%, #7f1010)",
+              boxShadow: "0 3px 10px rgba(0,0,0,0.5), 0 0 16px rgba(255,70,70,0.55), inset -3px -4px 8px rgba(0,0,0,0.45), inset 2px 2px 5px rgba(255,255,255,0.55)",
+            }}
+            animate={{ y: spinningPhase && stoppedCount === 0 ? "120%" : "0%" }}
+            transition={{ type: "spring", stiffness: 240, damping: 15 }}
+          />
 
           {/* live reel window (dark bezel fully covers the printed reels) */}
           <div
