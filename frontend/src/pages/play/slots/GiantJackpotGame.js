@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { Coins, Bell, Gem, Crown, Diamond, Sparkles } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
@@ -7,16 +6,17 @@ import { LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
+import { SlotSymbol } from "@/pages/play/slots/SlotSymbols";
 
-// symbol art (matches backend giant-jackpot symbols)
+// tag/colour metadata (matches backend giant-jackpot symbols); art via SlotSymbol
 const SYM = {
-  coin: { Icon: Coins, color: "#ffd447" },
-  bar: { text: "BAR", color: "#9fb4cc" },
-  bell: { Icon: Bell, color: "#ffb347" },
-  gem: { Icon: Gem, color: "#3ec6e8" },
-  crown: { Icon: Crown, color: "#ffe08a" },
-  diamond: { Icon: Diamond, color: "#c084fc", tag: "WILD" },
-  scatter: { Icon: Sparkles, color: "#ff4f9a", tag: "SCAT" },
+  coin: { color: "#ffd447" },
+  bar: { color: "#9fb4cc" },
+  bell: { color: "#ffb347" },
+  gem: { color: "#3ec6e8" },
+  crown: { color: "#ffe08a" },
+  diamond: { color: "#c084fc", tag: "WILD" },
+  scatter: { color: "#ff4f9a", tag: "SCAT" },
 };
 const IDS = Object.keys(SYM);
 // same 10 paylines as the backend (row per reel), for win highlighting
@@ -27,13 +27,7 @@ const GJ_LINES = [
   [1, 0, 0, 0, 1], [1, 2, 2, 2, 1], [1, 2, 1, 0, 1],
 ];
 
-const Sym = ({ id, size = 30, win, dim }) => {
-  const s = SYM[id] || SYM.coin;
-  const style = { color: s.color, filter: win ? "drop-shadow(0 0 6px currentColor)" : undefined, opacity: dim ? 0.5 : 1 };
-  if (s.text) return <span className="font-display font-extrabold tabular-nums" style={{ ...style, fontSize: size * 0.5 }}>{s.text}</span>;
-  const I = s.Icon;
-  return <I style={{ ...style, width: size, height: size }} strokeWidth={1.9} />;
-};
+const Sym = ({ id, size = 30, win, dim }) => <SlotSymbol id={id} size={size * 1.3} win={win} dim={dim} />;
 
 // cosmetic progressive meter — deterministic from the round number so every
 // player sees the SAME value; sawtooths (grows then "resets") for the feel.

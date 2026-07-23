@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { Cherry, Citrus, Bell, Star, Sparkles, Flame } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
@@ -7,14 +6,15 @@ import { LiveBetPanel } from "@/components/play/LiveBar";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 import { CoinShower, WinBurst } from "@/pages/play/slots/slotFx";
+import { SlotSymbol } from "@/pages/play/slots/SlotSymbols";
 
 const SYM = {
-  cherry: { Icon: Cherry, color: "#ff5964" },
-  lemon: { Icon: Citrus, color: "#ffd447" },
-  bell: { Icon: Bell, color: "#ffb347" },
-  star: { Icon: Star, color: "#ffe08a" },
-  seven: { text: "7", color: "#ff4f9a" },
-  joker: { Icon: Sparkles, color: "#c084fc", tag: "WILD" },
+  cherry: { color: "#ff5964" },
+  lemon: { color: "#ffd447" },
+  bell: { color: "#ffb347" },
+  star: { color: "#ffe08a" },
+  seven: { color: "#ff4f9a" },
+  joker: { color: "#c084fc", tag: "WILD" },
 };
 const IDS = Object.keys(SYM);
 const GJ_LINES = [
@@ -24,13 +24,7 @@ const GJ_LINES = [
   [1, 0, 0, 0, 1], [1, 2, 2, 2, 1], [1, 2, 1, 0, 1],
 ];
 
-const Sym = ({ id, size = 26, win }) => {
-  const s = SYM[id] || SYM.cherry;
-  const style = { color: s.color, filter: win ? "drop-shadow(0 0 6px currentColor)" : undefined };
-  if (s.text) return <span className="font-display font-extrabold" style={{ ...style, fontSize: size * 0.6 }}>{s.text}</span>;
-  const I = s.Icon;
-  return <I style={{ ...style, width: size, height: size }} strokeWidth={1.9} />;
-};
+const Sym = ({ id, size = 26, win }) => <SlotSymbol id={id} size={size * 1.35} win={win} />;
 
 export default function FeverJokerGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myTotal, placing, myBets } =

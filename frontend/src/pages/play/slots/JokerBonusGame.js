@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { VenetianMask, Bell, Grape, Citrus, Apple } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
@@ -7,6 +6,7 @@ import { LiveBetPanel, LastResults, ResultPill } from "@/components/play/LiveBar
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 import { SpinStrip, SettledCell, reelStopTimes, pickSeeded } from "./reelKit";
+import { SlotSymbol } from "@/pages/play/slots/SlotSymbols";
 import { FitWidth } from "@/components/FitWidth";
 
 /**
@@ -24,29 +24,7 @@ const PAYS = [
 const NEON = "#c084fc";
 const MAGENTA = "#e879f9";
 
-const Sym = ({ id, size = 44 }) => {
-  const st = (color) => ({ color, width: size * 0.6, height: size * 0.6, filter: `drop-shadow(0 0 6px ${color}88)` });
-  switch (id) {
-    case "plum":
-      return <Apple style={st("#a78bfa")} strokeWidth={1.7} />;
-    case "grape":
-      return <Grape style={st("#8b5cf6")} strokeWidth={1.7} />;
-    case "melon":
-      return <Citrus style={st("#4ade80")} strokeWidth={1.7} />;
-    case "bell":
-      return <Bell style={st("#fbbf24")} strokeWidth={1.7} />;
-    case "seven":
-      return (
-        <span className="font-display font-bold" style={{ color: "#fb7185", fontSize: size * 0.58, textShadow: "0 0 10px rgba(251,113,133,0.7)" }}>
-          7
-        </span>
-      );
-    case "joker":
-      return <VenetianMask style={st("#facc15")} strokeWidth={1.6} />;
-    default:
-      return null; // blank reel position
-  }
-};
+const Sym = ({ id, size = 44 }) => <SlotSymbol id={id} size={size * 0.92} />;
 
 const CELL = 88;
 
