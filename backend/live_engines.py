@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from game_engines import (
     RNG, new_deck, draw_cards, card_str, eval_poker5, eval_teen_patti, TP_LABELS,
     vp_result, play_slot, play_no_hold, play_checker, play_andar_bahar,
-    play_giant_jackpot, play_fever_joker, play_lucky8, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
+    play_giant_jackpot, play_fever_joker, play_lucky8, play_triple_fun, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
 )
 
 POKER_LABELS = {9: "Royal Flush", 8: "Straight Flush", 7: "Four of a Kind", 6: "Full House",
@@ -40,7 +40,7 @@ LIVE_GAMES = {
     "triple-fun":        {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
 }
 
-SLOT_SLUGS = {"joker-bonus", "triple-fun"}  # giant-jackpot, fever-joker-bonus, lucky-8-line have their own engines
+SLOT_SLUGS = {"joker-bonus"}  # giant-jackpot, fever-joker, lucky-8, triple-fun have their own engines
 
 SIDE_OPTIONS = {
     "seven-up-down": {"down": 2.1, "seven": 4.2, "up": 2.1},
@@ -122,6 +122,9 @@ def generate_outcome(slug):
         return outcome
     if slug == "lucky-8-line":
         outcome, _ = play_lucky8(1, {})
+        return outcome
+    if slug == "triple-fun":
+        outcome, _ = play_triple_fun(1, {})
         return outcome
     if slug in SLOT_SLUGS:
         outcome, _ = play_slot(slug, 1, {})

@@ -224,6 +224,45 @@ def play_slot(slug, bet, payload):
     return {"reels": reels, "label": label, "multiplier": mult}, payout
 
 
+# ---------------- 777 Triple Fun: real classic 3-reel, 1-payline slot ----------------
+# Weighted virtual reel strips with a common BLANK (real reels have gaps), so
+# 3-of-a-kind is genuinely rare. Wild (star) substitutes; cherries pay left
+# aligned (1 or 2) for frequent small hits. Exact math: ~71% RTP, ~23.6% hit
+# frequency (76% of spins lose), jackpot 1 in 14,400 — real online-slot feel.
+TF_SYMS = ["--", "CH", "BL", "BR", "SV", "WD"]
+TF_W = {"--": [11, 12, 13], "CH": [7, 6, 6], "BR": [5, 5, 5], "BL": [4, 4, 3], "SV": [3, 2, 2], "WD": [2, 1, 1]}
+TF_P3 = {"WD": 175, "SV": 66, "BL": 22, "BR": 12, "CH": 8}
+TF_CHP = {1: 1, 2: 3}
+TF_NAME = {"CH": "CHERRY", "BL": "BELL", "BR": "BAR", "SV": "SEVEN", "WD": "WILD"}
+
+
+def _tf_pick(reel):
+    return weighted_choice([(s, TF_W[s][reel]) for s in TF_SYMS])
+
+
+def _tf_eval(line):
+    """Center-line pay for [reel0, reel1, reel2]. Returns (multiplier, label)."""
+    for s in ("WD", "SV", "BL", "BR", "CH"):
+        if all(x == s or x == "WD" for x in line):
+            if s == "WD":
+                return TF_P3[s], "JACKPOT · 3× WILD"
+            return TF_P3[s], f"3× {TF_NAME[s]}"
+    if line[0] == "CH":
+        if line[1] in ("CH", "WD"):
+            return TF_CHP[2], "2 CHERRIES"
+        return TF_CHP[1], "1 CHERRY"
+    return 0, "NO WIN"
+
+
+def play_triple_fun(bet, payload):
+    # 3 rows x 3 reels; the center row is the payline (classic single-line).
+    grid = [[_tf_pick(c) for c in range(3)] for _ in range(3)]
+    line = [grid[1][c] for c in range(3)]
+    mult, label = _tf_eval(line)
+    payout = int(round(bet * mult))
+    return {"grid": grid, "reels": line, "multiplier": mult, "label": label}, payout
+
+
 # ---------------- Giant Jackpot: 5x3, 10-line video slot ----------------
 # A real 5-reel x 3-row slot: 10 fixed paylines, Diamond wild (substitutes on
 # lines), Scatter that pays anywhere; 5 scatters = the GIANT JACKPOT (1000x the
