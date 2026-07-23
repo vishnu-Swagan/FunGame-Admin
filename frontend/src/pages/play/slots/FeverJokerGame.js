@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Flame } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { HistoryStrip } from "@/components/play/PlayShell";
