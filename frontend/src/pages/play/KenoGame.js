@@ -90,12 +90,25 @@ export default function KenoGame({ game }) {
             Clear ({picks.length}/10)
           </button>
         </div>
-        {/* live draw rack + match counter */}
-        {phase !== "BETTING" && (
-          <div className="relative mb-2 rounded-lg px-2 py-1.5 flex items-center gap-2" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(201,162,39,0.25)" }}>
-            <span className="text-[9px] font-bold tracking-widest text-white/45 shrink-0">DRAWN</span>
+        {/* live draw: big current ball + recent rack + match counter */}
+        {phase !== "BETTING" && (() => {
+          const latest = drawn.length ? drawn[drawn.length - 1] : null;
+          const latestHit = latest != null && myPicks.includes(latest);
+          return (
+          <div className="relative mb-2 rounded-xl px-2.5 py-2 flex items-center gap-2.5" style={{ background: "radial-gradient(120% 100% at 20% 0%, rgba(255,212,71,0.06), rgba(0,0,0,0.35))", border: "1px solid rgba(201,162,39,0.3)" }}>
+            <div className="shrink-0 flex flex-col items-center">
+              <span className="text-[8px] font-bold tracking-[0.2em] text-white/45 mb-0.5">{shownCount < 20 ? "DRAWING" : "LAST"}</span>
+              <div className={`h-14 w-14 rounded-full grid place-items-center font-display text-2xl tabular-nums ${shownCount < 20 ? "fg-line-flash" : ""}`}
+                style={{
+                  color: latestHit ? "#3a2a00" : "#0a1430",
+                  background: latestHit ? "radial-gradient(circle at 34% 28%, #fff6c8, #ffd447 58%, #a9781a)" : "radial-gradient(circle at 34% 28%, #ffffff, #cdd9ee 60%, #7f92b5)",
+                  boxShadow: latestHit ? "0 4px 14px rgba(0,0,0,0.5), 0 0 20px rgba(255,212,71,0.8), inset -2px -3px 5px rgba(0,0,0,0.25), inset 2px 2px 4px rgba(255,255,255,0.7)" : "0 4px 12px rgba(0,0,0,0.5), inset -2px -3px 5px rgba(0,0,0,0.25), inset 2px 2px 4px rgba(255,255,255,0.9)",
+                }}>
+                {latest ?? "–"}
+              </div>
+            </div>
             <div className="flex-1 flex gap-1 overflow-hidden">
-              {drawn.slice(-12).map((n, i, arr) => {
+              {drawn.slice(-11, -1).map((n, i, arr) => {
                 const hit = myPicks.includes(n);
                 const newest = i === arr.length - 1 && shownCount < 20;
                 return (
@@ -119,7 +132,8 @@ export default function KenoGame({ game }) {
               </span>
             )}
           </div>
-        )}
+          );
+        })()}
         <div className="grid grid-cols-10 gap-1 relative">
           {Array.from({ length: 80 }, (_, i) => i + 1).map((n) => {
             const picked = picks.includes(n) || (myBets.length > 0 && myPicks.includes(n));

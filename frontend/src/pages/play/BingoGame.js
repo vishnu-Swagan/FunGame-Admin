@@ -95,18 +95,28 @@ export default function BingoGame({ game }) {
         <div aria-hidden="true" className="absolute inset-1.5 rounded-xl pointer-events-none" style={{ border: "1px solid rgba(201,162,39,0.3)" }} />
         {isWin && <WinBurst mult={result.payout} color="#ffd447" showAt={0} />}
         {bigWin && <CoinShower />}
-        {/* live ball caller */}
-        {phase !== "BETTING" && lastBall != null && (
-          <div className="flex items-center justify-center gap-2 mb-3 relative">
-            <span className="text-[10px] font-bold tracking-widest text-white/50">NOW CALLING</span>
-            <span
-              className="fg-line-flash flex items-center justify-center h-11 w-11 rounded-full font-display text-lg text-black tabular-nums"
-              style={{ background: "radial-gradient(circle at 35% 30%, #fff6c8, #ffd447 60%, #b8860b)", boxShadow: "0 0 16px rgba(255,212,71,0.9)" }}
-            >
-              {ballLetter(lastBall)}{lastBall}
-            </span>
-          </div>
-        )}
+        {/* live ball caller — big 3D ball coloured by its BINGO column */}
+        {phase !== "BETTING" && lastBall != null && (() => {
+          const called = drawnAll.slice(0, shownCount);
+          const colorOf = (n) => BINGO_COLS[Math.min(4, Math.floor((n - 1) / 15))];
+          return (
+            <div className="flex items-center justify-center gap-3 mb-3 relative">
+              <div className="flex gap-1">
+                {called.slice(-4, -1).map((n, i) => (
+                  <span key={`${n}-${i}`} className="h-7 w-7 rounded-full grid place-items-center text-[9px] font-extrabold text-white tabular-nums" style={{ background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.85), ${colorOf(n)} 55%, rgba(0,0,0,0.35))`, boxShadow: "0 2px 5px rgba(0,0,0,0.45)" }}>
+                    {ballLetter(n)}{n}
+                  </span>
+                ))}
+              </div>
+              <div className="fg-line-flash h-16 w-16 rounded-full grid place-items-center text-white tabular-nums" style={{ background: `radial-gradient(circle at 34% 28%, rgba(255,255,255,0.8), ${colorOf(lastBall)} 52%, rgba(0,0,0,0.4))`, boxShadow: `0 4px 14px rgba(0,0,0,0.55), 0 0 22px ${colorOf(lastBall)}, inset -2px -3px 5px rgba(0,0,0,0.35), inset 2px 2px 5px rgba(255,255,255,0.55)` }}>
+                <div className="flex flex-col items-center leading-none">
+                  <span className="text-[10px] font-extrabold opacity-90">{ballLetter(lastBall)}</span>
+                  <span className="font-display text-2xl">{lastBall}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <div className="grid grid-cols-5 gap-1 mb-2 relative">
           {["B", "I", "N", "G", "O"].map((l, i) => (
             <div key={l} className="text-center font-display text-xl fg-neon" style={{ color: BINGO_COLS[i] }}>{l}</div>
@@ -120,15 +130,18 @@ export default function BingoGame({ game }) {
             return (
               <div
                 key={i}
-                className={`rounded-lg border py-3 min-h-[44px] flex items-center justify-center text-sm font-bold tabular-nums transition-[background-color,box-shadow,transform] duration-200 ${
+                className={`relative overflow-hidden rounded-lg border py-3 min-h-[44px] flex items-center justify-center text-sm font-bold tabular-nums transition-[background-color,box-shadow,transform] duration-200 ${
                   justCalled
                     ? "bg-primary text-primary-foreground border-yellow-200 scale-110 shadow-[0_0_14px_rgba(255,199,64,0.95)]"
                     : marked
-                    ? "bg-primary/25 border-primary/60 text-primary shadow-[0_0_8px_rgba(255,199,64,0.4)]"
+                    ? "border-primary/50 shadow-[0_0_8px_rgba(255,199,64,0.35)]"
                     : "bg-white/5 border-white/10 text-white/70"
                 }`}
               >
-                {free ? "✦" : v}
+                {marked && !free && !justCalled && (
+                  <span aria-hidden="true" className="absolute h-8 w-8 rounded-full" style={{ background: "radial-gradient(circle at 35% 30%, rgba(255,110,110,0.6), rgba(200,25,25,0.4))", boxShadow: "inset 0 0 6px rgba(0,0,0,0.35)" }} />
+                )}
+                <span className={`relative z-10 ${marked && !justCalled && !free ? "text-white" : ""}`}>{free ? "✦" : v}</span>
               </div>
             );
           })}
