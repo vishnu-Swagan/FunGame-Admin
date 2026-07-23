@@ -48,9 +48,9 @@ SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 SIDE_OPTIONS = {
     "seven-up-down": {"down": 2.0, "seven": 5.0, "up": 2.0},
     "checker": {"gold": 1.4, "steel": 1.4},
-    # Andar is dealt first and wins slightly more often, so it pays less than
-    # Bahar — the authentic Andar-Bahar asymmetry (evens out the house edge).
-    "andar-bahar": {"andar": 1.35, "bahar": 1.44},
+    # Real casino Andar Bahar: Andar is dealt first (wins ~51.5%) so it pays
+    # 0.9:1 (1.9x); Bahar pays 1:1 (2.0x). House edge ~2.15% Andar / 3% Bahar.
+    "andar-bahar": {"andar": 1.9, "bahar": 2.0},
     # House-favorable ~70% RTP: Player/Dealer pay 1.40x, and a tie is a house
     # win for Player/Dealer bets (see settle_bet). Only the explicit Tie bet
     # wins on a tie.

@@ -54,7 +54,7 @@ export default function AndarBaharGame({ game }) {
   }, [jokerFlipped, phase, shownCount]);
 
   const sideCards = (s) => shown.map((c, i) => ({ ...c, idx: i })).filter((c) => c.side === s);
-  const abPays = state?.options || { andar: 1.85, bahar: 1.9 };
+  const abPays = state?.options || { andar: 1.9, bahar: 2.0 };
   const sideTotals = {};
   myBets.forEach((b) => {
     sideTotals[b.selection] = (sideTotals[b.selection] || 0) + b.amount;
