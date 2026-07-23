@@ -58,11 +58,11 @@ const Sym = ({ id, size = 44 }) => {
 };
 
 // live reel window placed over the cabinet art (fractions of the image box)
-const WINDOW = { left: 23, top: 35, width: 60, height: 45 };
+const WINDOW = { left: 24, top: 35, width: 58.5, height: 46.5 };
 // live chrome lever over the printed one (fractions of the image box).
 // left/top = ball's top-left, size = ball width, arm = ball+rod height; the
-// lever pivots at its bottom (the mechanism). Tune these to line up with the art.
-const LEVER = { left: 85, top: 19, size: 6.5, arm: 43 };
+// lever pivots at its bottom (the mechanism hub) — measured from the art.
+const LEVER = { left: 87.5, top: 21.5, size: 7, arm: 38.5 };
 
 /** Pulsing screen-blend glows that light the printed marquee bulbs (arch + both
     rails). Staggered timing gives a running-lights chase; faster when live. */
@@ -200,7 +200,7 @@ export default function TripleFun777Game({ game }) {
           {/* blend the art's light corners into the dark stage */}
           <div aria-hidden="true" className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(74% 66% at 50% 50%, transparent 56%, rgba(6,10,20,0.92) 100%)" }} />
           {/* focused shadow that hides the printed lever so the live one replaces it */}
-          <div aria-hidden="true" className="absolute pointer-events-none z-20" style={{ left: "79%", top: "9%", width: "23%", height: "54%", background: "radial-gradient(56% 60% at 52% 40%, rgba(6,10,20,0.98) 0%, rgba(6,10,20,0.72) 46%, transparent 82%)" }} />
+          <div aria-hidden="true" className="absolute pointer-events-none z-20" style={{ left: "81%", top: "12%", width: "21%", height: "51%", background: "radial-gradient(56% 60% at 50% 38%, rgba(6,10,20,0.98) 0%, rgba(6,10,20,0.74) 46%, transparent 82%)" }} />
 
           {/* running marquee lights on the printed bulbs */}
           <MarqueeLights live={spinningPhase || isWin} />
