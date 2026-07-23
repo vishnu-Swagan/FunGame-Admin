@@ -575,14 +575,14 @@ def roulette_multiplier(btype, value, n):
     if btype == "straight":
         if not isinstance(value, int) or value < 0 or value > 36:
             bad("Straight bet needs a number 0-36")
-        return 26 if n == value else 0
+        return 36 if n == value else 0
     if btype == "split":
         # two adjacent numbers on the table (chip on the shared line)
         a, b = _roulette_nums(value, 2)
         ok = (a == 0 and b in (1, 2, 3)) or (b == a + 3) or (b == a + 1 and a % 3 != 0)
         if not ok:
             bad("Split must cover two adjacent numbers")
-        return 13 if n in (a, b) else 0
+        return 18 if n in (a, b) else 0
     if btype == "corner":
         # four adjoining numbers (chip on the shared cross), incl. first-four 0-1-2-3
         nums = _roulette_nums(value, 4)
@@ -590,28 +590,28 @@ def roulette_multiplier(btype, value, n):
         ok = nums == [0, 1, 2, 3] or (a % 3 != 0 and a + 4 <= 36 and nums == [a, a + 1, a + 3, a + 4])
         if not ok:
             bad("Corner must cover four adjoining numbers")
-        return 6.5 if n in nums else 0
+        return 9 if n in nums else 0
     if btype == "color":
         if value not in ("red", "black"):
             bad("Color bet must be red or black")
-        return 1.5 if roulette_color(n) == value else 0
+        return 2 if roulette_color(n) == value else 0
     if btype == "parity":
         if value not in ("odd", "even"):
             bad("Parity bet must be odd or even")
-        return 1.5 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
+        return 2 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
     if btype == "range":
         if value not in ("low", "high"):
             bad("Range bet must be low or high")
         won = (1 <= n <= 18) if value == "low" else (19 <= n <= 36)
-        return 1.5 if won else 0
+        return 2 if won else 0
     if btype == "dozen":
         if value not in (1, 2, 3):
             bad("Dozen must be 1, 2 or 3")
-        return 2.1 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
+        return 3 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
     if btype == "column":
         if value not in (1, 2, 3):
             bad("Column must be 1, 2 or 3")
-        return 2.1 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
+        return 3 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
     bad("Invalid bet type")
 
 
