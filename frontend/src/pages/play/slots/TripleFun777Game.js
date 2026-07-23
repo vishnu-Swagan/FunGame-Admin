@@ -210,7 +210,6 @@ export default function TripleFun777Game({ game }) {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-white/40 mt-2">Real reel odds · jackpot 1 in 14,400 · you win about 1 spin in 4</p>
           </div>
           <HistoryStrip history={history} />
         </div>
