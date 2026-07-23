@@ -46,7 +46,7 @@ LIVE_GAMES = {
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 
 SIDE_OPTIONS = {
-    "seven-up-down": {"down": 2.0, "seven": 4.0, "up": 2.0},
+    "seven-up-down": {"down": 2.0, "seven": 5.0, "up": 2.0},
     "checker": {"gold": 1.4, "steel": 1.4},
     # Andar is dealt first and wins slightly more often, so it pays less than
     # Bahar — the authentic Andar-Bahar asymmetry (evens out the house edge).
@@ -108,13 +108,9 @@ def generate_outcome(slug):
     if slug == "seven-up-down":
         d1, d2 = RNG.randint(1, 6), RNG.randint(1, 6)
         total = d1 + d2
-        # Tough logic: matching dice (a "double") is a HOUSE win — up/down/seven
-        # all lose. This drops the ~42% up/down win rate to ~33% without changing
-        # any payout. Fair for everyone; the RNG is untouched (secrets.SystemRandom).
-        if d1 == d2:
-            winner = "double"
-        else:
-            winner = "seven" if total == 7 else ("up" if total > 7 else "down")
+        # True 7Up7Down: 2-6 = Down, 8-12 = Up, exactly 7 = Seven (Up and Down
+        # lose on a 7 — the natural house edge). Fair secure-RNG dice.
+        winner = "seven" if total == 7 else ("up" if total > 7 else "down")
         return {"dice": [d1, d2], "total": total, "winner": winner}
     if slug == "fun-target":
         return {"result": RNG.randint(0, 9)}

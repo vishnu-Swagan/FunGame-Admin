@@ -10,7 +10,7 @@ import { formatChips } from "@/components/common";
 
 const SIDES = [
   { id: "down", label: "Down (2-6)", pays: "1:1" },
-  { id: "seven", label: "Lucky 7", pays: "3:1" },
+  { id: "seven", label: "Lucky 7", pays: "4:1" },
   { id: "up", label: "Up (8-12)", pays: "1:1" },
 ];
 
@@ -155,7 +155,7 @@ export default function DiceGame({ game }) {
           <div className="rounded-xl border border-[hsl(var(--magenta)/0.3)] bg-[hsl(var(--magenta)/0.08)] px-3 py-2 flex items-center gap-2">
             <Dices className="h-4 w-4 text-[hsl(var(--magenta))] shrink-0" />
             <p className="text-[11px] text-white/70">
-              <span className="font-bold text-[hsl(var(--magenta))]">Matching dice (a double) = house wins</span> — Up, Down and Lucky 7 all lose on a double. Real dice, truly random.
+              <span className="font-bold text-[hsl(var(--magenta))]">A 7 beats both sides</span> — Up and Down lose when the dice total 7. Real casino odds: 1:1 sides, 4:1 on Lucky 7. Truly random dice.
             </p>
           </div>
           <HistoryStrip history={history} />
