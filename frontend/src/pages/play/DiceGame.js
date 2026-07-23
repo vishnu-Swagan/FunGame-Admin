@@ -9,9 +9,9 @@ import { GameStage } from "@/components/play/GameStage";
 import { formatChips } from "@/components/common";
 
 const SIDES = [
-  { id: "down", label: "Down (2-6)", pays: "2.1x" },
-  { id: "seven", label: "Lucky 7", pays: "4.2x" },
-  { id: "up", label: "Up (8-12)", pays: "2.1x" },
+  { id: "down", label: "Down (2-6)", pays: "1:1" },
+  { id: "seven", label: "Lucky 7", pays: "3:1" },
+  { id: "up", label: "Up (8-12)", pays: "1:1" },
 ];
 
 /* pip layout per face value on a 3x3 grid */

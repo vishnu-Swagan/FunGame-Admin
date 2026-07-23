@@ -46,7 +46,7 @@ LIVE_GAMES = {
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 
 SIDE_OPTIONS = {
-    "seven-up-down": {"down": 2.1, "seven": 4.2, "up": 2.1},
+    "seven-up-down": {"down": 2.0, "seven": 4.0, "up": 2.0},
     "checker": {"gold": 1.4, "steel": 1.4},
     # Andar is dealt first and wins slightly more often, so it pays less than
     # Bahar — the authentic Andar-Bahar asymmetry (evens out the house edge).
