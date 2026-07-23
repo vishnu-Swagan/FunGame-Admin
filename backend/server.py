@@ -20,6 +20,7 @@ import routes_player
 import routes_admin
 import routes_games
 import routes_live
+import routes_blackjack
 import routes_security
 
 logging.basicConfig(
@@ -120,6 +121,7 @@ async def health():
 api_router.include_router(routes_auth.router)
 api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
+api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_security.router)

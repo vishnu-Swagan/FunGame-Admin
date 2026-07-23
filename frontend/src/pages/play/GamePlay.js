@@ -25,6 +25,7 @@ import FeverJokerGame from "@/pages/play/slots/FeverJokerGame";
 import AviatorGame from "@/pages/play/AviatorGame";
 import CheckerGame from "@/pages/play/CheckerGame";
 import IceFishingGame from "@/pages/play/IceFishingGame";
+import BlackjackGame from "@/pages/play/BlackjackGame";
 
 const COMPONENTS = {
   "seven-up-down": DiceGame,
@@ -46,6 +47,7 @@ const COMPONENTS = {
   aviator: AviatorGame,
   checker: CheckerGame,
   "ice-fishing": IceFishingGame,
+  blackjack: BlackjackGame,
 };
 
 export default function GamePlay() {

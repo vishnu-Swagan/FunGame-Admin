@@ -75,6 +75,9 @@ GAMES = [
     {"slug": "ice-fishing", "name": "Ice Fishing", "category": "Wheel", "tagline": "Spin the ice, reel the big catch", "featured": True,
      "description": "A 53-segment money wheel with three cinematic fish bonus games. Bet the leaves for instant pays, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
      "art": {"from": "#0a2a44", "to": "#4aa3d9", "accent": "#bfe6ff", "icon": "fish", "glyph": "\u2744"}},
+    {"slug": "blackjack", "name": "Blackjack", "category": "Cards", "tagline": "Hit, stand, beat the dealer", "featured": True,
+     "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side bets, insurance, blackjack pays 3:2. Real casino rules.",
+     "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
 ]
 
 ANNOUNCEMENTS = [
@@ -146,20 +149,21 @@ async def run_seed():
         except Exception as e:
             logger.info(f'games seed race (ok): {e}')
 
-    # Ice Fishing was added after the initial seed — ensure it exists and is
-    # playable on already-seeded databases (idempotent; won't clobber edits).
-    ice = next((g for g in GAMES if g['slug'] == 'ice-fishing'), None)
-    if ice:
-        await db.games.update_one(
-            {'slug': 'ice-fishing'},
-            {'$setOnInsert': {
-                'id': str(uuid.uuid4()), 'slug': 'ice-fishing', 'name': ice['name'],
-                'category': ice['category'], 'tagline': ice['tagline'], 'description': ice['description'],
-                'status': 'ENABLED', 'featured': ice['featured'], 'art': ice['art'], 'order': 99,
-                'created_at': now,
-            }},
-            upsert=True,
-        )
+    # Games added after the initial seed — ensure they exist and are playable on
+    # already-seeded databases (idempotent; won't clobber later edits).
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100)):
+        gm = next((g for g in GAMES if g['slug'] == slug), None)
+        if gm:
+            await db.games.update_one(
+                {'slug': slug},
+                {'$setOnInsert': {
+                    'id': str(uuid.uuid4()), 'slug': slug, 'name': gm['name'],
+                    'category': gm['category'], 'tagline': gm['tagline'], 'description': gm['description'],
+                    'status': 'ENABLED', 'featured': gm['featured'], 'art': gm['art'], 'order': order,
+                    'created_at': now,
+                }},
+                upsert=True,
+            )
 
     # Announcements
     if await db.announcements.count_documents({}) == 0:

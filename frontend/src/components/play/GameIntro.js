@@ -12,7 +12,7 @@ import { Globe } from "lucide-react";
 const FAMILY = {
   "fun-roulette": "wheel", "super-golden-wheel": "wheel", "ice-fishing": "wheel",
   "triple-fun": "slot", "lucky-8-line": "slot", "giant-jackpot": "slot", "joker-bonus": "slot", "fever-joker-bonus": "slot",
-  "teen-patti": "card", "poker": "card", "champion-poker": "card", "andar-bahar": "card",
+  "teen-patti": "card", "poker": "card", "champion-poker": "card", "andar-bahar": "card", "blackjack": "card",
   "seven-up-down": "dice", keno: "ball", bingo: "ball",
   aviator: "fly", checker: "drop", "fun-target": "drop", "no-hold": "card",
 };
