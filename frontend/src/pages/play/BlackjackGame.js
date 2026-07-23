@@ -1,8 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { Plus, Minus, RotateCcw, ChevronRight } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+
+// Per-request timeout so a stalled network call (Render cold start, dropped
+// connection) fails cleanly instead of freezing the table forever.
+const REQ = { timeout: 22000 };
 import { sfx } from "@/lib/sound";
 import { PlayShell } from "@/components/play/PlayShell";
 import { CoinShower } from "@/pages/play/slots/slotFx";
@@ -110,13 +114,13 @@ const Spot = ({ label, sub, total, onAdd, disabled, small }) => (
 export default function BlackjackGame({ game }) {
   const [state, setState] = useState(null);
   const [bets, setBets] = useState([{ bet: 0, pp: 0, t3: 0 }]);
-  const [lastBets, setLastBets] = useState(null);
+  const lastBetsRef = useRef(null);
   const [chip, setChip] = useState(100);
   const [busy, setBusy] = useState(false);
   const [shuffling, setShuffling] = useState(false);
 
   const refresh = useCallback(async () => {
-    try { const { data } = await api.get("/blackjack/state"); setState(data); } catch { /* */ }
+    try { const { data } = await api.get("/blackjack/state", REQ); setState(data); } catch { /* */ }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -137,41 +141,50 @@ export default function BlackjackGame({ game }) {
     const hands = bets.filter((h) => h.bet > 0).map((h) => ({ bet: h.bet, pp: h.pp, t3: h.t3 }));
     if (!hands.length) { toast.info("Place a bet on at least one hand"); return; }
     setBusy(true);
-    setLastBets(bets.map((h) => ({ ...h })));   // remember for quick rebet
+    lastBetsRef.current = bets.map((h) => ({ ...h }));   // remember for quick rebet
     setShuffling(true);
     (sfx.shuffle ? sfx.shuffle() : sfx.chip && sfx.chip());
-    const minShow = new Promise((r) => setTimeout(r, 1550));   // let the shuffle read
+    const minShow = new Promise((r) => setTimeout(r, 1450));   // let the shuffle read
     try {
-      const [{ data }] = await Promise.all([api.post("/blackjack/deal", { hands }), minShow]);
-      setShuffling(false);
+      // whichever finishes last: the shuffle animation or the (timeout-bounded)
+      // network deal — the request can NEVER strand the overlay now.
+      const [{ data }] = await Promise.all([api.post("/blackjack/deal", { hands }, REQ), minShow]);
       setState(data);
       sfx.flick && sfx.flick();
     } catch (e) {
-      setShuffling(false);
-      toast.error(errMsg(e));
-    } finally { setBusy(false); }
+      toast.error(errMsg(e, "Deal timed out — please try again."));
+    } finally { setShuffling(false); setBusy(false); }
   };
   const act = async (action) => {
     setBusy(true); sfx.flick && sfx.flick();
-    try { const { data } = await api.post("/blackjack/action", { action }); setState(data); }
+    try { const { data } = await api.post("/blackjack/action", { action }, REQ); setState(data); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
   const insure = async (take) => {
     setBusy(true);
-    try { const { data } = await api.post("/blackjack/insurance", { take }); setState(data); }
+    try { const { data } = await api.post("/blackjack/insurance", { take }, REQ); setState(data); }
     catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  // THE fix: after a round, return to a clean betting table with the last
-  // bets pre-filled so the next hand is one tap away (or adjust freely).
-  const nextHand = () => {
-    setState({ status: "idle", balance: state?.balance });
-    setBets(lastBets && lastBets.some((h) => h.bet > 0) ? lastBets.map((h) => ({ ...h })) : [{ bet: 0, pp: 0, t3: 0 }]);
-  };
+  // After a round, return to a clean betting table with the last bets
+  // pre-filled so the next hand is one tap away (or adjust freely).
+  const nextHand = useCallback(() => {
+    setState((s) => ({ status: "idle", balance: s?.balance }));
+    const lb = lastBetsRef.current;
+    setBets(lb && lb.some((h) => h.bet > 0) ? lb.map((h) => ({ ...h })) : [{ bet: 0, pp: 0, t3: 0 }]);
+  }, []);
 
   useEffect(() => {
     if (done && state?.net > 0) { sfx.winCelebration ? sfx.winCelebration() : sfx.slotBell && sfx.slotBell(); }
     else if (done && state?.net < 0) { sfx.lose && sfx.lose(); }
   }, [done, state?.net]);
+
+  // Real-casino continuous flow: hold the result on the felt for a beat, then
+  // auto-return to the betting table for the next round. (Manual button too.)
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => nextHand(), 3400);
+    return () => clearTimeout(t);
+  }, [done, nextHand]);
 
   const activeIdx = state?.active;
   const activeHand = playing ? state.hands[activeIdx] : null;
@@ -209,6 +222,30 @@ export default function BlackjackGame({ game }) {
 
           <AnimatePresence>{shuffling && <ShuffleOverlay />}</AnimatePresence>
           {done && state?.net > 0 && <CoinShower />}
+
+          {/* centered result flash across the felt, Evolution-style */}
+          <AnimatePresence>
+            {done && (
+              <motion.div
+                key="flash"
+                className="absolute inset-x-0 top-1/2 -translate-y-1/2 z-20 flex justify-center pointer-events-none"
+                initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ type: "spring", stiffness: 300, damping: 18 }}
+              >
+                <span
+                  className="px-5 py-2 rounded-full font-black tracking-[0.14em] text-lg backdrop-blur-sm"
+                  style={{
+                    color: state.net > 0 ? "#052e16" : "#fff",
+                    background: state.net > 0 ? "linear-gradient(180deg,#fde68a,#f5b312)" : state.net < 0 ? "rgba(120,20,30,0.7)" : "rgba(30,50,80,0.7)",
+                    border: `2px solid ${state.net > 0 ? "#fff3c4" : "rgba(255,255,255,0.35)"}`,
+                    boxShadow: state.net > 0 ? "0 6px 22px rgba(245,179,18,0.55)" : "0 6px 18px rgba(0,0,0,0.5)",
+                  }}
+                >
+                  {state.net > 0 ? "YOU WIN" : state.net < 0 ? "DEALER WINS" : "PUSH"}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <p className="text-center text-[9px] font-extrabold tracking-[0.22em] text-white/70 mb-1">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON ALL 17</p>
 
@@ -316,6 +353,7 @@ export default function BlackjackGame({ game }) {
             className="w-full rounded-xl bg-primary text-primary-foreground font-extrabold text-base tracking-wide uppercase py-3.5 min-h-[52px] shadow-[0_8px_24px_rgba(255,199,64,0.4)] active:scale-[0.98] flex items-center justify-center gap-1">
             Next Hand <ChevronRight className="h-5 w-5" />
           </button>
+          <p className="text-center text-[10px] text-white/40">New round starts automatically…</p>
         </div>
       )}
     </PlayShell>
