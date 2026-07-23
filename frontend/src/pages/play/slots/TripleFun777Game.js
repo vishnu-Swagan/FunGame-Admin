@@ -257,8 +257,6 @@ export default function TripleFun777Game({ game }) {
                 </div>
               ))}
             </div>
-            {/* center payline (flashes on a win) */}
-            <div aria-hidden="true" className={`absolute left-[-3%] right-[-3%] top-1/2 -translate-y-1/2 h-[2px] z-20 ${isWin ? "fg-line-flash" : ""}`} style={{ background: "rgba(220,38,38,0.8)", boxShadow: "0 0 6px rgba(220,38,38,0.7)" }} />
           </div>
 
           {/* win celebration layered over the machine */}

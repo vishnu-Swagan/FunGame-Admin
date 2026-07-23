@@ -42,10 +42,21 @@ const wedge = (cx, cy, r0, r1, a0, a1) => {
 
 /* ---- realistic 53-segment ice money wheel ---- */
 const C = 110; // svg center
-function IceWheel({ layout, rot, spinMs, spinning, leafMult, boost }) {
-  const n = layout.length || 53;
-  const step = 360 / n;
-  const R0 = 34, R1 = 96, R_PEG = 99, R_LBL = 78, R_MULT = 56;
+const BONUS_SET = new Set(["blues", "oranges", "reds"]);
+// variable-width segments — bonus wedges are much wider so their colour and
+// label read clearly. Cumulative angles from the top (0deg), clockwise.
+function buildGeo(layout) {
+  const weights = layout.map((t) => (BONUS_SET.has(t) ? 2.7 : 1));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  let acc = 0;
+  return layout.map((t, i) => {
+    const w = (weights[i] / total) * 360;
+    const a0 = acc; acc += w;
+    return { type: t, a0, a1: acc, mid: a0 + w / 2 };
+  });
+}
+function IceWheel({ geo, rot, spinMs, spinning, leafMult, boost }) {
+  const R0 = 34, R1 = 96, R_PEG = 99, R_LBL = 74, R_MULT = 55;
   return (
     <div className="relative mx-auto" style={{ width: "100%", maxWidth: 360, aspectRatio: "1/1", filter: "drop-shadow(0 16px 32px rgba(0,0,0,0.55))" }} data-testid="ice-wheel-viz">
       {/* fixed metal frame */}
@@ -70,24 +81,23 @@ function IceWheel({ layout, rot, spinMs, spinning, leafMult, boost }) {
             </radialGradient>
           </defs>
 
-          {/* segments */}
-          {layout.map((t, i) => {
-            const a0 = i * step - step / 2, a1 = a0 + step, mid = i * step;
-            const s = SEG[t] || SEG.blank;
-            const isBonus = ["blues", "oranges", "reds"].includes(t);
-            const [lx, ly] = polar(C, C, R_LBL, mid);
+          {/* segments (variable width) */}
+          {geo.map((g, i) => {
+            const s = SEG[g.type] || SEG.blank;
+            const isBonus = BONUS_SET.has(g.type);
+            const [lx, ly] = polar(C, C, R_LBL, g.mid);
             const hasLeafMult = leafMult && leafMult.index === i;
-            const hasBoost = boost && boost.type === t;
+            const hasBoost = boost && boost.type === g.type;
             return (
               <g key={i}>
-                <path d={wedge(C, C, R0, R1, a0, a1)} fill={`url(#ifg-${t})`} />
-                {isBonus && <path d={wedge(C, C, R0, R1, a0, a1)} fill="none" stroke="#fff" strokeWidth="0.6" opacity="0.55" />}
+                <path d={wedge(C, C, R0, R1, g.a0, g.a1)} fill={`url(#ifg-${g.type})`} />
+                {isBonus && <path d={wedge(C, C, R0, R1, g.a0, g.a1)} fill="none" stroke="#fff" strokeWidth="0.8" opacity="0.65" />}
                 {s.label && (
-                  <text x={lx} y={ly} fill={s.text} fontSize={isBonus ? 5.2 : 4} fontWeight="900" textAnchor="middle" dominantBaseline="central"
-                    transform={`rotate(${mid}, ${lx}, ${ly})`} style={{ letterSpacing: 0.2 }}>{s.label}</text>
+                  <text x={lx} y={ly} fill={s.text} fontSize="7.5" fontWeight="900" textAnchor="middle" dominantBaseline="central"
+                    transform={`rotate(${g.mid - 90}, ${lx}, ${ly})`} stroke="rgba(0,0,0,0.4)" strokeWidth="0.5" paintOrder="stroke" style={{ letterSpacing: 0.5 }}>{s.label}</text>
                 )}
                 {(hasLeafMult || hasBoost) && (() => {
-                  const [mx, my] = polar(C, C, R_MULT, mid);
+                  const [mx, my] = polar(C, C, R_MULT, g.mid);
                   return (
                     <g className="fg-marquee-fast">
                       <circle cx={mx} cy={my} r="8" fill="#ffd447" stroke="#7a5200" strokeWidth="1" />
@@ -99,16 +109,16 @@ function IceWheel({ layout, rot, spinMs, spinning, leafMult, boost }) {
               </g>
             );
           })}
-          {/* separators */}
-          {layout.map((_, i) => {
-            const a = i * step - step / 2;
-            const [x0, y0] = polar(C, C, R0, a), [x1, y1] = polar(C, C, R1, a);
-            return <line key={`s${i}`} x1={x0} y1={y0} x2={x1} y2={y1} stroke="#0b1c2c" strokeWidth="0.5" opacity="0.55" />;
-          })}
-          {/* pegs ring — a metal ball at every boundary */}
-          {layout.map((_, i) => {
-            const [px, py] = polar(C, C, R_PEG, i * step - step / 2);
-            return <circle key={`p${i}`} cx={px} cy={py} r="2.1" fill="#eaf6ff" stroke="#38617f" strokeWidth="0.6" />;
+          {/* separators + pegs at every boundary */}
+          {geo.map((g, i) => {
+            const [x0, y0] = polar(C, C, R0, g.a0), [x1, y1] = polar(C, C, R1, g.a0);
+            const [px, py] = polar(C, C, R_PEG, g.a0);
+            return (
+              <g key={`b${i}`}>
+                <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#0b1c2c" strokeWidth="0.5" opacity="0.5" />
+                <circle cx={px} cy={py} r="2.1" fill="#eaf6ff" stroke="#38617f" strokeWidth="0.6" />
+              </g>
+            );
           })}
           {/* gloss + rings */}
           <circle cx={C} cy={C} r={R1} fill="url(#ifGloss)" style={{ mixBlendMode: "soft-light" }} pointerEvents="none" />
@@ -135,25 +145,41 @@ function IceWheel({ layout, rot, spinMs, spinning, leafMult, boost }) {
   );
 }
 
-/* ---- stylized fish (faces right) ---- */
-const FishArt = ({ color, dark, size = 128 }) => (
-  <svg width={size} height={size * 0.62} viewBox="0 0 120 74" style={{ filter: "drop-shadow(0 10px 22px rgba(0,0,0,0.55))" }}>
-    <defs>
-      <radialGradient id={`fb-${color.replace('#','')}`} cx="42%" cy="34%" r="72%">
-        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
-        <stop offset="42%" stopColor={color} />
-        <stop offset="100%" stopColor={dark} />
-      </radialGradient>
-    </defs>
-    <path d="M16 37 L1 15 L26 37 L1 59 Z" fill={dark} />
-    <path d="M50 14 Q66 0 84 15 Q66 11 50 16 Z" fill={dark} opacity="0.92" />
-    <path d="M52 60 Q66 72 82 57 Q66 62 52 58 Z" fill={dark} opacity="0.85" />
-    <ellipse cx="66" cy="37" rx="47" ry="24" fill={`url(#fb-${color.replace('#','')})`} stroke="rgba(0,0,0,0.25)" strokeWidth="1" />
-    <ellipse cx="58" cy="27" rx="20" ry="7" fill="#fff" opacity="0.28" />
-    <path d="M92 20 Q86 37 92 54" fill="none" stroke="rgba(0,0,0,0.28)" strokeWidth="2" />
-    <circle cx="101" cy="30" r="5.5" fill="#fff" /><circle cx="102.5" cy="30" r="2.8" fill="#101827" />
-  </svg>
-);
+/* ---- realistic fish (faces right) ---- */
+const FishArt = ({ color, dark, size = 150 }) => {
+  const uid = color.replace("#", "");
+  return (
+    <svg width={size} height={size * 0.66} viewBox="0 0 140 92" style={{ filter: "drop-shadow(0 12px 26px rgba(0,0,0,0.6))" }}>
+      <defs>
+        <linearGradient id={`fbg-${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.65" />
+          <stop offset="30%" stopColor={color} />
+          <stop offset="78%" stopColor={color} />
+          <stop offset="100%" stopColor={dark} />
+        </linearGradient>
+      </defs>
+      {/* forked tail */}
+      <path d="M20 46 C8 30 5 24 2 20 L28 40 C26 44 26 48 28 52 L2 72 C5 68 8 62 20 46 Z" fill={dark} />
+      {/* dorsal + pelvic fins */}
+      <path d="M54 22 Q72 4 94 18 L86 31 Q70 23 57 31 Z" fill={dark} opacity="0.92" />
+      <path d="M60 66 Q72 86 92 70 L84 60 Q70 67 62 60 Z" fill={dark} opacity="0.85" />
+      {/* body */}
+      <path d="M22 46 C34 22 66 16 96 24 C118 30 133 40 138 46 C133 52 118 62 96 68 C66 76 34 70 22 46 Z" fill={`url(#fbg-${uid})`} stroke="rgba(0,0,0,0.28)" strokeWidth="1" />
+      {/* belly sheen */}
+      <path d="M42 56 C66 68 98 66 122 55 C100 63 66 68 42 56 Z" fill="#ffffff" opacity="0.25" />
+      {/* scales */}
+      {[46, 60, 74, 88, 102].map((x, i) => (
+        <path key={x} d={`M${x} ${36 + (i % 2) * 2} Q${x + 8} 46 ${x} ${56 - (i % 2) * 2}`} fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1.2" />
+      ))}
+      {/* gill */}
+      <path d="M104 30 Q98 46 104 62" fill="none" stroke="rgba(0,0,0,0.3)" strokeWidth="2.5" />
+      {/* eye */}
+      <circle cx="120" cy="38" r="6.2" fill="#fff" /><circle cx="121.6" cy="38" r="3.1" fill="#101827" /><circle cx="120.2" cy="36.4" r="1.1" fill="#fff" />
+      {/* mouth */}
+      <path d="M136 46 Q140 48.5 136.5 51" fill="none" stroke="rgba(0,0,0,0.4)" strokeWidth="1.6" />
+    </svg>
+  );
+};
 
 /* ---- cinematic fish bonus reveal ---- */
 const FISH_COLOR = { blues: ["#3b90f0", "#12467e"], oranges: ["#ffa62a", "#b4560a"], reds: ["#f04747", "#8f1414"] };
@@ -227,7 +253,7 @@ export default function IceFishingGame({ game }) {
 
   const opts = state?.options || {};
   const layout = opts.layout || [];
-  const n = layout.length || 53;
+  const geo = layout.length ? buildGeo(layout) : [];
   const [chip, setChip] = useState(100);
   const [rot, setRot] = useState(0);
   const [spinning, setSpinning] = useState(false);
@@ -246,8 +272,9 @@ export default function IceFishingGame({ game }) {
     if (phase === "BETTING") { setSpinning(false); setLanded(false); return; }
     if (!outcome || outcome.win_index == null || spunRef.current === roundNo) return;
     spunRef.current = roundNo;
-    const step = 360 / n;
-    const target = (360 - outcome.win_index * step) % 360;
+    const seg = geo[outcome.win_index];
+    if (!seg) return;
+    const target = (360 - seg.mid + 360) % 360;
     const prev = rotRef.current;
     const prevMod = ((prev % 360) + 360) % 360;
     let delta = (target - prevMod + 360) % 360;
@@ -259,7 +286,7 @@ export default function IceFishingGame({ game }) {
     clearTimeout(landTimer.current);
     landTimer.current = setTimeout(() => { setLanded(true); sfx.reelStop && sfx.reelStop(); if (navigator.vibrate) navigator.vibrate(40); }, 3500 + spinMs + 150);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, outcome, roundNo, n]);
+  }, [phase, outcome, roundNo]);
   useEffect(() => () => clearTimeout(landTimer.current), []);
 
   const spotTotals = {};
@@ -337,7 +364,7 @@ export default function IceFishingGame({ game }) {
     >
       {/* ---- ice wheel stage ---- */}
       <div className="relative rounded-2xl border-2 p-4 overflow-hidden" style={{ borderColor: "#4aa3d955", background: "radial-gradient(120% 100% at 50% 20%, #123a5c 0%, #0a2740 55%, #061626 100%)" }} data-testid="ice-wheel">
-        <IceWheel layout={layout} rot={rot} spinMs={spinMs} spinning={spinning} leafMult={phase !== "BETTING" ? outcome?.leaf_mult : null} boost={phase !== "BETTING" ? outcome?.boost : null} />
+        <IceWheel geo={geo} rot={rot} spinMs={spinMs} spinning={spinning} leafMult={phase !== "BETTING" ? outcome?.leaf_mult : null} boost={phase !== "BETTING" ? outcome?.boost : null} />
 
         {/* result plate */}
         <div className="mt-3 rounded-lg border text-center py-1.5" style={{ borderColor: "#4aa3d944", background: "rgba(0,0,0,0.3)" }}>
