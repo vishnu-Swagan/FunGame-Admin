@@ -24,6 +24,7 @@ import GiantJackpotGame from "@/pages/play/slots/GiantJackpotGame";
 import FeverJokerGame from "@/pages/play/slots/FeverJokerGame";
 import AviatorGame from "@/pages/play/AviatorGame";
 import CheckerGame from "@/pages/play/CheckerGame";
+import IceFishingGame from "@/pages/play/IceFishingGame";
 
 const COMPONENTS = {
   "seven-up-down": DiceGame,
@@ -44,6 +45,7 @@ const COMPONENTS = {
   "triple-fun": TripleFun777Game,
   aviator: AviatorGame,
   checker: CheckerGame,
+  "ice-fishing": IceFishingGame,
 };
 
 export default function GamePlay() {

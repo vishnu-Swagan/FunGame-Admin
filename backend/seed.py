@@ -72,6 +72,9 @@ GAMES = [
     {"slug": "teen-patti", "name": "Teen Patti", "category": "Cards", "tagline": "Three cards, boot and blind", "featured": True,
      "description": "The beloved three-card game. Boot, blind, chaal and show — all in play chips.",
      "art": {"from": "#3a1206", "to": "#c05a12", "accent": "#ffa04d", "icon": "club", "glyph": "3\u2666"}},
+    {"slug": "ice-fishing", "name": "Ice Fishing", "category": "Wheel", "tagline": "Spin the ice, reel the big catch", "featured": True,
+     "description": "A 53-segment money wheel with three cinematic fish bonus games. Bet the leaves for instant pays, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
+     "art": {"from": "#0a2a44", "to": "#4aa3d9", "accent": "#bfe6ff", "icon": "fish", "glyph": "\u2744"}},
 ]
 
 ANNOUNCEMENTS = [
@@ -142,6 +145,21 @@ async def run_seed():
             await db.games.insert_many(docs, ordered=False)
         except Exception as e:
             logger.info(f'games seed race (ok): {e}')
+
+    # Ice Fishing was added after the initial seed — ensure it exists and is
+    # playable on already-seeded databases (idempotent; won't clobber edits).
+    ice = next((g for g in GAMES if g['slug'] == 'ice-fishing'), None)
+    if ice:
+        await db.games.update_one(
+            {'slug': 'ice-fishing'},
+            {'$setOnInsert': {
+                'id': str(uuid.uuid4()), 'slug': 'ice-fishing', 'name': ice['name'],
+                'category': ice['category'], 'tagline': ice['tagline'], 'description': ice['description'],
+                'status': 'ENABLED', 'featured': ice['featured'], 'art': ice['art'], 'order': 99,
+                'created_at': now,
+            }},
+            upsert=True,
+        )
 
     # Announcements
     if await db.announcements.count_documents({}) == 0:

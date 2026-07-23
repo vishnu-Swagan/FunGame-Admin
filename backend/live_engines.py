@@ -9,6 +9,7 @@ from game_engines import (
     RNG, new_deck, draw_cards, card_str, eval_poker5, eval_teen_patti, TP_LABELS,
     vp_result, play_slot, play_no_hold, play_checker, play_andar_bahar,
     play_giant_jackpot, play_fever_joker, play_lucky8, play_triple_fun, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
+    ice_fishing_round, settle_ice_fishing, IF_LAYOUT, IF_SPOTS, IF_FISH_RANGE,
 )
 
 POKER_LABELS = {9: "Royal Flush", 8: "Straight Flush", 7: "Four of a Kind", 6: "Full House",
@@ -38,6 +39,8 @@ LIVE_GAMES = {
     "joker-bonus":       {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
     "lucky-8-line":      {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
     "triple-fun":        {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
+    # reveal = multiplier-drop (~4s) + wheel spin (~8s); result = leaf payout or the cinematic fish bonus
+    "ice-fishing":       {"bet": 14, "reveal": 12, "result": 10, "kind": "spots"},
 }
 
 SLOT_SLUGS = {"joker-bonus"}  # giant-jackpot, fever-joker, lucky-8, triple-fun have their own engines
@@ -53,6 +56,9 @@ SIDE_OPTIONS = {
     # wins on a tie.
     "teen-patti": {"player": 1.40, "dealer": 1.40, "tie": 6},
     "poker": {"player": 1.40, "dealer": 1.40, "tie": 15},
+    # Ice Fishing carries its wheel layout + spot metadata here so the client
+    # renders the exact same 53-segment wheel the server settles against.
+    "ice-fishing": {"layout": IF_LAYOUT, "spots": list(IF_SPOTS), "fish_range": IF_FISH_RANGE},
 }
 
 
@@ -114,6 +120,8 @@ def generate_outcome(slug):
         return {"result": RNG.randint(0, 9)}
     if slug == "super-golden-wheel":
         return {"multiplier": weighted_choice([(s["m"], s["w"]) for s in WHEEL_SEGMENTS])}
+    if slug == "ice-fishing":
+        return ice_fishing_round()
     if slug == "giant-jackpot":
         outcome, _ = play_giant_jackpot(1, {})
         return outcome
@@ -159,6 +167,10 @@ def validate_selection(slug, selection):
     if kind == "pick":  # fun-target
         if not isinstance(selection, int) or selection < 0 or selection > 9:
             bad("Pick a number from 0 to 9")
+        return selection
+    if kind == "spots":  # ice-fishing multi-bet spots
+        if selection not in IF_SPOTS:
+            bad(f"Pick one of: {', '.join(IF_SPOTS)}")
         return selection
     if kind == "picks":  # keno
         if not isinstance(selection, list) or not (1 <= len(selection) <= 10):
@@ -214,6 +226,9 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     if kind == "pick":
         won = selection == outcome["result"]
         return (amount * 7 if won else 0), {"result": "win" if won else "lose"}
+    if kind == "spots":  # ice-fishing
+        payout = settle_ice_fishing(outcome, selection, amount)
+        return payout, {"spot": selection, "win_type": outcome["win_type"], "result": "win" if payout > 0 else "lose"}
     if kind == "picks":
         matches = sorted(set(selection) & set(outcome["drawn"]))
         mult = KENO_PAYTABLE[len(selection)].get(len(matches), 0)
@@ -233,6 +248,8 @@ def summarize_outcome(slug, outcome):
         return {"total": outcome["total"], "winner": outcome["winner"]}
     if slug == "fun-target":
         return {"result": outcome["result"]}
+    if slug == "ice-fishing":
+        return {"win_type": outcome["win_type"], "fish": outcome.get("fish_final")}
     if slug in ("teen-patti", "poker", "checker", "andar-bahar"):
         return {"winner": outcome["winner"]}
     if slug == "keno":

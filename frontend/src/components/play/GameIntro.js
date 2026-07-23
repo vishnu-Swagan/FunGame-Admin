@@ -10,7 +10,7 @@ import { Globe } from "lucide-react";
 
 // per-game family → how the hero art animates in
 const FAMILY = {
-  "fun-roulette": "wheel", "super-golden-wheel": "wheel",
+  "fun-roulette": "wheel", "super-golden-wheel": "wheel", "ice-fishing": "wheel",
   "triple-fun": "slot", "lucky-8-line": "slot", "giant-jackpot": "slot", "joker-bonus": "slot", "fever-joker-bonus": "slot",
   "teen-patti": "card", "poker": "card", "champion-poker": "card", "andar-bahar": "card",
   "seven-up-down": "dice", keno: "ball", bingo: "ball",

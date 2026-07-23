@@ -768,3 +768,77 @@ ENGINES = {
     "triple-fun": make_slot_engine("triple-fun"),
 }
 # aviator + champion-poker are stateful and handled in routes_games.py
+
+
+# ---------------- Ice Fishing: 53-segment money wheel + fish bonuses ----------------
+# Universal synced wheel. Leaf 1 / Leaf 2 pay 1:1 (boosted by a per-round leaf
+# multiplier). Lil' Blues / Big Oranges / Huge Reds trigger a cinematic fish
+# bonus paying the fish's multiplier (x a possible 2-10x type boost). "All
+# Bonuses" covers all three. Tuned to ~70% RTP for leaf + All Bonuses; the
+# individual bonus spots are high-variance lottery bets (see the sim in specs).
+IF_LAYOUT = [
+    'reds', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1',
+    'leaf2', 'blank', 'leaf1', 'blues', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2',
+    'blank', 'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'oranges', 'leaf2', 'blank',
+    'leaf1', 'leaf2', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2',
+    'blues', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'blank', 'leaf1', 'leaf2', 'leaf1',
+    'leaf2', 'blank', 'blank',
+]
+IF_SPOTS = ("leaf1", "leaf2", "blues", "oranges", "reds", "all-bonuses")
+IF_BONUS_TYPES = ("blues", "oranges", "reds")
+IF_LEAF_MULTS = [3] * 40 + [4] * 25 + [5] * 20 + [7] * 10 + [10] * 5
+IF_BOOST_P = 0.45
+IF_BOOSTS = [2] * 38 + [3] * 26 + [4] * 14 + [5] * 9 + [6] * 6 + [7] * 3 + [8] * 2 + [10] * 1
+
+
+def _if_wl(pairs):
+    out = []
+    for v, w in pairs:
+        out += [v] * w
+    return out
+
+
+IF_FISH = {
+    "blues":   _if_wl([(3, 105), (4, 80), (5, 50), (6, 28), (8, 14), (10, 7), (15, 3), (25, 1), (50, 1), (100, 1)]),
+    "oranges": _if_wl([(4, 130), (5, 78), (6, 38), (8, 20), (10, 11), (15, 5), (25, 2), (50, 1), (100, 1), (200, 1)]),
+    "reds":    _if_wl([(10, 600), (12, 30), (15, 10), (20, 4), (40, 1), (120, 1), (500, 1)]),
+}
+IF_FISH_RANGE = {"blues": "3x–100x", "oranges": "4x–200x", "reds": "10x–500x"}
+
+
+def ice_fishing_round():
+    """One universal Ice Fishing outcome. Secure RNG; all fields immutable per round."""
+    win_index = RNG.randrange(len(IF_LAYOUT))
+    win_type = IF_LAYOUT[win_index]
+    leaf_positions = [i for i, t in enumerate(IF_LAYOUT) if t in ("leaf1", "leaf2")]
+    lm_index = RNG.choice(leaf_positions)
+    leaf_mult = {"index": lm_index, "type": IF_LAYOUT[lm_index], "mult": RNG.choice(IF_LEAF_MULTS)}
+    boost = None
+    if RNG.random() < IF_BOOST_P:
+        boost = {"type": RNG.choice(IF_BONUS_TYPES), "mult": RNG.choice(IF_BOOSTS)}
+    fish = fish_final = None
+    if win_type in IF_BONUS_TYPES:
+        fish = RNG.choice(IF_FISH[win_type])
+        b = boost["mult"] if (boost and boost["type"] == win_type) else 1
+        fish_final = fish * b
+    return {
+        "win_index": win_index, "win_type": win_type,
+        "leaf_mult": leaf_mult, "boost": boost,
+        "fish": fish, "fish_final": fish_final,
+    }
+
+
+def settle_ice_fishing(outcome, selection, amount):
+    """Payout (int) for one Ice Fishing bet spot against the universal outcome."""
+    wt = outcome["win_type"]
+    if selection in ("leaf1", "leaf2"):
+        if wt != selection:
+            return 0
+        lm = outcome["leaf_mult"]
+        odds = lm["mult"] if outcome["win_index"] == lm["index"] else 1
+        return int(amount * (1 + odds))  # 1:1, or mult:1 on the boosted segment
+    if selection in IF_BONUS_TYPES:
+        return int(amount * outcome["fish_final"]) if wt == selection else 0
+    if selection == "all-bonuses":
+        return int(amount * outcome["fish_final"]) if wt in IF_BONUS_TYPES else 0
+    return 0
