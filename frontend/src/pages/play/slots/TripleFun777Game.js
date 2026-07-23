@@ -59,8 +59,10 @@ const Sym = ({ id, size = 44 }) => {
 
 // live reel window placed over the cabinet art (fractions of the image box)
 const WINDOW = { left: 23, top: 35, width: 60, height: 45 };
-// lever ball position over the printed lever (fractions of the image box)
-const LEVER = { left: 83.5, top: 19, size: 8.5 };
+// live chrome lever over the printed one (fractions of the image box).
+// left/top = ball's top-left, size = ball width, arm = ball+rod height; the
+// lever pivots at its bottom (the mechanism). Tune these to line up with the art.
+const LEVER = { left: 85, top: 19, size: 6.5, arm: 43 };
 
 /** Pulsing screen-blend glows that light the printed marquee bulbs (arch + both
     rails). Staggered timing gives a running-lights chase; faster when live. */
@@ -197,25 +199,25 @@ export default function TripleFun777Game({ game }) {
           />
           {/* blend the art's light corners into the dark stage */}
           <div aria-hidden="true" className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(74% 66% at 50% 50%, transparent 56%, rgba(6,10,20,0.92) 100%)" }} />
+          {/* focused shadow that hides the printed lever so the live one replaces it */}
+          <div aria-hidden="true" className="absolute pointer-events-none z-20" style={{ left: "79%", top: "9%", width: "23%", height: "54%", background: "radial-gradient(56% 60% at 52% 40%, rgba(6,10,20,0.98) 0%, rgba(6,10,20,0.72) 46%, transparent 82%)" }} />
 
           {/* running marquee lights on the printed bulbs */}
           <MarqueeLights live={spinningPhase || isWin} />
 
-          {/* pull lever — yanks down when the reels start rolling */}
+          {/* live chrome lever — swings down on its pivot when the reels roll */}
           <motion.div
             aria-hidden="true"
-            className="absolute z-30 rounded-full pointer-events-none"
-            style={{
-              left: `${LEVER.left}%`,
-              top: `${LEVER.top}%`,
-              width: `${LEVER.size}%`,
-              aspectRatio: "1 / 1",
-              background: "radial-gradient(circle at 34% 28%, #ff9a9a, #e11d1d 52%, #7f1010)",
-              boxShadow: "0 3px 10px rgba(0,0,0,0.5), 0 0 16px rgba(255,70,70,0.55), inset -3px -4px 8px rgba(0,0,0,0.45), inset 2px 2px 5px rgba(255,255,255,0.55)",
-            }}
-            animate={{ y: spinningPhase && stoppedCount === 0 ? "120%" : "0%" }}
-            transition={{ type: "spring", stiffness: 240, damping: 15 }}
-          />
+            className="absolute z-30 pointer-events-none"
+            style={{ left: `${LEVER.left}%`, top: `${LEVER.top}%`, width: `${LEVER.size}%`, height: `${LEVER.arm}%`, transformOrigin: "50% 100%" }}
+            animate={{ rotate: spinningPhase && stoppedCount === 0 ? 62 : 0 }}
+            transition={{ type: "spring", stiffness: 200, damping: 13 }}
+          >
+            {/* chrome rod */}
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-0 top-[16%] w-[26%] rounded-full" style={{ background: "linear-gradient(90deg, #5b6675, #eef2f7 46%, #7f8b9c)", boxShadow: "0 0 3px rgba(0,0,0,0.5)" }} />
+            {/* red ball knob */}
+            <div className="absolute left-1/2 -translate-x-1/2 top-0 rounded-full" style={{ width: "100%", aspectRatio: "1 / 1", background: "radial-gradient(circle at 34% 28%, #ff9a9a, #e11d1d 52%, #7f1010)", boxShadow: "0 3px 10px rgba(0,0,0,0.55), 0 0 16px rgba(255,70,70,0.5), inset -3px -4px 8px rgba(0,0,0,0.45), inset 2px 2px 5px rgba(255,255,255,0.6)" }} />
+          </motion.div>
 
           {/* live reel window (dark bezel fully covers the printed reels) */}
           <div
