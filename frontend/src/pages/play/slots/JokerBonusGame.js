@@ -15,12 +15,10 @@ import { FitWidth } from "@/components/FitWidth";
  * land. One universal spin per round on the shared server clock.
  */
 
-const IDS = ["plum", "grape", "melon", "bell", "seven", "joker"];
-const NICE = { PLUM: "NEON PLUM", GRAPE: "GRAPES", MELON: "MELON", BELL: "BELL", SEVEN: "NEON 7", JOKER: "JOKER WILD" };
-const nice = (label) => label.replace(/3x (\w+)/, (_, id) => `3\u00d7 ${NICE[id] || id}`);
+const IDS = ["--", "plum", "grape", "melon", "bell", "seven", "joker"];
 const PAYS = [
-  ["3\u00d7 Neon Plum", "2x"], ["3\u00d7 Grapes", "3x"], ["3\u00d7 Melon", "5x"],
-  ["3\u00d7 Bell", "10x"], ["3\u00d7 Neon 7", "18x"], ["3\u00d7 JOKER", "40x"],
+  ["1 Plum", "1x"], ["2 Plums", "2x"], ["3\u00d7 Plum", "7x"], ["3\u00d7 Grape", "9x"],
+  ["3\u00d7 Melon", "15x"], ["3\u00d7 Bell", "24x"], ["3\u00d7 Neon 7", "54x"], ["3\u00d7 JOKER", "140x"],
 ];
 
 const NEON = "#c084fc";
@@ -46,7 +44,7 @@ const Sym = ({ id, size = 44 }) => {
     case "joker":
       return <VenetianMask style={st("#facc15")} strokeWidth={1.6} />;
     default:
-      return <span>?</span>;
+      return null; // blank reel position
   }
 };
 
@@ -59,14 +57,13 @@ export default function JokerBonusGame({ game }) {
       formatResult: (s) => ({
         push: s.outcome.multiplier === 1,
         title:
-          s.outcome.label === "WILD JACKPOT"
-            ? `JESTER JACKPOT \u2014 ${s.outcome.multiplier}x!!`
-            : s.outcome.multiplier > 1
-            ? `${nice(s.outcome.label)} \u2014 ${s.outcome.multiplier}x!`
+          s.outcome.multiplier > 1
+            ? `${s.outcome.label} \u2014 ${s.outcome.multiplier}\u00d7!`
             : s.outcome.multiplier === 1
-            ? "Pair \u2014 stake back"
+            ? "1 Plum \u2014 stake back"
             : "The Joker laughs\u2026 no win",
-        subtitle: s.outcome.multiplier > 1 ? "The jester grins in your favor!" : undefined,
+        subtitle: s.outcome.multiplier >= 54 ? "The jester roars \u2014 huge hit!" : s.outcome.multiplier > 1 ? "The jester grins in your favor!" : undefined,
+        big: s.outcome.multiplier >= 24,
       }),
     });
   const [amount, setAmount] = useState(50);
@@ -97,7 +94,8 @@ export default function JokerBonusGame({ game }) {
   useEffect(() => {
     if (!allStopped || winKeyRef.current === roundNo) return;
     winKeyRef.current = roundNo;
-    if (outcome.label === "WILD JACKPOT") sfx.jokerLaugh();
+    if (outcome.multiplier >= 140) { sfx.jokerLaugh(); sfx.gong && sfx.gong(); sfx.coinShower && sfx.coinShower(); }
+    else if (outcome.multiplier > 1) { sfx.slotBell && sfx.slotBell(); sfx.coinShower && sfx.coinShower(); }
   }, [allStopped, outcome, roundNo]);
 
   const reelCell = (i) => {
@@ -132,7 +130,7 @@ export default function JokerBonusGame({ game }) {
             placing={placing}
             label="Tempt the Joker"
             myTotal={myTotal}
-            hint={"Pairs return your stake \u00b7 Joker wild substitutes"}
+            hint={"Joker wild substitutes \u00b7 plum pays left-aligned"}
           />
           {betting && myBets.length > 0 && (
             <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
@@ -232,12 +230,12 @@ export default function JokerBonusGame({ game }) {
                 ))}
               </div>
               <span className="text-[9px] font-bold" style={{ color: jokersLanded === 3 ? "#facc15" : "rgba(255,255,255,0.4)" }}>
-                {jokersLanded === 3 ? "JACKPOT 40x!" : "3 = 40x"}
+                {jokersLanded === 3 ? "JACKPOT 140x!" : "3 = 140x"}
               </span>
             </div>
             <p className="text-center text-[11px] mt-2" style={{ color: "rgba(255,255,255,0.45)" }} data-testid="joker-label">
               {allStopped
-                ? nice(outcome.label) + (outcome.multiplier > 1 ? ` \u2014 pays ${outcome.multiplier}x` : "")
+                ? outcome.label + (outcome.multiplier > 1 ? ` \u2014 pays ${outcome.multiplier}x` : "")
                 : spinningPhase
                 ? "The jester shuffles the reels\u2026"
                 : "Joker is WILD \u2014 substitutes any fruit"}

@@ -263,6 +263,40 @@ def play_triple_fun(bet, payload):
     return {"grid": grid, "reels": line, "multiplier": mult, "label": label}, payout
 
 
+# ---------------- Joker Bonus: real classic 3-reel, single-payline slot ----------------
+# Weighted virtual reel strips with a common BLANK (no more pair stake-back). Joker
+# is wild + the top jackpot; neon plum pays left-aligned. Exact math: ~72% RTP,
+# ~25% hit rate, jackpot 1 in 17,920 — real online-slot feel.
+JB_SYMS = ["--", "plum", "grape", "melon", "bell", "seven", "joker"]
+JB_W = {"--": [7, 8, 8], "plum": [8, 7, 7], "grape": [6, 6, 6], "melon": [5, 5, 5], "bell": [4, 3, 3], "seven": [3, 2, 2], "joker": [2, 1, 1]}
+JB_P3 = {"joker": 140, "seven": 54, "bell": 24, "melon": 15, "grape": 9, "plum": 7}
+JB_PLUM = {1: 1, 2: 2}
+JB_NAME = {"plum": "PLUM", "grape": "GRAPE", "melon": "MELON", "bell": "BELL", "seven": "NEON 7", "joker": "JOKER"}
+
+
+def _jb_pick(reel):
+    return weighted_choice([(s, JB_W[s][reel]) for s in JB_SYMS])
+
+
+def _jb_eval(line):
+    for s in ("joker", "seven", "bell", "melon", "grape", "plum"):
+        if all(x == s or x == "joker" for x in line):
+            if s == "joker":
+                return JB_P3[s], "JACKPOT · 3× JOKER"
+            return JB_P3[s], f"3× {JB_NAME[s]}"
+    if line[0] == "plum":
+        if line[1] in ("plum", "joker"):
+            return JB_PLUM[2], "2 PLUMS"
+        return JB_PLUM[1], "1 PLUM"
+    return 0, "NO WIN"
+
+
+def play_joker_bonus(bet, payload):
+    line = [_jb_pick(c) for c in range(3)]
+    mult, label = _jb_eval(line)
+    return {"reels": line, "multiplier": mult, "label": label}, int(round(bet * mult))
+
+
 # ---------------- Giant Jackpot: 5x3, 10-line video slot ----------------
 # A real 5-reel x 3-row slot: 10 fixed paylines, Diamond wild (substitutes on
 # lines), Scatter that pays anywhere; 5 scatters = the GIANT JACKPOT (1000x the
