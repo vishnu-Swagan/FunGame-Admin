@@ -174,6 +174,15 @@ export const sfx = {
   },
   push: () => tone({ freq: 520, dur: 0.14, type: "sine", vol: 0.1 }),
 
+  /* cinematic casino hero entrance — sub-bass swell + rising gold chime shimmer */
+  heroRise: () => {
+    vibe([0, 60, 40, 90]);
+    tone({ freq: 55, dur: 1.1, type: "sine", vol: 0.16, slideTo: 110 });
+    tone({ freq: 220, dur: 0.9, type: "sawtooth", vol: 0.05, slideTo: 440 });
+    [523, 659, 784, 988, 1319].forEach((f, i) => tone({ freq: f, dur: 0.6, type: "triangle", vol: 0.11, when: 0.18 + i * 0.07 }));
+    noise({ dur: 0.6, vol: 0.045, when: 0.12, freq: 6500, q: 0.6, filter: "highpass" });
+  },
+
   /* betting countdown alarm (shared across games) */
   tick: (step = 3) => {
     // escalating countdown blip: higher pitch + shorter as step -> 1 (final second)
