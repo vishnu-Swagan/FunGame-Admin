@@ -21,7 +21,6 @@ import routes_admin
 import routes_games
 import routes_live
 import routes_blackjack
-import routes_chicken_road
 import routes_security
 
 logging.basicConfig(
@@ -123,7 +122,6 @@ api_router.include_router(routes_auth.router)
 api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
-api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_security.router)

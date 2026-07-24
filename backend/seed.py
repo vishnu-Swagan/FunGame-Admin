@@ -78,9 +78,6 @@ GAMES = [
     {"slug": "blackjack", "name": "Blackjack", "category": "Cards", "tagline": "Hit, stand, beat the dealer", "featured": True,
      "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side bets, insurance, blackjack pays 3:2. Real casino rules.",
      "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
-    {"slug": "chicken-road", "name": "Chicken Road", "category": "Crash", "tagline": "Cross the road, bank the multiplier", "featured": True,
-     "description": "Chicken Road \u2014 step the chicken across the traffic. Every lane crossed raises the multiplier; cash out before a truck ends the run. Four difficulties from Easy to Hardcore.",
-     "art": {"from": "#1b2140", "to": "#3b4a86", "accent": "#ffd447", "icon": "target", "glyph": "\ud83d\udc14"}},
 ]
 
 ANNOUNCEMENTS = [
@@ -154,7 +151,7 @@ async def run_seed():
 
     # Games added after the initial seed — ensure they exist and are playable on
     # already-seeded databases (idempotent; won't clobber later edits).
-    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('chicken-road', 101)):
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100)):
         gm = next((g for g in GAMES if g['slug'] == slug), None)
         if gm:
             await db.games.update_one(
