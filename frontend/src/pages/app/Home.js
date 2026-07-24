@@ -36,56 +36,45 @@ const HeroSparks = () => (
   </div>
 );
 
-/* ---- cinematic casino scene — 100% crisp CSS (no raster) ---- */
-const RouletteWheel = ({ reduced, size = 186 }) => (
-  <div className="relative" style={{ width: size, height: size, filter: "drop-shadow(0 14px 26px rgba(0,0,0,0.6))" }}>
-    <div className="absolute inset-0 rounded-full" style={{ background: "conic-gradient(#fff2c0,#c9931a,#fff6d6,#a8760f,#ffe08a,#c9931a,#fff2c0)", boxShadow: "0 0 40px rgba(255,199,64,0.4), inset 0 3px 10px rgba(255,255,255,0.5), inset 0 -6px 14px rgba(0,0,0,0.55)" }} />
-    <div className="absolute rounded-full" style={{ inset: "6%", background: "#0a0d16", boxShadow: "inset 0 2px 12px rgba(0,0,0,0.85)" }} />
-    <motion.div className="absolute rounded-full overflow-hidden" style={{ inset: "10%" }} animate={reduced ? {} : { rotate: 360 }} transition={{ duration: 26, ease: "linear", repeat: Infinity }}>
-      <div className="absolute inset-0 rounded-full" style={{ background: "repeating-conic-gradient(#9c1f1f 0 18deg, #16161c 18deg 36deg)" }} />
-      <div className="absolute inset-0 rounded-full" style={{ background: "conic-gradient(#128a3e 0 9deg, transparent 9deg 360deg)" }} />
-      <div className="absolute inset-0 rounded-full" style={{ background: "repeating-conic-gradient(rgba(255,212,71,0.5) 0 0.6deg, transparent 0.6deg 18deg)" }} />
-      <div className="absolute rounded-full" style={{ inset: "27%", background: "radial-gradient(circle at 40% 32%, #fff2c0, #c9931a 60%, #7a5200)", boxShadow: "0 0 14px rgba(0,0,0,0.5)" }} />
-    </motion.div>
-    <div className="absolute rounded-full grid place-items-center" style={{ inset: "40%", background: "radial-gradient(circle at 40% 32%, #fff6d6, #c9931a 62%, #6e4a0c)", border: "1.5px solid #fff2c0" }}>
-      <span className="rounded-[2px]" style={{ width: 8, height: 8, background: "linear-gradient(135deg,#eaf6ff,#7fb2d8)", transform: "rotate(45deg)", boxShadow: "0 0 8px rgba(180,230,255,0.9)" }} />
-    </div>
-    <div className="absolute left-1/2 -translate-x-1/2 rounded-full" style={{ top: "8%", width: 7, height: 7, background: "radial-gradient(circle at 35% 30%, #fff, #cfd8e8)", boxShadow: "0 0 9px rgba(255,255,255,0.95)" }} />
-  </div>
-);
-const Chip = ({ c, edge, style }) => (
-  <div className="absolute rounded-full" style={{ width: 44, height: 44, background: `radial-gradient(circle at 40% 34%, ${c}, ${edge})`, border: "3px dashed rgba(255,255,255,0.6)", boxShadow: "0 6px 12px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.35)", ...style }} />
-);
-const ChipStack = () => (
-  <div className="relative" style={{ width: 50, height: 74 }}>
-    <Chip c="#1a1a1a" edge="#000" style={{ bottom: 0 }} />
-    <Chip c="#c02626" edge="#7f1414" style={{ bottom: 9 }} />
-    <Chip c="#2f6fd0" edge="#1a3f80" style={{ bottom: 18 }} />
-    <Chip c="#f5b312" edge="#a8760f" style={{ bottom: 27 }} />
-  </div>
-);
-const SceneCard = ({ rank, suit, red, rot, style }) => (
-  <div className="absolute rounded-md bg-white flex flex-col justify-between p-1" style={{ width: 40, height: 56, transform: `rotate(${rot}deg)`, boxShadow: "0 6px 14px rgba(0,0,0,0.55)", border: "1px solid #d7dbe6", ...style }}>
-    <span className="font-black leading-none" style={{ fontSize: 12, color: red ? "#d4152a" : "#14151c" }}>{rank}</span>
-    <span className="self-center leading-none" style={{ fontSize: 18, color: red ? "#d4152a" : "#14151c" }}>{suit}</span>
-  </div>
-);
-function CasinoStage({ accent = "#ffd447", reduced }) {
+/* ---- cinematic photo "video" stage: crossfading Ken-Burns casino reel ---- */
+const HERO_IMG = ["/hero/casino-floor.jpg", "/hero/jackpot.jpg", "/hero/celebrate.jpg", "/hero/slots-neon.jpg", "/hero/esports.jpg", "/hero/man-slots.jpg"];
+const KEN = [
+  { s0: 1.06, s1: 1.2, x0: -2, y0: -1, x1: 2, y1: 1 },
+  { s0: 1.2, s1: 1.06, x0: 2, y0: 1, x1: -2, y1: -1 },
+  { s0: 1.08, s1: 1.22, x0: 0, y0: 2, x1: 0, y1: -2 },
+  { s0: 1.22, s1: 1.08, x0: -2, y0: 1, x1: 2, y1: -1 },
+];
+function PhotoStage({ accent = "#ffd447", reduced }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    HERO_IMG.forEach((src) => { const im = new Image(); im.src = src; }); // preload
+  }, []);
+  useEffect(() => {
+    if (reduced) return;
+    const id = setInterval(() => setI((v) => (v + 1) % HERO_IMG.length), 4800);
+    return () => clearInterval(id);
+  }, [reduced]);
+  const k = KEN[i % KEN.length];
   return (
     <div className="absolute inset-0 overflow-hidden" style={{ transform: "translateZ(-30px)" }}>
-      <div className="absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 6%, #17233f 0%, #0b1222 46%, #05070f 100%)" }} />
-      <div aria-hidden className="absolute inset-0" style={{ background: `conic-gradient(from 200deg at 50% -12%, transparent, ${accent}22 8%, transparent 17%, transparent 44%, ${accent}1c 52%, transparent 60%)`, opacity: 0.9 }} />
-      {[["12%", "24%", 26, 0.45], ["82%", "16%", 34, 0.38], ["66%", "60%", 20, 0.5], ["24%", "70%", 16, 0.45], ["48%", "30%", 44, 0.24]].map(([l, t, s, o], i) => (
-        <span key={i} aria-hidden className="absolute rounded-full" style={{ left: l, top: t, width: s, height: s, background: accent, opacity: o, filter: "blur(9px)" }} />
-      ))}
-      <div aria-hidden className="absolute inset-x-[-10%] bottom-[-30%] h-[70%] rounded-[50%]" style={{ background: "radial-gradient(60% 100% at 50% 0%, #15713e 0%, #0c4a28 55%, transparent 78%)", boxShadow: "inset 0 8px 30px rgba(0,0,0,0.5)" }} />
-      <div className="absolute" style={{ right: "5%", top: "15%" }}><RouletteWheel reduced={reduced} size={188} /></div>
-      <div className="absolute" style={{ left: "9%", bottom: "22%" }}><ChipStack /></div>
-      <div className="absolute" style={{ left: "29%", bottom: "18%" }}>
-        <SceneCard rank="A" suit="♠" red={false} rot={-12} />
-        <SceneCard rank="K" suit="♥" red rot={7} style={{ left: 22 }} />
-      </div>
-      <div aria-hidden className="absolute inset-0" style={{ boxShadow: "inset 0 0 120px rgba(0,0,0,0.72)" }} />
+      <div className="absolute inset-0 bg-[#05070f]" />
+      <AnimatePresence>
+        <motion.div key={i} className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ opacity: { duration: 1.3, ease: "easeInOut" } }}>
+          <motion.img
+            src={HERO_IMG[i]} alt="Casino floor" draggable="false"
+            className="absolute inset-0 h-full w-full object-cover"
+            initial={reduced ? { scale: 1.1 } : { scale: k.s0, x: `${k.x0}%`, y: `${k.y0}%` }}
+            animate={reduced ? { scale: 1.1 } : { scale: k.s1, x: `${k.x1}%`, y: `${k.y1}%` }}
+            transition={{ duration: 6.4, ease: "linear" }}
+            style={{ filter: "saturate(1.08) contrast(1.05)" }}
+          />
+        </motion.div>
+      </AnimatePresence>
+      {/* cinematic grade for text legibility + brand tint */}
+      <div aria-hidden className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(6,8,16,0.4) 0%, transparent 26%, rgba(6,8,16,0.5) 58%, rgba(5,7,15,0.94) 100%)" }} />
+      <div aria-hidden className="absolute inset-0" style={{ background: `radial-gradient(85% 60% at 26% 16%, ${accent}18, transparent 60%)` }} />
+      <div aria-hidden className="fg-scanlines absolute inset-0 pointer-events-none opacity-15" />
+      <div aria-hidden className="absolute inset-0" style={{ boxShadow: "inset 0 0 120px rgba(0,0,0,0.6)" }} />
     </div>
   );
 }
@@ -134,19 +123,11 @@ function CinematicHero({ games, navigate, userName }) {
           animate={reduced ? {} : { rotateX: tilt.x, rotateY: tilt.y }}
           transition={{ type: "spring", stiffness: 120, damping: 18 }}
         >
-          {/* ---- cinematic casino stage (crisp CSS scene, tinted per title) ---- */}
-          <CasinoStage accent={art.accent} reduced={reduced} />
+          {/* ---- cinematic casino photo "video" stage ---- */}
+          <PhotoStage accent={art.accent} reduced={reduced} />
 
-          {/* crisp SVG geometric grid */}
-          <svg aria-hidden className="absolute inset-0 h-full w-full pointer-events-none" style={{ opacity: 0.13 }} preserveAspectRatio="none">
-            <defs><pattern id="fg-hero-grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#ffffff" strokeWidth="0.6" /></pattern></defs>
-            <rect width="100%" height="100%" fill="url(#fg-hero-grid)" />
-          </svg>
-
-          {/* grade + scanlines + sheen + sparks */}
-          <div aria-hidden className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(6,10,20,0.32) 0%, transparent 32%, rgba(6,10,20,0.82) 74%, #060a14 100%)" }} />
-          <div aria-hidden className="fg-scanlines absolute inset-0 pointer-events-none opacity-40" />
-          {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.13), transparent)" }} />}
+          {/* sheen sweep + gold sparks over the footage */}
+          {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)" }} />}
           {!reduced && <HeroSparks />}
 
           {/* top status bar — live floor */}
