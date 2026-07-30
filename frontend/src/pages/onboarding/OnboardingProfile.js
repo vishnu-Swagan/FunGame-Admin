@@ -56,7 +56,7 @@ export default function OnboardingProfile() {
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[160px] pointer-events-none" />
       <div className="relative z-[2] mx-auto max-w-[430px] px-5 py-10">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          <p className="font-display text-lg text-primary">FunGame</p>
+          <p className="font-display text-lg text-primary">Chakri.Casino</p>
           <div className="mt-4 flex items-center gap-2 text-xs text-white/50">
             <span className="h-6 w-6 rounded-full bg-primary text-primary-foreground font-bold flex items-center justify-center">1</span> Profile
             <span className="w-6 h-px bg-white/20" />
@@ -65,7 +65,7 @@ export default function OnboardingProfile() {
             <span className="h-6 w-6 rounded-full bg-white/10 flex items-center justify-center">3</span> Approval
           </div>
           <h1 className="mt-5 text-3xl font-bold tracking-tight">Set up your player profile</h1>
-          <p className="mt-2 text-sm text-white/65">This is how you will appear in the FunGame lounge.</p>
+          <p className="mt-2 text-sm text-white/65">This is how you will appear in the Chakri.Casino lounge.</p>
 
           <form onSubmit={submit} className="mt-7 space-y-5">
             <div className="space-y-2">
@@ -109,7 +109,7 @@ export default function OnboardingProfile() {
             <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5 cursor-pointer">
               <Checkbox data-testid="onboarding-terms-checkbox" checked={terms} onCheckedChange={(v) => setTerms(!!v)} className="mt-0.5" />
               <span className="text-xs text-white/70 leading-relaxed">
-                I understand FunGame uses <strong className="text-white">play chips only</strong>. There are no payments, prizes, deposits or withdrawals of any kind.
+                I understand Chakri.Casino uses <strong className="text-white">play chips only</strong>. There are no payments, prizes, deposits or withdrawals of any kind.
               </span>
             </label>
             <Button data-testid="onboarding-profile-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">

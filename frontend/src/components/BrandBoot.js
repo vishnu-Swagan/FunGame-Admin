@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { FunGameLogo } from "@/components/Brand";
+import { ChakriLogo } from "@/components/Brand";
 
 /* Cinematic brand boot — shown once per app session the first time the app is
-   opened: the logo forms up, the FUNGAME wordmark strikes in, a loader sweeps,
+   opened: the logo forms up, the CHAKRI.CASINO wordmark strikes in, a loader sweeps,
    then it dissolves into the home screen. The lobby loads underneath meanwhile. */
 
 const bootSeen = () => {
@@ -43,7 +43,7 @@ export const BrandBoot = () => {
             animate={{ scale: 1, rotate: 0, opacity: 1 }}
             transition={{ type: reduced ? "tween" : "spring", stiffness: 140, damping: 13, duration: reduced ? 0.3 : undefined }}
           >
-            <FunGameLogo className="h-24 w-24 drop-shadow-[0_0_34px_rgba(255,199,64,0.55)]" />
+            <ChakriLogo className="h-24 w-24 drop-shadow-[0_0_34px_rgba(255,199,64,0.55)]" />
           </motion.div>
           <motion.div
             className="mt-5 font-tech font-black text-4xl tracking-tight"
@@ -51,8 +51,8 @@ export const BrandBoot = () => {
             animate={{ opacity: 1, y: 0, letterSpacing: "-0.01em" }}
             transition={{ delay: 0.35, duration: 0.55, ease: "easeOut" }}
           >
-            <span className="text-white">FUN</span>
-            <span style={{ color: "#ffca3a" }}>GAME</span>
+            <span className="text-white">CHAKRI</span>
+            <span style={{ color: "#ffca3a" }}>.CASINO</span>
           </motion.div>
           <motion.p
             className="mt-3 font-gaming text-[11px] tracking-[0.45em] uppercase text-white/45"

@@ -1,5 +1,5 @@
 """
-FunGame Gameplay Engine Test Suite
+Chakri.Casino Gameplay Engine Test Suite
 Tests the bug fix: ALL 18 games should be playable with real engines.
 NO 'later build gate' 501 errors should appear.
 """
@@ -403,7 +403,7 @@ class GameplayTester:
     def run_all_tests(self):
         """Run all gameplay tests"""
         self.log("\n" + "="*70, Colors.YELLOW)
-        self.log("FunGame Gameplay Engine Test Suite", Colors.YELLOW)
+        self.log("Chakri.Casino Gameplay Engine Test Suite", Colors.YELLOW)
         self.log("BUG FIX VERIFICATION: No 'later build gate' errors", Colors.YELLOW)
         self.log("="*70 + "\n", Colors.YELLOW)
 

@@ -138,9 +138,9 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'ACTIVE', 'approved_at': _now()}, '$unset': {'rejection_reason': ''}})
     if not was_approved_before:
         await _credit_chips(user_id, WELCOME_BONUS, 'Welcome play chips — approval bonus')
-        await _notify(user_id, 'Account approved!', f'Welcome to FunGame! Your account is approved and {WELCOME_BONUS} welcome play chips were added.', 'APPROVAL')
+        await _notify(user_id, 'Account approved!', f'Welcome to Chakri.Casino! Your account is approved and {WELCOME_BONUS} welcome play chips were added.', 'APPROVAL')
     else:
-        await _notify(user_id, 'Account reactivated', 'Your FunGame account has been reactivated.', 'APPROVAL')
+        await _notify(user_id, 'Account reactivated', 'Your Chakri.Casino account has been reactivated.', 'APPROVAL')
     updated = await db.users.find_one({'id': user_id}, {'_id': 0, 'password_hash': 0})
     return {'message': 'User approved', 'user': serialize_doc(updated)}
 
@@ -166,7 +166,7 @@ async def suspend_user(user_id: str, body: AdminUserAction = None, admin: dict =
     if user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=400, detail='Only active users can be suspended')
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'SUSPENDED'}})
-    await _notify(user_id, 'Account suspended', 'Your FunGame account has been suspended. Contact support for details.', 'SUSPENSION')
+    await _notify(user_id, 'Account suspended', 'Your Chakri.Casino account has been suspended. Contact support for details.', 'SUSPENSION')
     return {'message': 'User suspended'}
 
 
@@ -185,7 +185,7 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
         },
         '$unset': {'reset_code_hash': '', 'reset_expires_at': ''},
     })
-    await _notify(user_id, 'Password changed', 'An administrator reset your FunGame password. Please log in with your new password.', 'INFO')
+    await _notify(user_id, 'Password changed', 'An administrator reset your Chakri.Casino password. Please log in with your new password.', 'INFO')
     logger.info(f'admin {admin.get("email")} reset password for user {user_id}')
     return {'message': 'Password reset. The user must log in again with the new password.'}
 
@@ -208,7 +208,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     password = _issue_password()
     # Email is optional; the account logs in by Login ID. Synthesize a unique
     # placeholder when none is given so the unique email index is satisfied.
-    email = body.email or f'{username.lower()}@fungame.local'
+    email = body.email or f'{username.lower()}@chakri.casino'
     if await db.users.find_one({'email': email}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
     user = {
@@ -285,7 +285,7 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
     await db.users.insert_one(user)
     if body.starting_chips > 0:
         await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
-    await _notify(user['id'], 'Welcome to FunGame!',
+    await _notify(user['id'], 'Welcome to Chakri.Casino!',
                   f'Your account is ready. Log in with your assigned Login ID "{username}".', 'APPROVAL')
     logger.info(f'Signup request {request_id} approved -> user {username}')
     return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}

@@ -1,5 +1,5 @@
 {
-  "summary": "Completed comprehensive testing of FunGame foundation gate. Backend: 39/39 tests passed (100%). Frontend: Successfully tested player flows, games display, chip system, announcements, notifications, and settings. All core features working as expected.",
+  "summary": "Completed comprehensive testing of Chakri.Casino foundation gate. Backend: 39/39 tests passed (100%). Frontend: Successfully tested player flows, games display, chip system, announcements, notifications, and settings. All core features working as expected.",
   "backend_issues": {
     "critical_bugs": [],
     "flaky_endpoints": []

@@ -21,7 +21,7 @@ def _code_email_html(title: str, intro: str, code: str) -> str:
   <tr><td align="center">
     <table role="presentation" width="420" cellpadding="0" cellspacing="0" style="background-color:#1e130a;border:1px solid #b45309;border-radius:14px;overflow:hidden;">
       <tr><td style="background-color:#2b1a0c;padding:20px 28px;text-align:center;border-bottom:1px solid #b4530955;">
-        <span style="font-family:Georgia,serif;font-size:26px;font-weight:bold;color:#ffd447;letter-spacing:1px;">FunGame</span>
+        <span style="font-family:Georgia,serif;font-size:26px;font-weight:bold;color:#ffd447;letter-spacing:1px;">Chakri.Casino</span>
       </td></tr>
       <tr><td style="padding:28px;">
         <p style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;margin:0 0 10px;">{title}</p>
@@ -45,16 +45,16 @@ def _code_email_html(title: str, intro: str, code: str) -> str:
 class EmailService:
     @staticmethod
     async def send_verification_code(to_email: str, code: str) -> dict:
-        subject = 'FunGame — Verify your email'
-        body = f'Your FunGame verification code is: {code}\nThis code expires in 15 minutes.\n\nPLAY CHIPS ONLY'
-        html = _code_email_html('Verify your email', 'Welcome to FunGame! Enter this code in the app to verify your email address:', code)
+        subject = 'Chakri.Casino — Verify your email'
+        body = f'Your Chakri.Casino verification code is: {code}\nThis code expires in 15 minutes.\n\nPLAY CHIPS ONLY'
+        html = _code_email_html('Verify your email', 'Welcome to Chakri.Casino! Enter this code in the app to verify your email address:', code)
         return await EmailService._send(to_email, subject, body, code, html)
 
     @staticmethod
     async def send_password_reset_code(to_email: str, code: str) -> dict:
-        subject = 'FunGame — Password reset code'
-        body = f'Your FunGame password reset code is: {code}\nThis code expires in 15 minutes.'
-        html = _code_email_html('Reset your password', 'Use this code in the app to reset your FunGame password:', code)
+        subject = 'Chakri.Casino — Password reset code'
+        body = f'Your Chakri.Casino password reset code is: {code}\nThis code expires in 15 minutes.'
+        html = _code_email_html('Reset your password', 'Use this code in the app to reset your Chakri.Casino password:', code)
         return await EmailService._send(to_email, subject, body, code, html)
 
     @staticmethod
@@ -81,7 +81,7 @@ class EmailService:
                 return {'sent': False, 'provider': 'resend', 'error': 'not_configured'}
             resend.api_key = api_key
             params = {
-                'from': f'FunGame <{sender}>',
+                'from': f'Chakri.Casino <{sender}>',
                 'to': [to_email],
                 'subject': subject,
                 'html': html or f'<pre style="font-family:Arial,sans-serif">{body}</pre>',

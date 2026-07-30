@@ -1891,7 +1891,7 @@ export function mountRoulette(root, opts) {
       list.appendChild(b);
       return b;
     };
-    row('lobby', 'Lobby', 'FunGame Casino', () => toast('The lobby lives in the app shell, not this table'));
+    row('lobby', 'Lobby', 'Chakri.Casino Casino', () => toast('The lobby lives in the app shell, not this table'));
     row('stats', 'Statistics', String(spins.length) + ' spins', () => { renderStats(); openSheet('statsheet'); });
     row('star', 'Favourite bets', slots.filter(Boolean).length + ' saved', () => { renderFav(); openSheet('favsheet'); });
     row('auto', 'Autoplay', autoLeft > 0 ? autoLeft + ' rounds left' : 'off', () => { renderAuto(); openSheet('autosheet'); });

@@ -1,5 +1,5 @@
 """
-Backend API tests for FunGame LIVE-11 features:
+Backend API tests for Chakri.Casino LIVE-11 features:
 1. Single active session per user (SESSION_REPLACED enforcement)
 2. Logout invalidates all tokens
 3. Chips->Points conversion blocked (must use sell-request)
@@ -109,7 +109,7 @@ class LIVE11Tester:
     def run_all_tests(self):
         """Run all LIVE-11 backend tests"""
         self.log("\n" + "="*80, Colors.YELLOW)
-        self.log("FUNGAME BACKEND API TESTS - LIVE-11 FEATURES", Colors.YELLOW)
+        self.log("CHAKRI.CASINO BACKEND API TESTS - LIVE-11 FEATURES", Colors.YELLOW)
         self.log("="*80 + "\n", Colors.YELLOW)
 
         # ========== FEATURE 1: SINGLE ACTIVE SESSION PER USER ==========
@@ -311,7 +311,7 @@ class LIVE11Tester:
         success, resp = self.test(
             "Admin login",
             "POST", "/auth/login", 200,
-            data={"email": "admin@fungame.app", "password": "FunGame@Admin2025"},
+            data={"email": "admin@fungame.app", "password": "Chakri.Casino@Admin2025"},
             description="Login as admin"
         )
         if success:

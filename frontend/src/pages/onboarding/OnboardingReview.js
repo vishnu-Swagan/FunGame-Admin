@@ -39,7 +39,7 @@ export default function OnboardingReview() {
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[160px] pointer-events-none" />
       <div className="relative z-[2] mx-auto max-w-[430px] px-5 py-10">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          <p className="font-display text-lg text-primary">FunGame</p>
+          <p className="font-display text-lg text-primary">Chakri.Casino</p>
           <div className="mt-4 flex items-center gap-2 text-xs text-white/50">
             <span className="h-6 w-6 rounded-full bg-[hsl(var(--emerald))] text-black font-bold flex items-center justify-center">✓</span> Profile
             <span className="w-6 h-px bg-white/20" />

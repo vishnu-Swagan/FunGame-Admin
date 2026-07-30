@@ -19,7 +19,7 @@ export const AuthShell = ({ title, subtitle, children, backTo = "/welcome" }) =>
         </button>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col justify-center py-8">
-          <p className="font-display text-lg text-primary mb-6">FunGame</p>
+          <p className="font-display text-lg text-primary mb-6">Chakri.Casino</p>
           <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
           {subtitle && <p className="mt-2 text-sm text-white/65 leading-relaxed">{subtitle}</p>}
           <div className="mt-7">{children}</div>

@@ -13,7 +13,7 @@ export const Disclaimer = ({ className = "" }) => (
 export const LoadingScreen = () => (
   <div className="min-h-dvh flex flex-col items-center justify-center bg-background gap-4" data-testid="loading-screen">
     <div className="h-12 w-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-    <span className="font-display text-xl text-primary">FunGame</span>
+    <span className="font-display text-xl text-primary">Chakri.Casino</span>
   </div>
 );
 

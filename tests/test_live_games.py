@@ -1,5 +1,5 @@
 """
-FunGame Live Games Backend Test Suite
+Chakri.Casino Live Games Backend Test Suite
 Tests Aviator and 16 live casino games with server-synchronized rounds.
 """
 import requests
@@ -490,7 +490,7 @@ class LiveGamesTester:
     def run_all_tests(self):
         """Run all live games tests"""
         self.log("\n" + "="*70, Colors.YELLOW)
-        self.log("FunGame Live Games Backend Test Suite", Colors.YELLOW)
+        self.log("Chakri.Casino Live Games Backend Test Suite", Colors.YELLOW)
         self.log("Testing Aviator + 16 Live Casino Games", Colors.YELLOW)
         self.log("="*70 + "\n", Colors.YELLOW)
 

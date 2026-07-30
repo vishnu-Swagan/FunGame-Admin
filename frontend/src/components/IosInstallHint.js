@@ -40,7 +40,7 @@ export default function IosInstallHint() {
       <div className="mx-auto max-w-[430px] rounded-2xl border border-primary/30 bg-[#12101a]/95 backdrop-blur-xl shadow-2xl p-3.5 flex items-start gap-3">
         <img src="/icon-192.png" alt="" className="h-11 w-11 rounded-xl shrink-0" />
         <div className="min-w-0 flex-1 text-sm">
-          <p className="font-bold text-white">Install FunGame on your iPhone</p>
+          <p className="font-bold text-white">Install Chakri.Casino on your iPhone</p>
           <p className="text-white/70 text-[13px] mt-0.5 leading-snug">
             Tap <Share className="inline h-4 w-4 -mt-0.5 text-primary" /> <span className="font-semibold text-white">Share</span>, then{" "}
             <span className="font-semibold text-white">"Add to Home Screen"</span> <Plus className="inline h-3.5 w-3.5 -mt-0.5" /> — it opens fullscreen, just like an app.

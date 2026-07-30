@@ -1,5 +1,5 @@
 {
-  "summary": "Completed comprehensive backend testing of Resend email integration for FunGame auth flows. Tested 11 scenarios covering email delivery failure handling, dev_code exposure prevention, anti-enumeration, and regression tests. Found 1 minor bug in re-register path.",
+  "summary": "Completed comprehensive backend testing of Resend email integration for Chakri.Casino auth flows. Tested 11 scenarios covering email delivery failure handling, dev_code exposure prevention, anti-enumeration, and regression tests. Found 1 minor bug in re-register path.",
   "backend_issues": {
     "critical_bugs": [],
     "medium_bugs": [

@@ -81,7 +81,7 @@ GAMES = [
 ]
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to FunGame!", "body": "FunGame is a play-chip-only amusement platform. Complete onboarding, get approved, and explore the lobby of 18 upcoming games.", "pinned": True},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore the lobby of 18 upcoming games.", "pinned": True},
     {"title": "18 games are on the way", "body": "Aviator, Teen Patti, Fun Roulette, Giant Jackpot and 14 more original games are in production. Watch this space — statuses update in real time from the server.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
@@ -99,7 +99,7 @@ async def run_seed():
     if not await db.system_config.find_one({'key': 'main'}):
         await _safe_insert(db.system_config.insert_one({
             'key': 'main', 'maintenance_mode': False,
-            'maintenance_message': 'FunGame is under scheduled maintenance. Please check back soon.',
+            'maintenance_message': 'Chakri.Casino is under scheduled maintenance. Please check back soon.',
             'min_client_version': '1.0.0', 'updated_at': now,
         }))
 
@@ -109,7 +109,7 @@ async def run_seed():
             'id': str(uuid.uuid4()), 'email': 'admin@fungame.app',
             'password_hash': hash_password('FunGame@Admin2025'),
             'role': 'ADMIN', 'status': 'ACTIVE', 'email_verified': True,
-            'display_name': 'FunGame Operator', 'country': 'India', 'avatar': 'crown',
+            'display_name': 'Chakri.Casino Operator', 'country': 'India', 'avatar': 'crown',
             'chip_balance': 0, 'favorites': [], 'recent_games': [],
             'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
             'created_at': now,

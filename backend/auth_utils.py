@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from db import db
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'fungame-dev-secret-change-me')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'chakri-dev-secret-change-me')
 JWT_ALG = 'HS256'
 ACCESS_TOKEN_DAYS = 7
 
@@ -72,7 +72,7 @@ async def check_maintenance_for_players(user: dict):
         return
     cfg = await db.system_config.find_one({'key': 'main'})
     if cfg and cfg.get('maintenance_mode'):
-        raise HTTPException(status_code=503, detail={'code': 'MAINTENANCE', 'message': cfg.get('maintenance_message') or 'FunGame is under maintenance.'})
+        raise HTTPException(status_code=503, detail={'code': 'MAINTENANCE', 'message': cfg.get('maintenance_message') or 'Chakri.Casino is under maintenance.'})
 
 
 async def require_active_player(user: dict = Depends(get_current_user)):

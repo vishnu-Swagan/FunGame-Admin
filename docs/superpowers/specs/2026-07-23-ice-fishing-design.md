@@ -1,11 +1,11 @@
 # Ice Fishing — Design Spec
 
-**Goal:** Add "Ice Fishing", a 53-segment money-wheel game show with three cinematic fish-bonus games, to FunGame as a universal synced live round at ~70% RTP.
+**Goal:** Add "Ice Fishing", a 53-segment money-wheel game show with three cinematic fish-bonus games, to Chakri.Casino as a universal synced live round at ~70% RTP.
 
-**Based on:** Evolution Gaming's Ice Fishing, adapted to FunGame's automated, play-chip, universal-round model (no live presenter).
+**Based on:** Evolution Gaming's Ice Fishing, adapted to Chakri.Casino's automated, play-chip, universal-round model (no live presenter).
 
 ## Decisions (locked)
-- **RTP:** ~70% (matches all FunGame games / ~30% house edge).
+- **RTP:** ~70% (matches all Chakri.Casino games / ~30% house edge).
 - **Bonus reveal:** full cinematic reel-in-the-fish.
 - **Bonus bet structure:** real-game — `All Bonuses` is the ~70% value bet; individual bonus spots are high-variance lottery bets (~40–55% RTP, bigger dream).
 
@@ -58,6 +58,6 @@ Add `ice-fishing` to the games catalog, `LIVE_GAMES`, the frontend component map
 - Settle-logic checks; standard `CI=true` build + deploy (backend + frontend hooks).
 
 ## Out of scope
-- Live presenter / video (FunGame is automated graphics).
+- Live presenter / video (Chakri.Casino is automated graphics).
 - Variable-length rounds (fixed cycle reserves bonus time).
 - Currency / real money (play chips only).

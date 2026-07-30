@@ -53,7 +53,7 @@ export default function Login() {
   };
 
   return (
-    <AuthShell title="Welcome back" subtitle="Log in to enter the FunGame lounge.">
+    <AuthShell title="Welcome back" subtitle="Log in to enter the Chakri.Casino lounge.">
       {sessionNotice && (
         <div data-testid="session-replaced-notice" className="mb-4 flex items-start gap-2.5 rounded-xl border border-primary/35 bg-primary/10 p-3 text-sm text-primary">
           <MonitorSmartphone className="h-4 w-4 mt-0.5 shrink-0" />

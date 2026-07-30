@@ -39,7 +39,7 @@ export default function AdminSignups() {
 
   const copyCreds = async () => {
     try {
-      await navigator.clipboard.writeText(`FunGame login\nUsername: ${created.username}\nPassword: ${created.password}`);
+      await navigator.clipboard.writeText(`Chakri.Casino login\nUsername: ${created.username}\nPassword: ${created.password}`);
       setCopied(true);
       toast.success("Credentials copied");
     } catch (_e) {

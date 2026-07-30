@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make every standard vertical live game fit the phone screen — bet controls and result visible without scrolling — with the betting countdown pinned below the FunGame logo and an escalating audio alarm in the last 5 seconds of betting.
+**Goal:** Make every standard vertical live game fit the phone screen — bet controls and result visible without scrolling — with the betting countdown pinned below the Chakri.Casino logo and an escalating audio alarm in the last 5 seconds of betting.
 
 **Architecture:** A new shared `GameStage` shell renders each game as a fixed-height app viewport: a sticky merged game-bar/timeline on top, a `flex-1` middle that scrolls only if a game overflows, and a sticky bet dock at the bottom, with a pull-up extras sheet. `AppShell` publishes its header height as a CSS variable and hides the bottom nav during play. A `useBettingAlarm` hook drives escalating ticks + a lock thunk.
 
@@ -340,7 +340,7 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, childr
       style={{ height: "calc(100dvh - var(--fg-header-h, 56px))" }}
       data-testid="game-stage"
     >
-      {/* sticky game bar (below the FunGame logo) */}
+      {/* sticky game bar (below the Chakri.Casino logo) */}
       <div className="shrink-0 px-3 pt-2 pb-2 border-b border-white/10 bg-[hsl(var(--background)/0.9)] backdrop-blur-xl space-y-1.5">
         <div className="flex items-center gap-2">
           <button data-testid="play-back-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back"
@@ -495,7 +495,7 @@ git commit -m "SlotGame: migrate to GameStage (docked bet + sticky timeline)"
 
 - [ ] **Step 1: Grep** remaining `PlayShell` consumers: `grep -rn "PlayShell" frontend/src/pages/play`. If only Roulette (which is exempt) or none use it, leave `PlayShell.js` as-is (do not delete — Roulette may import `HistoryStrip` from it). Confirm no game still renders the old inline `LiveBar` alongside `GameStage`.
 - [ ] **Step 2: Full build.** `cd frontend && CI=false npx craco build` → "Compiled successfully."
-- [ ] **Step 3: On-device checklist** (Android TWA + iOS PWA): sticky timeline stays pinned below the FunGame logo while scrolling; Place Bet always reachable without scrolling; result visible without scrolling up; last-5s ticks escalate + lock thunk at 0; timeline ramps amber→red; bottom nav hidden during play; dock clears the home indicator; Checker Gold/Steel centered.
+- [ ] **Step 3: On-device checklist** (Android TWA + iOS PWA): sticky timeline stays pinned below the Chakri.Casino logo while scrolling; Place Bet always reachable without scrolling; result visible without scrolling up; last-5s ticks escalate + lock thunk at 0; timeline ramps amber→red; bottom nav hidden during play; dock clears the home indicator; Checker Gold/Steel centered.
 - [ ] **Step 4: Commit** any cleanup. Deploy via the frontend deploy hook.
 
 ---

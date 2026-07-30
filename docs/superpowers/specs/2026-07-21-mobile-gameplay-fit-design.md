@@ -11,7 +11,7 @@ On phones, every live game stacks vertically: `timer bar → game visual → res
 ## Goals
 
 1. Betting controls **and** the game result are visible without the scroll-down/scroll-up dance.
-2. The **betting timeline (countdown) is pinned below the FunGame logo**, always visible while scrolling.
+2. The **betting timeline (countdown) is pinned below the Chakri.Casino logo**, always visible while scrolling.
 3. An **escalating audio alarm** fires in the final 5 seconds of betting.
 4. Works on Android + iOS (TWA and PWA), all phone sizes, honoring notch/home-indicator safe areas.
 
@@ -31,7 +31,7 @@ Replaces the current `PlayShell` + inline `LiveBar` stack for the standard games
 - **Flex column, three fixed zones + one overlay:**
   1. **Sticky game bar** (top, non-scrolling) — merges today's redundant PlayShell header and the inline `LiveBar`:
      `◀ back · Game name · ⏱ StickyTimeline (phase + progress + countdown) · 🔊 mute · 💰 balance`.
-     This is the "betting timeline below the FunGame logo," always visible.
+     This is the "betting timeline below the Chakri.Casino logo," always visible.
   2. **Middle** (`flex-1`, `overflow-y-auto`) — the game visual + `ResultBanner`. Scrolls **only** if a game is taller than the available space (fallback on very small phones); otherwise no scroll.
   3. **Bet dock** (bottom, non-scrolling) — each game supplies its bet controls here (see contract). Bottom padding honors `env(safe-area-inset-bottom)`.
   4. **`ExtrasSheet`** — a small handle above the dock expands a bottom sheet with history / paytable / rules on demand.

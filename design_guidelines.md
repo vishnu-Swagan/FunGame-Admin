@@ -1,6 +1,6 @@
 {
   "brand": {
-    "product_name": "FunGame",
+    "product_name": "Chakri.Casino",
     "positioning": "Premium amusement/casino-style play-chip platform (PWA-feel). No real money.",
     "non_cash_disclaimer": {
       "required_copy": "PLAY CHIPS — NO CASH VALUE",
@@ -83,7 +83,7 @@
     "tokens_css_variables": {
       "implementation_location": "/app/frontend/src/index.css",
       "replace_dark_palette": true,
-      "css": "/* FunGame dark-only tokens (HSL channels) */\n@layer base {\n  :root {\n    --background: 222 55% 6%;        /* midnight navy */\n    --foreground: 210 40% 98%;\n\n    --card: 222 45% 9%;\n    --card-foreground: 210 40% 98%;\n\n    --popover: 222 45% 9%;\n    --popover-foreground: 210 40% 98%;\n\n    --primary: 43 92% 56%;           /* brushed gold */\n    --primary-foreground: 222 55% 8%;\n\n    --secondary: 222 30% 14%;\n    --secondary-foreground: 210 40% 98%;\n\n    --muted: 222 28% 12%;\n    --muted-foreground: 215 20% 72%;\n\n    --accent: 222 28% 12%;\n    --accent-foreground: 210 40% 98%;\n\n    --destructive: 0 72% 52%;\n    --destructive-foreground: 210 40% 98%;\n\n    --border: 222 22% 18%;\n    --input: 222 22% 18%;\n    --ring: 43 92% 56%;\n\n    /* Extra brand channels (use via arbitrary values or custom utilities) */\n    --gold-2: 38 78% 48%;            /* deeper gold */\n    --cyan: 190 92% 55%;\n    --emerald: 152 62% 46%;\n    --magenta: 325 78% 58%;\n\n    --radius: 14px;\n  }\n\n  /* Force dark-only: keep .dark aligned with :root */\n  .dark {\n    --background: 222 55% 6%;\n    --foreground: 210 40% 98%;\n    --card: 222 45% 9%;\n    --card-foreground: 210 40% 98%;\n    --popover: 222 45% 9%;\n    --popover-foreground: 210 40% 98%;\n    --primary: 43 92% 56%;\n    --primary-foreground: 222 55% 8%;\n    --secondary: 222 30% 14%;\n    --secondary-foreground: 210 40% 98%;\n    --muted: 222 28% 12%;\n    --muted-foreground: 215 20% 72%;\n    --accent: 222 28% 12%;\n    --accent-foreground: 210 40% 98%;\n    --destructive: 0 72% 52%;\n    --destructive-foreground: 210 40% 98%;\n    --border: 222 22% 18%;\n    --input: 222 22% 18%;\n    --ring: 43 92% 56%;\n  }\n}\n"
+      "css": "/* Chakri.Casino dark-only tokens (HSL channels) */\n@layer base {\n  :root {\n    --background: 222 55% 6%;        /* midnight navy */\n    --foreground: 210 40% 98%;\n\n    --card: 222 45% 9%;\n    --card-foreground: 210 40% 98%;\n\n    --popover: 222 45% 9%;\n    --popover-foreground: 210 40% 98%;\n\n    --primary: 43 92% 56%;           /* brushed gold */\n    --primary-foreground: 222 55% 8%;\n\n    --secondary: 222 30% 14%;\n    --secondary-foreground: 210 40% 98%;\n\n    --muted: 222 28% 12%;\n    --muted-foreground: 215 20% 72%;\n\n    --accent: 222 28% 12%;\n    --accent-foreground: 210 40% 98%;\n\n    --destructive: 0 72% 52%;\n    --destructive-foreground: 210 40% 98%;\n\n    --border: 222 22% 18%;\n    --input: 222 22% 18%;\n    --ring: 43 92% 56%;\n\n    /* Extra brand channels (use via arbitrary values or custom utilities) */\n    --gold-2: 38 78% 48%;            /* deeper gold */\n    --cyan: 190 92% 55%;\n    --emerald: 152 62% 46%;\n    --magenta: 325 78% 58%;\n\n    --radius: 14px;\n  }\n\n  /* Force dark-only: keep .dark aligned with :root */\n  .dark {\n    --background: 222 55% 6%;\n    --foreground: 210 40% 98%;\n    --card: 222 45% 9%;\n    --card-foreground: 210 40% 98%;\n    --popover: 222 45% 9%;\n    --popover-foreground: 210 40% 98%;\n    --primary: 43 92% 56%;\n    --primary-foreground: 222 55% 8%;\n    --secondary: 222 30% 14%;\n    --secondary-foreground: 210 40% 98%;\n    --muted: 222 28% 12%;\n    --muted-foreground: 215 20% 72%;\n    --accent: 222 28% 12%;\n    --accent-foreground: 210 40% 98%;\n    --destructive: 0 72% 52%;\n    --destructive-foreground: 210 40% 98%;\n    --border: 222 22% 18%;\n    --input: 222 22% 18%;\n    --ring: 43 92% 56%;\n  }\n}\n"
     },
     "semantic_usage": {
       "background": "bg-background",
@@ -420,7 +420,7 @@
   },
 
   "instructions_to_main_agent": [
-    "Replace default shadcn tokens in /app/frontend/src/index.css with the provided FunGame dark-only palette (keep HSL channels).",
+    "Replace default shadcn tokens in /app/frontend/src/index.css with the provided Chakri.Casino dark-only palette (keep HSL channels).",
     "Remove CRA starter styles in /app/frontend/src/App.css (logo spin, centered header). Do not center the app container.",
     "Use Manrope for UI and Gloock only for game titles; load via Google Fonts in index.html or CSS import.",
     "Implement a mobile-first app shell with max width and a fixed bottom nav; ensure safe-area padding.",

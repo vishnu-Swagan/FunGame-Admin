@@ -1,4 +1,4 @@
-"""FunGame POC core-flow test (Phase 1).
+"""Chakri.Casino POC core-flow test (Phase 1).
 
 Covers: register -> verify email (demo code) -> onboarding profile -> submit ->
 PENDING gating (blocked from games) -> admin approve (welcome bonus) ->
@@ -57,7 +57,7 @@ def main():
     check("chips blocked for PENDING (403)", r.status_code == 403, r.text)
 
     print("\n== 6. Admin login + approve ==")
-    r = requests.post(f"{BASE}/auth/login", json={"email": "admin@fungame.app", "password": "FunGame@Admin2025"})
+    r = requests.post(f"{BASE}/auth/login", json={"email": "admin@fungame.app", "password": "Chakri.Casino@Admin2025"})
     check("admin login", r.status_code == 200, r.text)
     atoken = r.json()["access_token"]
     AH = {"Authorization": f"Bearer {atoken}"}

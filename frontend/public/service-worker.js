@@ -1,6 +1,6 @@
 // Minimal service worker to satisfy PWA installability (network-first pass-through).
 // Intentionally does not cache API responses — the app is backend-driven and live.
-const CACHE = 'fungame-shell-v1';
+const CACHE = 'chakri-shell-v1';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

@@ -1,4 +1,4 @@
-# FunGame — Security & Anti-Abuse
+# Chakri.Casino — Security & Anti-Abuse
 
 ## The honest threat model
 
@@ -28,7 +28,7 @@ Therefore:
 | **Admin-only password resets** | `POST /api/admin/users/{id}/reset-password` | No self-service email-code path to exploit; forces re-login |
 | **Digital Asset Links** | `frontend/public/.well-known/assetlinks.json` | Binds the *verified* app to your domain; a repackaged APK with a different signing key won't validate |
 | **JS obfuscation** (app code) | `frontend/craco.config.js` | App bundle is hard to read; vendor left intact |
-| **Signed APK** | PWABuilder keystore | `~/Downloads/FunGame-apk/signing.keystore` — **keep safe**, required for updates |
+| **Signed APK** | PWABuilder keystore | `~/Downloads/Chakri.Casino-apk/signing.keystore` — **keep safe**, required for updates |
 
 ## Applying the backend changes on Render
 
@@ -50,7 +50,7 @@ To actually get it, you would:
    web app, plus a Play Integrity plugin. (Capacitor gives you a JS→native bridge
    the TWA lacks.)
 2. **Distribute via Google Play** (Integrity's strong verdicts require the Play-
-   installed app), using the `.aab` in `~/Downloads/FunGame-apk/`.
+   installed app), using the `.aab` in `~/Downloads/Chakri.Casino-apk/`.
 3. **Google Cloud**: create a project, link it to the Play Console app, enable the
    Play Integrity API, create a service account with the Integrity role.
 4. **Backend**: set `PLAY_INTEGRITY_ENABLED=true`, `PLAY_INTEGRITY_PACKAGE`, and

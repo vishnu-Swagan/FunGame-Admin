@@ -1,5 +1,5 @@
 """
-Backend API tests for FunGame Points Economy + Admin-Provisioned Accounts features.
+Backend API tests for Chakri.Casino Points Economy + Admin-Provisioned Accounts features.
 Tests both new features:
 1. Points economy (chips <-> points conversion, admin adjustments)
 2. Admin-provisioned accounts (signup requests, admin approval with username/password)
@@ -89,7 +89,7 @@ class APITester:
     def run_all_tests(self):
         """Run all backend tests"""
         self.log("\n" + "="*80, Colors.YELLOW)
-        self.log("FUNGAME BACKEND API TESTS - Points Economy + Admin-Provisioned Accounts", Colors.YELLOW)
+        self.log("CHAKRI.CASINO BACKEND API TESTS - Points Economy + Admin-Provisioned Accounts", Colors.YELLOW)
         self.log("="*80 + "\n", Colors.YELLOW)
 
         # ========== FEATURE 1: CLOSED PUBLIC REGISTRATION ==========
@@ -166,7 +166,7 @@ class APITester:
         success, resp = self.test(
             "Admin login",
             "POST", "/auth/login", 200,
-            data={"email": "admin@fungame.app", "password": "FunGame@Admin2025"},
+            data={"email": "admin@fungame.app", "password": "Chakri.Casino@Admin2025"},
             description="Login as admin"
         )
         if success:

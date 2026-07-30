@@ -1,7 +1,7 @@
-# FunGame (Mobile‑first Web App) — Development Plan (Updated)
+# Chakri.Casino (Mobile‑first Web App) — Development Plan (Updated)
 
 ## 1) Objectives
-- Deliver a **play‑chip‑only** FunGame PWA‑style web app (React + FastAPI + MongoDB) with premium, original UI and the disclaimer: **“PLAY CHIPS — NO CASH VALUE”**.
+- Deliver a **play‑chip‑only** Chakri.Casino PWA‑style web app (React + FastAPI + MongoDB) with premium, original UI and the disclaimer: **“PLAY CHIPS — NO CASH VALUE”**.
 - Maintain the **core foundation** already built:
   - Auth + onboarding approval flow
   - Admin console
@@ -359,5 +359,5 @@
 - ✅ **LIVE‑11 completed: sessions + SELL approvals + admin aggregates verified (**iteration_10.json**).**
 
 **Test credentials**
-- Admin: `admin@fungame.app` / `FunGame@Admin2025`
+- Admin: `admin@fungame.app` / `Chakri.Casino@Admin2025`
 - Player: `player@fungame.app` / `Player@123`

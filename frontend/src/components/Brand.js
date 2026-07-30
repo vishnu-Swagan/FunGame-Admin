@@ -1,9 +1,9 @@
-/* FunGame brand system — a vector logo mark (crisp at any size) paired with the
-   FUN (white) · GAME (gold) wordmark. Used everywhere: app header, admin,
-   boot splash, game intros. */
+/* Chakri.Casino brand system — a vector logo mark (crisp at any size) paired with
+   the CHAKRI (white) · .CASINO (gold) wordmark. Used everywhere: app header,
+   admin, boot splash, game intros. */
 
-export const FunGameLogo = ({ className = "h-7 w-7" }) => (
-  <svg viewBox="0 0 48 48" className={className} role="img" aria-label="FunGame logo">
+export const ChakriLogo = ({ className = "h-7 w-7" }) => (
+  <svg viewBox="0 0 48 48" className={className} role="img" aria-label="Chakri.Casino logo">
     <defs>
       <linearGradient id="fgLogoGold" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stopColor="#fff4cf" />
@@ -27,13 +27,13 @@ export const FunGameLogo = ({ className = "h-7 w-7" }) => (
   </svg>
 );
 
-/** FUN (white) · GAME (gold) wordmark, optionally with the logo mark. */
+/** CHAKRI (white) · .CASINO (gold) wordmark, optionally with the logo mark. */
 export const BrandWordmark = ({ logoClassName = "h-7 w-7", textClassName = "text-lg", showLogo = true, className = "" }) => (
   <span className={`inline-flex items-center gap-2 ${className}`}>
-    {showLogo && <FunGameLogo className={logoClassName} />}
+    {showLogo && <ChakriLogo className={logoClassName} />}
     <span className={`font-tech font-black tracking-tight leading-none ${textClassName}`}>
-      <span className="text-white">FUN</span>
-      <span style={{ color: "#ffca3a" }}>GAME</span>
+      <span className="text-white">CHAKRI</span>
+      <span style={{ color: "#ffca3a" }}>.CASINO</span>
     </span>
   </span>
 );

@@ -1,4 +1,4 @@
-"""Backend API tests for FunGame slot games and confetti feature."""
+"""Backend API tests for Chakri.Casino slot games and confetti feature."""
 import requests
 import sys
 import time
@@ -188,7 +188,7 @@ class SlotGameTester:
     def run_all_tests(self):
         """Run all backend tests"""
         print("=" * 60)
-        print("🎰 FUNGAME SLOT GAMES BACKEND TEST SUITE")
+        print("🎰 CHAKRI.CASINO SLOT GAMES BACKEND TEST SUITE")
         print("=" * 60)
         
         # Login first

@@ -1,4 +1,4 @@
-"""Server-authoritative game engines for FunGame.
+"""Server-authoritative game engines for Chakri.Casino.
 
 All outcomes are generated server-side with a cryptographically secure RNG.
 Clients only submit bets/selections - never outcomes.

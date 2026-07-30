@@ -105,7 +105,7 @@ export const GameIntro = ({ game }) => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            FUN<span className="text-primary">GAME</span>
+            CHAKRI<span className="text-primary">.CASINO</span>
           </motion.span>
 
           {/* soft radial glow behind the art */}

@@ -4,7 +4,7 @@ Date: 2026-07-21
 Status: Approved, ready to build
 
 ## Goal
-Make every FunGame game *feel* like a packed, live, high-energy casino table —
+Make every Chakri.Casino game *feel* like a packed, live, high-energy casino table —
 addressing the "feels coded / not realtime" perception — plus 4DX-grade rumble
 and punch, per-game opening themes, and a trendy modern finish. Games are
 already realtime (universal server clock, secure RNG); the gap is perception.

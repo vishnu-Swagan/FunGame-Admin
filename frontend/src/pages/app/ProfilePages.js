@@ -94,7 +94,7 @@ export function Profile() {
         <LogOut className="h-4 w-4 mr-2" /> Log out
       </Button>
 
-      <p className="text-center text-[11px] text-white/35">FunGame v{APP_VERSION}</p>
+      <p className="text-center text-[11px] text-white/35">Chakri.Casino v{APP_VERSION}</p>
     </PageTransition>
   );
 }
@@ -209,7 +209,7 @@ export function Settings() {
       </div>
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">About</p>
-        <p className="text-xs text-white/55 mt-1">FunGame v{APP_VERSION} — a play-chip-only amusement platform. No payments, prizes or cash-outs exist anywhere in the product.</p>
+        <p className="text-xs text-white/55 mt-1">Chakri.Casino v{APP_VERSION} — a play-chip-only amusement platform. No payments, prizes or cash-outs exist anywhere in the product.</p>
       </div>
       <Disclaimer />
     </PageTransition>

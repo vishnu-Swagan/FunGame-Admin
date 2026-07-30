@@ -38,7 +38,7 @@ const HeroSparks = () => (
 
 /** Cinematic video hero — a full-width 16:9 banner of the looping casino
     footage (so the whole neon sign stays visible, not cropped), with the
-    FUNGAME brand + live count overlaid on top and the headline + CTAs in a
+    CHAKRI.CASINO brand + live count overlaid on top and the headline + CTAs in a
     panel below. Auto-plays muted (autoplay policy); the sound cue fires on
     first tap. Falls back to the poster still for reduced-motion. */
 function VideoHero({ navigate, userName }) {
@@ -73,7 +73,7 @@ function VideoHero({ navigate, userName }) {
           {!reduced && <HeroSparks />}
           {/* brand + live floor */}
           <div className="fg-safe-top absolute inset-x-0 top-0 px-4 pt-3 flex items-center justify-between">
-            <span className="font-tech font-black tracking-tight text-base drop-shadow-[0_1px_5px_rgba(0,0,0,0.9)]"><span className="text-white">FUN</span><span style={{ color: "#ffd447" }}>GAME</span></span>
+            <span className="font-tech font-black tracking-tight text-base drop-shadow-[0_1px_5px_rgba(0,0,0,0.9)]"><span className="text-white">CHAKRI</span><span style={{ color: "#ffd447" }}>.CASINO</span></span>
             <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/45 px-2.5 py-1 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />
@@ -134,7 +134,7 @@ export default function Home() {
       <VideoHero navigate={navigate} userName={user?.display_name || "Player"} />
 
       {/* Live floor ticker */}
-      <LiveActivityBar slug="fungame-lobby" />
+      <LiveActivityBar slug="chakri-lobby" />
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3">

@@ -93,7 +93,7 @@ export default function AppShell() {
         {/* Header */}
         <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
-            <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="FunGame home">
+            <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
               <BrandWordmark logoClassName="h-8 w-8" textClassName="text-xl" />
             </button>
             <div className="flex items-center gap-2">

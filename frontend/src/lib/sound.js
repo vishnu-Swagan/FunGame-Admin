@@ -1,5 +1,5 @@
 /**
- * FunGame sound engine - lightweight WebAudio synth (no audio files needed).
+ * Chakri.Casino sound engine - lightweight WebAudio synth (no audio files needed).
  * Global mute persisted in localStorage; context resumes on first user gesture.
  */
 let ctx = null;

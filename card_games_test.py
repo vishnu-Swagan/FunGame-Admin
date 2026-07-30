@@ -1,5 +1,5 @@
 """
-Backend API tests for FunGame card games flicker fix verification.
+Backend API tests for Chakri.Casino card games flicker fix verification.
 Tests all 5 card game endpoints and phase progression.
 """
 import requests
@@ -305,7 +305,7 @@ class CardGameTester:
 def main():
     """Run all backend tests"""
     print(f"\n{'='*60}")
-    print("FunGame Card Games Backend Test Suite")
+    print("Chakri.Casino Card Games Backend Test Suite")
     print(f"Testing flicker fix verification")
     print(f"Base URL: {BASE_URL}")
     print(f"{'='*60}\n")

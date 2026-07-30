@@ -21,7 +21,7 @@ client = AsyncIOMotorClient(
     waitQueueTimeoutMS=8000,   # don't block forever waiting for a pooled connection
     retryWrites=True,
     retryReads=True,
-    appname='fungame-api',
+    appname='chakri-api',
 )
 db = client[os.environ['DB_NAME']]
 

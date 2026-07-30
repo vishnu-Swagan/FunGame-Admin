@@ -1,4 +1,4 @@
-"""FunGame API — play-chip-only amusement platform backend.
+"""Chakri.Casino API — play-chip-only amusement platform backend.
 
 PLAY CHIPS ONLY. No payments, deposits, withdrawals or transfers exist.
 """
@@ -97,13 +97,13 @@ async def lifespan(app: FastAPI):
     await db.aviator_bets.create_index([('round_number', 1), ('status', 1)])
     await db.aviator_bets.create_index([('user_id', 1), ('round_number', 1)])
     keepalive = asyncio.create_task(_aviator_keepalive())
-    logger.info('FunGame ready - 18 games running universal 24/7 live rounds')
+    logger.info('Chakri.Casino ready - 18 games running universal 24/7 live rounds')
     yield
     keepalive.cancel()
     client.close()
 
 
-app = FastAPI(title='FunGame API', version='1.0.0', lifespan=lifespan)
+app = FastAPI(title='Chakri.Casino API', version='1.0.0', lifespan=lifespan)
 
 api_router = APIRouter(prefix='/api')
 
@@ -120,7 +120,7 @@ async def root():
     """
     from game_engines import ROULETTE_POCKETS
     return {
-        'message': 'FunGame API',
+        'message': 'Chakri.Casino API',
         'disclaimer': 'PLAY CHIPS ONLY',
         'build': {'roulette_pockets': len(ROULETTE_POCKETS)},
     }

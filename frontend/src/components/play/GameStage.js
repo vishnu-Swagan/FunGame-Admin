@@ -20,7 +20,7 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
       style={{ height: "calc(100dvh - var(--fg-header-h, 56px))" }}
       data-testid="game-stage"
     >
-      {/* sticky game bar (below the FunGame logo) */}
+      {/* sticky game bar (below the Chakri.Casino logo) */}
       <div className="shrink-0 px-3 pt-2 pb-2 border-b border-white/10 bg-[hsl(var(--background)/0.9)] backdrop-blur-xl space-y-1.5">
         <div className="flex items-center gap-2">
           <button data-testid="play-back-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back"

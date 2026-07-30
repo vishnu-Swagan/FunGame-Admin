@@ -1,4 +1,4 @@
-"""Pydantic request/response models for FunGame API."""
+"""Pydantic request/response models for Chakri.Casino API."""
 import re
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional, List
