@@ -554,73 +554,172 @@ def play_fun_target(bet, payload):
 
 ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
+# ---------------------------------------------------------------- American wheel
+# The double-zero wheel. This is NOT the European order with 00 inserted — it is a
+# different sequence, with 0 and 00 diametrically opposite and the colours
+# alternating between them. Every player worldwide is drawn from this one pool, so
+# the universal round keeps giving everyone the same spin and the same result.
+#
+# Pockets are LABELS, not integers. "00" is not a number: as an int it collapses
+# onto 0, and every bet on the double zero would settle as a bet on the single
+# zero. Anything that touches a pocket goes through _pocket().
+AMERICAN_ORDER = [
+    "0", "28", "9", "26", "30", "11", "7", "20", "32", "17", "5", "22", "34", "15",
+    "3", "24", "36", "13", "1", "00", "27", "10", "25", "29", "12", "8", "19", "31",
+    "18", "6", "21", "33", "16", "4", "23", "35", "14", "2",
+]
+ROULETTE_POCKETS = tuple(AMERICAN_ORDER)      # the draw pool: 38 pockets
+ROULETTE_ZEROS = frozenset({"0", "00"})
+
 
 def roulette_color(n):
-    return "green" if n == 0 else ("red" if n in ROULETTE_RED else "black")
-
-
-def _roulette_nums(value, count):
-    """Parse 'a-b[-c-d]' bet values into a sorted list of distinct numbers."""
+    """Colour of a pocket. Accepts an int or a label, so older callers still work."""
+    s = str(n).strip()
+    if s in ROULETTE_ZEROS:
+        return "green"
     try:
-        nums = sorted(int(x) for x in str(value).split("-"))
-    except (ValueError, AttributeError):
+        return "red" if int(s) in ROULETTE_RED else "black"
+    except ValueError:
+        return "green"
+
+
+def _pocket(value):
+    """Normalise anything client- or DB-supplied to a pocket label."""
+    s = str(value).strip()
+    if s in ROULETTE_ZEROS:
+        return s
+    try:
+        n = int(s)
+    except (TypeError, ValueError):
+        bad("Invalid roulette number")
+    if n < 0 or n > 36:
+        bad("Roulette numbers are 0-36 or 00")
+    # canonical form only: "000" and "07" both parse to a number but are not
+    # pockets, and accepting them lets the same bet arrive under several spellings
+    if str(n) != s:
+        bad("Roulette numbers must be written plainly, e.g. 7 not 007")
+    return str(n)
+
+
+def _bet_labels(value):
+    """Parse 'a-b[-c...]' into a frozenset of pocket labels."""
+    parts = [p for p in str(value).split("-") if p != ""]
+    if not parts:
         bad("Invalid bet numbers")
-    if len(nums) != count or len(set(nums)) != count or any(x < 0 or x > 36 for x in nums):
-        bad(f"Bet needs {count} distinct numbers 0-36")
-    return nums
+    labels = frozenset(_pocket(p) for p in parts)
+    if len(labels) != len(parts):
+        bad("Bet numbers must be distinct")
+    return labels
+
+
+def _build_legal_bets():
+    """Every legal inside bet on an American layout, as a set of frozensets.
+
+    Built from the layout once, then checked by MEMBERSHIP. Validating a shape by
+    parsing it — "does it have six numbers?" — is not enough: a client could post
+    any six numbers it liked and collect a six-line payout on a hand-picked spread.
+    A whitelist can only ever pay a bet that exists on the felt.
+    """
+    L = lambda *ns: frozenset(str(n) for n in ns)
+    splits, streets, corners, sixlines = set(), set(), set(), set()
+    for n in range(1, 37):
+        if n % 3 != 0:
+            splits.add(L(n, n + 1))                       # across the trio
+        if n + 3 <= 36:
+            splits.add(L(n, n + 3))                       # along the layout
+        if n % 3 != 0 and n + 4 <= 36:
+            corners.add(L(n, n + 1, n + 3, n + 4))
+    for a in range(1, 35, 3):
+        streets.add(L(a, a + 1, a + 2))
+    for a in range(1, 32, 3):
+        sixlines.add(L(a, a + 1, a + 2, a + 3, a + 4, a + 5))
+    # The zero end of an American table. 0 sits above 00 at the end of the felt and
+    # each spans half the three-row block, so 0 borders the top half (3 and 2) and
+    # 00 borders the bottom half (2 and 1). These are exactly the spots the client
+    # renders — the two definitions have to agree or a legitimate chip is refused.
+    splits |= {L(0, "00"), L(0, 3), L(0, 2), L("00", 2), L("00", 1)}
+    streets |= {L(0, 2, 3), L("00", 1, 2)}
+    baskets = {L(0, "00", 1, 2, 3)}                       # the five-number "first five"
+    return {
+        "split": (splits, 2),
+        "street": (streets, 3),
+        "corner": (corners, 4),
+        "sixline": (sixlines, 6),
+        "basket": (baskets, 5),
+    }
+
+
+LEGAL_INSIDE = _build_legal_bets()
+
+# Wheel arcs are NAMED, never accepted as a client-supplied list of numbers — the
+# same reason the inside bets are whitelisted. A client sends 'zeroside', not the
+# nineteen pockets it would like paid.
+ROULETTE_SECTORS = {
+    "zeroside": frozenset(AMERICAN_ORDER[0:19]),          # the half containing 0
+    "dzeroside": frozenset(AMERICAN_ORDER[19:38]),        # the half containing 00
+    "zeroneighbours": frozenset({"0", "00", "2", "28", "1", "27"}),  # both zeros + their neighbours
+}
+
+
+def roulette_payout(bet, mult):
+    """Chips returned on a winning stake.
+
+    floor(x + 0.5), not Python's round(), which is banker's rounding: round(2.5)
+    is 2 here but 3 in JavaScript. The client shows the same figure the server
+    pays, so the two have to round the same way.
+    """
+    return int(math.floor(bet * mult + 0.5))
 
 
 def roulette_multiplier(btype, value, n):
-    """Returns total-return multiplier for a winning bet, 0 if lost. Raises on invalid."""
+    """Total-return multiplier for a winning bet, 0 if lost. Raises on invalid."""
+    win = _pocket(n)
+    zero = win in ROULETTE_ZEROS
+    num = None if zero else int(win)
+
     if btype == "straight":
-        if not isinstance(value, int) or value < 0 or value > 36:
-            bad("Straight bet needs a number 0-36")
-        return 36 if n == value else 0
-    if btype == "split":
-        # two adjacent numbers on the table (chip on the shared line)
-        a, b = _roulette_nums(value, 2)
-        ok = (a == 0 and b in (1, 2, 3)) or (b == a + 3) or (b == a + 1 and a % 3 != 0)
-        if not ok:
-            bad("Split must cover two adjacent numbers")
-        return 18 if n in (a, b) else 0
-    if btype == "corner":
-        # four adjoining numbers (chip on the shared cross), incl. first-four 0-1-2-3
-        nums = _roulette_nums(value, 4)
-        a = nums[0]
-        ok = nums == [0, 1, 2, 3] or (a % 3 != 0 and a + 4 <= 36 and nums == [a, a + 1, a + 3, a + 4])
-        if not ok:
-            bad("Corner must cover four adjoining numbers")
-        return 9 if n in nums else 0
+        return 36 if _pocket(value) == win else 0
+    if btype in LEGAL_INSIDE:
+        allowed, size = LEGAL_INSIDE[btype]
+        labels = _bet_labels(value)
+        if len(labels) != size or labels not in allowed:
+            bad(f"That is not a legal {btype} on this layout")
+        return 36 / size if win in labels else 0
+    if btype == "sector":
+        arc = ROULETTE_SECTORS.get(str(value))
+        if arc is None:
+            bad("Unknown wheel sector")
+        return 36 / len(arc) if win in arc else 0
     if btype == "color":
         if value not in ("red", "black"):
             bad("Color bet must be red or black")
-        return 2 if roulette_color(n) == value else 0
+        return 2 if roulette_color(win) == value else 0
     if btype == "parity":
         if value not in ("odd", "even"):
             bad("Parity bet must be odd or even")
-        return 2 if (n != 0 and (n % 2 == 1) == (value == "odd")) else 0
+        return 2 if (not zero and (num % 2 == 1) == (value == "odd")) else 0
     if btype == "range":
         if value not in ("low", "high"):
             bad("Range bet must be low or high")
-        won = (1 <= n <= 18) if value == "low" else (19 <= n <= 36)
+        won = (not zero) and ((1 <= num <= 18) if value == "low" else (19 <= num <= 36))
         return 2 if won else 0
     if btype == "dozen":
         if value not in (1, 2, 3):
             bad("Dozen must be 1, 2 or 3")
-        return 3 if (n != 0 and (n - 1) // 12 + 1 == value) else 0
+        return 3 if (not zero and (num - 1) // 12 + 1 == value) else 0
     if btype == "column":
         if value not in (1, 2, 3):
             bad("Column must be 1, 2 or 3")
-        return 3 if (n != 0 and (n - 1) % 3 + 1 == value) else 0
+        return 3 if (not zero and (num - 1) % 3 + 1 == value) else 0
     bad("Invalid bet type")
 
 
 def play_fun_roulette(bet, payload):
     btype = payload.get("bet_type")
     value = payload.get("value")
-    n = RNG.randint(0, 36)
+    n = RNG.choice(ROULETTE_POCKETS)
     mult = roulette_multiplier(btype, value, n)
-    payout = int(round(bet * mult))
+    payout = roulette_payout(bet, mult)
     return {"number": n, "color": roulette_color(n), "bet_type": btype, "value": value, "won": mult > 0}, payout
 
 

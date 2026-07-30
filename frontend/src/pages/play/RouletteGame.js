@@ -10,8 +10,15 @@ import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
 
 const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
-const EURO_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
-const SEG = 360 / 37;
+// The American double-zero wheel, matching the server's ROULETTE_POCKETS exactly.
+// Pockets are LABELS, not numbers: "00" is not an integer, and treating it as one
+// collapses it onto 0 so every double-zero bet would settle as a single-zero bet.
+const AMERICAN_ORDER = ["0", "28", "9", "26", "30", "11", "7", "20", "32", "17", "5", "22", "34",
+  "15", "3", "24", "36", "13", "1", "00", "27", "10", "25", "29", "12", "8", "19", "31", "18",
+  "6", "21", "33", "16", "4", "23", "35", "14", "2"];
+const SEG = 360 / AMERICAN_ORDER.length;
+const isZero = (p) => p === "0" || p === "00";
+const pocketColor = (p) => (isZero(p) ? "green" : RED.has(Number(p)) ? "red" : "black");
 const CHIPS = [
   { v: 10, bg: "#e2e8f0", fg: "#0f172a" },
   { v: 50, bg: "#22d3ee", fg: "#083344" },
@@ -83,10 +90,11 @@ const WheelSVG = () => (
     })}
 
     {/* number pockets — deep casino colours */}
-    {EURO_ORDER.map((n, i) => {
+    {AMERICAN_ORDER.map((n, i) => {
       const a0 = i * SEG - SEG / 2;
       const a1 = a0 + SEG;
-      const fill = n === 0 ? "#0b7a3b" : RED.has(n) ? "#b0121c" : "#0e1015";
+      const c = pocketColor(n);
+      const fill = c === "green" ? "#0b7a3b" : c === "red" ? "#b0121c" : "#0e1015";
       const mid = i * SEG;
       const [tx, ty] = polar(110, 110, 83, mid);
       return (
@@ -96,7 +104,7 @@ const WheelSVG = () => (
             x={tx}
             y={ty}
             fill="#f7f2e4"
-            fontSize="8.4"
+            fontSize={n.length > 1 ? "7.4" : "8.4"}
             fontWeight="700"
             textAnchor="middle"
             dominantBaseline="central"
@@ -110,7 +118,7 @@ const WheelSVG = () => (
     })}
 
     {/* metallic frets separating every pocket */}
-    {EURO_ORDER.map((_, i) => {
+    {AMERICAN_ORDER.map((_, i) => {
       const a = i * SEG - SEG / 2;
       const [x0, y0] = polar(110, 110, 52, a);
       const [x1, y1] = polar(110, 110, 92, a);
@@ -202,7 +210,7 @@ const ResultDot = ({ n, big = false }) => (
   <span
     className={`inline-flex items-center justify-center rounded-full font-bold tabular-nums border ${
       big ? "h-10 w-10 text-base border-2" : "h-6 w-6 text-[10px]"
-    } ${n === 0 ? "bg-[#0a7a3c] border-[#12a355]" : RED.has(n) ? "bg-[#b3282d] border-[#e05a5f]" : "bg-[#15181f] border-white/40"} text-white`}
+    } ${pocketColor(n) === "green" ? "bg-[#0a7a3c] border-[#12a355]" : pocketColor(n) === "red" ? "bg-[#b3282d] border-[#e05a5f]" : "bg-[#15181f] border-white/40"} text-white`}
   >
     {n}
   </span>
@@ -365,7 +373,7 @@ export default function RouletteGame({ game }) {
 
   const spinTo = useCallback(
     (winning, durMs) => {
-      const idx = EURO_ORDER.indexOf(winning);
+      const idx = AMERICAN_ORDER.indexOf(String(winning));
       if (idx < 0) return;
       // long, dramatic spin — clamp raised so the full 10s server spin plays out
       const dur = Math.max(2600, Math.min(10500, durMs || 9500));
@@ -751,18 +759,23 @@ export default function RouletteGame({ game }) {
       >
         <FitWidth>
           <div className="w-[600px] select-none">
-          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "58px 58px 58px 52px 52px" }}>
-            {/* zero wedge */}
-            <BoardCell
-              {...cellCommon}
-              type="straight"
-              value={0}
-              chipTotal={spotTotals["straight:0"]}
-              label={<span className="pointer-events-none font-display text-xl">0</span>}
-              testId="roulette-cell-straight-0"
-              style={{ gridColumn: 1, gridRow: "1 / span 3" }}
-              className={`${FELT_CELL} rounded-l-[24px] ${isResult && winning === 0 ? "ring-2 ring-primary z-10" : ""}`}
-            />
+          <div className="grid gap-0" style={{ gridTemplateColumns: "42px repeat(12, minmax(0, 1fr)) 46px", gridTemplateRows: "29px 29px 29px 29px 29px 29px 52px 52px" }}>
+            {/* the zero end: an American layout carries both 0 and 00 */}
+            {[["0", "1 / span 3", "rounded-tl-[24px]"], ["00", "4 / span 3", "rounded-bl-[24px]"]].map(
+              ([lab, row, round]) => (
+                <BoardCell
+                  {...cellCommon}
+                  key={`z-${lab}`}
+                  type="straight"
+                  value={lab}
+                  chipTotal={spotTotals[`straight:${lab}`]}
+                  label={<span className="pointer-events-none font-display text-xl">{lab}</span>}
+                  testId={`roulette-cell-straight-${lab}`}
+                  style={{ gridColumn: 1, gridRow: row }}
+                  className={`${FELT_CELL} ${round} ${isResult && String(winning) === lab ? "ring-2 ring-primary z-10" : ""}`}
+                />
+              )
+            )}
             {/* number grid — classic layout, top row 3..36 */}
             {[0, 1, 2].map((row) =>
               Array.from({ length: 12 }, (_, j) => {
@@ -775,8 +788,8 @@ export default function RouletteGame({ game }) {
                     value={n}
                     chipTotal={spotTotals[`straight:${n}`]}
                     label={<NumberSpot n={n} />}
-                    style={{ gridColumn: j + 2, gridRow: row + 1 }}
-                    className={`${FELT_CELL} ${isResult && winning === n ? "ring-2 ring-primary z-10" : ""}`}
+                    style={{ gridColumn: j + 2, gridRow: `${row * 2 + 1} / span 2` }}
+                    className={`${FELT_CELL} ${isResult && String(winning) === String(n) ? "ring-2 ring-primary z-10" : ""}`}
                   />
                 );
               })
@@ -817,19 +830,31 @@ export default function RouletteGame({ game }) {
                 ));
               })
             )}
-            {/* zero splits on the 0 wedge boundary */}
-            {[3, 2, 1].map((z, row) => (
+            {/* the zero end of an American layout: 0 borders 3 and 2, 00 borders 2
+                and 1, plus the 0/00 split between them. These are exactly the
+                shapes the server whitelists — anything else is refused. */}
+            {[["0", 3, 1], ["0", 2, 3], ["00", 2, 4], ["00", 1, 6]].map(([z, n, hrow]) => (
               <BetSpot
-                key={`zero-split-${z}`}
+                key={`zero-split-${z}-${n}`}
                 type="split"
-                nums={[0, z]}
+                nums={[z, n]}
                 pos="justify-self-start self-center -translate-x-1/2"
                 betting={betting}
                 onPlace={placeBet}
-                chipTotal={spotTotals[`split:0-${z}`]}
-                style={{ gridColumn: 2, gridRow: row + 1 }}
+                chipTotal={spotTotals[`split:${z}-${n}`]}
+                style={{ gridColumn: 2, gridRow: hrow }}
               />
             ))}
+            {/* 0 / 00 split, on the line between the two */}
+            <BetSpot
+              type="split"
+              nums={["0", "00"]}
+              pos="justify-self-end self-end translate-x-1/2 translate-y-1/2"
+              betting={betting}
+              onPlace={placeBet}
+              chipTotal={spotTotals["split:0-00"]}
+              style={{ gridColumn: 1, gridRow: 3 }}
+            />
             {/* dozens */}
             {[1, 2, 3].map((d) => (
               <BoardCell
@@ -839,17 +864,17 @@ export default function RouletteGame({ game }) {
                 value={d}
                 chipTotal={spotTotals[`dozen:${d}`]}
                 label={<span className="pointer-events-none text-[12px] font-extrabold tracking-wide">{d === 1 ? "1st 12" : d === 2 ? "2nd 12" : "3rd 12"}</span>}
-                style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 4 }}
+                style={{ gridColumn: `${2 + (d - 1) * 4} / span 4`, gridRow: 7 }}
                 className={FELT_CELL}
               />
             ))}
             {/* outside bets */}
-            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 5 }} className={FELT_CELL} />
-            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 5 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="range" value="low" chipTotal={spotTotals["range:low"]} label={<span className="pointer-events-none text-[11px] font-extrabold">1 to 18</span>} style={{ gridColumn: "2 / span 2", gridRow: 8 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="parity" value="even" chipTotal={spotTotals["parity:even"]} label={<span className="pointer-events-none text-[11px] font-extrabold">EVEN</span>} style={{ gridColumn: "4 / span 2", gridRow: 8 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="color" value="red" chipTotal={spotTotals["color:red"]} label={<Diamond color="red" />} style={{ gridColumn: "6 / span 2", gridRow: 8 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="color" value="black" chipTotal={spotTotals["color:black"]} label={<Diamond color="black" />} style={{ gridColumn: "8 / span 2", gridRow: 8 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="parity" value="odd" chipTotal={spotTotals["parity:odd"]} label={<span className="pointer-events-none text-[11px] font-extrabold">ODD</span>} style={{ gridColumn: "10 / span 2", gridRow: 8 }} className={FELT_CELL} />
+            <BoardCell {...cellCommon} type="range" value="high" chipTotal={spotTotals["range:high"]} label={<span className="pointer-events-none text-[11px] font-extrabold">19 to 36</span>} style={{ gridColumn: "12 / span 2", gridRow: 8 }} className={FELT_CELL} />
           </div>
           </div>
         </FitWidth>

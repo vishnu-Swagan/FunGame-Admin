@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 from db import db, serialize_doc
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
-from game_engines import RNG, MIN_BET, roulette_multiplier, roulette_color
+from game_engines import (RNG, MIN_BET, roulette_multiplier, roulette_color,
+                          ROULETTE_POCKETS, roulette_payout)
 
 logger = logging.getLogger('gameplay')
 router = APIRouter(tags=['gameplay'])
@@ -70,6 +71,9 @@ SPIN_SECONDS = 10      # 20-30s: long, dramatic wheel spin (bets locked)
 # 1-18/19-36) are capped so that doubling on loss hits the ceiling within a few
 # rounds and cannot be exploited. Inside/other positions get a higher ceiling.
 EVEN_MONEY_TYPES = {"color", "parity", "range"}
+# A 19-pocket wheel arc is an even-money position in all but name, so it takes the
+# same anti-Martingale ceiling rather than the looser inside-bet one.
+WIDE_SECTORS = {"zeroside", "dzeroside"}
 EVEN_MONEY_MAX = MIN_BET * 200   # 2000 — 10,20,40,...,1280 then blocked
 POSITION_MAX = MIN_BET * 1000    # 10000 — general per-position table max
 
@@ -100,8 +104,12 @@ async def _roulette_round_result(round_number: int):
     """Get (or atomically create) the universal winning number for a round."""
     existing = await db.roulette_rounds.find_one({'round_number': round_number})
     if existing:
-        return existing['winning_number']
-    n = RNG.randint(0, 36)
+        # rounds drawn before the American changeover were stored as ints; the API
+        # contract is a label, so normalise on the way out
+        return str(existing['winning_number'])
+    # One draw per round number for the whole world. Stored as a LABEL ('0'..'36'
+    # or '00') because the double zero is not an integer.
+    n = RNG.choice(ROULETTE_POCKETS)
     try:
         await db.roulette_rounds.insert_one({
             'round_number': round_number, 'winning_number': n,
@@ -111,7 +119,7 @@ async def _roulette_round_result(round_number: int):
     except Exception:
         # Another request/instance created it first - unique index guarantees one result
         existing = await db.roulette_rounds.find_one({'round_number': round_number})
-        return existing['winning_number'] if existing else n
+        return str(existing['winning_number']) if existing else n
 
 
 async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
@@ -137,7 +145,7 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
                 mult = roulette_multiplier(b['bet_type'], b['value'], winning)
             except HTTPException:
                 mult = 0
-            payout = int(round(b['amount'] * mult))
+            payout = roulette_payout(b['amount'], mult)
             res = await db.roulette_bets.update_one(
                 {'id': b['id'], 'status': 'OPEN'},
                 {'$set': {'status': 'SETTLED', 'payout': payout, 'winning_number': winning, 'settled_at': _now_iso()}},
@@ -207,17 +215,18 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
     if body.amount < MIN_BET:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
     # Validate the bet shape now (winning number irrelevant, just validation)
-    roulette_multiplier(body.bet_type, body.value, 0)
+    roulette_multiplier(body.bet_type, body.value, '0')
     # Table limit — cap cumulative stake on this exact position. Even-money
     # positions get the lower ceiling so Martingale doubling cannot run away.
-    cap = EVEN_MONEY_MAX if body.bet_type in EVEN_MONEY_TYPES else POSITION_MAX
+    wide_arc = body.bet_type == 'sector' and str(body.value) in WIDE_SECTORS
+    cap = EVEN_MONEY_MAX if (body.bet_type in EVEN_MONEY_TYPES or wide_arc) else POSITION_MAX
     existing_pos = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN',
          'bet_type': body.bet_type, 'value': body.value}, {'amount': 1},
     ).to_list(300)
     staked = sum(b['amount'] for b in existing_pos)
     if staked + body.amount > cap:
-        kind = 'even-money' if body.bet_type in EVEN_MONEY_TYPES else 'table'
+        kind = 'even-money' if (body.bet_type in EVEN_MONEY_TYPES or wide_arc) else 'table'
         raise HTTPException(status_code=400, detail={
             'code': 'TABLE_LIMIT',
             'message': f'Table limit — max {cap} chips on this position ({kind} limit). You have {staked} here.',
