@@ -46,7 +46,16 @@ LIVE_GAMES = {
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 
 SIDE_OPTIONS = {
-    "seven-up-down": {"down": 2.0, "seven": 5.0, "up": 2.0},
+    # 7Up7Down. The three sides plus a bet on the exact total, which is what the
+    # bottom two rows of the table are. Every multiplier is (5/6) / probability,
+    # so a stake on 2 and a stake on Down carry exactly the same 83.3% return —
+    # the reference table pays 72-83% depending on where you put the chip, which
+    # quietly punishes the longer odds.
+    "seven-up-down": {
+        "down": 2.0, "seven": 5.0, "up": 2.0,
+        "t2": 30.0, "t3": 15.0, "t4": 10.0, "t5": 7.5, "t6": 6.0,
+        "t8": 6.0, "t9": 7.5, "t10": 10.0, "t11": 15.0, "t12": 30.0,
+    },
     "checker": {"gold": 1.4, "steel": 1.4},
     # Real casino Andar Bahar: Andar is dealt first (wins ~51.5%) so it pays
     # 0.9:1 (1.9x); Bahar pays 1:1 (2.0x). House edge ~2.15% Andar / 3% Bahar.
@@ -217,6 +226,13 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     if kind == "sides":
         winner = outcome["winner"]
         mults = SIDE_OPTIONS[slug]
+        # "t8" is a bet on the dice showing exactly 8, which is a different
+        # question from which side won — 8 is an Up result, but Up pays 2x and
+        # the exact total pays 6x, and only one of them should collect.
+        if isinstance(selection, str) and selection.startswith("t") and selection[1:].isdigit():
+            if outcome.get("total") == int(selection[1:]):
+                return int(round(amount * mults[selection])), {"result": "win"}
+            return 0, {"result": "lose"}
         # Tougher: a tie is a HOUSE win — Player/Dealer bets lose on a tie
         # (only the explicit Tie bet wins). Raises the ~2.5% edge to ~5%.
         if selection == winner:
