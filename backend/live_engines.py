@@ -260,7 +260,9 @@ def settle_bet(slug, outcome, selection, amount, card=None):
 def summarize_outcome(slug, outcome):
     """Compact summary for last-results strips."""
     if slug == "seven-up-down":
-        return {"total": outcome["total"], "winner": outcome["winner"]}
+        # the dice travel with the summary so the roadmap can show the faces that
+        # made each total, not just the number
+        return {"total": outcome["total"], "winner": outcome["winner"], "dice": outcome["dice"]}
     if slug == "fun-target":
         return {"result": outcome["result"]}
     if slug == "ice-fishing":
