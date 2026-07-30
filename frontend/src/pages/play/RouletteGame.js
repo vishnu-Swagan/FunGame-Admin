@@ -38,12 +38,17 @@ export default function RouletteGame({ game }) {
     return `${t}:${b.value}`;
   };
 
-  const placeBet = useCallback(async (bet_type, value, amount) => {
+  const placeBet = useCallback(async (bet_type, value, amount, key) => {
     inFlightRef.current += 1;
     try {
       await api.post("/games/fun-roulette/bets", { bet_type, value, amount });
     } catch (e) {
-      toast.error(errMsg(e));
+      /* Hand the reason back to the table. A refused stake used to leave its
+         optimistic chip sitting on the felt until the next poll quietly removed
+         it, which reads as the game losing the bet rather than declining it. */
+      const msg = errMsg(e);
+      if (engineRef.current) engineRef.current.rejectBet(key, amount, msg);
+      toast.error(msg);
     } finally {
       inFlightRef.current -= 1;
     }

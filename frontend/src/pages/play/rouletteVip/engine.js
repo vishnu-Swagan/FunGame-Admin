@@ -825,6 +825,23 @@ export function mountRoulette(root, opts) {
 
   const sfxPlace = () => {};
 
+  /* Called by the wrapper when the server refuses a stake. The optimistic chip
+     has to come back off the felt immediately and the reason has to be visible
+     on the table — a chip that quietly disappears a second later reads as the
+     game losing the bet. */
+  function rejectBet(key, amount, message) {
+    const b = bets.find(x => x.key === key);
+    if (b) {
+      b.amount -= amount;
+      if (b.amount <= 0) { bets = bets.filter(x => x !== b); removeChip(key); }
+      else drawChip(key, b.amount);
+    }
+    balance += amount;
+    refreshMoney();
+    if ($('rtlayer')) drawRtChips();
+    toast(message || 'That bet was not accepted');
+  }
+
 
   function clearBets() {
     chipEls.forEach(c => c.remove());
@@ -885,7 +902,11 @@ export function mountRoulette(root, opts) {
   const SERVER_SECTORS = { zeroside: 'zeroside', dzeroside: 'dzeroside', zerofour: 'zeroneighbours' };
   function toServerBet(key) {
     const [t, v] = key.split(':');
-    if (t === 'straight') return { bet_type: 'straight', value: v };
+    if (t === 'straight') {
+      // "00" is the only pocket that must travel as a string; the rest are plain
+      // numbers, which is what the API has always expected for a straight up
+      return { bet_type: 'straight', value: v === '00' ? '00' : Number(v) };
+    }
     if (t === 'color' || t === 'parity' || t === 'range') return { bet_type: t, value: v };
     if (t === 'dozen' || t === 'column') return { bet_type: t, value: Number(v) };
     if (t === 'grp') {
@@ -2185,6 +2206,7 @@ export function mountRoulette(root, opts) {
      it only renders what the server has already settled. */
   return {
     applyState,
+    rejectBet,
     setHistory(list) {
       history = (list || []).map(String).slice(0, 14);
       spins = (list || []).map(String);
