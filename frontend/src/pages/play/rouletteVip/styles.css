@@ -1,0 +1,1556 @@
+/* Generated from the standalone game — see rouletteVip/README.md.
+   Every selector is scoped under .rvip and every @keyframes name is
+   namespaced, so nothing here can reach the rest of the app. */
+
+  .rvip {
+    /* Felt sampled straight out of the wheel photograph: #520d09 where the
+       cabinet sits, falling to #100001 at the edges. Using the photo's own
+       colours is what lets the layout and the wheel read as one table. */
+    --felt-warm: #52100b;
+    --felt-mid:  #330907;
+    --felt-deep: #180404;
+    --void:      #0d0202;
+    --burgundy:  #3d0a08;
+    --mid:       #220605;
+    /* printed layout: deep casino red and near-black on the felt */
+    --red-idle:  #47100f;
+    --red-live:  #5a1513;
+    --ink:       #030001;
+    --ink-live:  #010000;
+    --side-bg:   #0f0007;   /* the near-black panels down the left */
+    --zero-bg:   #0f2620;   /* desaturated teal of the zero */
+    --rule:      rgba(168,139,145,.9);   /* light warm grey rules, not brass */
+    --rule-soft: rgba(168,139,145,.55);
+    --brass-ln:  rgba(168,139,145,.9);
+    --brass-hi:  rgba(214,196,199,.95);
+    --teal:      #0e6b5e;
+    --teal-live: #16988a;
+    --cyan:      #00e5cc;
+    --gold:      #f5c518;
+    --brass:     #c9a02c;
+    --cream:     #f2ede4;
+    --hair:      rgba(255,255,255,.85);
+
+    --num: "Optima", "Candara", "Gill Sans", "Gill Sans MT", "Trebuchet MS", sans-serif;
+    --ui:  ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+
+    --rail-w: 60px;   /* table's right inset — must exceed the rail's own footprint */
+    /* the two rotated columns down the left edge; the zero cell offsets by their
+       sum, so they are variables rather than numbers repeated in three places */
+    --col-out: 62px;  /* 1-18 / EVEN / diamonds / ODD / 19-36 */
+    --col-doz: 60px;  /* 1ST / 2ND / 3RD 12 — same width as the outside column */
+    --strip-h: 30px;
+    --top-h: 34px;
+  }
+
+  .rvip * { box-sizing: border-box; }
+
+  .rvip {
+    margin: 0;
+    background: #000;
+    font-family: var(--ui);
+    color: var(--cream);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  .rvip .stage { display: grid; place-items: center; min-height: 100dvh; }
+
+  .rvip .phone {
+    position: relative;
+    width: 100%;
+    max-width: 430px;
+    height: 100dvh;
+    max-height: 932px;
+    overflow: hidden;
+    /* Grid rather than a flex column, so portrait and landscape are two area maps
+       over ONE DOM. Reordering six flex children per orientation would mean six
+       `order` values to keep in step; named areas keep the two layouts readable
+       and independent. The overlays (rail, sheets, toasts) stay absolute and are
+       unaffected by either map. */
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "top" "hist" "wheel" "board" "tray" "money";
+    /* One continuous felt: warm where the cabinet stands, falling away at the
+       edges, with the woven texture over the top. The photo's own dark surround
+       lands on the same colour, so its edges disappear into the table. */
+    background:
+      url("./felt.webp") 0 0 / 108px 108px repeat,
+      radial-gradient(128% 62% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 44%, var(--felt-deep) 74%, var(--void) 100%);
+    background-blend-mode: soft-light, normal;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  @media (min-width: 480px) {
+    .rvip .stage { padding: 16px; }
+    .rvip .phone {
+      border-radius: 26px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.8);
+      height: min(932px, calc(100dvh - 32px));
+    }
+  }
+
+  .rvip /* ---------- top chrome ---------- */
+  .topbar {
+    grid-area: top;
+    height: var(--top-h);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 22px;
+    padding: 0 18px;
+    flex: none;
+  }
+  .rvip .topbar svg { width: 19px; height: 19px; fill: none; stroke: #1a1a1a; stroke-width: 1.6; }
+
+  .rvip /* ---------- history strip ---------- */
+  .history {
+    grid-area: hist;
+    height: var(--strip-h);
+    flex: none;
+    background: #000;
+    display: flex;
+    font-family: var(--num);
+    font-size: 15px;
+    overflow: hidden;
+  }
+  .rvip .history .latest {
+    flex: none;
+    width: 62px;
+    display: grid;
+    place-items: center;
+    background: #8b8b8b;
+    color: #fff;
+    font-weight: 600;
+  }
+  .rvip .history .past {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 0 12px;
+    overflow: hidden;
+  }
+  .rvip .history .past span { font-variant-numeric: tabular-nums; }
+  .rvip .h-green { color: #00c853; }
+  .rvip .h-red { color: #e53935; }
+  .rvip .h-black { color: #f2ede4; }
+
+  .rvip /* ---------- wheel stage ---------- */
+  /* The wheel keeps its intrinsic 320px geometry (the ball physics is written in
+     those px) and is scaled to fit instead — so short screens shrink the wheel
+     rather than crushing the betting table. */
+  /* the wheel stays visible above the board at all times, .rvip as on the reference
+     table — it never collapses behind the felt */
+  /* 682x475 photo at 430px wide stands 299px tall — the stage has to clear it */
+  .wheelstage {
+    grid-area: wheel;
+    position: relative;
+    flex: none;
+    /* the overhead wheel is square, so its width and the stage's height are one
+       and the same measurement — 62vh leaves the layout its room on short screens */
+    /* capped so the layout keeps enough height to show the player's chips while
+       the wheel is in play — a full-width circle that hides your own bets is a
+       bad trade */
+    --wheelsz: min(378px, 94vw, 52vh);
+    /* The stage keeps ONE layout height for the whole round. It used to grow for
+       the spin, which squeezed the number board — the board had to compress its
+       rows and still ran off the bottom of its frame. Now the overhead wheel is
+       an overlay that grows over the board instead, and the board keeps its own
+       size from first bet to payout and simply fades behind. */
+    height: 92px;
+    overflow: visible;
+  }
+  .rvip /* While bets are open the cabinet steps back to a slim band and hands its
+     height to the layout — the same move the reference table makes. The image
+     itself is unchanged; only how much room it takes while you are betting. */
+
+  /* ---------- focus lighting ---------- */
+  /* A key spot from above plus a dark pool beneath, .rvip so the cabinet reads as a
+     lit object in a dim room rather than a flat cut-out on a background. */
+  .spotlight {
+    position: absolute;
+    inset: -16% -22% -26%;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(54% 44% at 50% 2%,
+        rgba(255,243,216,.19), rgba(255,235,190,.05) 44%, transparent 70%),
+      radial-gradient(50% 26% at 50% 82%,
+        rgba(0,0,0,.62), rgba(0,0,0,.24) 52%, transparent 76%);
+    transition: opacity .7s ease;
+  }
+  .rvip .phone[data-mode="spin"] .spotlight, .rvip .phone[data-mode="result"] .spotlight { opacity: 1; }
+  .rvip .phone[data-mode="bet"] .spotlight { opacity: .72; }
+
+  .rvip /* raking house lights — only while the wheel is actually turning */
+  /* the rake belongs to the wheel, .rvip so it is clipped to the wheel — unmasked it
+     spilled a diagonal streak of screen-blend light across the layout below */
+  .sweep {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 100%; height: 100%;
+    margin: -50% 0 0 -50%;
+    -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%, #000 0 91%, transparent 99%);
+    mask-image: radial-gradient(circle closest-side at 50% 50%, #000 0 91%, transparent 99%);
+    pointer-events: none;
+    z-index: 2;
+    mix-blend-mode: screen;
+    opacity: 0;
+    transition: opacity .6s ease;
+    background: conic-gradient(from 0deg,
+      transparent 0deg, rgba(255,240,206,.12) 20deg, transparent 50deg,
+      transparent 168deg, rgba(255,240,206,.06) 190deg, transparent 222deg);
+    animation: rvip-sweepTurn 3.4s linear infinite;
+  }
+  .rvip .phone[data-mode="spin"] .sweep { opacity: 1; }
+  @keyframes rvip-sweepTurn { to { transform: rotate(360deg); } }
+
+  .rvip /* bloom over the brass while it is at speed */
+  .bloom {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 74%; height: 74%;
+    margin: -37% 0 0 -37%;
+    pointer-events: none;
+    z-index: 2;
+    mix-blend-mode: screen;
+    opacity: 0;
+    transition: opacity .8s ease;
+    background: radial-gradient(60% 60% at 50% 42%,
+      rgba(255,236,186,.14), rgba(255,226,160,.04) 52%, transparent 76%);
+  }
+  .rvip .phone[data-mode="spin"] .bloom { opacity: 1; }
+
+  .rvip /* ---------- overhead view while the wheel is in play ----------
+     Stretching the 3/4 photo vertically was only ever an approximation: a circle
+     in perspective does not space its pockets evenly, .rvip so scaleY() rounds the
+     outline while leaving the near pockets crowded and the far ones thin — it is
+     never a true circle. rectify.py inverts the projection instead and produces
+     a genuine overhead image, .rvip so this is a crossfade between two photographs of
+     the same wheel rather than a distortion of one. */
+  .topwrap {
+    position: absolute;
+    left: 50%; top: -2px;
+    width: var(--wheelsz); height: var(--wheelsz);
+    transform: translateX(-50%);
+    pointer-events: none;
+    /* While bets are open the wheel steps BEHIND the layout (which sits at
+       z-index 10) and dims; when the wheel is in play it comes in front and the
+       layout dims instead. Nothing resizes in either direction — the two simply
+       trade places, so no geometry moves and nothing has to be re-measured. */
+    z-index: 5;
+    opacity: .34;
+    transition: opacity .5s ease;
+  }
+  .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { z-index: 20; opacity: 1; }
+
+  .rvip /* The rectified image is square, .rvip so its dark corners would draw a hard box over
+     the felt. Masking it to its own circle dissolves that edge, .rvip and the shadow
+     puts the wheel above the table rather than pasted onto it.
+
+     closest-side matters: a radial-gradient's stops are fractions of the RAY
+     LENGTH, .rvip and a circle's default ray runs to the farthest CORNER — 0.707 of the
+     side, .rvip not 0.5 — so percentages meant as "nearly the full disc" land a third
+     of the way in and shave the whole number ring off. */
+  .topimg {
+    position: absolute; inset: 0;
+    display: block; width: 100%; height: auto;
+    -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%,
+      #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
+    mask-image: radial-gradient(circle closest-side at 50% 50%,
+      #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
+    filter: drop-shadow(0 12px 30px rgba(0,0,0,.8));
+  }
+  .rvip /* the head is rotated from script; will-change keeps it on its own layer so a
+     13-second spin does not repaint the bowl underneath it every frame */
+  .tophead { will-change: transform; }
+  .rvip /* the bowl already carries the shadow — a second one on the head would double it */
+  .tophead { filter: none; }
+  .rvip /* the board stays exactly where and what it is; it just steps back */
+  .tablewrap { transition: opacity .45s ease, filter .45s ease; }
+  .rvip .phone[data-mode="spin"] .tablewrap, .rvip .phone[data-mode="result"] .tablewrap {
+    opacity: .26;
+    filter: saturate(.65) brightness(.8);
+  }
+
+
+  .rvip /* the small ivory ball — cream, .rvip not bright white */
+  .ball {
+    position: absolute;
+    width: 3.1%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 26%, #fffdf6 0%, #f6f1e2 40%, #ddd5c0 76%, #b3ab96 100%);
+    box-shadow:
+      inset -1.2px -1.6px 2.6px rgba(60,45,20,.34),
+      inset 1.2px 1.2px 1.8px rgba(255,255,255,.95),
+      0 1px 3px rgba(0,0,0,.5),
+      0 0 6px rgba(255,248,225,.35);
+    transform: translate(-50%, -50%);
+    will-change: left, top, transform;
+    z-index: 3;
+  }
+  .rvip .ball.fast { filter: blur(1.1px); }
+
+  .rvip .bshadow {
+    position: absolute;
+    width: 3.6%;
+    aspect-ratio: 1.7;
+    border-radius: 50%;
+    background: rgba(0,0,0,.55);
+    filter: blur(2.6px);
+    transform: translate(-50%, -50%);
+    will-change: left, top, opacity;
+    z-index: 2;
+  }
+
+  .rvip /* result pocket readout — 19 | 4 | 21 */
+  /* result readout: a compact plate at the foot of the bowl, .rvip so it never
+     competes with the wheel or gets lost against it */
+  .readout {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -14px;
+    width: max-content;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    /* the plate sits over dark cabinet, so it needs a solid ground and a bright
+       rim or it disappears into the woodwork */
+    background: rgba(4,2,1,.9);
+    box-shadow:
+      inset 0 0 0 1.2px rgba(226,192,116,.75),
+      0 6px 18px rgba(0,0,0,.8);
+    font-family: var(--num);
+    opacity: 0;
+    transition: opacity .45s ease;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .rvip .phone[data-mode="result"] .readout { opacity: 1; }
+  .rvip .readout .neighbour {
+    font-size: clamp(17px, 2.8vh, 23px);
+    font-weight: 300;
+    color: rgba(242,237,228,.44);
+    width: clamp(26px, 4.4vh, 34px);
+    text-align: center;
+  }
+  .rvip .pocket {
+    width: clamp(38px, 6.2vh, 50px);
+    height: clamp(40px, 6.8vh, 54px);
+    background: #000;
+    border: 2px solid var(--gold);
+    border-radius: 5px;
+    display: grid;
+    place-items: center;
+    font-size: clamp(22px, 3.8vh, 31px);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(245,197,24,.6);
+    animation: rvip-pocketIn .5s cubic-bezier(.2,1.4,.4,1) both;
+  }
+  @keyframes rvip-pocketIn { from { transform: scale(.55); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+
+  .rvip /* phase call-out — replaces the "auto" feel with a dealer's call */
+  .callout {
+    position: absolute;
+    left: 0; right: 0;
+    top: 8px;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: .28em;
+    font-weight: 600;
+    z-index: 6;
+    pointer-events: none;
+    transition: opacity .4s ease, transform .4s ease;
+  }
+  .rvip .callout.hide { opacity: 0; transform: translateY(-6px); }
+  .rvip .callout.open { color: var(--cyan); }
+  .rvip .callout.close { color: #ff5b5b; }
+
+  .rvip /* ---------- back / timer control ---------- */
+  .backbtn {
+    position: absolute;
+    top: calc(var(--strip-h) + var(--top-h) + 8px);
+    left: 10px;
+    width: 54px; height: 54px;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .rvip .backbtn .plate {
+    position: absolute; inset: 0;
+    background: #17a89a;
+    border-radius: 10px 10px 22px 10px;
+    transition: opacity .4s ease, border-radius .4s ease;
+  }
+  .rvip .phone[data-mode="bet"] .backbtn .plate { opacity: .42; border-radius: 50%; }
+  .rvip .backbtn .chev { position: relative; width: 22px; height: 22px; stroke: #fff; stroke-width: 2.4; fill: none; }
+  .rvip .ring { position: absolute; inset: 0; transform: rotate(-90deg); opacity: 0; transition: opacity .4s ease; }
+  .rvip .phone[data-mode="bet"] .ring { opacity: 1; }
+  .rvip .ring circle { fill: none; stroke-width: 4; }
+  .rvip .ring .trk { stroke: rgba(0,0,0,.35); }
+  .rvip .ring .val { stroke: #29e0a4; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+
+  .rvip /* ---------- right rail ---------- */
+  .rail {
+    position: absolute;
+    right: 4px;
+    top: calc(var(--strip-h) + var(--top-h) + 8px);
+    /* confined to the wheel's own band: the utility buttons no longer run down
+       beside the layout, which is what let the board take the full width */
+    height: 268px;
+    bottom: auto;
+    width: 44px;
+    transition: opacity .4s ease;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+  }
+  .rvip .rail > * { pointer-events: auto; }
+  .rvip /* favourite / stats / racetrack / menu can wait; while bets are open the
+     controls that matter are all down on the chip rail */
+  .phone[data-mode="bet"] .rail { opacity: 0; pointer-events: none; }
+  .rvip .phone[data-mode="bet"] .rail > * { pointer-events: none; }
+  .rvip .rail .spacer { flex: 1; }
+
+  .rvip .rbtn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(20,10,14,.72);
+    border: 1px solid rgba(255,255,255,.16);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    padding: 0;
+    transition: transform .12s ease;
+  }
+  .rvip .rbtn:active { transform: scale(.9); }
+  .rvip .rbtn svg { width: 17px; height: 17px; fill: none; stroke: var(--cream); stroke-width: 1.7; }
+  .rvip .rbtn.filled svg { fill: var(--cream); stroke: none; }
+  .rvip .rbtn:disabled { opacity: .32; cursor: default; }
+  .rvip .rbtn:focus-visible, .rvip .cell:focus-visible, .rvip .backbtn:focus-visible, .rvip .x2:focus-visible, .rvip .pennant:focus-visible {
+    outline: 2px solid var(--cyan); outline-offset: 2px;
+  }
+
+  .rvip .raillabel {
+    font-size: 9.5px;
+    letter-spacing: .16em;
+    color: rgba(242,237,228,.72);
+    font-weight: 600;
+  }
+
+
+  .rvip .x2 {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: rgba(20,10,14,.72);
+    border: 1px solid rgba(255,255,255,.16);
+    color: var(--cream);
+    font-family: var(--num);
+    font-size: 15px;
+    cursor: pointer;
+    transition: transform .12s ease;
+  }
+  .rvip .x2:active { transform: scale(.9); }
+  .rvip .x2:disabled { opacity: .32; cursor: default; }
+
+  .rvip .betonly {
+    opacity: 0;
+    transform: translateX(14px);
+    transition: opacity .4s ease, transform .4s ease;
+    pointer-events: none !important;
+  }
+  .rvip .phone[data-mode="bet"] .betonly {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto !important;
+  }
+
+  .rvip /* ---------- betting table ---------- */
+  /* The layout is PRINTED on the same felt the wheel stands on — no panel, .rvip no
+     card, .rvip no separate surface. Only a brass rule marks its edge, .rvip exactly as on
+     a real table, .rvip which is what merges it with the cabinet above. */
+  .tablewrap {
+    grid-area: board;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    /* 384px is what makes a number cell ~1.5:1 once the wheel steps back,
+       which is the proportion on the supplied board */
+    width: min(370px, calc(100% - 10px));
+    margin: 0 auto 1px;
+    padding: 8px 8px 9px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    z-index: 10;
+    background: transparent;
+    overflow: hidden;
+  }
+  .rvip /* the brass rule bounding the printed area */
+  .tablewrap::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    box-shadow:
+      inset 0 0 0 3px rgba(0,0,0,.3),
+      inset 0 14px 40px rgba(0,0,0,.3);
+    pointer-events: none;
+  }
+
+  .rvip /* The zero as on the reference: teal, .rvip with a pointed top. clip-path crops a
+     border, .rvip so the rule is a filled backplate one pixel larger than the fill
+     sitting on top of it — same trick as the diamonds. */
+  .pennant {
+    display: flex;
+    height: clamp(26px, 4.2vh, 36px);
+    margin-left: calc(var(--col-out) + var(--col-doz));
+    width: calc(100% - var(--col-out) - var(--col-doz));
+    background: var(--rule);
+    -webkit-clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
+    clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
+    border: 0;
+    font-family: var(--num);
+    font-size: clamp(16px, 2.9vh, 23px);
+    font-weight: 400;
+    cursor: pointer;
+    color: #f4efe6;
+    text-shadow: 0 1px 2px rgba(0,0,0,.85);
+    position: relative;
+  }
+  .rvip .pcell {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+  }
+  .rvip .pcell + .pcell { box-shadow: inset 1px 0 0 var(--rule-soft); }
+  .rvip .pcell:active { filter: brightness(1.5); }
+
+  .rvip .pennant::before {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    background-color: var(--zero-bg);
+    background-image:
+      url("./felt.webp"),
+      linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.32));
+    background-size: 108px 108px, auto;
+    background-blend-mode: soft-light, normal;
+    -webkit-clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
+    clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
+  }
+  .rvip /* the numeral has to sit above the absolutely-positioned fill */
+  .pennant span { position: relative; z-index: 2; }
+
+  .rvip .betlayer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9;
+  }
+  .rvip .betlayer .placed { position: absolute; }
+
+  .rvip .board {
+    display: grid;
+    grid-template-columns: var(--col-out) var(--col-doz) repeat(3, minmax(0, 1fr));
+    /* minmax(0,1fr) — without the 0 floor, each row's min-content (the numeral)
+       keeps it from shrinking and the grid overflows the money bar on short screens */
+    grid-template-rows: repeat(12, minmax(15px, 1fr)) minmax(22px, 34px);
+    flex: 1;
+    min-height: 0;
+    max-height: 900px;
+  }
+
+  .rvip /* Every box is felt with paint on it: the woven texture rides over the colour
+     via soft-light, .rvip the rules are brass rather than white, .rvip and the numerals are
+     pressed in with a shadow instead of floating on top. */
+  .cell {
+    position: relative;
+    border: 1px solid var(--rule-soft);
+    background: transparent;
+    color: #f4efe6;
+    font-family: var(--num);
+    font-weight: 400;
+    font-size: clamp(15px, 2.7vh, 23px);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    padding: 0;
+    transition: background .35s ease, filter .12s ease;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 0 6px rgba(0,0,0,.35);
+  }
+  .rvip .cell:active { filter: brightness(1.5); }
+
+  .rvip .cell.red, .rvip .cell.black {
+    background-image:
+      url("./felt.webp"),
+      linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.34));
+    background-size: 108px 108px, auto;
+    background-blend-mode: soft-light, normal;
+  }
+  .rvip .cell.red { background-color: var(--red-idle); }
+  .rvip .cell.black { background-color: var(--ink); }
+  .rvip .phone[data-mode="bet"] .cell.red { background-color: var(--red-live); }
+  .rvip .phone[data-mode="bet"] .cell.black { background-color: var(--ink-live); }
+
+  .rvip /* the left columns and the 2-to-1 row are near-black printed panels */
+  .cell.outside, .rvip .cell.dozen, .rvip .cell.col21 {
+    background-color: var(--side-bg);
+    background-image:
+      url("./felt.webp"),
+      linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.3));
+    background-size: 108px 108px, auto;
+    background-blend-mode: soft-light, normal;
+  }
+
+  .rvip /* rotated labels are longer than their cell is tall on short screens —
+     let them scale down and never clip */
+  /* wider columns give the rotated labels room for a larger face */
+  .cell.outside, .rvip .cell.dozen {
+    font-size: clamp(9px, 2vh, 18px);
+    letter-spacing: .08em;
+  }
+  .rvip /* :not(.placed) matters — a staked chip is also a span, .rvip and without this it
+     inherits the vertical writing mode and its value comes out sideways */
+  .cell.outside > span:not(.placed), .rvip .cell.dozen   > span:not(.placed) {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+  .rvip .cell.dozen sup { font-size: .58em; letter-spacing: 0; }
+
+  .rvip .cell.col21 {
+    font-size: clamp(10px, 1.9vh, 15px);
+    letter-spacing: .04em;
+    white-space: nowrap;
+    line-height: 1;
+  }
+  .rvip .cell.col21 .c21 { white-space: nowrap; }
+  .rvip .cell.col21 .to {
+    font-size: .62em;
+    vertical-align: baseline;
+    margin: 0 .12em;
+    opacity: .85;
+  }
+
+  .rvip /* clip-path crops a border, .rvip so the outline is drawn as a filled backplate
+     one step larger than the fill sitting on top of it */
+  .diamond {
+    position: relative;
+    width: 23px; height: 36px;
+    background: var(--brass-hi);
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  }
+  .rvip .diamond::after {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    background: var(--red-idle);
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  }
+  .rvip .diamond.blk::after { background: var(--ink); }
+  .rvip .phone[data-mode="bet"] .diamond::after { background: var(--red-live); }
+  .rvip .phone[data-mode="bet"] .diamond.blk::after { background: #000; }
+
+  .rvip /* the winning number, .rvip called out on the layout as well as on the wheel */
+  .cell.win, .rvip .pcell.win {
+    box-shadow: inset 0 0 0 3px var(--gold), 0 0 16px 2px rgba(245,197,24,.55);
+    z-index: 6;
+    animation: rvip-winPulse 1s ease-out 3;
+  }
+  .rvip .cell.win { color: #fff; }
+  @keyframes rvip-winPulse {
+    0%   { box-shadow: inset 0 0 0 3px var(--gold), 0 0 26px 6px rgba(245,197,24,.85) }
+    55%  { box-shadow: inset 0 0 0 3px var(--gold), 0 0 12px 1px rgba(245,197,24,.35) }
+    100% { box-shadow: inset 0 0 0 3px var(--gold), 0 0 16px 2px rgba(245,197,24,.55) }
+  }
+
+  .rvip /* the pocket the ball came to rest in */
+  .pockethl {
+    position: absolute;
+    width: 9.5%; aspect-ratio: 1;
+    margin: -4.75% 0 0 -4.75%;
+    border-radius: 50%;
+    border: 2px solid var(--gold);
+    box-shadow: 0 0 14px 3px rgba(245,197,24,.7), inset 0 0 10px rgba(245,197,24,.45);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .rvip .pockethl.on { animation: rvip-pocketRing 2.6s cubic-bezier(.2,.9,.3,1) forwards; }
+  @keyframes rvip-pocketRing {
+    0%   { opacity: 0; transform: scale(2.4) }
+    22%  { opacity: 1; transform: scale(1) }
+    70%  { opacity: 1; transform: scale(1) }
+    100% { opacity: .55; transform: scale(1) }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rvip .cell.win, .rvip .pcell.win { animation: none }
+    .rvip .pockethl.on { animation: none; opacity: 1 }
+  }
+
+
+  .rvip /* a staked chip is the same clay chip as the tray, .rvip in the colour of the
+     denomination it represents — so the board reads at a glance */
+  .placed {
+    --c: #b0201c;
+    --c-dk: #6d100e;
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 30px; height: 30px;
+    margin: -15px 0 0 -15px;
+    border-radius: 50%;
+    background:
+      repeating-conic-gradient(from 11.25deg,
+        #f6f1e6 0deg 12deg, transparent 12deg 45deg),
+      radial-gradient(circle at 38% 30%, var(--c) 0%, var(--c-dk) 96%);
+    display: grid;
+    place-items: center;
+    font-size: 10.5px;
+    font-weight: 800;
+    color: #fffaf0;
+    font-family: var(--ui);
+    writing-mode: horizontal-tb;
+    z-index: 6;
+    box-shadow:
+      0 0 0 2px rgba(245,197,24,.9),
+      0 0 14px 3px rgba(245,197,24,.4),
+      0 3px 8px rgba(0,0,0,.7),
+      inset 0 -2px 4px rgba(0,0,0,.4);
+    animation: rvip-chipDrop .17s cubic-bezier(.25,.9,.35,1) both;
+    pointer-events: none;
+  }
+  .rvip .placed::after {
+    content: "";
+    position: absolute; inset: 5px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 30%, var(--c), var(--c-dk) 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.4);
+  }
+  .rvip .placed b {
+    position: relative;
+    z-index: 2;
+    text-shadow: 0 1px 2px rgba(0,0,0,.85);
+  }
+  @keyframes rvip-chipDrop {
+    from { transform: translateY(-9px) scale(1.28); opacity: 0 }
+    to   { transform: none; opacity: 1 }
+  }
+
+  .rvip /* ---------- chip tray: every denomination on the rail, .rvip always reachable ----
+     Built as real clay chips — a coloured body, .rvip eight white edge spots, .rvip a
+     recessed inlay carrying the value, .rvip and a lit top edge. */
+  .chiptray {
+    grid-area: tray;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 10px 0;
+    z-index: 20;
+  }
+  .rvip .trayside {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 75px;   /* keeps the chips optically centred */
+  }
+  .rvip .trayside:last-child { justify-content: flex-end; }
+  .rvip .chipslot {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(6px, 2.4vw, 13px);
+  }
+  .rvip /* undo / double, .rvip sat either side of the chips */
+  .traybtn {
+    flex: none;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    /* dark felt swallows a dark button — these need a brass rim and a lifted
+       body to be findable at the bottom of the screen */
+    background:
+      radial-gradient(circle at 40% 30%, rgba(86,32,26,.95), rgba(30,10,9,.95));
+    border: 1px solid rgba(214,178,102,.6);
+    box-shadow:
+      0 2px 5px rgba(0,0,0,.6),
+      inset 0 1px 2px rgba(255,236,190,.22);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    padding: 0;
+    color: var(--cream);
+    font-family: var(--num);
+    font-size: 14px;
+    transition: transform .12s ease, opacity .3s ease;
+  }
+  .rvip .traybtn svg { width: 16px; height: 16px; fill: none; stroke: var(--cream); stroke-width: 1.8; }
+  .rvip .traybtn:active { transform: scale(.9); }
+  .rvip .traybtn:disabled { opacity: .3; cursor: default; }
+  .rvip .traybtn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .rvip /* these two fade rather than slide — a sideways slide reads wrong on a row */
+  .chiptray .betonly { opacity: 0; transform: none; pointer-events: none !important; }
+  .rvip .phone[data-mode="bet"] .chiptray .betonly { opacity: 1; pointer-events: auto !important; }
+  .rvip .chip {
+    --c: #b0201c;
+    --c-dk: #6d100e;
+    position: relative;
+    width: clamp(28px, 7.6vw, 34px);
+    aspect-ratio: 1;
+    flex: none;
+    border: 0;
+    padding: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    background:
+      repeating-conic-gradient(from 11.25deg,
+        #f6f1e6 0deg 12deg, transparent 12deg 45deg),
+      radial-gradient(circle at 38% 30%, var(--c) 0%, var(--c-dk) 96%);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,.55),
+      0 3px 6px rgba(0,0,0,.6),
+      inset 0 2px 3px rgba(255,255,255,.3),
+      inset 0 -3px 5px rgba(0,0,0,.45);
+    transition: transform .16s cubic-bezier(.2,1.3,.4,1), box-shadow .16s ease;
+  }
+  .rvip /* recessed inlay */
+  .chip::before {
+    content: "";
+    position: absolute;
+    inset: 19%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 30%, var(--c) 0%, var(--c-dk) 100%);
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255,255,255,.42),
+      inset 0 2px 4px rgba(0,0,0,.45);
+  }
+  .rvip .chip span {
+    position: relative;
+    z-index: 2;
+    font-family: var(--ui);
+    font-size: clamp(8px, 2.1vw, 9.5px);
+    font-weight: 800;
+    letter-spacing: -.03em;
+    color: #fffaf0;
+    text-shadow: 0 1px 2px rgba(0,0,0,.85);
+  }
+  .rvip /* Selection is shown by the brass ring alone — every chip keeps the same
+     diameter, .rvip so the row stays even instead of one growing out of line. */
+  .chip[aria-pressed="true"] {
+    box-shadow:
+      0 0 0 2px var(--gold),
+      0 0 12px 3px rgba(245,197,24,.5),
+      0 3px 6px rgba(0,0,0,.6),
+      inset 0 2px 3px rgba(255,255,255,.35),
+      inset 0 -3px 5px rgba(0,0,0,.45);
+  }
+  .rvip .chip:active { transform: scale(.94); }
+  .rvip .chip:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+  .rvip /* ---------- money bar ---------- */
+  .moneybar {
+    grid-area: money;
+    flex: none;
+    padding: 2px 14px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-size: 12.5px;
+    z-index: 20;
+  }
+  .rvip .moneybar .l { display: flex; flex-direction: column; gap: 2px; }
+  .rvip .moneybar .r { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
+  .rvip .figures { display: flex; align-items: baseline; gap: 7px; }
+  .rvip .figures .sep { color: rgba(242,237,228,.3); }
+  .rvip .ticker { color: var(--gold); font-weight: 600; }
+  .rvip .win { color: var(--gold); }
+  .rvip .muted { color: rgba(242,237,228,.55); }
+  .rvip .lbl { color: var(--gold); }
+  .rvip .val { color: var(--cream); font-variant-numeric: tabular-nums; }
+  .rvip .dim { color: rgba(242,237,228,.42); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .rvip .tablename { color: var(--cream); font-size: 12px; }
+  .rvip .tablename b { color: var(--gold); font-weight: 500; }
+
+
+  .rvip /* ================= panels ================= */
+  .sheetscrim {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,.62);
+    z-index: 95; opacity: 0; pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  .rvip .sheetscrim.on { opacity: 1; pointer-events: auto; }
+
+  .rvip .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    max-height: 78%;
+    z-index: 96;
+    background: #17181a;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -14px 40px rgba(0,0,0,.7);
+    transform: translateY(102%);
+    transition: transform .32s cubic-bezier(.25,.9,.3,1);
+    display: flex; flex-direction: column;
+  }
+  .rvip .sheet.on { transform: none; }
+  .rvip .sheetgrip {
+    width: 42px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,.32);
+    margin: 9px auto 2px;
+    flex: none;
+  }
+  .rvip .sheethead {
+    flex: none;
+    display: flex; align-items: center; justify-content: center;
+    gap: 10px; padding: 8px 46px 12px;
+    position: relative;
+  }
+  .rvip .sheethead h3 { margin: 0; font-size: 19px; font-weight: 700; color: #fff; }
+  .rvip .sheethead .ic { width: 20px; height: 20px; fill: #fff; }
+  .rvip .sheetx {
+    position: absolute; right: 14px; top: 4px;
+    width: 34px; height: 34px; border: 0; background: transparent;
+    color: rgba(255,255,255,.8); font-size: 24px; line-height: 1; cursor: pointer;
+  }
+  .rvip .sheettabs {
+    flex: none; display: flex; gap: 0;
+    padding: 0 18px; border-bottom: 1px solid rgba(255,255,255,.1);
+  }
+  .rvip .sheettab {
+    flex: 1; padding: 11px 4px; border: 0; background: transparent;
+    color: rgba(255,255,255,.5); font-size: 12.5px; font-weight: 700;
+    letter-spacing: .07em; cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .rvip .sheettab[aria-selected="true"] { color: #fff; border-bottom-color: var(--cyan); }
+  .rvip .sheetbody { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px 26px; }
+  .rvip .sheetsec { margin: 0 0 22px; }
+  .rvip .sheetsec h4 {
+    margin: 0 0 10px; font-size: 12.5px; font-weight: 700;
+    letter-spacing: .12em; color: rgba(255,255,255,.72); text-align: center;
+  }
+  .rvip .gridbtns { display: grid; gap: 0; border: 1px solid rgba(255,255,255,.16); }
+  .rvip .gridbtns.c5 { grid-template-columns: repeat(5, 1fr); }
+  .rvip .gridbtns.c4 { grid-template-columns: repeat(4, 1fr); }
+  .rvip .gridbtns.c2 { grid-template-columns: repeat(2, 1fr); }
+  .rvip .gridbtns.c1 { grid-template-columns: 1fr; }
+  .rvip .gb {
+    border: 0; outline: 1px solid rgba(255,255,255,.12);
+    background: transparent; color: #efeae2;
+    padding: 15px 4px; font-size: 14px; font-family: var(--ui);
+    cursor: pointer;
+  }
+  .rvip .gb:active { background: rgba(255,255,255,.1); }
+  .rvip .gb.small { padding: 12px 3px; font-size: 12.5px; letter-spacing: .05em; }
+
+  .rvip /* ---------- statistics ---------- */
+  .stnums { display: flex; flex-direction: column; gap: 7px; }
+  .rvip .strow {
+    display: grid; grid-template-columns: 34px 1fr 46px;
+    align-items: center; gap: 9px;
+    border: 0; background: transparent; padding: 0;
+    font-family: var(--ui); cursor: pointer; text-align: left;
+  }
+  .rvip .strow:active .stbar i { filter: brightness(1.4); }
+  .rvip /* a word label and a "72 · 36.0%" value need more room than a 2-digit pip does */
+  .strow.grp { grid-template-columns: 68px 1fr 74px; }
+  .rvip .strow.grp .stname {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
+    color: rgba(255,255,255,.82);
+  }
+  .rvip .stpip {
+    width: 30px; height: 30px; border-radius: 4px;
+    display: grid; place-items: center;
+    font-family: var(--num); font-size: 14px; color: #fff;
+    border: .5px solid rgba(255,255,255,.22);
+  }
+  .rvip .stpip.red { background: #8e1f1c; }
+  .rvip .stpip.black { background: #1a1416; }
+  .rvip .stpip.green { background: #1e6b52; }
+  .rvip .stbar { height: 7px; border-radius: 4px; background: rgba(255,255,255,.09); overflow: hidden; }
+  .rvip .stbar i { display: block; height: 100%; border-radius: 4px; background: var(--bar); }
+  .rvip .stval {
+    font-size: 11.5px; color: rgba(255,255,255,.72);
+    font-variant-numeric: tabular-nums; text-align: right;
+    white-space: nowrap;
+  }
+  .rvip .sttwo { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .rvip .stcap {
+    font-size: 10px; font-weight: 700; letter-spacing: .16em;
+    color: rgba(255,255,255,.5); margin: 0 0 9px; text-align: center;
+  }
+
+  .rvip /* an even split reads as a vertical rule dead centre — the eye measures the
+     offset from it, .rvip which is the only thing that carries information here */
+  .stsplit { display: flex; flex-direction: column; gap: 12px; }
+  .rvip .stpair { display: grid; grid-template-columns: 1fr; gap: 5px; }
+  .rvip .stpairhead {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: rgba(255,255,255,.62);
+    font-variant-numeric: tabular-nums;
+  }
+  .rvip .stpairhead b { color: #fff; font-weight: 700; }
+  .rvip .stsplitbar {
+    height: 12px; border-radius: 3px; overflow: hidden;
+    display: flex; background: rgba(255,255,255,.08);
+    position: relative;
+  }
+  .rvip .stsplitbar u { display: block; height: 100%; text-decoration: none; }
+  .rvip .stsplitbar::after {
+    content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: rgba(255,255,255,.45);
+  }
+
+  .rvip /* the wheel histogram: one column per pocket, .rvip in WHEEL order, .rvip so a biased
+     wheel shows up as a run of tall neighbours rather than scattered noise */
+  .sthist {
+    display: flex; align-items: flex-end; gap: 1px;
+    height: 96px; padding: 0 0 2px;
+    position: relative;
+  }
+  .rvip /* without a reference line the bars only say "some are taller"; with one they
+     say which pockets are actually running above their share */
+  .stexp {
+    position: absolute; left: 0; right: 0; height: 0;
+    border-top: 1px dashed rgba(255,255,255,.42);
+    pointer-events: none;
+  }
+  .rvip .stexp b {
+    position: absolute; right: 0; top: -13px;
+    font-size: 8px; font-weight: 700; letter-spacing: .08em;
+    color: rgba(255,255,255,.55);
+  }
+  .rvip .sthist button {
+    flex: 1; border: 0; padding: 0; background: transparent;
+    height: 100%; display: flex; flex-direction: column; justify-content: flex-end;
+    cursor: pointer; min-width: 0;
+  }
+  .rvip .sthist i { display: block; width: 100%; border-radius: 1px 1px 0 0; min-height: 1px; }
+  .rvip .sthist button:active i { filter: brightness(1.6); }
+  .rvip .sthistax {
+    display: flex; gap: 1px; margin-top: 4px;
+    font-size: 6.5px; color: rgba(255,255,255,.4);
+  }
+  .rvip .sthistax span {
+    flex: 1; text-align: center; min-width: 0; overflow: hidden;
+    font-variant-numeric: tabular-nums;
+  }
+  .rvip .stwin {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 16px;
+  }
+  .rvip .stwin label {
+    font-size: 10px; font-weight: 700; letter-spacing: .14em;
+    color: rgba(255,255,255,.5); white-space: nowrap;
+  }
+  .rvip .stwin input { flex: 1; accent-color: var(--cyan); }
+  .rvip .stwin b { font-size: 13px; color: #fff; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  .rvip .sthint {
+    font-size: 10.5px; line-height: 1.5; color: rgba(255,255,255,.45);
+    margin: 14px 0 0; text-align: center;
+  }
+
+  .rvip /* ---------- favourites, .rvip autoplay, .rvip menu ---------- */
+  .slot {
+    display: grid; grid-template-columns: 1fr 30px;
+    align-items: stretch; gap: 0;
+    border: 1px solid rgba(255,255,255,.16); border-radius: 5px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .rvip .slot > button {
+    border: 0; background: transparent; color: #efeae2;
+    font-family: var(--ui); text-align: left; cursor: pointer;
+    padding: 11px 12px; min-width: 0;
+  }
+  .rvip .slot > button:active { background: rgba(255,255,255,.08); }
+  .rvip .slot .stitle { font-size: 12.5px; font-weight: 700; letter-spacing: .04em; }
+  .rvip .slot .ssub {
+    font-size: 10px; color: rgba(255,255,255,.5); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .rvip .slot.empty .stitle { color: rgba(255,255,255,.45); font-weight: 400; }
+  .rvip .slot .sdel {
+    border: 0; border-left: 1px solid rgba(255,255,255,.14);
+    background: transparent; color: rgba(255,255,255,.45);
+    font-size: 17px; cursor: pointer; line-height: 1;
+  }
+  .rvip .slot .sdel:active { background: rgba(190,40,40,.3); color: #fff; }
+
+  .rvip .gb b { display: block; font-size: 13.5px; font-weight: 700; }
+  .rvip .gb i {
+    display: block; font-style: normal; font-size: 8.5px;
+    letter-spacing: .1em; color: rgba(255,255,255,.42); margin-top: 3px;
+  }
+  .rvip .gb.wide { grid-column: 1 / -1; }
+  .rvip .gb.red { background: rgba(142,31,28,.5); }
+  .rvip .gb.blk { background: rgba(20,16,18,.85); }
+
+  .rvip .menulist { display: flex; flex-direction: column; }
+  .rvip .menurow {
+    display: flex; align-items: center; gap: 13px;
+    padding: 14px 4px;
+    border: 0; border-bottom: 1px solid rgba(255,255,255,.09);
+    background: transparent; color: #efeae2;
+    font-family: var(--ui); font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .rvip .menurow:active { background: rgba(255,255,255,.07); }
+  .rvip .menurow svg { width: 19px; height: 19px; flex: none; fill: none;
+    stroke: rgba(255,255,255,.65); stroke-width: 1.6; }
+  .rvip .menurow span { flex: 1; }
+  .rvip .menurow em {
+    font-style: normal; font-size: 11px; color: rgba(255,255,255,.42);
+  }
+  .rvip .toggle {
+    width: 38px; height: 21px; border-radius: 11px; flex: none;
+    background: rgba(255,255,255,.18); position: relative;
+    transition: background .18s ease;
+  }
+  .rvip .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 17px; height: 17px; border-radius: 50%; background: #fff;
+    transition: transform .18s ease;
+  }
+  .rvip .menurow[aria-pressed="true"] .toggle { background: var(--cyan); }
+  .rvip .menurow[aria-pressed="true"] .toggle::after { transform: translateX(17px); }
+
+  .rvip .bigbtn {
+    width: 100%; padding: 15px; border: 0; border-radius: 6px;
+    background: var(--cyan); color: #07211d;
+    font-family: var(--ui); font-size: 14px; font-weight: 800;
+    letter-spacing: .12em; cursor: pointer; margin-top: 4px;
+  }
+  .rvip .bigbtn:disabled { background: rgba(255,255,255,.14); color: rgba(255,255,255,.4); cursor: default; }
+  .rvip .bigbtn.stop { background: #a8302b; color: #fff; }
+  .rvip .kv {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: rgba(255,255,255,.6);
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .rvip .kv b { color: #fff; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .rvip .paytable { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rvip .paytable th, .rvip .paytable td {
+    padding: 7px 6px; text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    color: rgba(255,255,255,.72);
+  }
+  .rvip .paytable th { color: rgba(255,255,255,.45); font-size: 9.5px; letter-spacing: .12em; }
+  .rvip .paytable td:last-child { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
+
+  .rvip /* ---------- betting countdown ----------
+     A shared round is on a clock, .rvip so the clock has to be visible. It sits over
+     the wheel — which is dimmed while bets are open — and turns amber then red as
+     it runs down, .rvip so the state is readable without reading the number. */
+  .bettimer {
+    position: absolute;
+    left: 50%; top: 18px;
+    transform: translateX(-50%);
+    width: 62px; height: 62px;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .35s ease;
+    --tc: var(--cyan);
+  }
+  .rvip .phone[data-mode="bet"] .bettimer { opacity: 1; }
+  .rvip .bettimer svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .rvip .bettimer .btrk {
+    fill: rgba(6,2,4,.72);
+    stroke: rgba(255,255,255,.16);
+    stroke-width: 3.5;
+  }
+  .rvip .bettimer .bval {
+    fill: none;
+    stroke: var(--tc);
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset .25s linear, stroke .3s ease;
+    filter: drop-shadow(0 0 5px var(--tc));
+  }
+  .rvip .bettimer b {
+    position: absolute; left: 0; right: 0; top: 15px;
+    text-align: center;
+    font-family: var(--num); font-size: 21px; font-weight: 400;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .rvip .bettimer em {
+    position: absolute; left: 0; right: 0; bottom: 12px;
+    text-align: center;
+    font-style: normal; font-family: var(--ui);
+    font-size: 6.5px; font-weight: 700; letter-spacing: .2em;
+    color: rgba(255,255,255,.5);
+  }
+  .rvip .bettimer[data-state="warn"] { --tc: #f0a92c; }
+  .rvip .bettimer[data-state="urgent"] { --tc: #e8342c; }
+  .rvip .bettimer[data-state="urgent"] b { color: #ff6a60; }
+  .rvip /* one pulse per second, .rvip in step with the alarm */
+  .bettimer[data-state="urgent"] { animation: rvip-btPulse 1s ease-out infinite; }
+  @keyframes rvip-btPulse {
+    0%   { transform: translateX(-50%) scale(1.14) }
+    35%  { transform: translateX(-50%) scale(1) }
+    100% { transform: translateX(-50%) scale(1) }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rvip .bettimer[data-state="urgent"] { animation: none; }
+  }
+
+  .rvip /* ---------- the table's winners ----------
+     A shared round has other people in it, .rvip so the result is a table result. This
+     sits over the felt during the payout window and clears itself. */
+  .winboard {
+    position: absolute;
+    left: 12px; bottom: 84px;
+    width: 176px;
+    z-index: 40;
+    border-radius: 8px;
+    padding: 7px 8px 8px;
+    background: linear-gradient(180deg, rgba(18,4,8,.93), rgba(10,2,5,.95));
+    border: 1px solid rgba(214,178,102,.34);
+    box-shadow: 0 8px 22px rgba(0,0,0,.6);
+    opacity: 0; transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity .3s ease, transform .3s ease;
+  }
+  .rvip .winboard.on { opacity: 1; transform: none; }
+  .rvip .wbhead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--ui); font-size: 7.5px; font-weight: 700;
+    letter-spacing: .17em; color: rgba(214,178,102,.85);
+    padding-bottom: 5px; margin-bottom: 4px;
+    border-bottom: 1px solid rgba(214,178,102,.22);
+  }
+  .rvip .wbhead b { color: #fff; font-size: 10px; letter-spacing: 0; }
+  .rvip .wbrow {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 8px; padding: 2.5px 0;
+    font-family: var(--ui); font-size: 10px;
+    opacity: 0;
+    animation: rvip-wbIn .32s cubic-bezier(.25,.9,.35,1) forwards;
+  }
+  @keyframes rvip-wbIn { from { opacity: 0; transform: translateX(-7px) } to { opacity: 1; transform: none } }
+  .rvip .wbname {
+    color: rgba(240,232,220,.78);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rvip .wbamt {
+    color: #6fe3b0; font-weight: 700; font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  .rvip .wbrow.top .wbamt { color: #f5c518; }
+  .rvip .wbrow.me .wbname { color: #fff; font-weight: 700; }
+  .rvip .wbrow.me { border-left: 2px solid var(--cyan); padding-left: 5px; margin-left: -7px; }
+  .rvip .wbmore {
+    font-family: var(--ui); font-size: 8px; letter-spacing: .1em;
+    color: rgba(240,232,220,.4); padding-top: 4px; text-align: center;
+  }
+  @media (max-height: 620px) { .rvip .winboard { bottom: 74px; width: 156px } }
+
+  .rvip /* the speaker shows waves when on and a cross when off — the icon states what
+     is happening now, .rvip not what tapping it would do */
+  .sndx { display: none; }
+  .rvip .rbtn[aria-pressed="false"] .sndwave { display: none; }
+  .rvip .rbtn[aria-pressed="false"] .sndx { display: inline; }
+  .rvip .rbtn[aria-pressed="false"] { opacity: .55; }
+
+  .rvip /* ---------- racetrack ---------- */
+  .racetrack {
+    position: absolute; inset: 0;
+    z-index: 30;
+    display: none;
+  }
+  .rvip /* the grid steps aside; the box, .rvip frame and felt stay put */
+  .tablewrap.rt > .board, .rvip .tablewrap.rt > .pennant, .rvip .tablewrap.rt > .betlayer { visibility: hidden; }
+  .rvip .racetrack.on { display: block; }
+  .rvip .rtring {
+    position: absolute;
+    border-radius: 999px;
+    border: 1px solid rgba(168,139,145,.55);
+    background:
+      radial-gradient(120% 160% at 50% -20%, rgba(255,214,170,.07), transparent 60%),
+      linear-gradient(180deg, var(--felt-mid), var(--felt-deep));
+    box-shadow: 0 2px 10px rgba(0,0,0,.5) inset;
+  }
+  .rvip /* 37 pockets on an 840px perimeter is 22px each — the geometry sets the
+     type size, .rvip which is why real racetracks print their numbers small */
+  .rtnum {
+    position: absolute;
+    width: 19px; height: 18px;
+    margin: -9px 0 0 -9.5px;
+    display: grid; place-items: center;
+    font-family: var(--num); font-size: 11px; font-weight: 400;
+    color: #f4efe6;
+    border: .5px solid rgba(168,139,145,.55);
+    border-radius: 2px;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .rvip .rtnum.red { background: var(--red-idle); }
+  .rvip .rtnum.black { background: var(--ink); }
+  .rvip .rtnum.green { background: var(--zero-bg); }
+  .rvip .rtnum:active { filter: brightness(1.6); }
+  .rvip .rtsec {
+    position: absolute;
+    border: 1px solid rgba(168,139,145,.4);
+    border-radius: 3px;
+    background: rgba(10,2,4,.42);
+    color: #e8dccb;
+    font-family: var(--ui); font-size: 9.5px; font-weight: 700;
+    letter-spacing: .12em; text-align: center; line-height: 1.3;
+    padding: 0 2px;
+    display: grid; place-items: center;
+    cursor: pointer;
+  }
+  .rvip .rtsec:active { background: rgba(122,26,25,.7); }
+  .rvip .rtlayer { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  .rvip .rtchip {
+    position: absolute; width: 17px; height: 17px; margin: -8.5px 0 0 -8.5px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-family: var(--ui); font-size: 6.5px; font-weight: 800; color: #fff;
+    background: radial-gradient(circle at 34% 28%, var(--c), var(--c-dk));
+    box-shadow: 0 0 0 1.5px rgba(255,255,255,.85) inset,
+                0 2px 5px rgba(0,0,0,.65);
+    animation: rvip-chipDrop .17s cubic-bezier(.25,.9,.35,1) both;
+  }
+  .rvip .rtnb {
+    position: absolute; left: 0; right: 0; bottom: 10px;
+    display: flex; justify-content: center; align-items: center; gap: 12px;
+    z-index: 3;
+  }
+  .rvip .rtnb button {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid rgba(214,178,102,.5);
+    background: rgba(24,8,7,.8); color: var(--cream);
+    font-size: 17px; line-height: 1; cursor: pointer;
+  }
+  .rvip .rtnb span { font-size: 15px; font-weight: 700; color: #fff; min-width: 14px; text-align: center; }
+  .rvip .rtnb em {
+    font-style: normal; font-family: var(--ui); font-size: 8px;
+    letter-spacing: .16em; color: rgba(232,220,203,.6);
+  }
+  .rvip .rtlabel {
+    position: absolute; left: 0; right: 0; top: 10px;
+    text-align: center;
+    font-family: var(--ui); font-size: 9px; font-weight: 700;
+    letter-spacing: .3em; color: rgba(214,178,102,.85);
+    z-index: 3;
+  }
+
+  .rvip /* ---------- modal ---------- */
+  .scrim {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,.72);
+    display: grid;
+    place-items: center;
+    z-index: 90;
+    opacity: 0; pointer-events: none;
+    transition: opacity .28s ease;
+  }
+  .rvip .scrim.on { opacity: 1; pointer-events: auto; }
+  .rvip .modal {
+    width: 84%;
+    background: rgba(26,18,22,.97);
+    border: 1.5px solid var(--cyan);
+    border-radius: 18px;
+    padding: 26px 22px 18px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.8);
+    transform: scale(.9);
+    transition: transform .28s cubic-bezier(.2,1.3,.4,1);
+  }
+  .rvip .scrim.on .modal { transform: none; }
+  .rvip .modal h3 { margin: 0 0 12px; color: var(--cyan); font-size: 15px; letter-spacing: .1em; font-weight: 600; }
+  .rvip .modal p { margin: 0 0 20px; font-size: 14px; line-height: 1.5; }
+  .rvip .modal button {
+    background: #f4f1ea; color: #111; border: 0;
+    border-radius: 999px; padding: 12px 44px;
+    font-size: 13px; font-weight: 700; letter-spacing: .08em;
+    cursor: pointer;
+  }
+  .rvip .modal .ts { margin-top: 12px; font-size: 10px; color: rgba(242,237,228,.4); font-variant-numeric: tabular-nums; }
+
+  .rvip /* the amount credited, .rvip stated plainly over the table */
+  .winflash {
+    position: absolute;
+    left: 50%;
+    bottom: 128px;
+    transform: translate(-50%, 10px) scale(.9);
+    padding: 9px 22px;
+    border-radius: 999px;
+    background: rgba(6,3,2,.92);
+    box-shadow: inset 0 0 0 1.5px var(--gold), 0 8px 22px rgba(0,0,0,.75);
+    color: var(--gold);
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: .08em;
+    z-index: 70;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s ease, transform .3s cubic-bezier(.2,1.4,.4,1);
+  }
+  .rvip .winflash.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  .rvip .winflash.hide { opacity: 0; }
+
+  .rvip .netup { color: #59e08a; font-weight: 700; }
+  .rvip .netdown { color: rgba(242,237,228,.55); }
+  .rvip #balance.credit {
+    color: var(--gold);
+    text-shadow: 0 0 10px rgba(245,197,24,.7);
+    transition: color .3s ease, text-shadow .3s ease;
+  }
+
+  .rvip .toast {
+    position: absolute;
+    top: calc(var(--strip-h) + var(--top-h) + 12px);
+    left: 50%;
+    transform: translate(-50%, -14px);
+    background: rgba(10,4,7,.94);
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 12px;
+    z-index: 80;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    white-space: nowrap;
+  }
+  .rvip .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rvip .placed, .rvip .pocket { animation-duration: .01ms !important; }
+    .rvip .sweep { animation: none; opacity: 0 !important; }
+  }
+  /* ================= landscape =================
+     A phone on its side has width to spare and almost no height, so stacking the
+     wheel above the layout stops working — the layout would be squeezed into a
+     couple of hundred pixels. Side by side suits the shape instead, and it buys
+     something portrait cannot have: the wheel and the layout are BOTH fully
+     visible at once, so neither has to fade behind the other.
+
+     Gated on height as well as orientation, so a desktop window — which is also
+     "landscape" but tall — keeps the portrait phone frame. */
+  @media (orientation: landscape) and (max-height: 620px) {
+    .rvip .stage { padding: 0; }
+    .rvip .phone {
+      max-width: none;
+      width: 100dvw;
+      height: 100dvh;
+      max-height: none;
+      border-radius: 0;
+      box-shadow: none;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+      grid-template-areas:
+        "top   top"
+        "wheel hist"
+        "wheel board"
+        "wheel tray"
+        "wheel money";
+    }
+    .rvip /* the wheel owns a column of its own and centres in it */
+    .wheelstage {
+      --wheelsz: min(86dvh, 44dvw);
+      width: var(--wheelsz);
+      height: auto;
+      align-self: stretch;
+    }
+    .rvip .topwrap {
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .rvip /* the classic layout wants width, .rvip so it takes the column it is given */
+    .tablewrap { width: 100%; margin: 0 auto; padding: 4px 6px 6px; }
+
+    .rvip /* the rail belongs beside the layout now, .rvip not over the wheel's band */
+    .rail {
+      right: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      height: auto;
+      flex-direction: column;
+    }
+    .rvip .backbtn { top: calc(var(--top-h) + 4px); left: 4px; }
+    .rvip /* the rail runs down the right edge in landscape, .rvip so the tray and the money
+       line have to stop short of it or the double-up button hides underneath */
+    .chiptray { padding-right: 46px; }
+    .rvip .moneybar { padding-right: 48px; }
+    .rvip /* the countdown sits over the wheel, .rvip which is now on the left */
+    .bettimer { top: 50%; margin-top: -31px; }
+    .rvip /* the winner board would cover the layout; put it under the wheel instead */
+    .winboard { left: 8px; bottom: 8px; width: calc(var(--wheelsz) - 16px); }
+
+    .rvip /* ---- the classic table: three rows of twelve ---- */
+    .board.land {
+      grid-template-columns: repeat(14, minmax(0, 1fr));
+      grid-template-rows: repeat(6, minmax(0, 1fr)) minmax(30px, auto) minmax(34px, auto);
+    }
+    .rvip /* the labels run along the bottom now, .rvip so they read the normal way up */
+    .board.land .cell.outside > span:not(.placed), .rvip .board.land .cell.dozen   > span:not(.placed) {
+      writing-mode: horizontal-tb;
+      transform: none;
+    }
+    .rvip .board.land .cell.dozen, .rvip .board.land .cell.outside { font-size: clamp(9px, 2.6dvh, 14px); }
+    .rvip .board.land .cell { font-size: clamp(11px, 3.4dvh, 20px); }
+    .rvip .board.land .cell.col21 { font-size: clamp(8px, 2.2dvh, 12px); }
+    .rvip /* the arc belongs to the portrait layout; landscape has the zero in the grid */
+    .pennant { display: none; }
+    .rvip .board.land .cell.zero {
+      background-color: var(--zero-bg);
+      background-image:
+        url("./felt.webp"),
+        linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.3));
+      background-size: 108px 108px, auto;
+      background-blend-mode: soft-light, normal;
+      font-size: clamp(13px, 3.6dvh, 22px);
+    }
+
+    .rvip /* ---- the same emphasis shift portrait has ----
+       Side by side the two do not overlap, .rvip so this is no longer one hiding behind
+       the other — but the attention should still move. While bets are open the
+       layout is what matters and the wheel recedes; once the wheel is in play they
+       trade places. */
+    .topwrap { opacity: .42; }
+    .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { opacity: 1; }
+    .rvip .phone[data-mode="spin"] .tablewrap, .rvip .phone[data-mode="result"] .tablewrap { opacity: .34; filter: saturate(.7) brightness(.85); }
+
+  }
+
+  /* very short landscape — older or smaller handsets */
+  @media (orientation: landscape) and (max-height: 420px) {
+    .rvip .wheelstage { --wheelsz: min(88dvh, 40dvw); }
+    .rvip .chiptray { padding-top: 0; }
+    .rvip .moneybar { padding-bottom: 4px; font-size: 11px; }
+  }
+
