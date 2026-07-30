@@ -110,7 +110,20 @@ api_router = APIRouter(prefix='/api')
 
 @api_router.get('/')
 async def root():
-    return {'message': 'FunGame API', 'disclaimer': 'PLAY CHIPS ONLY'}
+    """Public root. Carries a small build fingerprint on purpose.
+
+    Every endpoint that would reveal which build is running needs auth, so when a
+    deploy silently does not happen there is no way to tell from outside — which
+    is exactly the situation that costs an afternoon. The roulette pocket count
+    is the cheapest honest signal: 38 means the American changeover is live, 37
+    means it is not.
+    """
+    from game_engines import ROULETTE_POCKETS
+    return {
+        'message': 'FunGame API',
+        'disclaimer': 'PLAY CHIPS ONLY',
+        'build': {'roulette_pockets': len(ROULETTE_POCKETS)},
+    }
 
 
 @api_router.get('/health')

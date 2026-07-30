@@ -208,18 +208,39 @@ export default function DiceGame({ game }) {
         })}
       </div>
 
-      {/* the dice themselves */}
-      <div className="relative my-3 flex items-center justify-center gap-6 rounded-2xl bg-[radial-gradient(60%_70%_at_50%_35%,rgba(255,255,255,.10),transparent)] py-5">
-        <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
-        <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
+      {/* the dice, under the glass */}
+      <div className="relative my-3 flex items-center justify-center py-1">
+        <div className="fg-dome" data-testid="dice-dome">
+          <div className="fg-dome-dish" />
+          <div className="fg-dome-stage">
+            <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
+            <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
+          </div>
+          <div className="fg-dome-glass" />
+          <div className="fg-dome-collar" />
+        </div>
+
+        {/* the countdown sits beside the dome while bets are open */}
+        {betting && countdown > 0 && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2" data-testid="dice-countdown">
+            <span className={`grid h-14 w-14 place-items-center rounded-full border-2 text-xl font-black tabular-nums
+              ${countdown <= 3 ? "border-rose-400 text-rose-300" : "border-amber-400 text-amber-300"}`}>
+              {Math.ceil(countdown)}
+            </span>
+          </div>
+        )}
+
         {showFinal && (
-          <span className="absolute bottom-1 rounded-full bg-black/70 px-3 py-0.5 text-xs font-bold text-white" data-testid="dice-total">
+          <span className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full bg-black/75 px-3 py-0.5 text-xs font-bold text-white"
+                data-testid="dice-total">
             {outcome.total}
           </span>
         )}
         {!betting && (
-          <div className="absolute inset-0 grid place-items-center rounded-2xl bg-black/55" data-testid="dice-locked">
-            <span className="text-lg font-extrabold tracking-wide text-amber-300">Bet Locked</span>
+          <div className="absolute inset-0 grid place-items-center" data-testid="dice-locked">
+            <span className="rounded-lg bg-black/65 px-6 py-2 text-lg font-extrabold tracking-wide text-amber-300">
+              Bet Locked
+            </span>
           </div>
         )}
       </div>
