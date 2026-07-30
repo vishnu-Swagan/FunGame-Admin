@@ -2,10 +2,49 @@ import axios from "axios";
 
 export const APP_VERSION = "1.0.0";
 
+/* The backend URL is baked in at build time, which makes renaming the API host a
+   coordinated change: the moment its .onrender.com name changes, every already-
+   built client is pointing at a host that no longer answers, and it stays broken
+   until the frontend is rebuilt and redeployed.
+
+   So the client carries the alternates too. On the first failure it tries the
+   others once, keeps whichever answers, and remembers it. That turns the rename
+   from a synchronised cutover into two independent deploys in either order. */
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-export const API_BASE = `${BACKEND_URL}/api`;
+const ALTERNATES = [
+  BACKEND_URL,
+  "https://chakri-casino-api.onrender.com",
+  "https://fungame-api.onrender.com",
+].filter(Boolean);
+
+const REMEMBERED = "cc_api_base";
+const stored = typeof localStorage !== "undefined" ? localStorage.getItem(REMEMBERED) : null;
+const initial = ALTERNATES.includes(stored) ? stored : ALTERNATES[0];
+
+export const API_BASE = `${initial}/api`;
 
 export const api = axios.create({ baseURL: API_BASE });
+
+/** Try the other hosts once, in order, and keep the first that answers. */
+let failoverInFlight = null;
+function failover() {
+  if (failoverInFlight) return failoverInFlight;
+  const current = api.defaults.baseURL.replace(/\/api$/, "");
+  const others = ALTERNATES.filter((h) => h !== current);
+  failoverInFlight = (async () => {
+    for (const host of others) {
+      try {
+        const res = await fetch(`${host}/api/health`, { method: "GET", mode: "cors" });
+        if (!res.ok) continue;
+        api.defaults.baseURL = `${host}/api`;
+        try { localStorage.setItem(REMEMBERED, host); } catch (e) { /* private mode */ }
+        return host;
+      } catch (e) { /* try the next one */ }
+    }
+    return null;
+  })().finally(() => { failoverInFlight = null; });
+  return failoverInFlight;
+}
 
 const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required"];
 
@@ -17,7 +56,20 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (res) => res,
-  (error) => {
+  async (error) => {
+    /* No response at all means the host did not answer — DNS gone, connection
+       refused, CORS rejected. That is exactly what a renamed service looks like,
+       so try the alternates once and replay the request. A response with a status
+       means the backend is there and simply said no; that is not a failover. */
+    const cfg = error?.config;
+    if (!error?.response && cfg && !cfg.__triedFailover) {
+      cfg.__triedFailover = true;
+      const host = await failover();
+      if (host) {
+        cfg.baseURL = `${host}/api`;
+        return api.request(cfg);
+      }
+    }
     const status = error?.response?.status;
     const detail = error?.response?.data?.detail;
     const path = window.location.pathname;

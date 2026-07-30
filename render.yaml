@@ -1,10 +1,10 @@
-# Render Blueprint — deploys the FunGame FastAPI backend as a Docker web service.
+# Render Blueprint — deploys the Chakri.Casino FastAPI backend as a Docker web service.
 # 1. Push this repo to GitHub (already done).
 # 2. On render.com: New + > Blueprint > pick this repo. Render reads this file.
 # 3. Fill in MONGO_URL (from MongoDB Atlas) and JWT_SECRET when prompted.
 services:
   - type: web
-    name: fungame-api
+    name: chakri-casino-api
     runtime: docker
     plan: free
     region: singapore              # near India players; MUST match the MongoDB Atlas region
@@ -15,11 +15,17 @@ services:
       - key: MONGO_URL
         sync: false          # set in dashboard — MongoDB Atlas connection string
       - key: DB_NAME
+        # NOT part of the rebrand. This is the live MongoDB database name — every
+        # user, balance, bet and round lives in it. Renaming it points the API at
+        # an empty database.
         value: fungame
       - key: JWT_SECRET
         sync: false          # set in dashboard — long random string
       - key: CORS_ORIGINS
-        value: "https://fungame-web.onrender.com"   # locked to the real frontend origin
+        # Both origins during the rename: the old host keeps working until the
+        # service is renamed in the dashboard, and the new one works the moment
+        # it is. Neither deploy has to wait for the other.
+        value: "https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
       - key: APP_ENV
         value: production                            # production: never leak verification codes (dev_code)
       - key: EMAIL_PROVIDER
@@ -28,14 +34,14 @@ services:
   # Static frontend (CDN-served, always on). Built by Render; serves the PWA
   # that PWABuilder wraps into the Android APK.
   - type: web
-    name: fungame-web
+    name: chakri-casino
     runtime: static
     rootDir: frontend
     buildCommand: yarn install --network-timeout 600000 && yarn build
     staticPublishPath: build
     envVars:
       - key: REACT_APP_BACKEND_URL
-        value: https://fungame-api.onrender.com
+        value: https://chakri-casino-api.onrender.com
       - key: GENERATE_SOURCEMAP
         value: "false"
     routes:
