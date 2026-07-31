@@ -1,111 +1,76 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useId } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { GameStage } from "@/components/play/GameStage";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
+import { DIE_ART } from "@/pages/play/diceArt";
 
-/* pip layout per face value on a 3x3 grid */
+/* pip layout per face value on a 3x3 grid — the roadmap's flat mini dice */
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
-const FACE_ROT = {
-  1: "rotateX(0deg) rotateY(0deg)", 2: "rotateX(-90deg) rotateY(0deg)",
-  3: "rotateX(0deg) rotateY(-90deg)", 4: "rotateX(0deg) rotateY(90deg)",
-  5: "rotateX(90deg) rotateY(0deg)", 6: "rotateX(0deg) rotateY(180deg)",
-};
-/* Nobody looks at a die square-on, and a die drawn square-on is a square: one
-   face, no silhouette, no thickness. Landing it a few degrees off both axes
-   shows the top and one side as well, which is what makes it read as a solid
-   block rather than a printed tile — and it is how a die actually comes to
-   rest, never perfectly aligned to anyone's eye. */
-const DIE_TILT = "rotateX(-14deg) rotateY(19deg)";  // must match TILT below
-const FACE_PLACE = {
-  1: "translateZ(37px)", 2: "rotateX(90deg) translateZ(37px)", 3: "rotateY(90deg) translateZ(37px)",
-  4: "rotateY(-90deg) translateZ(37px)", 5: "rotateX(-90deg) translateZ(37px)", 6: "rotateY(180deg) translateZ(37px)",
-};
-/* the solid block behind the rounded faces — see .fg-die-core */
-const CORE_PLACE = {
-  1: "translateZ(35px)", 2: "rotateX(90deg) translateZ(35px)", 3: "rotateY(90deg) translateZ(35px)",
-  4: "rotateY(-90deg) translateZ(35px)", 5: "rotateX(-90deg) translateZ(35px)", 6: "rotateY(180deg) translateZ(35px)",
-};
 
-/* ---- what actually makes a die look like a die ----
-   Not the cube: a cube is easy. It is that the three faces you can see are lit
-   DIFFERENTLY, because they point in different directions. Give every face the
-   same gradient — which is what a die built out of six identical divs does —
-   and the eye reads a printed box, however carefully the material is shaded.
-
-   So each face is lit from its real orientation. The outward normal is rotated
-   by the value's rotation and then by the resting tilt, and the light it
-   catches falls out of the dot product with the key. On a resting die that puts
-   the top at 1.07, the face you are reading at 0.90 and the side at 0.62 —
-   enough separation to read as a solid block, without dimming the value.
-
-   CSS coordinates: +x right, +y DOWN, +z toward the viewer. The key sits above,
-   in front and to the right, which is also where the specular on each face is
-   painted, so the two agree instead of fighting. */
-const KEY_LIGHT = [0.585, -0.663, 0.468];
-const AMBIENT = 0.62, DIFFUSE = 0.6;
-const FACE_NORMAL = {
-  1: [0, 0, 1], 2: [0, -1, 0], 3: [1, 0, 0], 4: [-1, 0, 0], 5: [0, 1, 0], 6: [0, 0, -1],
-};
-const VALUE_ROT = { 1: [0, 0], 2: [-90, 0], 3: [0, -90], 4: [0, 90], 5: [90, 0], 6: [0, 180] };
-const TILT = [-14, 19];
-
-const rotX = ([x, y, z], deg) => {
-  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-  return [x, y * c - z * s, y * s + z * c];
-};
-const rotY = ([x, y, z], deg) => {
-  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-  return [x * c + z * s, y, -x * s + z * c];
-};
-
-/** Brightness for face `face` when the die has come to rest showing `value`. */
-const shadeFor = (value, face) => {
-  const [vx, vy] = VALUE_ROT[value];
-  let n = rotY(rotX(FACE_NORMAL[face], vx), vy);
-  n = rotX(rotY(n, TILT[1]), TILT[0]);
-  const d = Math.max(0, n[0] * KEY_LIGHT[0] + n[1] * KEY_LIGHT[1] + n[2] * KEY_LIGHT[2]);
-  return AMBIENT + DIFFUSE * d;
-};
-const SHADES = {};
-for (let v = 1; v <= 6; v += 1) {
-  SHADES[v] = {};
-  for (let f = 1; f <= 6; f += 1) SHADES[v][f] = shadeFor(v, f).toFixed(3);
-}
-/* While it is tumbling the orientation changes every frame, so a fixed shade
-   would be a lie that reads as flicker. One neutral value for all six. */
-const ROLL_SHADE = "0.86";
-
-const DieFace = ({ value, shade }) => (
-  <div className="fg-die-face" style={{ transform: FACE_PLACE[value], filter: `brightness(${shade})` }}>
-    {Array.from({ length: 9 }, (_, i) => (
-      <span key={i} className={PIPS[value].includes(i) ? `fg-pip ${value === 1 ? "fg-pip-red" : ""}` : ""} />
-    ))}
-  </div>
-);
-
-const Die = ({ value, rolling, variant, duration = "0.8s" }) => (
-  <div className="fg-die-scene relative">
-    <div className={`fg-die-shadow ${rolling ? "rolling" : ""}`} style={rolling ? { animationDuration: duration } : {}} />
-    <div
-      className={`fg-die ${rolling ? `rolling ${variant ? "v2" : ""}` : ""}`}
-      style={rolling ? { animationDuration: duration } : { transform: `${DIE_TILT} ${FACE_ROT[value]}` }}
-    >
-      <div className="fg-die-core" aria-hidden="true">
-        {[1, 2, 3, 4, 5, 6].map((f) => (
-          <span key={f} style={{
-            transform: CORE_PLACE[f],
-            filter: `brightness(${rolling ? ROLL_SHADE : SHADES[value][f]})`,
-          }} />
-        ))}
+/**
+ * One die. The shape comes from DIE_ART, which is a single rounded solid rather
+ * than a stack of planes, so there is no seam between the faces to hide.
+ *
+ * While it is in the air the value flickers and the whole die is thrown along an
+ * arc — a die you can read mid-throw is a die that is not really moving.
+ */
+const Die = ({ value, rolling, variant, duration = "0.8s" }) => {
+  const art = DIE_ART[value] || DIE_ART[1];
+  const uid = useId().replace(/:/g, "");
+  return (
+    <div className="fg-die-scene">
+      <div className={`fg-die-shadow ${rolling ? "rolling" : ""}`}
+           style={rolling ? { animationDuration: duration } : undefined} />
+      <div className={`fg-die ${rolling ? `rolling ${variant ? "v2" : ""}` : ""}`}
+           style={rolling ? { animationDuration: duration } : undefined}>
+        <svg viewBox="0 0 120 120" className="fg-die-svg" aria-hidden="true">
+          <defs>
+            <linearGradient id={`fgBase${uid}`} x1="0.1" y1="0" x2="0.6" y2="1">
+              <stop offset="0" stopColor="#ffffff" />
+              <stop offset="0.55" stopColor="#f6f8fb" />
+              <stop offset="1" stopColor="#dde2ea" />
+            </linearGradient>
+            <linearGradient id={`fgTop${uid}`} x1="0.2" y1="0" x2="0.7" y2="1">
+              <stop offset="0" stopColor="#ffffff" />
+              <stop offset="1" stopColor="#eaeef4" />
+            </linearGradient>
+            <linearGradient id={`fgSide${uid}`} x1="1" y1="0" x2="0" y2="0.7">
+              <stop offset="0" stopColor="#c2c9d6" />
+              <stop offset="1" stopColor="#9aa3b4" />
+            </linearGradient>
+            {/* the face divisions are feathered, or they read as drawn lines */}
+            <filter id={`fgSoft${uid}`} x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="1.15" />
+            </filter>
+            <radialGradient id={`fgGloss${uid}`} cx="34%" cy="20%" r="62%">
+              <stop offset="0" stopColor="rgba(255,255,255,.85)" />
+              <stop offset="1" stopColor="rgba(255,255,255,0)" />
+            </radialGradient>
+            <clipPath id={`fgClip${uid}`}><path d={art.sil} /></clipPath>
+          </defs>
+          <g clipPath={`url(#fgClip${uid})`}>
+            <path d={art.sil} fill={`url(#fgBase${uid})`} />
+            <path d={art.side} fill={`url(#fgSide${uid})`} filter={`url(#fgSoft${uid})`} />
+            <path d={art.top} fill={`url(#fgTop${uid})`} filter={`url(#fgSoft${uid})`} />
+            <path d={art.sil} fill={`url(#fgGloss${uid})`} />
+          </g>
+          {art.pips.map((grp, gi) => (
+            <g key={gi} transform={`matrix(${grp.m.join(" ")})`}>
+              {grp.dots.map(([u, v], di) => (
+                <g key={di}>
+                  <circle cx={u} cy={v} r="0.165" fill={grp.dark ? "#15151b" : "#242a34"} />
+                  <circle cx={u - 0.045} cy={v - 0.05} r="0.055" fill="rgba(255,255,255,.22)" />
+                </g>
+              ))}
+            </g>
+          ))}
+        </svg>
       </div>
-      {[1, 2, 3, 4, 5, 6].map((f) => (
-        <DieFace key={f} value={f} shade={rolling ? ROLL_SHADE : SHADES[value][f]} />
-      ))}
     </div>
-  </div>
-);
+  );
+};
 
 /** A past round's die, drawn small for the roadmap. */
 const MiniDie = ({ value }) => (
@@ -142,7 +107,18 @@ export default function DiceGame({ game }) {
 
   const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
   const rolling = phase === "REVEAL" && !showFinal;
-  const dice = showFinal ? outcome.dice : [3, 4];
+  /* A die that shows one number all the way through its flight reads as a
+     picture being waved about. While it is in the air the face keeps changing,
+     and only the server's result survives the landing. */
+  const [tumble, setTumble] = useState([3, 4]);
+  const dice = showFinal ? outcome.dice : tumble;
+
+  useEffect(() => {
+    if (!rolling) return;
+    const roll = () => 1 + Math.floor(Math.random() * 6);
+    const flick = setInterval(() => setTumble([roll(), roll()]), 90);
+    return () => clearInterval(flick);
+  }, [rolling]);
 
   useEffect(() => {
     if (!rolling) return;
