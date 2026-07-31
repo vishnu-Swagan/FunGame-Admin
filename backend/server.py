@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
     # a race the handler loses and the index does not.
     await crm.ensure_indexes()
     await crm.ensure_house_account()
+    await revenue.ensure_indexes()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])

@@ -17,6 +17,7 @@ from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
+import revenue
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -650,3 +651,33 @@ async def move_player(user_id: str, body: PlayerReassign, admin: dict = Depends(
     doc.pop('_id', None)
     return {'message': 'Player reassigned from now on; settled periods are unchanged',
             'attribution': doc}
+
+
+# ---------- Revenue (CRM) ----------
+# Section 3 of the deck: the daily figures the commission run is calculated
+# from. Exposed read-only plus a rebuild, because a day that was aggregated
+# before a fix has to be reproducible on demand — the figures are derived from
+# the ledger, never accumulated, so rebuilding is always safe.
+
+@router.get('/revenue/{day}')
+async def revenue_for_day(day: str, admin: dict = Depends(require_admin)):
+    dists = await db.distributor_days.find({'day': day}, {'_id': 0}).to_list(500)
+    totals = {
+        'turnover': sum(d['turnover'] for d in dists),
+        'payout': sum(d['payout'] for d in dists),
+        'ggr': sum(d['ggr'] for d in dists),
+        'ngr': sum(d['ngr'] for d in dists),
+        'bets': sum(d['bets'] for d in dists),
+        'players': sum(d['players'] for d in dists),
+    }
+    return {'day': day, 'distributors': dists, 'totals': totals}
+
+
+@router.post('/revenue/{day}/rebuild')
+async def rebuild_revenue(day: str, admin: dict = Depends(require_admin)):
+    try:
+        datetime.strptime(day, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(status_code=400, detail='Day must be YYYY-MM-DD')
+    result = await revenue.rebuild_day(day)
+    return {'message': f'Rebuilt {day} from the ledger', **result}
