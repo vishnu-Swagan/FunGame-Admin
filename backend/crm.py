@@ -267,6 +267,77 @@ async def reassign_user(user_id, new_distributor_id, actor, note=None):
     return doc
 
 
+async def attach_login(distributor_id, email, password_hash, actor):
+    """Give a distributor a portal login, or reset the one they have.
+
+    The login is an ordinary user row with role DISTRIBUTOR, so the portal
+    inherits the session handling, the single-active-session rule and the
+    password reset flow the player app already has, rather than growing a second
+    authentication path that will be patched half as often.
+
+    What it must NOT inherit is a wallet. The row carries no chip balance and
+    `require_active_player` refuses the role outright: commission is the
+    operator's money owed to a partner, chips are the player's, and an account
+    that could hold both is an account that can quietly convert one into the
+    other.
+
+    Resetting revokes the existing session. A partner asking for a new password
+    is often a partner who has lost control of the old one, and leaving their
+    previous token valid for the rest of the week defeats the point of resetting.
+    """
+    dist = await db.distributors.find_one({'id': distributor_id})
+    if not dist:
+        raise ValueError('Unknown distributor')
+    if dist.get('is_house'):
+        raise ValueError('The house account is not a partner and has no portal login')
+    email = (email or '').strip().lower()
+    if '@' not in email:
+        raise ValueError('A valid email is required for a portal login')
+
+    clash = await db.users.find_one({'email': email})
+    if clash and clash.get('id') != dist.get('user_id'):
+        raise ValueError('That email already belongs to another account')
+
+    if dist.get('user_id'):
+        await db.users.update_one({'id': dist['user_id']}, {'$set': {
+            'email': email,
+            'password_hash': password_hash,
+            'active_session_id': f'revoked-{uuid.uuid4()}',
+            'updated_at': now_iso(),
+        }})
+        await db.distributors.update_one({'id': distributor_id}, {'$set': {'email': email}})
+        return await db.users.find_one({'id': dist['user_id']}, {'_id': 0, 'password_hash': 0})
+
+    # The referral code doubles as the Login ID so a partner has one identifier
+    # to remember, which only works while it is unique across every account.
+    taken = await db.users.find_one({'username': {'$regex': f"^{re.escape(dist['code'])}$", '$options': 'i'}})
+    if taken:
+        raise ValueError(f"Login ID {dist['code']} is already in use — change the referral code first")
+
+    user = {
+        'id': str(uuid.uuid4()),
+        'username': dist['code'],
+        'email': email,
+        'password_hash': password_hash,
+        'role': 'DISTRIBUTOR',
+        'status': 'ACTIVE',
+        # Provisioned by the operator, who already has the partner's details —
+        # there is nothing for an emailed code to prove.
+        'email_verified': True,
+        'full_name': dist['name'],
+        'display_name': f"{dist['name']} ({dist['code']})",
+        'chip_balance': 0,
+        'created_at': now_iso(),
+        'created_by': actor,
+    }
+    await db.users.insert_one(user)
+    await db.distributors.update_one({'id': distributor_id}, {'$set': {
+        'user_id': user['id'], 'email': email}})
+    user.pop('_id', None)
+    user.pop('password_hash', None)
+    return user
+
+
 async def ensure_indexes():
     """Uniqueness the application cannot be trusted to maintain on its own.
 
@@ -275,6 +346,8 @@ async def ensure_indexes():
     """
     await db.distributors.create_index('code', unique=True)
     await db.distributors.create_index('status')
+    # Every portal request resolves the distributor from the signed-in user.
+    await db.distributors.create_index('user_id', sparse=True)
     await db.distributor_rates.create_index([('distributor_id', 1), ('effective_from', -1)])
     await db.player_attribution.create_index([('user_id', 1), ('active', 1)])
     await db.player_attribution.create_index('distributor_id')

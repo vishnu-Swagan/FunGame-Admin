@@ -28,6 +28,16 @@ export function RequireActive({ children }) {
   return children;
 }
 
+export function RequirePartner({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  // Anyone else goes to wherever they do belong rather than to the login page —
+  // an admin who follows a partner link is signed in, just not as a partner.
+  if (user.role !== "DISTRIBUTOR") return <Navigate to={routeForUser(user)} replace />;
+  return children;
+}
+
 export function RequireAdmin({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;

@@ -66,6 +66,30 @@ async def require_admin(user: dict = Depends(get_current_user)):
     return user
 
 
+async def require_distributor(user: dict = Depends(get_current_user)):
+    """A partner-portal session, and the distributor it speaks for.
+
+    Resolved from `distributors.user_id` rather than from anything on the token,
+    so suspending a distributor closes their portal on the next request instead
+    of when their week-old JWT happens to expire.
+
+    Returns both halves because every route in the portal needs the distributor
+    id to scope its query, and a route that had to look it up again would be one
+    route away from forgetting to.
+    """
+    if user.get('role') != 'DISTRIBUTOR':
+        raise HTTPException(status_code=403, detail='Partner portal access required')
+    dist = await db.distributors.find_one({'user_id': user['id']}, {'_id': 0})
+    if not dist:
+        raise HTTPException(status_code=403, detail='This login is not linked to a distributor account')
+    if dist.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail={
+            'code': 'DISTRIBUTOR_SUSPENDED',
+            'message': 'Your partner account is suspended. Please contact the operator.',
+        })
+    return {'user': user, 'distributor': dist}
+
+
 async def check_maintenance_for_players(user: dict):
     """Raise 503 when maintenance is on for non-admin users."""
     if user.get('role') == 'ADMIN':
@@ -80,6 +104,14 @@ async def require_active_player(user: dict = Depends(get_current_user)):
     await check_maintenance_for_players(user)
     if user.get('role') == 'ADMIN':
         return user
+    # A distributor login is ACTIVE by construction, so without this it would
+    # pass every check below and reach the games, the wallet and the chip
+    # requests. Commission money and player money must not meet in one account.
+    if user.get('role') == 'DISTRIBUTOR':
+        raise HTTPException(status_code=403, detail={
+            'code': 'NOT_A_PLAYER',
+            'message': 'Partner logins cannot play. Sign in to the partner portal instead.',
+        })
     if user.get('status') == 'SUSPENDED':
         raise HTTPException(status_code=403, detail={'code': 'SUSPENDED', 'message': 'Your account is suspended. Contact support.'})
     if user.get('status') == 'REJECTED':

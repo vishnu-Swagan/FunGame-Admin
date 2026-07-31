@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { Network, Plus, Percent, Users, Ban, CheckCircle2 } from "lucide-react";
+import { Network, Plus, Percent, Users, Ban, CheckCircle2, KeyRound, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 
 /**
@@ -21,6 +21,7 @@ export default function AdminDistributors() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", code: "", pct: "25", email: "", phone: "" });
   const [busy, setBusy] = useState(false);
+  const [issued, setIssued] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +65,23 @@ export default function AdminDistributors() {
     try {
       const { data } = await api.patch(`/admin/distributors/${d.id}/rate`, { rate_bps });
       toast.success(data.message);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  /* Credentials are shown once, in a panel rather than a toast, because the
+     operator has to copy them somewhere before they close it — a toast that
+     dismisses itself would lose a password that cannot be read back. */
+  const issueLogin = async (d) => {
+    const email = window.prompt(
+      `Email for ${d.code}'s partner portal login.\n\n` +
+      `They sign in at /partner with their code as the Login ID. A password is ` +
+      `generated and shown once — it cannot be read back afterwards.`,
+      d.email || "");
+    if (!email) return;
+    try {
+      const { data } = await api.post(`/admin/distributors/${d.id}/login`, { email });
+      setIssued({ ...data, name: d.name });
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -117,6 +135,24 @@ export default function AdminDistributors() {
         </div>
       )}
 
+      {issued && (
+        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/8 p-4 space-y-2" data-testid="distributor-credentials">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-emerald-200">Portal login for {issued.name}</p>
+              <p className="text-[11px] text-emerald-200/70">{issued.note}</p>
+            </div>
+            <button onClick={() => setIssued(null)} aria-label="Dismiss"
+              className="h-8 w-8 rounded-lg bg-white/5 flex items-center justify-center"><X className="h-4 w-4 text-white/60" /></button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Cred label="Login ID" value={issued.login_id} />
+            <Cred label="Password" value={issued.password} />
+            <Cred label="Portal" value={window.location.origin + issued.portal_url} />
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <p className="text-sm text-white/50">Loading…</p>
       ) : (
@@ -135,7 +171,12 @@ export default function AdminDistributors() {
                     {d.status}
                   </span>
                 </div>
-                <p className="font-mono text-xs text-primary mt-0.5">{d.code}</p>
+                <p className="font-mono text-xs text-primary mt-0.5">
+                  {d.code}
+                  {!d.is_house && !d.user_id && (
+                    <span className="ml-2 font-sans text-[10px] text-white/35">no portal login yet</span>
+                  )}
+                </p>
               </div>
               <Stat icon={Users} label="Players" value={d.players} />
               <Stat icon={Percent} label="Commission" value={`${pct(d.rate_bps)}%`} />
@@ -145,6 +186,10 @@ export default function AdminDistributors() {
                     <button onClick={() => changeRate(d)} data-testid={`distributor-rate-${d.code}`}
                       className="rounded-lg border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-semibold min-h-[36px]">
                       Change rate
+                    </button>
+                    <button onClick={() => issueLogin(d)} data-testid={`distributor-login-${d.code}`}
+                      className="rounded-lg border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-semibold min-h-[36px] flex items-center gap-1">
+                      <KeyRound className="h-3 w-3" /> {d.user_id ? "Reset login" : "Portal login"}
                     </button>
                     <button onClick={() => setStatus(d, d.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE")}
                       className="rounded-lg border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-semibold min-h-[36px] flex items-center gap-1">
@@ -173,6 +218,13 @@ const Field = ({ label, value, onChange, placeholder, hint }) => (
     />
     {hint && <span className="block text-[10px] text-white/40">{hint}</span>}
   </label>
+);
+
+const Cred = ({ label, value }) => (
+  <div className="rounded-xl border border-white/10 bg-black/25 p-2.5">
+    <p className="text-[10px] tracking-wider text-white/45">{label}</p>
+    <p className="font-mono text-sm text-white break-all select-all">{value}</p>
+  </div>
 );
 
 const Stat = ({ icon: Icon, label, value }) => (

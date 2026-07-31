@@ -253,6 +253,14 @@ class DistributorStatus(BaseModel):
         return u
 
 
+class DistributorLogin(BaseModel):
+    """Portal credentials for a distributor. The Login ID is their code."""
+    email: str
+    # Left optional so the operator can have one generated rather than inventing
+    # (and then emailing) a weak one.
+    password: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+
 class PlayerReassign(BaseModel):
     distributor_id: str
     note: Optional[str] = None

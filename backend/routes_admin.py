@@ -12,6 +12,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     DistributorCreate,
                     DistributorRate,
                     DistributorStatus,
+                    DistributorLogin,
                     PlayerReassign,
                     CommissionSettle,
                     PayoutAction,
@@ -636,6 +637,30 @@ async def set_distributor_status(distributor_id: str, body: DistributorStatus,
     # Players stay where they are. Suspending a distributor stops new signups on
     # the code and stops payouts; it does not orphan the players they brought.
     return {'message': f'Distributor set to {body.status}'}
+
+
+@router.post('/distributors/{distributor_id}/login')
+async def issue_distributor_login(distributor_id: str, body: DistributorLogin,
+                                  admin: dict = Depends(require_admin)):
+    """Create or reset a partner's portal credentials.
+
+    The password is returned ONCE, in this response, and is never readable
+    again — it is stored hashed like every other. The operator hands it over
+    out of band, the same way player credentials are already issued.
+    """
+    password = (body.password or '').strip() or _issue_password() + _issue_password()
+    try:
+        user = await crm.attach_login(distributor_id, body.email, hash_password(password), admin['id'])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        'message': 'Portal login issued',
+        'login_id': user['username'],
+        'email': user['email'],
+        'password': password,
+        'note': 'Give these to the partner now — the password cannot be shown again.',
+        'portal_url': '/partner',
+    }
 
 
 @router.get('/distributors/{distributor_id}/players')

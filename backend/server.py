@@ -22,6 +22,7 @@ import payouts
 import routes_auth
 import routes_player
 import routes_admin
+import routes_distributor
 import routes_games
 import routes_live
 import routes_blackjack
@@ -183,6 +184,7 @@ api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
+api_router.include_router(routes_distributor.router)
 api_router.include_router(routes_security.router)
 app.include_router(api_router)
 

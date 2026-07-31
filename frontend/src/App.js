@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
-import { PublicOnly, RequireAuth, RequireActive, RequireAdmin } from "@/components/RouteGuards";
+import { PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
 
@@ -49,6 +49,13 @@ import AdminDistributors from "@/pages/admin/AdminDistributors";
 import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminPayouts from "@/pages/admin/AdminPayouts";
 import AdminSupport from "@/pages/admin/AdminSupport";
+
+// Partner portal (distributors)
+import PartnerLayout from "@/pages/partner/PartnerLayout";
+import PartnerDashboard from "@/pages/partner/PartnerDashboard";
+import PartnerRevenue from "@/pages/partner/PartnerRevenue";
+import PartnerStatements from "@/pages/partner/PartnerStatements";
+import PartnerPlayers from "@/pages/partner/PartnerPlayers";
 
 // Onboarding-only gate: ACTIVE users and admins are redirected away
 function OnboardingRoute({ children }) {
@@ -120,10 +127,21 @@ function App() {
             <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="distributors" element={<AdminDistributors />} />
+            <Route path="commission" element={<AdminCommission />} />
+            <Route path="payouts" element={<AdminPayouts />} />
             <Route path="support" element={<AdminSupport />} />
             <Route path="games" element={<AdminGames />} />
             <Route path="announcements" element={<AdminAnnouncements />} />
             <Route path="settings" element={<AdminSettings />} />
+          </Route>
+
+          {/* Partner portal — distributors only; no wallet, no games */}
+          <Route path="/partner" element={<RequirePartner><PartnerLayout /></RequirePartner>}>
+            <Route index element={<PartnerDashboard />} />
+            <Route path="revenue" element={<PartnerRevenue />} />
+            <Route path="statements" element={<PartnerStatements />} />
+            <Route path="players" element={<PartnerPlayers />} />
           </Route>
 
           {/* Fallback */}

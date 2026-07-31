@@ -113,9 +113,31 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/* Fetch a CSV through the authenticated client and hand it to the browser.
+   A plain <a download> would be an unauthenticated request and come back 401 —
+   the token lives in the axios interceptor, not in the cookie jar. */
+export async function downloadCsv(path, fallbackName) {
+  const res = await api.get(path, { responseType: "blob" });
+  const disposition = res.headers["content-disposition"] || "";
+  const named = disposition.match(/filename="?([^";]+)"?/);
+  const url = URL.createObjectURL(res.data);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = named ? named[1] : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoking immediately cancels the download in Safari, which reads the blob
+  // after the click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 export function routeForUser(user) {
   if (!user) return "/welcome";
   if (user.role === "ADMIN") return "/admin";
+  // A partner has no onboarding and no wallet — the account is provisioned
+  // complete, so the status ladder below does not apply to them.
+  if (user.role === "DISTRIBUTOR") return "/partner";
   switch (user.status) {
     case "VERIFIED":
       return "/onboarding/profile";
