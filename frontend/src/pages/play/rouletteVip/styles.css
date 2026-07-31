@@ -40,7 +40,10 @@
     --col-out: 62px;  /* 1-18 / EVEN / diamonds / ODD / 19-36 */
     --col-doz: 60px;  /* 1ST / 2ND / 3RD 12 — same width as the outside column */
     --strip-h: 30px;
-    --top-h: 34px;
+    /* The white strip that carried the heart and basket icons is gone, so the
+       row it occupied is zero. Overlays below still measure from here, and
+       would otherwise float 34px lower than the chrome they align to. */
+    --top-h: 0px;
   }
 
   .rvip * { box-sizing: border-box; }

@@ -654,17 +654,40 @@ export function mountRoulette(root, opts) {
      centres for straight-ups, edge midpoints for splits and streets, and the
      crosses for corners and six lines. */
   let anchors = [], outsideRects = [], outsidePoints = [], wrapBox = null;
-  let cellW = 0, cellH = 0;
+  let cellW = 0, cellH = 0, fitK = 1;
+
+  /* The table is scaled to fit the handset, and that splits the two coordinate
+     systems this file uses apart. getBoundingClientRect answers in SCREEN
+     pixels, already multiplied by the scale; CSS left/top are read back in
+     LAYOUT pixels, before it. They are the same number only at full size.
+
+     Mixing them is silent and quadratic: an anchor measured off a rect and then
+     written to style.left lands at scale-squared of where it belongs, so a chip
+     drifts further from the tap the further it sits from the corner the table
+     scales about — while the bet itself resolves correctly, because both sides
+     of that comparison came from rects.
+
+     So everything below works in layout pixels, and every rect is divided by
+     this on the way in. */
+  function fitScale(el) {
+    const w = el.offsetWidth;
+    if (!w) return 1;
+    const k = el.getBoundingClientRect().width / w;
+    return k > 0.05 ? k : 1;
+  }
 
   function buildAnchors() {
     const wrap = root.querySelector('.tablewrap');
     const wb = wrap.getBoundingClientRect();
+    const k = fitScale(wrap);
+    fitK = k;
     wrapBox = wb;
     const box = el => {
       const r = el.getBoundingClientRect();
-      return { l: r.left - wb.left, t: r.top - wb.top, r: r.right - wb.left,
-               b: r.bottom - wb.top, cx: (r.left + r.right) / 2 - wb.left,
-               cy: (r.top + r.bottom) / 2 - wb.top };
+      return { l: (r.left - wb.left) / k, t: (r.top - wb.top) / k,
+               r: (r.right - wb.left) / k, b: (r.bottom - wb.top) / k,
+               cx: ((r.left + r.right) / 2 - wb.left) / k,
+               cy: ((r.top + r.bottom) / 2 - wb.top) / k };
     };
     const N = {};
     for (let n = 1; n <= 36; n++) {
@@ -889,13 +912,11 @@ export function mountRoulette(root, opts) {
        widths, because it is a question of fingertip precision on an edge. */
     for (const o of outsideRects) {
       if (px >= o.l && px <= o.r && py >= o.t && py <= o.b) {
-        /* Measured against the cell, not in raw pixels. The table is scaled to
-           fit the handset, so every rect the anchors were built from is already
-           smaller — a constant 9px window would keep its size while the felt
-           shrank around it, quietly handing more and more of each box to the
-           line printed on its border. 0.12 of a cell is that same 9px at the
-           430px design width, and stays that fraction at every other. */
-        if (best && best.edge && bestPx <= cw * 0.12) return best.key;
+        /* 9 pixels of SCREEN, which is what a fingertip actually has to work
+           with, converted into the layout pixels this function measures in. A
+           flat 9 here would shrink with the table and demand finer aim on the
+           smallest phones, which are the ones that can least afford it. */
+        if (best && best.edge && bestPx <= 9 / fitK) return best.key;
         return o.key;
       }
     }
@@ -951,8 +972,11 @@ export function mountRoulette(root, opts) {
        another, which is exactly the bet landing away from the finger. Rebuilding
        here costs one pointerdown's worth of measurement and cannot drift. */
     if (!buildAnchors()) return;
-    const wrap = root.querySelector('.tablewrap').getBoundingClientRect();
-    const key = resolveTap(ev.clientX - wrap.left, ev.clientY - wrap.top);
+    const wrapEl = root.querySelector('.tablewrap');
+    const wrap = wrapEl.getBoundingClientRect();
+    // the pointer arrives in screen pixels; the anchors live in layout pixels
+    const k = fitScale(wrapEl);
+    const key = resolveTap((ev.clientX - wrap.left) / k, (ev.clientY - wrap.top) / k);
     if (!key) return;
     if (place(key)) { toast(BET_NAME(key) + '  ·  ' + fmt(CHIPS[chipIdx])); sfxTick(); }
   }
@@ -1210,11 +1234,13 @@ export function mountRoulette(root, opts) {
       c.style.setProperty('--c-dk', c2);
       c.textContent = amount >= 1000 ? (Math.round(amount / 100) / 10) + 'K' : String(amount);
       const r = host.getBoundingClientRect(), o = rt.getBoundingClientRect();
+      // rects are screen pixels, style.left is layout pixels — see fitScale
+      const k = fitScale(rt);
       // offset off a number so the numeral stays readable underneath; sectors
       // are large enough to take the chip dead centre
       const off = host.classList.contains('rtnum') ? 5 : 0;
-      c.style.left = (r.left - o.left + r.width / 2 + off) + 'px';
-      c.style.top  = (r.top  - o.top  + r.height / 2 + off) + 'px';
+      c.style.left = ((r.left - o.left + r.width / 2) / k + off) + 'px';
+      c.style.top  = ((r.top  - o.top  + r.height / 2) / k + off) + 'px';
       layer.appendChild(c);
     };
     rt.querySelectorAll('.rtnum').forEach(el => {
@@ -2133,7 +2159,12 @@ export function mountRoulette(root, opts) {
       const T_CIRC = 2 * Math.PI * 28;
       tsec.textContent = left;
       tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, st.secondsLeft / (BET_MS / 1000)))).toFixed(1);
-      ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, st.secondsLeft / (BET_MS / 1000)))).toFixed(1);
+      /* The second countdown ring rode on the table's own back button, which the
+         app's header already provides. With that gone this is simply absent, and
+         the ring in the wheel stage above is the only clock. */
+      if (ringval) {
+        ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, st.secondsLeft / (BET_MS / 1000)))).toFixed(1);
+      }
       timer.dataset.state = left <= 3 ? 'urgent' : left <= 6 ? 'warn' : '';
       if (left >= 1 && left <= 3 && left !== lastAlarm) { lastAlarm = left; Sound.alarm(left); }
       if (left > 3) lastAlarm = null;

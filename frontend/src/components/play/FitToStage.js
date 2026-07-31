@@ -17,12 +17,15 @@ import { useLayoutEffect, useRef, useState } from "react";
  * — and because layout geometry is read back through getBoundingClientRect,
  * which reports post-transform pixels, hit-testing keeps working untouched.
  *
- * Scaling stops at `min`. A board that would have to shrink past that is one
- * with genuinely long content rather than one slightly too big, and shrinking it
- * further trades a scroll for something nobody can read — so below the floor the
- * board keeps its size and scrolls, exactly as it did before.
+ * Scaling stops at `min`, and the floor is set by the thumb rather than by the
+ * eye. Controls in this app are built to a 44px minimum touch target; scaling
+ * shrinks that along with everything else, and a betting chip that has become
+ * 27px is one the player misses. 0.85 keeps the smallest control at ~37px,
+ * which is still comfortably tappable. A board that would need to shrink past
+ * that is one with genuinely long content rather than one slightly too big, so
+ * below the floor it keeps its size and scrolls, exactly as it did before.
  */
-export const FitToStage = ({ children, min = 0.62, fluid = false, className = "" }) => {
+export const FitToStage = ({ children, min = 0.85, fluid = false, className = "" }) => {
   const boxRef = useRef(null);
   const innerRef = useRef(null);
   const [scale, setScale] = useState(1);
