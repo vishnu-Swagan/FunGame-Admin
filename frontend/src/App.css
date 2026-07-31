@@ -17,7 +17,7 @@
 .fg-die-scene {
   --die: 74px;
   position: relative;
-  perspective: 760px;
+  perspective: 470px;
   perspective-origin: 50% 36%;
 }
 .fg-die {
@@ -31,7 +31,7 @@
 .fg-die-face {
   position: absolute;
   inset: 0;
-  border-radius: 18%;
+  border-radius: 10%;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
@@ -39,21 +39,30 @@
   gap: 3%;
   backface-visibility: hidden;
   background:
-    radial-gradient(118% 118% at 26% 18%, #fffdf6 0%, #f8f1df 32%, #eaddc1 68%, #d3c4a0 100%);
+    radial-gradient(122% 122% at 74% 16%, #fffdf7 0%, #f9f2e1 30%, #ece0c6 66%, #d6c8a6 100%);
   box-shadow:
-    /* light wrapping the cut edge */
-    inset 0 0 0 1px rgba(255, 255, 255, 0.62),
-    inset 0 5px 10px rgba(255, 255, 255, 0.72),
-    /* the block has depth, so the far side falls off */
-    inset 0 -9px 16px rgba(120, 98, 56, 0.24),
-    inset 0 0 28px rgba(94, 74, 36, 0.16),
-    /* the seam where this face meets the next */
-    0 0 0 1px rgba(116, 94, 52, 0.24);
+    /* only the edges turned toward the key catch the chamfer highlight */
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.72),
+    inset -1.5px 0 0 rgba(255, 255, 255, 0.42),
+    /* and the two facing away from it fall into shade */
+    inset 0 -1.5px 0 rgba(104, 84, 46, 0.34),
+    inset 1.5px 0 0 rgba(104, 84, 46, 0.22),
+    /* the body of the face, brightest under the key, falling off opposite */
+    inset -5px 6px 13px rgba(255, 255, 255, 0.5),
+    inset 8px -9px 18px rgba(116, 94, 52, 0.2);
 }
 /* Six rounded faces do not close a cube: at each corner the curves pull away
    from one another and leave a notch straight through to the felt behind. A
    plain cube a few pixels smaller sits inside and shows through those notches,
    so a corner reads as the cut edge of a solid block instead of a hole. */
+.fg-die-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(56% 42% at 76% 14%, rgba(255, 255, 255, 0.42), transparent 74%);
+}
 .fg-die-core {
   position: absolute;
   inset: 0;
@@ -61,12 +70,13 @@
 }
 .fg-die-core span {
   position: absolute;
-  inset: 4px;
-  border-radius: 6%;
-  background: #e7dabb;
+  inset: 2px;
+  border-radius: 4%;
+  background: #ece0c6;
   backface-visibility: hidden;
 }
 .fg-pip {
+  position: relative;
   align-self: center;
   justify-self: center;
   width: 66%;

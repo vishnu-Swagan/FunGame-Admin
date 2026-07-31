@@ -17,19 +17,68 @@ const FACE_ROT = {
    shows the top and one side as well, which is what makes it read as a solid
    block rather than a printed tile — and it is how a die actually comes to
    rest, never perfectly aligned to anyone's eye. */
-const DIE_TILT = "rotateX(-14deg) rotateY(19deg)";
+const DIE_TILT = "rotateX(-14deg) rotateY(19deg)";  // must match TILT below
 const FACE_PLACE = {
   1: "translateZ(37px)", 2: "rotateX(90deg) translateZ(37px)", 3: "rotateY(90deg) translateZ(37px)",
   4: "rotateY(-90deg) translateZ(37px)", 5: "rotateX(-90deg) translateZ(37px)", 6: "rotateY(180deg) translateZ(37px)",
 };
 /* the solid block behind the rounded faces — see .fg-die-core */
 const CORE_PLACE = {
-  1: "translateZ(33px)", 2: "rotateX(90deg) translateZ(33px)", 3: "rotateY(90deg) translateZ(33px)",
-  4: "rotateY(-90deg) translateZ(33px)", 5: "rotateX(-90deg) translateZ(33px)", 6: "rotateY(180deg) translateZ(33px)",
+  1: "translateZ(35px)", 2: "rotateX(90deg) translateZ(35px)", 3: "rotateY(90deg) translateZ(35px)",
+  4: "rotateY(-90deg) translateZ(35px)", 5: "rotateX(-90deg) translateZ(35px)", 6: "rotateY(180deg) translateZ(35px)",
 };
 
-const DieFace = ({ value }) => (
-  <div className="fg-die-face" style={{ transform: FACE_PLACE[value] }}>
+/* ---- what actually makes a die look like a die ----
+   Not the cube: a cube is easy. It is that the three faces you can see are lit
+   DIFFERENTLY, because they point in different directions. Give every face the
+   same gradient — which is what a die built out of six identical divs does —
+   and the eye reads a printed box, however carefully the material is shaded.
+
+   So each face is lit from its real orientation. The outward normal is rotated
+   by the value's rotation and then by the resting tilt, and the light it
+   catches falls out of the dot product with the key. On a resting die that puts
+   the top at 1.07, the face you are reading at 0.90 and the side at 0.62 —
+   enough separation to read as a solid block, without dimming the value.
+
+   CSS coordinates: +x right, +y DOWN, +z toward the viewer. The key sits above,
+   in front and to the right, which is also where the specular on each face is
+   painted, so the two agree instead of fighting. */
+const KEY_LIGHT = [0.585, -0.663, 0.468];
+const AMBIENT = 0.62, DIFFUSE = 0.6;
+const FACE_NORMAL = {
+  1: [0, 0, 1], 2: [0, -1, 0], 3: [1, 0, 0], 4: [-1, 0, 0], 5: [0, 1, 0], 6: [0, 0, -1],
+};
+const VALUE_ROT = { 1: [0, 0], 2: [-90, 0], 3: [0, -90], 4: [0, 90], 5: [90, 0], 6: [0, 180] };
+const TILT = [-14, 19];
+
+const rotX = ([x, y, z], deg) => {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [x, y * c - z * s, y * s + z * c];
+};
+const rotY = ([x, y, z], deg) => {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [x * c + z * s, y, -x * s + z * c];
+};
+
+/** Brightness for face `face` when the die has come to rest showing `value`. */
+const shadeFor = (value, face) => {
+  const [vx, vy] = VALUE_ROT[value];
+  let n = rotY(rotX(FACE_NORMAL[face], vx), vy);
+  n = rotX(rotY(n, TILT[1]), TILT[0]);
+  const d = Math.max(0, n[0] * KEY_LIGHT[0] + n[1] * KEY_LIGHT[1] + n[2] * KEY_LIGHT[2]);
+  return AMBIENT + DIFFUSE * d;
+};
+const SHADES = {};
+for (let v = 1; v <= 6; v += 1) {
+  SHADES[v] = {};
+  for (let f = 1; f <= 6; f += 1) SHADES[v][f] = shadeFor(v, f).toFixed(3);
+}
+/* While it is tumbling the orientation changes every frame, so a fixed shade
+   would be a lie that reads as flicker. One neutral value for all six. */
+const ROLL_SHADE = "0.86";
+
+const DieFace = ({ value, shade }) => (
+  <div className="fg-die-face" style={{ transform: FACE_PLACE[value], filter: `brightness(${shade})` }}>
     {Array.from({ length: 9 }, (_, i) => (
       <span key={i} className={PIPS[value].includes(i) ? `fg-pip ${value === 1 ? "fg-pip-red" : ""}` : ""} />
     ))}
@@ -44,9 +93,16 @@ const Die = ({ value, rolling, variant, duration = "0.8s" }) => (
       style={rolling ? { animationDuration: duration } : { transform: `${DIE_TILT} ${FACE_ROT[value]}` }}
     >
       <div className="fg-die-core" aria-hidden="true">
-        {[1, 2, 3, 4, 5, 6].map((v) => <span key={v} style={{ transform: CORE_PLACE[v] }} />)}
+        {[1, 2, 3, 4, 5, 6].map((f) => (
+          <span key={f} style={{
+            transform: CORE_PLACE[f],
+            filter: `brightness(${rolling ? ROLL_SHADE : SHADES[value][f]})`,
+          }} />
+        ))}
       </div>
-      {[1, 2, 3, 4, 5, 6].map((v) => <DieFace key={v} value={v} />)}
+      {[1, 2, 3, 4, 5, 6].map((f) => (
+        <DieFace key={f} value={f} shade={rolling ? ROLL_SHADE : SHADES[value][f]} />
+      ))}
     </div>
   </div>
 );
