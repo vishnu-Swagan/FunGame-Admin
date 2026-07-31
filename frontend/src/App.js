@@ -45,6 +45,9 @@ import AdminChipRequests from "@/pages/admin/AdminChipRequests";
 import AdminGames from "@/pages/admin/AdminGames";
 import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
 import AdminSettings from "@/pages/admin/AdminSettings";
+import AdminDistributors from "@/pages/admin/AdminDistributors";
+import AdminCommission from "@/pages/admin/AdminCommission";
+import AdminPayouts from "@/pages/admin/AdminPayouts";
 import AdminSupport from "@/pages/admin/AdminSupport";
 
 // Onboarding-only gate: ACTIVE users and admins are redirected away

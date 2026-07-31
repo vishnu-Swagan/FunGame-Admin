@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
@@ -11,6 +11,10 @@ const NAV = [
   { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
   { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
   { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
+  // The distributor CRM — the deck's sections 1, 4 and 5.
+  { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
+  { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
+  { to: "/admin/payouts", label: "Payouts", icon: Banknote, testId: "admin-nav-payouts" },
   { to: "/admin/games", label: "Games", icon: Gamepad2, testId: "admin-nav-games" },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, testId: "admin-nav-announcements" },
   { to: "/admin/settings", label: "System", icon: Settings, testId: "admin-nav-settings" },
