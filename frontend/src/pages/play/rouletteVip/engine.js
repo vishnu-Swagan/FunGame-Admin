@@ -2117,15 +2117,33 @@ export function mountRoulette(root, opts) {
     balance = st.balance != null ? st.balance : balance;
     if (st.chipValues) CHIPS.splice(0, CHIPS.length, ...st.chipValues);
 
-    // --- the chips on the felt are the server's record of them, not ours ---
-    const serverBets = (st.myBets || []).map(b => ({ key: b.key, amount: b.amount }));
-    const sameBets = serverBets.length === bets.length &&
-      serverBets.every(b => bets.some(x => x.key === b.key && x.amount === b.amount));
-    if (!sameBets) {
-      chipEls.forEach(c => c.remove());
-      chipEls.clear();
-      bets = serverBets;
-      if (buildAnchors()) bets.forEach(b => drawChip(b.key, b.amount));
+    /* --- the chips on the felt are the server's record of them, not ours ---
+       null is not an empty felt. It means the caller has a bet in flight and the
+       server's list cannot be trusted this tick, because the stake it just
+       posted is not in it yet. Reading that as "no bets" swept every chip off
+       the table for the second it took the POST to land.
+
+       And the reconciliation is per chip, not wholesale. Clearing the layer and
+       redrawing it replaced chips that had not changed, and since a chip
+       re-drops when it is drawn, every chip on the felt re-animated on every
+       poll — a second of blank table followed by the whole board flashing, once
+       a second, for as long as anyone kept betting. */
+    if (st.myBets != null) {
+      const want = new Map(st.myBets.map(b => [b.key, b.amount]));
+      for (const key of Array.from(chipEls.keys())) {
+        if (!want.has(key)) removeChip(key);
+      }
+      const have = new Map(bets.map(b => [b.key, b.amount]));
+      const toDraw = [];
+      want.forEach((amount, key) => {
+        // a chip is only redrawn when it is new or its stake moved, so an
+        // untouched chip keeps sitting where it landed
+        if (!chipEls.has(key) || have.get(key) !== amount) toDraw.push([key, amount]);
+      });
+      bets = Array.from(want, ([key, amount]) => ({ key, amount }));
+      if (toDraw.length && buildAnchors()) {
+        toDraw.forEach(([key, amount]) => drawChip(key, amount));
+      }
     }
     refreshMoney();
 
