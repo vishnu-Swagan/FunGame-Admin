@@ -31,32 +31,45 @@ import BlackjackGame from "@/pages/play/BlackjackGame";
    working through the rollout — a slug is either on the new landscape
    cabinet or still on its portrait table, never half of each. */
 import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
+import AndarBaharCabinet from "@/pages/play/cabinet/AndarBaharCabinet";
+import FunTargetCabinet from "@/pages/play/cabinet/FunTargetCabinet";
+import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
+import CheckerCabinet from "@/pages/play/cabinet/CheckerCabinet";
+import { RouletteCabinet, AviatorCabinet } from "@/pages/play/cabinet/FluidCabinets";
+import {
+  NoHoldCabinet, ChampionPokerCabinet, FeverJokerCabinet, GiantJackpotCabinet,
+  Lucky8LineCabinet, TripleFunCabinet, BingoCabinet, GoldenWheelCabinet,
+} from "@/pages/play/cabinet/stakeGames";
 
 const COMPONENTS = {
   "seven-up-down": SevenUpDownCabinet,
-  "fun-target": TargetGame,
-  "fun-roulette": RouletteGame,
-  keno: KenoGame,
-  bingo: BingoGame,
-  "super-golden-wheel": WheelGame,
+  "fun-target": FunTargetCabinet,
+  "fun-roulette": RouletteCabinet,
+  keno: KenoCabinet,
+  bingo: BingoCabinet,
+  "super-golden-wheel": GoldenWheelCabinet,
   "teen-patti": CardDuelGame,
   poker: CardDuelGame,
-  "no-hold": VideoPokerGame,
-  "champion-poker": ChampionPokerGame,
-  "andar-bahar": AndarBaharGame,
-  "fever-joker-bonus": FeverJokerGame,
-  "giant-jackpot": GiantJackpotGame,
+  "no-hold": NoHoldCabinet,
+  "champion-poker": ChampionPokerCabinet,
+  "andar-bahar": AndarBaharCabinet,
+  "fever-joker-bonus": FeverJokerCabinet,
+  "giant-jackpot": GiantJackpotCabinet,
   "joker-bonus": JokerBonusGame,
-  "lucky-8-line": Lucky8LineGame,
-  "triple-fun": TripleFun777Game,
-  aviator: AviatorGame,
-  checker: CheckerGame,
+  "lucky-8-line": Lucky8LineCabinet,
+  "triple-fun": TripleFunCabinet,
+  aviator: AviatorCabinet,
+  checker: CheckerCabinet,
   "ice-fishing": IceFishingGame,
   blackjack: BlackjackGame,
 };
 
 /* Slugs already rebuilt as landscape cabinets. */
-const CABINET = new Set(["seven-up-down"]);
+const CABINET = new Set([
+  "seven-up-down", "andar-bahar", "fun-target", "keno", "bingo", "checker",
+  "fun-roulette", "aviator", "super-golden-wheel", "no-hold", "champion-poker",
+  "fever-joker-bonus", "giant-jackpot", "lucky-8-line", "triple-fun",
+]);
 
 export default function GamePlay() {
   const { slug } = useParams();

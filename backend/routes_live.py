@@ -25,7 +25,7 @@ from game_engines import (
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
-    settle_bet, summarize_outcome, make_bingo_card,
+    settle_bet, summarize_outcome, make_bingo_card, paytable_for,
 )
 
 logger = logging.getLogger('live')
@@ -477,6 +477,9 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         # what it accepts. Sent rather than hardcoded in the client for the same
         # reason the odds are.
         'min_bet': MIN_BET, 'max_bet': MAX_BET,
+        # The engine's own price list, so the felt cannot quote an offer
+        # settlement would not honour.
+        'paytable': paytable_for(slug),
         'outcome': outcome, 'my_bets': my_bets,
         'my_total': sum(b['amount'] for b in my_bets),
         'last_results': [{'round_number': p['round_number'], **(p.get('summary') or {})} for p in prev],

@@ -9,6 +9,8 @@ from game_engines import (
     RNG, new_deck, draw_cards, card_str, eval_poker5, eval_teen_patti, TP_LABELS,
     vp_result, play_slot, play_no_hold, play_checker, play_andar_bahar,
     play_giant_jackpot, play_fever_joker, play_lucky8, play_triple_fun, play_joker_bonus, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
+    NH_PAYTABLE, NH_LABELS, VP_PAYTABLE, GJ_SYMBOLS, GJ_SCATTER_PAY, FJ_SYMBOLS, FJ_FEVER,
+    L8_SYMBOLS, TF_P3, TF_NAME, JB_P3, JB_NAME,
     ice_fishing_round, settle_ice_fishing, IF_LAYOUT, IF_SPOTS, IF_FISH_RANGE,
 )
 
@@ -72,6 +74,78 @@ SIDE_OPTIONS = {
     # renders the exact same 53-segment wheel the server settles against.
     "ice-fishing": {"layout": IF_LAYOUT, "spots": list(IF_SPOTS), "fish_range": IF_FISH_RANGE},
 }
+
+
+# ---------------- What each table actually pays, for the felt ----------------
+#
+# The cabinet screens are built around a price list — it is the largest element
+# on most of them and the one thing a player reads before betting. Those prices
+# have to be the engine's own, derived here from the same constants settlement
+# uses, so a table cannot print an offer the server would not honour. Hardcoding
+# them in the client had already produced one wrong minimum stake on one screen;
+# fifteen screens of hand-copied odds would produce more, and the ones nobody
+# noticed would be the expensive ones.
+#
+# Each entry is a list of [label, multiplier] on one staked chip.
+
+def _pairs(table, labels, order=None):
+    keys = order or sorted(table, reverse=True)
+    return [[labels[k], table[k]] for k in keys if table.get(k)]
+
+
+def _symbol_rows(symbols, counts=(5, 4, 3)):
+    """A reel game's price list: each symbol, longest run first."""
+    rows = []
+    for s in symbols:
+        pay = s.get("pay")
+        if not pay:
+            continue
+        name = s["id"].upper()
+        if isinstance(pay, dict):
+            for n in counts:
+                if pay.get(n):
+                    rows.append([f"{name} x{n}", pay[n]])
+        else:
+            rows.append([f"{name} x3", pay])
+    rows.sort(key=lambda r: r[1], reverse=True)
+    return rows
+
+
+def paytable_for(slug, picks=None):
+    if slug == "no-hold":
+        return _pairs(NH_PAYTABLE, NH_LABELS, order=list(range(9, 0, -1)))
+    if slug == "champion-poker":
+        return [[label, mult] for _, label, mult in VP_PAYTABLE]
+    if slug == "giant-jackpot":
+        return ([[f"SCATTER x{n}", m] for n, m in sorted(GJ_SCATTER_PAY.items(), reverse=True)]
+                + _symbol_rows(GJ_SYMBOLS))
+    if slug == "fever-joker-bonus":
+        return (_symbol_rows(FJ_SYMBOLS)
+                + [[f"JOKER FEVER x{n}", m] for n, m in sorted(FJ_FEVER.items(), reverse=True)])
+    if slug == "lucky-8-line":
+        return _symbol_rows(L8_SYMBOLS)
+    if slug == "triple-fun":
+        return [[TF_NAME.get(k, k) + " x3", v] for k, v in
+                sorted(TF_P3.items(), key=lambda kv: -kv[1])]
+    if slug == "joker-bonus":
+        return [[JB_NAME.get(k, k) + " x3", v] for k, v in
+                sorted(JB_P3.items(), key=lambda kv: -kv[1])]
+    if slug == "super-golden-wheel":
+        return [[f"{s['m']}x segment", s["m"]] for s in
+                sorted(WHEEL_SEGMENTS, key=lambda s: -s["m"]) if s["m"]]
+    if slug == "bingo":
+        return ([["12 LINES", 1000], ["5 LINES", 400]]
+                + [[f"{n} LINE{'S' if n > 1 else ''}", m]
+                   for n, m in sorted(BINGO_TABLE.items(), reverse=True) if m])
+    if slug == "keno":
+        # Keno's price depends on how many numbers are marked, so the felt has
+        # to be told which column it is showing.
+        n = picks if picks in KENO_PAYTABLE else 6
+        return [[f"HIT {h} of {n}", m] for h, m in
+                sorted(KENO_PAYTABLE[n].items(), reverse=True)]
+    if slug == "fun-target":
+        return [["EXACT NUMBER", 7]]
+    return None
 
 
 def cycle_seconds(slug):

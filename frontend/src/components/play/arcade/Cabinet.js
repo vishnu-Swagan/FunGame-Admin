@@ -47,6 +47,19 @@ export const Cabinet = ({
   exitTo,
   className = "",
   testId = "cabinet",
+  /**
+   * `fluid` gives a game the landscape frame and the chrome, but not the fixed
+   * canvas — the child lays itself out in real pixels.
+   *
+   * Two of these machines already scale themselves: the roulette board fits its
+   * own felt and hit-tests taps against that fit, and Aviator sizes its sky to
+   * the viewport. Nesting either inside a second transform would put the board's
+   * screen-space geometry and its layout coordinates out of step by the square
+   * of the scale — which is exactly the fault that once made roulette chips land
+   * an inch from the number they were dropped on. A game that has solved its own
+   * fitting must not be scaled again on top of it.
+   */
+  fluid = false,
 }) => {
   const navigate = useNavigate();
   const boxRef = useRef(null);
@@ -57,6 +70,7 @@ export const Cabinet = ({
   useEffect(() => lockLandscape(), []);
 
   useLayoutEffect(() => {
+    if (fluid) return undefined;
     const measure = () => {
       const box = boxRef.current;
       if (!box) return;
@@ -80,7 +94,7 @@ export const Cabinet = ({
       ro.disconnect();
       window.removeEventListener("orientationchange", measure);
     };
-  }, []);
+  }, [fluid]);
 
   const leave = () => (onExit ? onExit() : navigate(exitTo || -1));
 
@@ -88,12 +102,14 @@ export const Cabinet = ({
     <div ref={boxRef} className={`cab-viewport ${className}`} data-testid={testId}>
       <div
         className="cab-screen"
-        style={{
-          width: CAB_W,
-          height: CAB_H,
-          background: ground,
-          transform: `translate(-50%, -50%) rotate(${fit.rotate ? 90 : 0}deg) scale(${fit.scale})`,
-        }}
+        style={fluid
+          ? { position: "absolute", inset: 0, top: 0, left: 0, transform: "none", background: ground }
+          : {
+              width: CAB_W,
+              height: CAB_H,
+              background: ground,
+              transform: `translate(-50%, -50%) rotate(${fit.rotate ? 90 : 0}deg) scale(${fit.scale})`,
+            }}
       >
         {/* Glass: a faint vignette and a sheen, so the art reads as something
             behind a screen rather than a flat page. */}
