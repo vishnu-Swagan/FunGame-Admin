@@ -30,6 +30,8 @@ export function mountRoulette(root, opts) {
   const onPlaceBet = opts.onPlaceBet || (() => {});
   const onUndo = opts.onUndo || (() => {});
   const onClear = opts.onClear || (() => {});
+  const onSoundChange = opts.onSoundChange || (() => {});
+  const onExit = opts.onExit || null;
   'use strict';
 
   const RED  = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
@@ -642,6 +644,8 @@ export function mountRoulette(root, opts) {
     $('balance').textContent  = fmt(balance);
     $('undo').disabled = bets.length === 0;
     $('dbl').disabled  = bets.length === 0;
+    // repeat depends on the round BEFORE this one, not on what is on the felt
+    $('rebet').disabled = lastBets.length === 0;
   }
 
   /* colour a stack by the largest denomination it could be paid in, so a 1,650
@@ -677,6 +681,7 @@ export function mountRoulette(root, opts) {
   }
 
   function buildAnchors() {
+    anchorSig = '';
     const wrap = root.querySelector('.tablewrap');
     const wb = wrap.getBoundingClientRect();
     const k = fitScale(wrap);
@@ -792,6 +797,7 @@ export function mountRoulette(root, opts) {
        nearest bet POINT, and an outside box is not a point — it is claimed by
        containment. These exist only so a placed chip has somewhere to sit. */
     outsidePoints = outsideRects.map(o => ({ key: o.key, x: o.cx, y: o.cy, edge: false }));
+    anchorSig = layoutSig();
     return true;
   }
 
@@ -962,16 +968,40 @@ export function mountRoulette(root, opts) {
     return label + ' ' + n.join('·');
   };
 
+  /* Anchors have to describe the layout as it is AT THE TAP. Trusting the
+     ResizeObserver to have kept them current is not safe: it fires on every
+     frame of the stage's height transition, and because that callback writes
+     styles the browser may drop the notification that would have followed, so
+     the cache can be left describing a layout that was still moving. The tap
+     then resolves against stale geometry and the chip lands away from the
+     finger.
+
+     Rebuilding on every touch is correct but expensive — it forces forty-odd
+     synchronous layout reads before the chip can be drawn, which on a cheap
+     handset is felt. So the geometry is verified instead of rebuilt: if the
+     board occupies exactly the rectangle it did when the anchors were built,
+     and is still in the same orientation, then nothing inside it can have
+     moved, because everything inside is laid out by that box. One rect read
+     replaces forty, and a rebuild happens only when the answer would differ. */
+  let anchorSig = '';
+
+  function layoutSig() {
+    const w = root.querySelector('.tablewrap');
+    if (!w) return '';
+    const r = w.getBoundingClientRect();
+    return [r.left.toFixed(2), r.top.toFixed(2), r.width.toFixed(2), r.height.toFixed(2),
+            board.className, $('racetrack').classList.contains('on') ? 'rt' : ''].join('|');
+  }
+
+  function anchorsUsable() {
+    const sig = layoutSig();
+    if (!sig) return false;
+    if (sig === anchorSig && anchors.length) return true;
+    return buildAnchors();
+  }
+
   function tapBoard(ev) {
-    /* Measure the cells NOW, in the same instant as the tap point. Relying on
-       the ResizeObserver to have kept them current is not safe: it fires on every
-       frame of the stage's height transition, and because this callback writes
-       styles the browser is entitled to drop the notification that would have
-       followed — so the cached anchors can be left describing a layout that was
-       still moving. Then the tap resolves in one frame and the chip is drawn in
-       another, which is exactly the bet landing away from the finger. Rebuilding
-       here costs one pointerdown's worth of measurement and cannot drift. */
-    if (!buildAnchors()) return;
+    if (!anchorsUsable()) return;
     const wrapEl = root.querySelector('.tablewrap');
     const wrap = wrapEl.getBoundingClientRect();
     // the pointer arrives in screen pixels; the anchors live in layout pixels
@@ -1048,25 +1078,43 @@ export function mountRoulette(root, opts) {
     onUndo();                             // the server refunds; the poll redraws
   });
 
+  /* Doubling is not a local edit to the chips — it is a second stake on every
+     bet already standing, and it has to be posted like any other. Left as it
+     was, the felt showed doubled chips for one second and the next poll put
+     them back, because the server had never been told. */
   $('dbl').addEventListener('click', () => {
-    const cost = bets.reduce((s, b) => s + b.amount, 0);
+    if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return; }
+    if (!bets.length) { toast('Nothing on the table to double'); return; }
+    const plan = bets.map(b => ({ key: b.key, amount: b.amount }));
+    const cost = plan.reduce((t, b) => t + b.amount, 0);
     if (cost > balance) { $('scrim').classList.add('on'); return; }
-    balance -= cost;
-    bets.forEach(b => { b.amount *= 2; drawChip(b.key, b.amount); });
-    refreshMoney();
+    // snapshot first: place() mutates `bets` as it goes
+    plan.forEach(b => place(b.key, { amount: b.amount, silent: true }));
+    sfxTick();
+    toast('Doubled  ·  ' + fmt(cost) + ' more staked');
   });
 
-  $('rebet').addEventListener('click', () => {
+  /* Repeat had two faults. lastBets was declared and then never written to, so
+     it was always empty and the button could only ever say there was nothing to
+     repeat. And like the double, it moved chips around locally without telling
+     the server, so even once it had something to replay the next poll removed
+     it. It now replays through place(), the same path a tapped bet takes. */
+  $('rebet').addEventListener('click', async () => {
     if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return; }
-    if (!lastBets.length) { toast('No previous bet to repeat'); return; }
-    clearBets();
-    lastBets.forEach(({ key, amount }) => {
-      if (amount > balance) return;
-      balance -= amount;
-      bets.push({ key, amount });
-      drawChip(key, amount);
-    });
-    refreshMoney();
+    if (!lastBets.length) { toast('No previous round to repeat'); return; }
+    const plan = lastBets.map(b => ({ key: b.key, amount: b.amount }));
+    const cost = plan.reduce((t, b) => t + b.amount, 0);
+    if (cost > balance) { $('scrim').classList.add('on'); return; }
+    /* Repeat replaces what is on the table, so anything already down has to go
+       first — and the clear has to LAND before the new stakes are posted, or the
+       server may apply them in the other order and wipe the round. */
+    if (bets.length) {
+      try { await onClear(); } catch (e) { /* the poll re-syncs either way */ }
+      clearBets();
+    }
+    plan.forEach(b => place(b.key, { amount: b.amount, silent: true }));
+    sfxTick();
+    toast('Repeated  ·  ' + fmt(cost) + ' staked');
   });
 
   $('collapse').addEventListener('click', () => toast('Table view toggled'));
@@ -1561,8 +1609,42 @@ export function mountRoulette(root, opts) {
     ['1ST COLUMN', 'column:1'], ['2ND COLUMN', 'column:2'], ['3RD COLUMN', 'column:3'],
   ];
 
-  /* --- saved bets --- */
-  let slots = [null, null, null, null, null, null];
+  /* --- saved bets ---
+     A favourite that does not survive leaving the table is not a favourite. The
+     slots lived in a local that was rebuilt every time the engine mounted, so a
+     reload — or simply going back to the lobby and returning — emptied all six.
+     They are kept on the device instead, and read back defensively: storage can
+     be full, disabled in private mode, or hold something from an older build,
+     and none of those may stop the table from opening. */
+  const FAV_KEY = 'cc_roulette_favs_v1';
+  const BLANK_SLOTS = [null, null, null, null, null, null];
+
+  function loadSlots() {
+    try {
+      const raw = localStorage.getItem(FAV_KEY);
+      if (!raw) return BLANK_SLOTS.slice();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return BLANK_SLOTS.slice();
+      return BLANK_SLOTS.map((_, i) => {
+        const sl = parsed[i];
+        if (!sl || !Array.isArray(sl.list) || !sl.list.length) return null;
+        const list = sl.list
+          .filter(b => b && typeof b.key === 'string' && Number(b.amount) > 0)
+          .map(b => ({ key: b.key, amount: Number(b.amount) }));
+        if (!list.length) return null;
+        return { list, total: list.reduce((t, b) => t + b.amount, 0) };
+      });
+    } catch (e) {
+      return BLANK_SLOTS.slice();
+    }
+  }
+
+  function saveSlots() {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(slots)); }
+    catch (e) { /* private mode or a full quota — the slots still work this session */ }
+  }
+
+  let slots = loadSlots();
 
   function summarise(list) {
     return list.map(b => BET_NAME(b.key)).join(', ');
@@ -1602,6 +1684,7 @@ export function mountRoulette(root, opts) {
               list: bets.map(b => ({ key: b.key, amount: b.amount })),
               total: bets.reduce((s, b) => s + b.amount, 0),
             };
+            saveSlots();
             renderFav();
           } else {
             toast('Place a bet on the table first, then save it here');
@@ -1611,7 +1694,7 @@ export function mountRoulette(root, opts) {
         const del = el('button', 'sdel', '×');
         del.type = 'button';
         del.setAttribute('aria-label', 'Clear slot ' + (i + 1));
-        del.addEventListener('click', () => { slots[i] = null; renderFav(); });
+        del.addEventListener('click', () => { slots[i] = null; saveSlots(); renderFav(); });
         row.appendChild(del);
         body.appendChild(row);
       });
@@ -1790,17 +1873,27 @@ export function mountRoulette(root, opts) {
   }
 
   /* --- menu --- */
-  let soundOn = true;
+  /* There are two mute buttons on this screen: the app's, in the header, and the
+     table's, in the rail. They were driving separate flags, so muting from one
+     left the other still playing and neither looked like it had worked. The
+     table no longer owns the state — it reports the change and is told what the
+     answer is, so whichever button is pressed, both agree. */
+  let soundOn = opts.soundOn !== false;
 
-  function setSound(v) {
+  function applySound(v, announce) {
     soundOn = v;
     Sound.setOn(v);
     $('sndbtn').setAttribute('aria-pressed', String(v));
     const m = $('menubody') && $('menubody').querySelector('.menurow[aria-pressed]');
     if (m) m.setAttribute('aria-pressed', String(v));
     if (!v && window.speechSynthesis) window.speechSynthesis.cancel();
-    toast(v ? 'Sound on' : 'Sound muted');
+    if (announce) toast(v ? 'Sound on' : 'Sound muted');
   }
+  function setSound(v) {
+    applySound(v, true);
+    onSoundChange(v);          // the app shell keeps the authoritative flag
+  }
+  applySound(soundOn, false);
   $('sndbtn').addEventListener('click', () => setSound(!soundOn));
 
   const ICONS = {
@@ -1923,14 +2016,20 @@ export function mountRoulette(root, opts) {
       list.appendChild(b);
       return b;
     };
-    row('lobby', 'Lobby', 'Chakri.Casino Casino', () => toast('The lobby lives in the app shell, not this table'));
+    /* "Chakri.Casino Casino" was a find-and-replace landing on top of the word
+       it was replacing. And a row that only says it cannot do the thing is not
+       a menu row — Lobby leaves the table when the shell gives it somewhere to
+       go, and says so plainly when it does not. */
+    row('lobby', 'Lobby', 'Chakri.Casino',
+        onExit ? () => { closeSheets(); onExit(); }
+               : () => toast('Use the back arrow above the table'));
     row('stats', 'Statistics', String(spins.length) + ' spins', () => { renderStats(); openSheet('statsheet'); });
     row('star', 'Favourite bets', slots.filter(Boolean).length + ' saved', () => { renderFav(); openSheet('favsheet'); });
     row('auto', 'Autoplay', autoLeft > 0 ? autoLeft + ' rounds left' : 'off', () => { renderAuto(); openSheet('autosheet'); });
     row('hist', 'Game history', '', () => renderMenu('history'));
     row('coin', 'Payouts & limits', '', () => renderMenu('payouts'));
     row('help', 'How to play', '', () => renderMenu('how'));
-    row('chat', 'Live support', '', () => toast('Support opens in the app shell'));
+    row('chat', 'Live support', '', () => toast('Support is in the app menu, outside the table'));
 
     const snd = row('sound', 'Sound', '', () => setSound(!soundOn));
     snd.setAttribute('aria-pressed', String(soundOn));
@@ -2157,16 +2256,28 @@ export function mountRoulette(root, opts) {
       clearPocket();
     }
     if (st.phase && st.phase !== phase) {
+      const was = phase;
       phase = st.phase;
       if (phase === 'BETTING') {
         phone.dataset.mode = 'bet';
         callout('PLACE YOUR BETS', 'open');
         $('clock').textContent = clock();
+        /* Autoplay is armed in its sheet and then has to be RUN, and nothing
+           was running it — the plan sat there while round after round went by.
+           The top of a betting phase is the only place it can go. */
+        autoTick();
       } else if (phase === 'SPINNING') {
         phone.dataset.mode = 'spin';
         toggleRacetrack(false);
         callout('NO MORE BETS', 'close');
         Sound.alarm(0);
+      }
+      /* Whatever was standing when betting closed is what "repeat" repeats. It
+         has to be captured here: by the time the next round opens the server has
+         cleared the table and the bets are gone. */
+      if (was === 'BETTING' && phase !== 'BETTING' && bets.length) {
+        lastBets = bets.map(b => ({ key: b.key, amount: b.amount }));
+        refreshMoney();
       }
     }
 
@@ -2262,6 +2373,8 @@ export function mountRoulette(root, opts) {
   return {
     applyState,
     rejectBet,
+    /* so the header's mute button can drive the table's audio too */
+    setSound(v) { applySound(!!v, false); },
     setHistory(list) {
       history = (list || []).map(String).slice(0, 14);
       spins = (list || []).map(String);

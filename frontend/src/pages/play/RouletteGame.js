@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { PlayShell } from "@/components/play/PlayShell";
 import { mountRoulette } from "@/pages/play/rouletteVip/engine";
+import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import "@/pages/play/rouletteVip/styles.css";
 
 /**
@@ -21,6 +23,7 @@ import "@/pages/play/rouletteVip/styles.css";
  * record of them on the next poll, so a refused bet simply disappears.
  */
 export default function RouletteGame({ game }) {
+  const navigate = useNavigate();
   const hostRef = useRef(null);
   const engineRef = useRef(null);
   const pollRef = useRef(null);
@@ -71,7 +74,19 @@ export default function RouletteGame({ game }) {
     let alive = true;
     let engine;
     try {
-      engine = mountRoulette(host, { onPlaceBet: placeBet, onUndo: undoBet, onClear: clearBets });
+      engine = mountRoulette(host, {
+        onPlaceBet: placeBet,
+        onUndo: undoBet,
+        onClear: clearBets,
+        /* One mute, two buttons. The table has its own in the rail and the shell
+           has one in the header; before this they were separate flags, so
+           silencing from one left the other playing. The shell owns the answer —
+           the table starts from it, reports its own presses into it, and is told
+           when it changes elsewhere. */
+        soundOn: !isMuted(),
+        onSoundChange: (on) => setMuted(!on),
+        onExit: () => navigate(`/games/${game.slug}`),
+      });
       engineRef.current = engine;
     } catch (e) {
       setFatal(String(e && e.message ? e.message : e));
@@ -110,7 +125,13 @@ export default function RouletteGame({ game }) {
       try { engine && engine.destroy(); } catch (e) { /* already gone */ }
       engineRef.current = null;
     };
-  }, [placeBet, undoBet, clearBets]);
+  }, [placeBet, undoBet, clearBets, navigate, game.slug]);
+
+  /* The other half of the shared mute: a press on the header's button has to
+     reach the table, not just the app's own effects. */
+  useEffect(() => onMuteChange((m) => {
+    if (engineRef.current && engineRef.current.setSound) engineRef.current.setSound(!m);
+  }), []);
 
   /* The table is authored against a 430-wide phone and none of its metrics are
      fluid, so on anything narrower it collides rather than compressing. Laying it
