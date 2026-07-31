@@ -114,24 +114,29 @@ export default function DiceGame({ game }) {
   /* A die that shows one number all the way through its flight reads as a
      picture being waved about. While it is in the air the face keeps changing,
      and only the server's result survives the landing. */
+  // three frames apart: in step, never the same picture twice over
   const [frames, setFrames] = useState([0, 3]);
   const dice = showFinal ? outcome.dice : [3, 4];
 
   /* A die thrown across a table turns fast, then slower, then tips onto a face.
      A constant-rate flicker is what reads as computerised — it is a strobe, not
-     a throw. Each die steps through real attitudes on its own decaying interval,
-     and the two are deliberately out of step so the pair never turns together. */
+     a throw — so the interval decays.
+
+     Both dice run off ONE timer. Stepping them separately let them drift apart
+     within a throw, so one was still turning quickly while the other had almost
+     settled, and the pair stopped reading as a single throw. They advance
+     together now and stay a fixed number of frames apart, which keeps them
+     showing different faces without coming out of step. */
   useEffect(() => {
     if (!rolling) return;
-    const timers = [];
-    const spin = (i, gap) => {
-      setFrames((f) => { const n = f.slice(); n[i] += 1; return n; });
+    let timer;
+    const step = (gap) => {
+      setFrames(([a, b]) => [a + 1, b + 1]);
       const next = Math.min(230, gap * 1.16);
-      timers[i] = setTimeout(() => spin(i, next), next);
+      timer = setTimeout(() => step(next), next);
     };
-    spin(0, 55);
-    timers[1] = setTimeout(() => spin(1, 62), 40);
-    return () => timers.forEach(clearTimeout);
+    step(55);
+    return () => clearTimeout(timer);
   }, [rolling]);
 
   useEffect(() => {

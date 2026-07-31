@@ -2,7 +2,14 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <!-- A betting table is a fixed canvas, not a document. Pinch-zoom on one
+         leaves the board at an arbitrary scale with the controls off screen,
+         and every chip lands where the finger is NOT — the tap arrives in a
+         viewport the layout never agreed to. It also made the whole app look
+         shrunken with dead space, which is what it was: a zoomed-out page.
+         maximum-scale pins the layout; the app is already sized for the
+         handset, so there is nothing zoom would reveal. -->
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="theme-color" content="#0B0B0F" />
         <meta name="description" content="Chakri.Casino — play-chip amusement games." />
 
