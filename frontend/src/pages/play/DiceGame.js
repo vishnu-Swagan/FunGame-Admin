@@ -16,7 +16,7 @@ const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6,
  * While it is in the air the value flickers and the whole die is thrown along an
  * arc — a die you can read mid-throw is a die that is not really moving.
  */
-const Die = ({ value, rolling, variant, duration = "0.8s", frame = 0 }) => {
+export const Die = ({ value, rolling, variant, duration = "0.8s", frame = 0 }) => {
   /* Mid-throw the die is showing whatever attitude it is in; only when it comes
      to rest does it show the number the server rolled. */
   const art = rolling

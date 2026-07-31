@@ -27,8 +27,13 @@ import CheckerGame from "@/pages/play/CheckerGame";
 import IceFishingGame from "@/pages/play/IceFishingGame";
 import BlackjackGame from "@/pages/play/BlackjackGame";
 
+/* The cabinet rebuild. Games move over one at a time so the live app keeps
+   working through the rollout — a slug is either on the new landscape
+   cabinet or still on its portrait table, never half of each. */
+import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
+
 const COMPONENTS = {
-  "seven-up-down": DiceGame,
+  "seven-up-down": SevenUpDownCabinet,
   "fun-target": TargetGame,
   "fun-roulette": RouletteGame,
   keno: KenoGame,
@@ -49,6 +54,9 @@ const COMPONENTS = {
   "ice-fishing": IceFishingGame,
   blackjack: BlackjackGame,
 };
+
+/* Slugs already rebuilt as landscape cabinets. */
+const CABINET = new Set(["seven-up-down"]);
 
 export default function GamePlay() {
   const { slug } = useParams();
@@ -99,7 +107,9 @@ export default function GamePlay() {
           intro plays on top for ~4s, so it dissolves straight onto the round
           that is already in progress. */}
       <Component game={game} />
-      <GameIntro game={game} />
+      {/* The cabinet is its own fullscreen machine and opens straight onto the
+          round in progress; the portrait tables keep the cinematic intro. */}
+      {!CABINET.has(game.slug) && <GameIntro game={game} />}
     </PageTransition>
   );
 }

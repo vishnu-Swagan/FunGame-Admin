@@ -470,6 +470,13 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         'round_number': rn, 'phase': phase, 'phase_ends_in': ends_in,
         'timings': {'bet': cfg['bet'], 'reveal': cfg['reveal'], 'result': cfg['result'], 'total': total},
         'kind': cfg['kind'], 'options': SIDE_OPTIONS.get(slug),
+        # The stake limits the table is actually held to. The cabinet screens
+        # print these on the message rail and size their chip rail from them, and
+        # a table that offered a chip this endpoint would refuse — or printed a
+        # minimum that was not the minimum — would be lying to the player about
+        # what it accepts. Sent rather than hardcoded in the client for the same
+        # reason the odds are.
+        'min_bet': MIN_BET, 'max_bet': MAX_BET,
         'outcome': outcome, 'my_bets': my_bets,
         'my_total': sum(b['amount'] for b in my_bets),
         'last_results': [{'round_number': p['round_number'], **(p.get('summary') or {})} for p in prev],

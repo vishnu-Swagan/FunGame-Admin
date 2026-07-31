@@ -1,0 +1,303 @@
+/* The cabinet's shared material: gold, lacquer, and the light on both.
+   Everything here is drawn with gradients and borders rather than images, so a
+   game screen stays a few kilobytes and scales to any size without going soft. */
+
+:root {
+    --cab-gold-hi: #ffeaa0;
+    --cab-gold: #d9a83c;
+    --cab-gold-mid: #b8862a;
+    --cab-gold-lo: #6d4a10;
+    --cab-ink: #0a0913;
+    --cab-cream: #f6ecd0;
+    --cab-red: #8d1220;
+    --cab-green: #1e9a4e;
+}
+
+/* The gold used on every rim. A single gradient, so a button, a plaque and a
+   frame all catch the light from the same direction. */
+.cab-gold-face {
+    background-image: linear-gradient(160deg, var(--cab-gold-hi) 0%, var(--cab-gold) 26%, var(--cab-gold-lo) 52%, var(--cab-gold) 74%, var(--cab-gold-hi) 100%);
+}
+
+.cab-viewport {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    overflow: hidden;
+    /* A table is dragged and tapped, never selected or long-pressed. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    z-index: 60;
+}
+
+.cab-screen {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center center;
+    overflow: hidden;
+    /* No transition on transform: the rotate/scale is recomputed on every
+       resize, and animating it makes an orientation change look like a fault. */
+}
+
+.cab-glass {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 40;
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 55%),
+        radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+.cab-syscontrols {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    z-index: 45;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cab-sysbtn {
+    height: 44px;
+    width: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    color: var(--cab-cream);
+    border: 2px solid rgba(217, 168, 60, 0.55);
+    background: rgba(6, 5, 12, 0.55);
+}
+
+.cab-sysbtn:active {
+    transform: scale(0.94);
+}
+
+.cab-sysbtn-exit {
+    border-color: rgba(217, 168, 60, 0.9);
+    color: #fff;
+}
+
+/* ---------------------------------------------------------------- plaques */
+
+/* Score / Winner / Bet. A sunken dark field inside a double gold rim, with the
+   filigree end-caps drawn as separate elements so the field can stretch to the
+   number without the ornament stretching with it. */
+.cab-plaque {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 6px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+}
+
+.cab-plaque-field {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #05040a, #14111f 60%, #05040a);
+    border: 1px solid rgba(0, 0, 0, 0.8);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9);
+    color: var(--cab-cream);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+
+/* The script labels — "Score", "Winner", "Bet". The reference sets these in an
+   italic serif, which is what makes the machines read as a parlour cabinet
+   rather than a phone app. */
+.cab-script {
+    font-family: 'Gloock', ui-serif, Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    color: var(--cab-cream);
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.65), 0 0 18px rgba(255, 214, 120, 0.25);
+}
+
+.cab-serif {
+    font-family: ui-serif, Georgia, 'Times New Roman', serif;
+}
+
+/* ------------------------------------------------------------- title board */
+
+.cab-title {
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+    background-image: linear-gradient(180deg, #fff6d0 0%, var(--cab-gold-hi) 34%, var(--cab-gold) 58%, #8a5f14 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 22px rgba(255, 200, 90, 0.35));
+    letter-spacing: 0.01em;
+}
+
+/* ---------------------------------------------------------------- paytable */
+
+.cab-paytable {
+    background: linear-gradient(180deg, rgba(9, 8, 22, 0.94), rgba(4, 4, 12, 0.97));
+    border: 2px solid var(--cab-gold-mid);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), inset 0 0 40px rgba(0, 0, 0, 0.75), 0 6px 22px rgba(0, 0, 0, 0.5);
+}
+
+.cab-paytable-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-family: ui-serif, Georgia, 'Times New Roman', serif;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Alternating rows are coloured rather than banded, exactly as the machines do
+   it — it is what lets the eye track a long price list across a wide screen. */
+.cab-row-a { color: #f4efe2; }
+.cab-row-b { color: #c79bff; font-style: italic; }
+
+/* ----------------------------------------------------------------- buttons */
+
+.cab-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+    color: var(--cab-cream);
+    background: linear-gradient(180deg, #1a1730 0%, #0a0817 55%, #16122a 100%);
+    border: 2px solid var(--cab-gold-mid);
+    box-shadow: inset 0 1px 0 rgba(255, 235, 170, 0.28), 0 4px 14px rgba(0, 0, 0, 0.6);
+    transition: filter 120ms ease, transform 80ms ease;
+}
+
+.cab-btn:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+.cab-btn:disabled { opacity: 0.45; }
+
+.cab-btn-armed {
+    background: linear-gradient(180deg, #7bf59b 0%, #1e9a4e 55%, #0d6a33 100%);
+    color: #05210f;
+    border-color: #ffeaa0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 26px rgba(60, 235, 130, 0.55);
+}
+
+.cab-btn-hot {
+    background: linear-gradient(180deg, #ff8ada 0%, #d0189c 55%, #8a0a68 100%);
+    color: #2a0020;
+    border-color: #ffeaa0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 26px rgba(255, 90, 200, 0.5);
+}
+
+.cab-btn-take {
+    background: linear-gradient(180deg, #ffd66e 0%, #d99a1e 55%, #8a5f14 100%);
+    color: #2a1a02;
+    border-color: #fff3c4;
+}
+
+/* ------------------------------------------------------------------- chips */
+
+.cab-chip {
+    position: relative;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #f6f2e2;
+    background: radial-gradient(circle at 36% 28%, #2f6d54, #0d2c22 72%);
+    border: 3px solid var(--cab-gold-mid);
+    box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.18), 0 4px 10px rgba(0, 0, 0, 0.6);
+    transition: transform 110ms ease, box-shadow 110ms ease;
+}
+
+.cab-chip-on {
+    transform: scale(1.09);
+    border-color: var(--cab-gold-hi);
+    box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.3), 0 0 22px rgba(255, 210, 100, 0.75);
+}
+
+/* ------------------------------------------------------------ message rail */
+
+.cab-marquee {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(10, 8, 20, 0.95), rgba(3, 3, 9, 0.98));
+    border: 2px solid var(--cab-gold-mid);
+    color: var(--cab-cream);
+    font-family: ui-serif, Georgia, serif;
+    text-align: center;
+    box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.8);
+}
+
+/* --------------------------------------------------------- countdown dial */
+
+/* The LED counter in its gold ring. Seven-segment-ish without shipping a font:
+   the reference's is a plain condensed LED and tabular digits read the same at
+   this size. */
+.cab-dial {
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: radial-gradient(circle at 50% 38%, #16132a, #05040c 72%);
+    border: 3px solid var(--cab-gold-mid);
+    box-shadow: inset 0 3px 14px rgba(0, 0, 0, 0.95), 0 0 0 6px rgba(217, 168, 60, 0.16), 0 6px 18px rgba(0, 0, 0, 0.6);
+    color: #ffffff;
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 14px rgba(180, 220, 255, 0.75);
+}
+
+.cab-dial-urgent {
+    color: #ffd7d7;
+    border-color: #e05a5a;
+    text-shadow: 0 0 16px rgba(255, 90, 90, 0.9);
+}
+
+/* --------------------------------------------------------------- card rail */
+
+.cab-rail {
+    display: flex;
+    align-items: center;
+    border-radius: 14px;
+    border: 2px solid var(--cab-gold-mid);
+    background: linear-gradient(180deg, rgba(12, 9, 24, 0.8), rgba(4, 3, 10, 0.9));
+    box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
+}
+
+/* Face-down cards use the same lacquered star the reference does, drawn as two
+   crossed conic gradients rather than an image. */
+.cab-cardback {
+    border-radius: 8px;
+    border: 1px solid rgba(217, 168, 60, 0.45);
+    background:
+        conic-gradient(from 45deg at 50% 50%, rgba(255, 220, 140, 0.14) 0deg, transparent 34deg, rgba(255, 220, 140, 0.14) 90deg, transparent 124deg, rgba(255, 220, 140, 0.14) 180deg, transparent 214deg, rgba(255, 220, 140, 0.14) 270deg, transparent 304deg),
+        linear-gradient(150deg, #1d1a30, #0a0814 60%, #191531);
+    box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.85);
+}
+
+/* A dealt card. White stock with a hairline, so a face sits on it cleanly. */
+.cab-card {
+    border-radius: 6px;
+    background: linear-gradient(180deg, #ffffff, #f0f0f4);
+    border: 1px solid #b9b9c6;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55);
+    display: grid;
+    place-items: center;
+    font-family: ui-serif, Georgia, serif;
+    font-weight: 700;
+    color: #14141c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cab-btn { transition: none; }
+    .cab-chip { transition: none; }
+}
