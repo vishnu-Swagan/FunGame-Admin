@@ -19,10 +19,12 @@ import crm
 import revenue
 import commission
 import payouts
+import compliance
 import routes_auth
 import routes_player
 import routes_admin
 import routes_distributor
+import routes_compliance
 import routes_games
 import routes_live
 import routes_blackjack
@@ -141,6 +143,7 @@ async def lifespan(app: FastAPI):
     await step('indexes:revenue', revenue.ensure_indexes())
     await step('indexes:commission', commission.ensure_indexes())
     await step('indexes:payouts', payouts.ensure_indexes())
+    await step('indexes:compliance', compliance.ensure_indexes())
     await step('indexes:core', _core_indexes())
 
     keepalive = asyncio.create_task(_aviator_keepalive())
@@ -185,6 +188,8 @@ api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_distributor.router)
+api_router.include_router(routes_compliance.router)
+api_router.include_router(routes_compliance.admin_router)
 api_router.include_router(routes_security.router)
 app.include_router(api_router)
 

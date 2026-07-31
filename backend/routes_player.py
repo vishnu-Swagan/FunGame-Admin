@@ -8,6 +8,7 @@ from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsReques
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
 from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
 from ledger import credit_chips, debit_chips, InsufficientChips
+import compliance
 import ledger
 
 logger = logging.getLogger('player')
@@ -46,6 +47,15 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
         raise HTTPException(status_code=403, detail='Verify your email first')
     if user.get('status') in ('ACTIVE', 'SUSPENDED'):
         raise HTTPException(status_code=400, detail='Onboarding already completed')
+    # Country and date of birth are entered here, so this is where market and
+    # age are decided — the earliest point the answer can be known, and the
+    # point the player can still correct a typo. A date of birth the operator
+    # has not recorded yet is not a refusal; it is a row in the compliance
+    # review.
+    ok, code, message = await compliance.check_eligibility(
+        body.country, body.date_of_birth or user.get('date_of_birth'), require_dob=False)
+    if not ok:
+        raise HTTPException(status_code=403, detail={'code': code, 'message': message})
     await db.users.update_one({'id': user['id']}, {'$set': {
         'display_name': body.display_name.strip(),
         'country': body.country.strip(),
@@ -173,6 +183,9 @@ async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(requ
     pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': {'$ne': 'SELL'}})
     if pending >= 3:
         raise HTTPException(status_code=429, detail='You already have 3 pending requests. Please wait for review.')
+    # Checked when the request is made so the player is told now, and again at
+    # approval so an operator cannot wave through what the limit refuses.
+    await compliance.check_deposit(user['id'], body.amount)
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
         'user_email': user['email'], 'user_display_name': user.get('display_name'),

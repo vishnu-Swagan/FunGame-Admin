@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
   { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
   { to: "/admin/payouts", label: "Payouts", icon: Banknote, testId: "admin-nav-payouts" },
+  { to: "/admin/compliance", label: "Compliance", icon: Scale, testId: "admin-nav-compliance" },
   { to: "/admin/games", label: "Games", icon: Gamepad2, testId: "admin-nav-games" },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, testId: "admin-nav-announcements" },
   { to: "/admin/settings", label: "System", icon: Settings, testId: "admin-nav-settings" },
@@ -28,22 +29,29 @@ export default function AdminLayout() {
     <div className="App fg-noise min-h-dvh bg-background">
       {/* Topbar */}
       <header data-testid="admin-topbar" className="sticky top-0 z-40 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl border-b border-border/60">
-        <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5" data-testid="admin-logo">
+        {/* min-w-0 on both clusters, because a flex child defaults to its
+            content width and will not shrink — which is why this bar was 25px
+            wider than a 390px phone on every admin page. */}
+        <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0" data-testid="admin-logo">
             <BrandWordmark logoClassName="h-8 w-8" textClassName="text-base" />
             <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
               <ShieldCheck className="h-3 w-3 text-sky-400" />
               <span className="font-mono text-[9px] tracking-[0.2em] text-sky-300 uppercase">Admin</span>
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
             <Disclaimer className="hidden md:block" />
             <button
               data-testid="admin-open-player-app"
               onClick={() => navigate("/home")}
-              className="flex items-center gap-1.5 text-xs font-semibold text-white/65 hover:text-white border border-white/10 bg-white/5 rounded-full px-3 py-1.5 min-h-[36px]"
+              className="flex items-center gap-1.5 text-xs font-semibold text-white/65 hover:text-white border border-white/10 bg-white/5 rounded-full px-2.5 sm:px-3 py-1.5 min-h-[36px]"
+              aria-label="Open the player app"
             >
-              <Smartphone className="h-3.5 w-3.5" /> Player app
+              {/* The label goes on a phone; the icon still says what it does,
+                  and the two buttons plus the wordmark do not fit at 390px. */}
+              <Smartphone className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">Player app</span>
             </button>
             <button
               data-testid="admin-logout-button"

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { setHaptics, setMuted } from "@/lib/sound";
 import { toast } from "sonner";
 import {
-  Shield, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
+  Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export function Profile() {
   const links = [
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
+    { icon: HeartPulse, label: "Responsible play", to: "/responsible-play", testId: "profile-link-responsible" },
     { icon: SettingsIcon, label: "Settings", to: "/settings", testId: "profile-link-settings" },
     { icon: Megaphone, label: "Announcements", to: "/announcements", testId: "profile-link-announcements" },
     { icon: Bell, label: "Notifications", to: "/notifications", testId: "profile-link-notifications" },

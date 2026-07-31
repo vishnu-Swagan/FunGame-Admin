@@ -60,6 +60,19 @@ class InsufficientChips(Exception):
     pass
 
 
+# Checks that must pass before a stake is taken. Registered by whoever owns the
+# rule rather than called from the game routes: there are five places a bet is
+# debited today and there will be more, and a check that each new route has to
+# remember to call is a check that will eventually be missed. Everything that
+# takes money for a bet comes through debit_chips, so this is the one place it
+# cannot be routed around.
+_stake_guards = []
+
+
+def register_stake_guard(fn):
+    _stake_guards.append(fn)
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -124,6 +137,10 @@ async def credit_chips(user_id: str, amount: int, note: str, ref: str = None,
 async def debit_chips(user_id: str, amount: int, note: str, ref: str = None,
                       kind: str = ADJUST, game: str = None):
     amount = int(amount)
+    if kind == STAKE:
+        # Before the balance moves, and before the caller has written a bet row.
+        for guard in _stake_guards:
+            await guard(user_id, amount)
     result = await db.users.find_one_and_update(
         {'id': user_id, 'chip_balance': {'$gte': amount}},
         {'$inc': {'chip_balance': -amount}},

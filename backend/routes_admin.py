@@ -23,6 +23,7 @@ from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
+import compliance
 import revenue
 import commission
 import payouts
@@ -150,6 +151,15 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
         raise HTTPException(status_code=400, detail='User already active')
     if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
         raise HTTPException(status_code=400, detail='User has not submitted onboarding yet')
+    # Approving is a new decision, so it is gated rather than merely reported.
+    # This is not the retroactive case — nobody who is already playing is
+    # touched by it.
+    ok, code, message = await compliance.check_eligibility(
+        user.get('country'), user.get('date_of_birth'), require_dob=False)
+    if not ok:
+        raise HTTPException(status_code=403, detail=(
+            f'{message} This account cannot be approved under the current '
+            f'compliance settings ({code}).'))
     was_approved_before = user.get('approved_at') is not None
     await db.users.update_one({'id': user_id}, {'$set': {'status': 'ACTIVE', 'approved_at': _now()}, '$unset': {'rejection_reason': ''}})
     if not was_approved_before:
@@ -424,8 +434,20 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
                       f"Your request to return {req['amount']} chips was approved. {req['amount']} chips were returned to the operator. New balance: {chip_balance}.", 'CHIPS')
         return {'message': 'Return approved — chips deducted from the player', 'chip_balance': chip_balance}
 
-    # BUY (default): credit chips
-    balance = await _credit_chips(req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)", ref=request_id)
+    # BUY (default): credit chips.
+    try:
+        await compliance.check_deposit(req['user_id'], req['amount'])
+    except compliance.ComplianceBlock as e:
+        await db.chip_requests.update_one(
+            {'id': request_id},
+            {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}})
+        raise HTTPException(status_code=400, detail=(
+            f"This player's deposit limit refuses it: {e.detail.get('message')}"))
+    # Typed as a DEPOSIT rather than an untyped credit, so the deposit limit and
+    # the revenue engine agree on what a deposit is.
+    balance = await ledger.credit_chips(
+        req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)",
+        ref=request_id, kind=ledger.DEPOSIT)
     await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}.", 'CHIPS')
     return {'message': 'Request approved and chips credited', 'balance_after': balance}
 

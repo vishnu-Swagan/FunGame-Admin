@@ -82,6 +82,18 @@ api.interceptors.response.use(
       window.location.assign("/login");
       return Promise.reject(error);
     }
+    /* A refusal that closes the whole app to this player gets its own screen.
+       Without it an excluded player taps around getting the same red toast on
+       every page with nothing to do about it. Per-bet refusals (LOSS_LIMIT,
+       DEPOSIT_LIMIT) are deliberately NOT here — those belong inline, next to
+       the bet that was refused. */
+    const CLOSED_CODES = ["SELF_EXCLUDED", "MARKET_BLOCKED", "AGE_NOT_VERIFIED", "UNDERAGE"];
+    if (status === 403 && detail && CLOSED_CODES.includes(detail.code)) {
+      try { localStorage.setItem("cc_block", JSON.stringify(detail)); } catch (e) { /* private mode */ }
+      if (!path.startsWith("/account-closed") && !path.startsWith("/responsible-play") && !path.startsWith("/support")) {
+        window.location.assign("/account-closed");
+      }
+    }
     if (status === 503 && detail && detail.code === "MAINTENANCE") {
       if (!path.startsWith("/maintenance") && !path.startsWith("/admin")) {
         window.location.assign("/maintenance");

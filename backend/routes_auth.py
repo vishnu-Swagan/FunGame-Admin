@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from db import db, serialize_doc
 import crm
+import compliance
 from models import (RegisterRequest, VerifyEmailRequest, ResendVerificationRequest,
                     LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
                     SignupRequestCreate)
@@ -55,9 +56,15 @@ async def signup_request(body: SignupRequestCreate):
         raise HTTPException(status_code=409, detail='An account with this email already exists. Please log in.')
     if await db.signup_requests.find_one({'email': email, 'status': 'PENDING'}):
         raise HTTPException(status_code=409, detail='A request for this email is already pending review.')
+    # Checked here rather than at approval so an ineligible applicant is told
+    # immediately, instead of waiting on a queue for a no.
+    ok, code, message = await compliance.check_eligibility(body.country, body.date_of_birth)
+    if not ok:
+        raise HTTPException(status_code=403, detail={'code': code, 'message': message})
     doc = {
         'id': str(uuid.uuid4()),
         'full_name': body.full_name.strip(),
+        'country': (body.country or '').strip() or None,
         'email': email,
         'date_of_birth': body.date_of_birth,
         'phone': body.phone,

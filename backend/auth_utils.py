@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from db import db
+import compliance
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'chakri-dev-secret-change-me')
 JWT_ALG = 'HS256'
@@ -118,4 +119,7 @@ async def require_active_player(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail={'code': 'REJECTED', 'message': 'Your onboarding was rejected.'})
     if user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=403, detail={'code': 'NOT_APPROVED', 'message': 'Your account is pending approval.'})
+    # Self-exclusion, market and age. Last, so a player who is excluded is told
+    # that rather than something less specific about their account status.
+    await compliance.assert_playable(user)
     return user

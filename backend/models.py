@@ -16,6 +16,10 @@ class SignupRequestCreate(BaseModel):
     email: EmailStr
     date_of_birth: str  # YYYY-MM-DD
     phone: str = Field(min_length=7, max_length=20)
+    # Optional so an older client that does not send it still works. An unstated
+    # country reads as UNKNOWN, which only refuses anything once the operator
+    # has switched an allow-list on.
+    country: Optional[str] = Field(default=None, max_length=64)
     # Optional, and deliberately not validated here: an unknown code must not
     # cost the operator the registration. It is carried through and resolved at
     # approval, falling back to the house account.
@@ -259,6 +263,44 @@ class DistributorLogin(BaseModel):
     # Left optional so the operator can have one generated rather than inventing
     # (and then emailing) a weak one.
     password: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+
+class LimitSet(BaseModel):
+    kind: str            # DEPOSIT | LOSS
+    period: str          # DAY | WEEK | MONTH
+    # None means "no limit", which is the largest possible increase and waits
+    # like any other.
+    amount: Optional[int] = Field(default=None, ge=0)
+
+
+class ExclusionCreate(BaseModel):
+    kind: str = 'BREAK'
+    days: Optional[int] = Field(default=None, ge=1, le=3650)
+    reason: Optional[str] = None
+    # A permanent self-exclusion is typed out in full, because a mis-tap must
+    # not close an account forever.
+    confirm: Optional[str] = None
+
+
+class ComplianceConfigUpdate(BaseModel):
+    market_mode: Optional[str] = None
+    markets: Optional[list] = None
+    min_age: Optional[int] = None
+    min_age_by_country: Optional[dict] = None
+    enforce_market_on_login: Optional[bool] = None
+    require_age_verification: Optional[bool] = None
+    limit_increase_delay_hours: Optional[int] = Field(default=None, ge=0, le=168)
+    reactivation_cooling_hours: Optional[int] = Field(default=None, ge=0, le=168)
+
+
+class AgeVerify(BaseModel):
+    verified: bool = True
+    note: Optional[str] = None
+
+
+class AdminExclusion(BaseModel):
+    days: Optional[int] = Field(default=None, ge=1, le=3650)
+    reason: str
 
 
 class PlayerReassign(BaseModel):

@@ -31,10 +31,12 @@ import Announcements from "@/pages/app/Announcements";
 import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
 import Support from "@/pages/app/Support";
+import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
 import GamePlay from "@/pages/play/GamePlay";
 
 // System
 import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScreens";
+import AccountClosed from "@/pages/system/AccountClosed";
 
 // Admin
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -49,6 +51,7 @@ import AdminDistributors from "@/pages/admin/AdminDistributors";
 import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminPayouts from "@/pages/admin/AdminPayouts";
 import AdminSupport from "@/pages/admin/AdminSupport";
+import AdminCompliance from "@/pages/admin/AdminCompliance";
 
 // Partner portal (distributors)
 import PartnerLayout from "@/pages/partner/PartnerLayout";
@@ -113,8 +116,13 @@ function App() {
             <Route path="/settings" element={<Settings />} />
           </Route>
 
-          {/* Support — available to any signed-in user (incl. pending onboarding) */}
+          {/* Support and responsible play — reachable by any signed-in user,
+              including one who has excluded themselves. Putting these behind
+              RequireActive would shut a player out of the screen that explains
+              why they are shut out, and out of the way back. */}
           <Route path="/support" element={<RequireAuth><Support /></RequireAuth>} />
+          <Route path="/responsible-play" element={<RequireAuth><ResponsiblePlay /></RequireAuth>} />
+          <Route path="/account-closed" element={<RequireAuth><AccountClosed /></RequireAuth>} />
 
           {/* System */}
           <Route path="/maintenance" element={<Maintenance />} />
@@ -130,6 +138,7 @@ function App() {
             <Route path="distributors" element={<AdminDistributors />} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
             <Route path="games" element={<AdminGames />} />
             <Route path="announcements" element={<AdminAnnouncements />} />
