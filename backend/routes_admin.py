@@ -11,6 +11,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
+import ledger
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -367,7 +368,7 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
     if req_type == 'SELL':
         # Chips -> points (1:1). Chips are deducted only now, on approval.
         try:
-            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Sold {req['amount']} chips for points (1:1) — approved by operator", ref=request_id)
+            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Sold {req['amount']} chips for points (1:1) — approved by operator", ref=request_id, kind=ledger.WITHDRAWAL)
         except InsufficientChips:
             # Revert so the admin can retry or deny with a note
             await db.chip_requests.update_one(

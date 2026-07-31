@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from db import db
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
+import ledger
 from game_engines import (
     MIN_BET, MAX_BET, AVIATOR_GROWTH,
     aviator_crash_point, aviator_multiplier, aviator_time_for,
@@ -98,7 +99,7 @@ async def _av_cash_bet(bet, mult, crash_point=None, auto=False):
     )
     if res.modified_count == 0:
         return None
-    await credit_chips(bet['user_id'], payout, f'Aviator cashout {mult}x', ref=bet['id'])
+    await credit_chips(bet['user_id'], payout, f'Aviator cashout {mult}x', ref=bet['id'], kind=ledger.PAYOUT, game='aviator')
     await _av_history_doc(bet, payout, {'result': 'cashed_out', 'multiplier': mult, 'crash_point': crash_point})
     return payout
 
@@ -229,7 +230,7 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
         raise HTTPException(status_code=409, detail='You already have an active bet on this panel for that round')
     bet_id = str(uuid.uuid4())
     try:
-        await debit_chips(user['id'], body.amount, f'Aviator bet (round {target_rn})', ref=bet_id)
+        await debit_chips(user['id'], body.amount, f'Aviator bet (round {target_rn})', ref=bet_id, kind=ledger.STAKE, game='aviator')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     auto = round(float(body.auto_cashout), 2) if body.auto_cashout else None
@@ -265,7 +266,7 @@ async def aviator_cancel_bet(body: BetRef, user: dict = Depends(require_active_p
     )
     if res.modified_count == 0:
         raise HTTPException(status_code=400, detail='Bet already settled')
-    balance = await credit_chips(user['id'], b['amount'], 'Aviator bet cancelled', ref=b['id'])
+    balance = await credit_chips(user['id'], b['amount'], 'Aviator bet cancelled', ref=b['id'], kind=ledger.REFUND, game='aviator')
     return {'message': 'Bet cancelled', 'refunded': b['amount'], 'balance': balance}
 
 
@@ -395,7 +396,7 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
         if total_bet == 0:
             continue
         if total_payout > 0:
-            await credit_chips(user_id, total_payout, f'{gname} win (round {rn})', ref=str(rn))
+            await credit_chips(user_id, total_payout, f'{gname} win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game=slug)
         await db.game_rounds.insert_one({
             'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': slug, 'game_name': gname,
             'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
@@ -490,7 +491,7 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     card = make_bingo_card() if slug == 'bingo' else None
     bet_id = str(uuid.uuid4())
     try:
-        await debit_chips(user['id'], body.amount, f'Live bet {slug} (round {rn})', ref=bet_id)
+        await debit_chips(user['id'], body.amount, f'Live bet {slug} (round {rn})', ref=bet_id, kind=ledger.STAKE, game=slug)
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     doc = {
@@ -529,6 +530,6 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
         if res.modified_count:
             refunded += b['amount']
     if refunded > 0:
-        await credit_chips(user['id'], refunded, f'Live bets refunded ({slug} round {rn})', ref=str(rn))
+        await credit_chips(user['id'], refunded, f'Live bets refunded ({slug} round {rn})', ref=str(rn), kind=ledger.REFUND, game=slug)
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from db import db
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
+import ledger
 from game_engines import MIN_BET, MAX_BET
 import blackjack as bj
 
@@ -154,7 +155,7 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
         stake += hb.bet + hb.pp + hb.t3
     ref = str(uuid.uuid4())
     try:
-        await debit_chips(uid, stake, 'Blackjack deal', ref=ref)
+        await debit_chips(uid, stake, 'Blackjack deal', ref=ref, kind=ledger.STAKE, game='blackjack')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for these bets')
 
@@ -206,7 +207,7 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
 
     await _save(g)
     if side_payout > 0:
-        await credit_chips(uid, side_payout, 'Blackjack side bets', ref=ref)
+        await credit_chips(uid, side_payout, 'Blackjack side bets', ref=ref, kind=ledger.PAYOUT, game='blackjack')
     if g['status'] == 'done':
         await _finalize(g, uid, ref)
     bal = await _balance(uid)
@@ -225,7 +226,7 @@ async def bj_insurance(body: InsuranceBody, user: dict = Depends(require_active_
     if body.take:
         ins = sum(h['bet'] for h in g['hands']) // 2
         try:
-            await debit_chips(uid, ins, 'Blackjack insurance', ref=ref)
+            await debit_chips(uid, ins, 'Blackjack insurance', ref=ref, kind=ledger.STAKE, game='blackjack')
         except InsufficientChips:
             raise HTTPException(status_code=400, detail='Not enough chips for insurance')
         g['insurance_bet'] = ins
@@ -292,7 +293,7 @@ async def bj_action(body: ActionBody, user: dict = Depends(require_active_player
 
     if extra_debit > 0:
         try:
-            await debit_chips(uid, extra_debit, f'Blackjack {act}', ref=ref)
+            await debit_chips(uid, extra_debit, f'Blackjack {act}', ref=ref, kind=ledger.STAKE, game='blackjack')
         except InsufficientChips:
             raise HTTPException(status_code=400, detail='Not enough chips')
         g['total_staked'] += extra_debit
@@ -315,7 +316,7 @@ async def _finalize(g, uid, ref):
     ins = g['insurance_bet'] * 3 if (g.get('insurance_bet', 0) > 0 and bj.is_blackjack([_tuple(c) for c in g['dealer']])) else 0
     payout = main + ins
     if payout > 0:
-        await credit_chips(uid, payout, 'Blackjack payout', ref=ref)
+        await credit_chips(uid, payout, 'Blackjack payout', ref=ref, kind=ledger.PAYOUT, game='blackjack')
     game = await db.games.find_one({'slug': 'blackjack'})
     gname = game['name'] if game else 'Blackjack'
     await db.game_rounds.insert_one({

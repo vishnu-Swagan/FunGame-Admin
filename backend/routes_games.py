@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from db import db, serialize_doc
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
+import ledger
 from game_engines import (RNG, MIN_BET, roulette_multiplier, roulette_color,
                           ROULETTE_POCKETS, roulette_payout)
 
@@ -158,7 +159,7 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
         if total_bet == 0:
             continue
         if total_payout > 0:
-            await credit_chips(user_id, total_payout, f'Fun Roulette win (round {rn})', ref=str(rn))
+            await credit_chips(user_id, total_payout, f'Fun Roulette win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette')
         round_doc = {
             'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette', 'game_name': 'Fun Roulette',
             'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
@@ -233,7 +234,7 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
         })
     bet_id = str(uuid.uuid4())
     try:
-        await debit_chips(user['id'], body.amount, f'Fun Roulette bet (round {round_number})', ref=bet_id)
+        await debit_chips(user['id'], body.amount, f'Fun Roulette bet (round {round_number})', ref=bet_id, kind=ledger.STAKE, game='fun-roulette')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     await db.roulette_bets.insert_one({
@@ -261,7 +262,7 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
         if res.modified_count:
             refunded += b['amount']
     if refunded > 0:
-        await credit_chips(user['id'], refunded, f'Fun Roulette bets refunded (round {round_number})', ref=str(round_number))
+        await credit_chips(user['id'], refunded, f'Fun Roulette bets refunded (round {round_number})', ref=str(round_number), kind=ledger.REFUND, game='fun-roulette')
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
 
@@ -281,7 +282,7 @@ async def roulette_undo_bet(user: dict = Depends(require_active_player)):
         res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
         if res.modified_count:
             refunded = b['amount']
-            await credit_chips(user['id'], refunded, f'Fun Roulette undo (round {round_number})', ref=b['id'])
+            await credit_chips(user['id'], refunded, f'Fun Roulette undo (round {round_number})', ref=b['id'], kind=ledger.REFUND, game='fun-roulette')
     my_bets = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},

@@ -8,6 +8,7 @@ from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsReques
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
 from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
 from ledger import credit_chips, debit_chips, InsufficientChips
+import ledger
 
 logger = logging.getLogger('player')
 router = APIRouter(tags=['player'])
@@ -154,7 +155,7 @@ async def convert_chips_points(body: ConvertRequest, user: dict = Depends(requir
         'balance_after': points_balance, 'note': f'Converted {body.amount} points to chips (1:1)',
         'ref': 'convert', 'created_at': _now(),
     })
-    chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert')
+    chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert', kind=ledger.DEPOSIT)
     message = f'Converted {body.amount} points — {body.amount} chips credited.'
     return {'message': message, 'chip_balance': chip_balance, 'points_balance': points_balance}
 
