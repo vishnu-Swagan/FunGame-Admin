@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Disclaimer } from "@/components/common";
 
 const FEATURES = [
-  { icon: Gamepad2, title: "18 original games", text: "Aviator, Teen Patti, Fun Roulette and more — all in production." },
+  { icon: Gamepad2, title: "20 original games", text: "Aviator, Teen Patti, Fun Roulette and more — all in production." },
   { icon: Coins, title: "Play chips only", text: "No payments or withdrawals. Pure amusement." },
   { icon: ShieldCheck, title: "Members only", text: "Accounts are issued by the operator — log in with the Login ID and password you were given." },
 ];
@@ -24,10 +24,10 @@ export default function Welcome() {
               </div>
             </div>
             <h1 className="font-display text-5xl leading-[1.05] text-white">
-              Fun<span className="text-primary">Game</span>
+              Chakri<span className="text-primary">.Casino</span>
             </h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
-              A premium play-chip amusement lounge. 18 original games, one glowing midnight lobby.
+              A premium play-chip amusement lounge. 20 original games, one glowing midnight lobby.
             </p>
             <Disclaimer className="mt-3" />
           </motion.div>
