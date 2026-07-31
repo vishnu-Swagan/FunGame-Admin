@@ -280,3 +280,7 @@ class PayoutPaid(BaseModel):
 class ClawbackCreate(BaseModel):
     amount: int = Field(gt=0)
     reason: str = Field(min_length=4, max_length=300)
+
+
+class AdminSetEmail(BaseModel):
+    email: EmailStr

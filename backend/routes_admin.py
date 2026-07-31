@@ -16,7 +16,8 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     CommissionSettle,
                     PayoutAction,
                     PayoutPaid,
-                    ClawbackCreate)
+                    ClawbackCreate,
+                    AdminSetEmail)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
@@ -817,3 +818,32 @@ async def night_run(request: Request):
     built = await payouts.build_all(actor='cron')
     steps['payouts_raised'] = len(built)
     return steps
+
+
+@router.post('/users/{user_id}/email')
+async def admin_change_email(user_id: str, body: AdminSetEmail, admin: dict = Depends(require_admin)):
+    """Change the address an account signs in with.
+
+    The address IS the login here, so this is a change of identity rather than of
+    a profile field: every outstanding session is revoked, the same as a password
+    reset, or a device holding a token would keep the access the change was meant
+    to move.
+    """
+    email = body.email.lower().strip()
+    user = await db.users.find_one({'id': user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    clash = await db.users.find_one({'email': email, 'id': {'$ne': user_id}})
+    if clash:
+        raise HTTPException(status_code=409, detail='Another account already uses that email')
+    await db.users.update_one({'id': user_id}, {'$set': {
+        'email': email,
+        'email_verified': True,
+        'previous_email': user.get('email'),
+        'email_changed_at': _now(),
+        'email_changed_by': admin['id'],
+        'active_session_id': f'revoked-{uuid.uuid4()}',
+    }})
+    logger.info(f'admin {admin.get("email")} changed email for {user_id}: {user.get("email")} -> {email}')
+    return {'message': f'Login email changed to {email}. All sessions for that account were signed out.',
+            'previous_email': user.get('email'), 'email': email}

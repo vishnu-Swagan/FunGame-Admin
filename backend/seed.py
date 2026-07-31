@@ -104,7 +104,12 @@ async def run_seed():
         }))
 
     # Admin user
-    if not await db.users.find_one({'email': 'admin@fungame.app'}):
+    # Keyed on the ROLE, not on an address. Seeding exists to bootstrap an empty
+    # database; if an admin already exists under any address, there is nothing to
+    # bootstrap. Keyed on the address, renaming the operator's login would make
+    # the next restart quietly recreate the old one — with the seed password —
+    # and that account would be a live way in that nobody knew about.
+    if not await db.users.find_one({'role': 'ADMIN'}):
         await _safe_insert(db.users.insert_one({
             'id': str(uuid.uuid4()), 'email': 'admin@fungame.app',
             'password_hash': hash_password('FunGame@Admin2025'),
@@ -116,7 +121,10 @@ async def run_seed():
         }))
 
     # Pre-approved test player
-    if not await db.users.find_one({'email': 'player@fungame.app'}):
+    # Same reasoning for the demo player: keyed on the username, which is the
+    # thing the tests actually log in with.
+    if not await db.users.find_one({'$or': [{'email': 'player@fungame.app'},
+                                            {'username': 'lucky'}]}):
         pid = str(uuid.uuid4())
         await _safe_insert(db.users.insert_one({
             'id': pid, 'email': 'player@fungame.app',
