@@ -25,25 +25,31 @@ def bad(msg):
 
 # ---------------- Cycle configuration (seconds) ----------------
 # phase order: BETTING -> REVEAL (animation) -> RESULT, then next round
+#
+# Betting runs a full minute on every table, which is what the client's machines
+# give a player. The reveal and result windows stay as they were: those are the
+# length of each game's own animation, and stretching them would leave the table
+# sitting on a finished result.
+BET_SECONDS = 60
 LIVE_GAMES = {
-    "seven-up-down":     {"bet": 13, "reveal": 4, "result": 3, "kind": "sides"},
-    "fun-target":        {"bet": 13, "reveal": 4, "result": 3, "kind": "pick"},
-    "super-golden-wheel": {"bet": 13, "reveal": 5, "result": 3, "kind": "stake"},
-    "checker":           {"bet": 13, "reveal": 4, "result": 3, "kind": "sides"},
-    "teen-patti":        {"bet": 15, "reveal": 12, "result": 6, "kind": "sides"},
-    "poker":             {"bet": 15, "reveal": 14, "result": 6, "kind": "sides"},
-    "no-hold":           {"bet": 14, "reveal": 8, "result": 5, "kind": "stake"},
-    "champion-poker":    {"bet": 15, "reveal": 14, "result": 6, "kind": "stake"},
-    "andar-bahar":       {"bet": 15, "reveal": 16, "result": 5, "kind": "sides"},
-    "keno":              {"bet": 20, "reveal": 6, "result": 4, "kind": "picks"},
-    "bingo":             {"bet": 20, "reveal": 6, "result": 4, "kind": "stake"},
-    "fever-joker-bonus": {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
-    "giant-jackpot":     {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
-    "joker-bonus":       {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
-    "lucky-8-line":      {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
-    "triple-fun":        {"bet": 12, "reveal": 5, "result": 3, "kind": "stake"},
+    "seven-up-down":     {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "sides"},
+    "fun-target":        {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "pick"},
+    "super-golden-wheel": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
+    "checker":           {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "sides"},
+    "teen-patti":        {"bet": BET_SECONDS, "reveal": 12, "result": 6, "kind": "sides"},
+    "poker":             {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "sides"},
+    "no-hold":           {"bet": BET_SECONDS, "reveal": 8, "result": 5, "kind": "stake"},
+    "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
+    "andar-bahar":       {"bet": BET_SECONDS, "reveal": 16, "result": 5, "kind": "sides"},
+    "keno":              {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "picks"},
+    "bingo":             {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "stake"},
+    "fever-joker-bonus": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
+    "giant-jackpot":     {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
+    "joker-bonus":       {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
+    "lucky-8-line":      {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
+    "triple-fun":        {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
     # reveal = multiplier-drop (~4s) + wheel spin (~8s); result = leaf payout or the cinematic fish bonus
-    "ice-fishing":       {"bet": 14, "reveal": 12, "result": 10, "kind": "spots"},
+    "ice-fishing":       {"bet": BET_SECONDS, "reveal": 12, "result": 10, "kind": "spots"},
 }
 
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine

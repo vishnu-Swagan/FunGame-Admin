@@ -63,9 +63,9 @@ async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_a
 # ---------------- Live Fun Roulette (universal synchronized rounds) ----------------
 # Rounds are derived from universal epoch time: every player worldwide sees the
 # same round number, the same countdown and the same winning number.
-ROUND_SECONDS = 35
-BETTING_SECONDS = 20   # 0-20s: bets open
-SPIN_SECONDS = 10      # 20-30s: long, dramatic wheel spin (bets locked)
+BETTING_SECONDS = 60   # 0-60s: bets open — a full minute, as the machine gives
+SPIN_SECONDS = 10      # 60-70s: the wheel spins, bets locked
+ROUND_SECONDS = 75     # then 5s on the result before the next round
 # 30-35s: result display, then the next round starts automatically
 
 # Table limits (anti-Martingale). Even-money positions (red/black, odd/even,

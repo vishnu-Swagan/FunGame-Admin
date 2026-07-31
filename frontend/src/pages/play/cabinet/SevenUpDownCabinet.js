@@ -267,11 +267,9 @@ export default function SevenUpDownCabinet({ game }) {
         <div className="sud-gate" data-testid="cab-gate">
           <div className="sud-gate-box">
             <span className="sud-gate-spin" />
-            <span>
-              {myTotal ? <>Game Over<br /></> : null}
-              Next round starts in 00:{String(Math.max(0, Math.ceil(countdown))).padStart(2, "0")}s<br />
-              Currently game round is in progress…
-            </span>
+            {/* "Game Over" reads as the session ending. The round is simply
+                closed to bets, so that is what it says. */}
+            <span>NO MORE BETTING</span>
           </div>
         </div>
       )}

@@ -458,9 +458,10 @@
     background: linear-gradient(180deg, #1a2a6e, #0d1740);
     border: 3px solid #ffd76a;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-size: 25px;
-    line-height: 1.42;
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+    font-size: 44px;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
     color: #ffffff;
 }
 

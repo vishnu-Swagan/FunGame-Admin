@@ -329,3 +329,48 @@
 @media (prefers-reduced-motion: reduce) {
     .rou-chip { transition: none; }
 }
+
+/* ---------------------------------------------------- marker and line bets */
+
+/* The marker the ball rests against, at the top of the wheel. */
+.rou-marker {
+    position: absolute;
+    left: 50%;
+    top: 4%;
+    width: 0;
+    height: 0;
+    margin-left: -11px;
+    border-left: 11px solid transparent;
+    border-right: 11px solid transparent;
+    border-top: 20px solid #e8e8f0;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.8));
+    z-index: 4;
+}
+
+.rou-ball { z-index: 4; }
+
+/* A boundary target. Invisible until it carries money, because a table covered
+   in visible hit-boxes stops looking like a table — but it still lights on
+   press so a tap that landed on the line is confirmed. */
+.rou-zone {
+    position: absolute;
+    border-radius: 50%;
+    background: transparent;
+    z-index: 3;
+}
+
+.rou-zone:active:not(:disabled) {
+    background: radial-gradient(circle, rgba(255, 220, 120, 0.55), transparent 70%);
+}
+
+.rou-laid-zone {
+    right: 50%;
+    bottom: 50%;
+    transform: translate(50%, 50%);
+}
+
+/* The number that came in. */
+.rou-cell.hit .rou-disc {
+    border-color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 0 26px rgba(255, 245, 180, 0.95);
+}

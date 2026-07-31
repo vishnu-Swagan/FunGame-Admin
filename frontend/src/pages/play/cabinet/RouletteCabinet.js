@@ -55,6 +55,42 @@ const colourOf = (p) => (p === "0" || p === "00" ? "green" : RED.has(Number(p)) 
 /** A key for a bet, so laid chips can be totalled per box. */
 const keyOf = (type, value) => `${type}:${value}`;
 
+/* Where the number grid actually sits, in cabinet units. The line zones below
+   are computed from these rather than measured off the rendered grid, so the
+   boundaries cannot drift away from the cells they divide. */
+const GX = 120, GY = 424, GW = 1330, GH = 174;
+const COL_W = GW / 12, ROW_H = GH / 3;
+
+const LINE_ZONES = (() => {
+  const zones = [];
+  const push = (type, nums, x, y) => zones.push({ type, value: nums.join("-"), x, y });
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 12; c++) {
+      const n = GRID_ROWS[r][c];
+      // split with the number to the left
+      if (c > 0) push("split", [GRID_ROWS[r][c - 1], n], GX + c * COL_W, GY + (r + 0.5) * ROW_H);
+      // split with the number below
+      if (r < 2) push("split", [n, GRID_ROWS[r + 1][c]], GX + (c + 0.5) * COL_W, GY + (r + 1) * ROW_H);
+      // the corner of four
+      if (c > 0 && r < 2) {
+        push("corner", [GRID_ROWS[r][c - 1], n, GRID_ROWS[r + 1][c - 1], GRID_ROWS[r + 1][c]],
+             GX + c * COL_W, GY + (r + 1) * ROW_H);
+      }
+    }
+    void r;
+  }
+  for (let c = 0; c < 12; c++) {
+    // the street of three, on the bottom edge of its column
+    push("street", [GRID_ROWS[0][c], GRID_ROWS[1][c], GRID_ROWS[2][c]], GX + (c + 0.5) * COL_W, GY + GH);
+    // the six-line, on the bottom edge between two columns
+    if (c > 0) {
+      push("sixline", [GRID_ROWS[0][c - 1], GRID_ROWS[1][c - 1], GRID_ROWS[2][c - 1],
+                       GRID_ROWS[0][c], GRID_ROWS[1][c], GRID_ROWS[2][c]], GX + c * COL_W, GY + GH);
+    }
+  }
+  return zones;
+})();
+
 export default function RouletteCabinet({ game }) {
   const navigate = useNavigate();
   const [state, setState] = useState(null);
@@ -107,6 +143,31 @@ export default function RouletteCabinet({ game }) {
 
   const winning = state?.winning_number;
   const settled = state?.settled;
+  const spinning = state?.phase === "SPINNING";
+
+  /* The wheel turns until the winning pocket is under the marker at the top.
+     The angle is computed from the number the server has already chosen, and
+     several whole turns are added so it reads as a spin rather than a jump —
+     the outcome exists before the animation does, and the animation has to
+     agree with it. The ring is what turns; the ball stays under the marker,
+     which is how a real wheel reads from the player's seat. */
+  const STEP = 360 / WHEEL_ORDER.length;
+  const [ring, setRing] = useState(0);
+  const spunFor = useRef(null);
+  useEffect(() => {
+    if (winning == null) { spunFor.current = null; return; }
+    const rn = state?.round_number;
+    if (spunFor.current === rn) return;
+    spunFor.current = rn;
+    const idx = Math.max(0, WHEEL_ORDER.indexOf(String(winning)));
+    /* Always forward, and always at least six turns past wherever it stopped
+       last time, so consecutive rounds never look like the wheel jerked back. */
+    setRing((prev) => {
+      const target = -idx * STEP;
+      const turns = Math.ceil((prev + 360 * 6 - target) / 360);
+      return target + turns * 360;
+    });
+  }, [winning, state?.round_number, STEP]);
 
   const message = (() => {
     if (state?.phase === "SPINNING") return "No more bets. The wheel is spinning…";
@@ -123,9 +184,10 @@ export default function RouletteCabinet({ game }) {
      the disabled state are written once. */
   const Cell = ({ type, value, style, className = "", children, testId }) => {
     const amount = staked[keyOf(type, value)];
+    const hit = winning != null && type === "straight" && String(value) === String(winning);
     return (
       <button type="button" disabled={!betting || busy} onClick={() => lay(type, value)}
-        data-testid={testId} className={`rou-cell ${className}`}
+        data-testid={testId} className={`rou-cell ${hit ? "hit" : ""} ${className}`}
         style={{ ...style, opacity: betting ? 1 : 0.82, cursor: betting ? "pointer" : "default" }}>
         {children}
         {amount > 0 && <span className="rou-laid">{formatChips(amount)}</span>}
@@ -136,8 +198,12 @@ export default function RouletteCabinet({ game }) {
   /* The box is square and the disc is laid back inside it, so the flattening is
      the perspective's doing rather than a height picked to look right. A disc
      rotated 58 degrees covers about 55% of its box, which is what sets the top. */
-  const wheelSize = zoom ? 430 : 340;
-  const wheelTop = zoom ? 6 : 46;
+  /* The machine pushes in on the wheel for the spin and pulls back once the
+     number is known — which is the whole of the drama, and the reason the
+     reference has a zoomed and an unzoomed frame of the same table. */
+  const wide = zoom || spinning;
+  const wheelSize = wide ? 440 : 340;
+  const wheelTop = wide ? 2 : 46;
 
   return (
     <Cabinet ground="#01120a" exitTo={`/games/${game.slug}`} testId="cab-fun-roulette" className="rou">
@@ -218,6 +284,9 @@ export default function RouletteCabinet({ game }) {
         <div className="rou-wheel">
           <div className="rou-wheel-rim" />
           <div className="rou-wheel-track" style={{
+            transform: `rotate(${ring}deg)`,
+            transition: spinning ? "transform 9s cubic-bezier(.12,.62,.12,1)"
+                                 : "transform 1.2s cubic-bezier(.2,.7,.2,1)",
             background: `conic-gradient(${WHEEL_ORDER.map((p, i) => {
               const a = (360 / WHEEL_ORDER.length);
               const c = colourOf(p) === "green" ? "#0f8a3c" : colourOf(p) === "red" ? "#c01526" : "#101018";
@@ -238,12 +307,11 @@ export default function RouletteCabinet({ game }) {
           <div className="rou-wheel-hub" />
           <div className="rou-wheel-cross" />
           <div className="rou-wheel-gem" />
+          {/* The marker and the ball both live at the top; the ring brings the
+              number to them. */}
+          <div className="rou-marker" />
           {winning != null && (
-            <div className="rou-ball" style={{
-              left: "50%", top: "50%",
-              transform: `translate(-50%,-50%) rotate(${(360 / WHEEL_ORDER.length) *
-                Math.max(0, WHEEL_ORDER.indexOf(String(winning)))}deg) translateY(-${wheelSize * 0.395}px)`,
-            }} />
+            <div className="rou-ball" style={{ top: `${50 - 39.5}%`, left: "50%" }} />
           )}
         </div>
       </div>
@@ -268,6 +336,23 @@ export default function RouletteCabinet({ game }) {
           </Cell>
         )))}
       </div>
+
+      {/* The line bets. A real table takes a chip on the boundary between
+          numbers, and the engine settles split, street, corner and six-line —
+          so the boundaries are live rather than decorative. Each zone is a
+          small target laid over the ruled line it belongs to, above the number
+          cells so the boundary wins the tap and the number keeps the rest. */}
+      {LINE_ZONES.map((z) => {
+        const amount = staked[keyOf(z.type, z.value)];
+        return (
+          <button key={`${z.type}:${z.value}`} type="button" disabled={!betting || busy}
+            onClick={() => lay(z.type, z.value)} data-testid={`rou-${z.type}-${z.value}`}
+            title={`${z.type} ${z.value.replace(/-/g, ", ")}`}
+            className="rou-zone" style={at(z.x - 13, z.y - 13, 26, 26)}>
+            {amount > 0 && <span className="rou-laid rou-laid-zone">{formatChips(amount)}</span>}
+          </button>
+        );
+      })}
 
       {/* the column bets: the top row is column 3, the bottom is column 1 */}
       <div style={{ ...at(1450, 424, 112, 174), display: "grid", gridTemplateRows: "repeat(3, 1fr)" }}>
