@@ -16,6 +16,12 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /api/health
+    # The API answers under the brand too, so nothing a user or a support agent
+    # ever reads says fungame. Renaming the Render SERVICE would change the same
+    # hostname but breaks every already-built client the moment it takes effect;
+    # a custom domain adds a name without removing the old one.
+    domains:
+      - api.chakri.casino
     envVars:
       - key: MONGO_URL
         sync: false          # set in dashboard — MongoDB Atlas connection string

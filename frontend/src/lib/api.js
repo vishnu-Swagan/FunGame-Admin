@@ -13,6 +13,7 @@ export const APP_VERSION = "1.0.0";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const ALTERNATES = [
   BACKEND_URL,
+  "https://api.chakri.casino",
   "https://chakri-casino-api.onrender.com",
   "https://fungame-api.onrender.com",
 ].filter(Boolean);

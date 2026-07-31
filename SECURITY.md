@@ -3,7 +3,7 @@
 ## The honest threat model
 
 The Android app is a **TWA (Trusted Web Activity)** — a thin shell that opens
-`https://fungame-web.onrender.com` in Chrome. There is **no game logic inside the
+`https://chakri.casino` in Chrome. There is **no game logic inside the
 APK**; the crown jewels (game engines, RNG, chip balances, admin logic) run
 **server-side** and never reach the client.
 
@@ -19,7 +19,7 @@ Therefore:
 
 | Protection | Where | Effect |
 |---|---|---|
-| **CORS locked** to `https://fungame-web.onrender.com` | `render.yaml` / `server.py` | A copied frontend on another domain can't call your backend from a browser |
+| **CORS locked** to `https://chakri.casino` | `render.yaml` / `server.py` | A copied frontend on another domain can't call your backend from a browser |
 | **Production mode** (`APP_ENV=production`) | `render.yaml` | Verification/reset codes are **never** returned in API responses (`dev_code` killed) |
 | **Rate limiting** (per-IP) on auth endpoints | `backend/security.py` | Brute-force / abuse throttled (login 8/5min, resets 5/15min, etc.) |
 | **Security headers** | `security.py` + static `render.yaml` headers | `nosniff`, `X-Frame-Options: DENY` (anti-clickjacking/embedding), Referrer-Policy, Permissions-Policy |

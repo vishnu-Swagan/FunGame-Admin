@@ -280,13 +280,13 @@ export default function DiceGame({ game }) {
     >
       <div className="sud" data-testid="dice-table">
         {/* how the table has actually been running */}
-        <div className="sud-wood flex flex-wrap items-center gap-x-3 px-3 py-1.5 text-[11px] font-bold">
+        <div className="sud-wood flex items-center gap-x-3 overflow-hidden whitespace-nowrap px-3 py-1 text-[11px] font-bold">
           {share ? (
             <>
               <span className="text-amber-200">2~6 <span className="text-amber-400">{share.down}%</span></span>
               <span className="text-amber-200">8~12 <span className="text-amber-400">{share.up}%</span></span>
               <span className="text-amber-200">7 <span className="text-amber-400">{share.seven}%</span></span>
-              <span className="font-normal text-amber-100/60">Calculated from the last {share.n} rounds.</span>
+              <span className="ml-auto font-normal text-amber-100/60">last {share.n}</span>
             </>
           ) : (
             <span className="font-normal text-amber-100/60">Waiting for the first rounds…</span>
@@ -329,7 +329,7 @@ export default function DiceGame({ game }) {
         </div>
 
         {/* the board */}
-        <div className={`relative p-2 ${betting ? "" : "sud-locked"}`}>
+        <div className={`relative px-2 pb-1.5 pt-2 ${betting ? "" : "sud-locked"}`}>
           <div className="grid grid-cols-3 gap-1.5" data-testid="dice-sides">
             <Cell sel="down" testId="dice-side-down"
               className="h-[112px] border-emerald-300/50 bg-gradient-to-b from-emerald-500 to-emerald-700">
@@ -351,7 +351,7 @@ export default function DiceGame({ game }) {
           </div>
 
           {TOTALS.map((row, ri) => (
-            <div key={ri} className="mt-1.5 grid grid-cols-5 gap-1.5" data-testid={`dice-totals-${ri}`}>
+            <div key={ri} className="mt-1 grid grid-cols-5 gap-1.5" data-testid={`dice-totals-${ri}`}>
               {row.map((t) => (
                 <Cell key={t} sel={`t${t}`} testId={`dice-total-${t}`}
                   className="h-[92px] border-emerald-200/25 bg-emerald-800/60">
@@ -373,7 +373,7 @@ export default function DiceGame({ game }) {
         </div>
 
         {/* the money line */}
-        <div className="flex items-center justify-center gap-8 px-3 pb-2 text-[13px] font-bold text-white/80">
+        <div className="flex items-center justify-center gap-8 px-3 pb-1.5 text-[13px] font-bold text-white/80">
           <span>Balance <span className="tabular-nums text-amber-300">{formatChips(balance ?? 0)}</span></span>
           <span>Your Bet <span className="tabular-nums text-amber-300">{formatChips(myTotal)}</span></span>
         </div>

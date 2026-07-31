@@ -1,5 +1,5 @@
-import asyncio, sys, types
-sys.path.insert(0, '/Users/vishnu/FunGame-Admin/backend')
+import asyncio, os, sys, types
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mongomock_motor import AsyncMongoMockClient
 client = AsyncMongoMockClient()
 sys.modules['db'] = types.SimpleNamespace(db=client['t'], serialize_doc=lambda d: d)
