@@ -1,157 +1,245 @@
-/* 7Up 7Down — the machine's own surfaces.
+/* 7Up 7Down — the machine's own surfaces, matched to the reference.
 
-   Kept in its own sheet rather than in the shared cabinet CSS because this
-   screen is matched to one reference exactly: the purple nebula, the chained
-   panel borders, the red-and-gold card frame. Those are this machine's, not the
-   cabinet's, and folding them into the shared kit would drag every other game
-   toward them. */
+   Its own sheet rather than the shared cabinet CSS: the hex-woven nebula, the
+   chained panel borders, the arced chip rail and the red-and-gold card frame
+   belong to this machine, and folding them into the shared kit would drag the
+   other fourteen screens toward them. */
 
 .sud-ground {
     position: absolute;
     inset: 0;
     background:
-        /* the hex weave the reference has under everything */
-        repeating-conic-gradient(from 30deg at 50% 50%, rgba(255, 255, 255, 0.028) 0deg 60deg, transparent 60deg 120deg),
-        radial-gradient(60% 80% at 72% 42%, rgba(120, 90, 220, 0.5) 0%, transparent 62%),
-        radial-gradient(70% 90% at 26% 30%, rgba(80, 40, 150, 0.55) 0%, transparent 60%),
-        radial-gradient(120% 110% at 50% 0%, #5a2a86 0%, #2a1046 40%, #0d0620 76%, #06030f 100%);
-    background-size: 46px 46px, auto, auto, auto;
+        /* the honeycomb the reference weaves under everything */
+        repeating-conic-gradient(from 30deg at 50% 50%, rgba(190, 170, 255, 0.045) 0deg 60deg, transparent 60deg 120deg),
+        radial-gradient(38% 46% at 78% 30%, rgba(150, 120, 255, 0.4) 0%, transparent 70%),
+        radial-gradient(46% 56% at 22% 26%, rgba(110, 60, 200, 0.42) 0%, transparent 70%),
+        radial-gradient(60% 70% at 50% 52%, rgba(60, 30, 120, 0.5) 0%, transparent 76%),
+        linear-gradient(180deg, #3d1a63 0%, #2a1149 30%, #170a2e 62%, #0a0418 100%);
+    background-size: 54px 54px, auto, auto, auto, auto;
+}
+
+/* The scattered sparkle the reference has across the top half. */
+.sud-sparkle {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(1.6px 1.6px at 12% 18%, rgba(255, 255, 255, 0.85), transparent),
+        radial-gradient(1.4px 1.4px at 31% 9%, rgba(220, 200, 255, 0.7), transparent),
+        radial-gradient(1.8px 1.8px at 68% 14%, rgba(255, 255, 255, 0.8), transparent),
+        radial-gradient(1.3px 1.3px at 84% 26%, rgba(210, 190, 255, 0.65), transparent),
+        radial-gradient(1.5px 1.5px at 55% 33%, rgba(255, 255, 255, 0.6), transparent),
+        radial-gradient(1.4px 1.4px at 44% 62%, rgba(230, 215, 255, 0.5), transparent),
+        radial-gradient(1.7px 1.7px at 90% 58%, rgba(255, 255, 255, 0.55), transparent),
+        radial-gradient(1.3px 1.3px at 8% 66%, rgba(220, 200, 255, 0.5), transparent);
 }
 
 /* ------------------------------------------------------------------ title */
 
+.sud-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+
 .sud-title {
     text-align: center;
-    padding: 8px 0 6px;
-    border-radius: 999px;
-    background: linear-gradient(180deg, rgba(20, 10, 40, 0.9), rgba(8, 4, 18, 0.95));
+    padding: 6px 44px 8px;
+    border-radius: 999px / 58px;
+    background: linear-gradient(180deg, #241238 0%, #0c0518 52%, #1c0f30 100%);
     border: 3px solid transparent;
-    border-image: linear-gradient(120deg, #6d4a10, #ffeaa0 22%, #d9a83c 46%, #7a5411 70%, #ffeaa0 100%) 1;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 6px 20px rgba(0, 0, 0, 0.6);
+    border-image: linear-gradient(120deg, #7a5411, #ffeaa0 20%, #d9a83c 44%, #8a5f14 66%, #ffeaa0 88%, #a9781f 100%) 1;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), 0 6px 22px rgba(0, 0, 0, 0.65), inset 0 0 26px rgba(0, 0, 0, 0.7);
 }
 
 .sud-title span {
     font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-size: 46px;
-    line-height: 1.1;
-    background-image: linear-gradient(180deg, #fff8d8 0%, #ffe08a 32%, #d9a83c 58%, #8a5f14 100%);
+    font-size: 42px;
+    line-height: 1.06;
+    background-image: linear-gradient(180deg, #fffbe6 0%, #ffe08a 30%, #e0ae40 54%, #8a5f14 82%, #f6d98a 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.9));
-    letter-spacing: 0.01em;
+    filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 18px rgba(255, 200, 90, 0.3));
 }
+
+/* The X sits in its own gold box in the corner, as the machine has it. */
+.sud-x {
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    border: 3px solid #b8862a;
+    background: linear-gradient(180deg, rgba(20, 10, 38, 0.8), rgba(6, 3, 14, 0.9));
+    color: #ffffff;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 38px;
+    font-weight: 300;
+    line-height: 1;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.sud-x:active { transform: scale(0.94); }
 
 /* ---------------------------------------------------------------- plaques */
 
-.sud-plaque-wrap,
-.sud-bet-wrap {
+.sud-plaque-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    width: 372px;
 }
-
-.sud-bet-wrap { width: 260px; }
 
 .sud-label {
     font-family: 'Gloock', ui-serif, Georgia, serif;
     font-style: italic;
-    font-size: 30px;
+    font-size: 29px;
     color: #f4ecd8;
-    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.75), 0 0 16px rgba(255, 220, 140, 0.2);
+    line-height: 1.05;
 }
 
 .sud-label-sm { font-size: 24px; }
 
-.sud-plaque {
+/* The plaque and its two scrolls travel together. */
+.sud-plaque-row {
+    display: flex;
+    align-items: center;
     width: 100%;
-    height: 44px;
+}
+
+.sud-plaque {
+    flex: 1;
+    height: 34px;
     display: grid;
     place-items: center;
     border-radius: 999px;
-    background: linear-gradient(180deg, #0b0620, #191036 55%, #0b0620);
-    border: 2px solid #b8862a;
-    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.7);
+    background: linear-gradient(180deg, #0a0520 0%, #171034 48%, #07031a 100%);
+    border: 2px solid #c2a54a;
+    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
-
-.sud-plaque-sm { height: 34px; }
 
 .sud-plaque span {
     font-family: ui-serif, Georgia, serif;
-    font-size: 24px;
-    color: #f4ecd8;
+    font-size: 23px;
+    color: #f6efdc;
     font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
 }
 
-.sud-plaque-sm span { font-size: 20px; }
+.sud-plaque-sm { height: 30px; }
+.sud-plaque-sm span { font-size: 19px; font-style: italic; }
 
 /* ------------------------------------------------------------------- dial */
 
+.sud-dial-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .sud-dial {
-    height: 104px;
     display: grid;
     place-items: center;
     border-radius: 50%;
-    background: radial-gradient(circle at 50% 36%, #17122e, #05030c 74%);
-    border: 4px solid #b8862a;
-    box-shadow: inset 0 3px 16px rgba(0, 0, 0, 0.95), 0 0 0 7px rgba(217, 168, 60, 0.14);
+    background: radial-gradient(circle at 50% 34%, #1a1434, #05030c 76%);
+    border: 3px solid #c2a54a;
+    box-shadow: inset 0 3px 16px rgba(0, 0, 0, 0.95), 0 0 0 5px rgba(217, 168, 60, 0.12),
+                0 0 26px rgba(180, 140, 255, 0.25);
     font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
-    font-size: 46px;
+    font-size: 44px;
     color: #ffffff;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.06em;
-    text-shadow: 0 0 16px rgba(190, 225, 255, 0.7);
+    letter-spacing: 0.05em;
+    text-shadow: 0 0 14px rgba(200, 230, 255, 0.75);
 }
 
 /* -------------------------------------------------------------- chip rail */
 
-/* The chips sit on a long gold rail that runs behind them, which is what makes
-   the row read as part of the machine rather than six buttons on a background. */
-.sud-chiprail {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 32px;
-    height: 84px;
-    border-radius: 999px;
-    border: 3px solid #b8862a;
-    background: linear-gradient(180deg, rgba(30, 18, 56, 0.55), rgba(10, 5, 22, 0.7));
-    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.7);
+/* The rail is an arc, not a bar: it sweeps up at both ends and passes behind
+   the dial, which is what makes the chips read as sitting ON the machine. */
+.sud-chiprail { position: relative; }
+
+.sud-chiprail-track {
+    position: absolute;
+    inset: 0;
+    border: 3px solid #c2a54a;
+    border-top-color: rgba(194, 165, 74, 0.3);
+    border-radius: 50% / 46%;
+    background: linear-gradient(180deg, rgba(46, 26, 82, 0.22), rgba(10, 5, 24, 0.45));
+    box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.4);
 }
 
+.sud-chips {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+}
+
+/* Each chip carries the reference's double gold ring. */
 .sud-chip {
-    height: 62px;
-    width: 62px;
+    height: 66px;
+    width: 66px;
     border-radius: 50%;
     font-family: ui-serif, Georgia, serif;
-    font-size: 22px;
+    font-size: 25px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-    color: #eef4ee;
-    background: radial-gradient(circle at 36% 28%, #3d7a63, #0d2a22 74%);
-    border: 3px solid #caa04a;
-    box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.2), 0 4px 10px rgba(0, 0, 0, 0.6);
+    color: #f2f6f4;
+    background:
+        radial-gradient(circle at 38% 30%, #1d2246 0%, #090b1e 70%) padding-box,
+        linear-gradient(160deg, #ffeaa0, #a9781f 40%, #ffe08a 70%, #8a5f14) border-box;
+    border: 5px solid transparent;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 2px 8px rgba(255, 255, 255, 0.12),
+                0 5px 12px rgba(0, 0, 0, 0.6);
     transition: transform 110ms ease, box-shadow 110ms ease;
 }
 
 .sud-chip.on {
-    transform: scale(1.1);
-    border-color: #ffeaa0;
-    box-shadow: inset 0 2px 10px rgba(255, 255, 255, 0.3), 0 0 24px rgba(255, 214, 110, 0.85);
+    background:
+        radial-gradient(circle at 38% 30%, #4e8f76 0%, #14332a 72%) padding-box,
+        linear-gradient(160deg, #fffbe0, #d9a83c 40%, #fff3c8 70%, #a9781f) border-box;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 2px 10px rgba(255, 255, 255, 0.28),
+                0 0 26px rgba(255, 214, 110, 0.8);
 }
+
+/* Once a round is running the machine greens the whole rail. */
+.sud-chiprail.lit .sud-chip {
+    background:
+        radial-gradient(circle at 38% 30%, #3f7a64 0%, #10291f 72%) padding-box,
+        linear-gradient(160deg, #ffeaa0, #a9781f 40%, #ffe08a 70%, #8a5f14) border-box;
+}
+
+/* ------------------------------------------------------------ cancel bet */
+
+.sud-cancel {
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+    font-size: 25px;
+    color: #ffeede;
+    background: linear-gradient(180deg, #a8172c 0%, #6d0d1c 55%, #8f1425 100%);
+    border: 2px solid #c2a54a;
+    box-shadow: inset 0 1px 0 rgba(255, 220, 190, 0.35), 0 4px 14px rgba(0, 0, 0, 0.6);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.7);
+}
+
+.sud-cancel:disabled { opacity: 0.45; }
 
 /* ----------------------------------------------------------- price panels */
 
 /* The reference frames both panels in a fine gold chain over near-black. */
 .sud-panel {
-    padding: 6px 13px;
-    border-radius: 6px;
-    background: linear-gradient(180deg, rgba(8, 5, 20, 0.88), rgba(4, 2, 12, 0.94));
-    border: 3px solid transparent;
-    border-image: repeating-linear-gradient(45deg, #8a5f14 0 6px, #ffeaa0 6px 10px, #b8862a 10px 16px) 1;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 0 40px rgba(0, 0, 0, 0.7);
+    padding: 5px 12px;
+    border-radius: 4px;
+    background: linear-gradient(180deg, rgba(9, 6, 24, 0.9), rgba(4, 2, 12, 0.95));
+    border: 4px solid transparent;
+    border-image: repeating-linear-gradient(48deg,
+        #6d4a10 0 5px, #ffeaa0 5px 8px, #a9781f 8px 13px, #ffd76a 13px 16px) 1;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), inset 0 0 44px rgba(0, 0, 0, 0.72);
 }
 
 .sud-row {
@@ -175,74 +263,70 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    height: 66px;
 }
 
 .sud-strip-inner {
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 5px 10px;
-    border-radius: 999px;
-    border: 2px solid #b8862a;
-    background: linear-gradient(180deg, rgba(26, 16, 48, 0.7), rgba(8, 4, 18, 0.85));
+    padding: 6px 12px;
+    border-radius: 999px / 40px;
+    border: 3px solid #c2a54a;
+    background: linear-gradient(180deg, rgba(30, 18, 54, 0.72), rgba(8, 4, 18, 0.88));
+    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.7);
 }
 
 .sud-strip-card {
     position: relative;
-    width: 54px;
-    height: 54px;
+    width: 52px;
+    height: 62px;
     border-radius: 3px;
     background: linear-gradient(180deg, #ffffff, #eef0f4);
     border: 1px solid #9aa0ad;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .sud-strip-tl,
 .sud-strip-br {
     position: absolute;
     font-family: ui-serif, Georgia, serif;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     line-height: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
+    gap: 1px;
 }
 
 .sud-strip-tl { top: 3px; left: 4px; }
 .sud-strip-br { bottom: 3px; right: 4px; transform: rotate(180deg); }
 .sud-strip-tl i,
-.sud-strip-br i { font-style: normal; font-size: 13px; }
+.sud-strip-br i { font-style: normal; font-size: 15px; }
 
 /* --------------------------------------------------------- the ten places */
 
-/* The red and gold frame the machine draws around the positions. */
+/* The red-and-gold chain the machine draws around the positions. */
 .sud-board {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 3px solid transparent;
-    border-image: repeating-linear-gradient(45deg, #7a1020 0 7px, #ffd76a 7px 11px, #b8862a 11px 18px) 1;
-    background: rgba(6, 3, 16, 0.4);
+    gap: 10px;
+    padding: 9px 13px;
+    border-radius: 4px;
+    border: 4px solid transparent;
+    border-image: repeating-linear-gradient(48deg,
+        #8a1122 0 6px, #ffd76a 6px 9px, #a9781f 9px 15px, #c8102e 15px 18px) 1;
+    background: rgba(6, 3, 16, 0.3);
 }
 
 .sud-back {
     flex: 1;
     height: 100%;
     border-radius: 5px;
-    border: 1px solid rgba(217, 168, 60, 0.5);
-    background:
-        conic-gradient(from 45deg at 50% 50%,
-            rgba(255, 220, 140, 0.16) 0deg, transparent 32deg,
-            rgba(255, 220, 140, 0.16) 90deg, transparent 122deg,
-            rgba(255, 220, 140, 0.16) 180deg, transparent 212deg,
-            rgba(255, 220, 140, 0.16) 270deg, transparent 302deg),
-        linear-gradient(150deg, #241c3e, #0c0718 62%, #1d1636);
-    box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.85);
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
 }
 
 .sud-face {
@@ -254,84 +338,144 @@
     border: 1px solid #b9b9c6;
     display: grid;
     place-items: center;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.65);
 }
 
 .sud-face-tl,
 .sud-face-br {
     position: absolute;
     font-family: ui-serif, Georgia, serif;
-    font-size: 26px;
+    font-size: 28px;
     font-weight: 700;
     line-height: 1;
 }
 
-.sud-face-tl { top: 6px; left: 8px; }
-.sud-face-br { bottom: 6px; right: 8px; transform: rotate(180deg); }
-.sud-face-pip { font-size: 54px; line-height: 1; }
+.sud-face-tl { top: 6px; left: 9px; }
+.sud-face-br { bottom: 6px; right: 9px; transform: rotate(180deg); }
+.sud-face-pip { font-size: 56px; line-height: 1; }
 
 /* ---------------------------------------------------------------- buttons */
 
-.sud-buttons {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 26px;
-}
-
+/* While bets are open the two sides are large pills laid over the positions,
+   which is where the machine puts them; once the round closes they drop to the
+   compact row under the board with Take between them. */
 .sud-btn {
-    flex: 1;
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 14px;
     border-radius: 999px;
     font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-size: 27px;
-    color: #efe6cf;
-    background: linear-gradient(180deg, #1c1636 0%, #0a0618 58%, #171130 100%);
-    border: 2px solid #b8862a;
-    box-shadow: inset 0 1px 0 rgba(255, 235, 170, 0.24), 0 4px 14px rgba(0, 0, 0, 0.6);
+    color: #f0e7d2;
+    background: linear-gradient(180deg, #1d1638 0%, #0a0618 56%, #191233 100%);
+    border: 3px solid #c2a54a;
+    box-shadow: inset 0 0 0 3px rgba(10, 6, 24, 0.9), inset 0 1px 0 rgba(255, 235, 170, 0.22),
+                0 5px 16px rgba(0, 0, 0, 0.65);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.75);
     transition: filter 120ms ease;
 }
 
 .sud-btn em {
     font-style: normal;
     font-size: 18px;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0, 0, 0, 0.4);
     border-radius: 999px;
     padding: 2px 12px;
 }
 
 .sud-btn:disabled { opacity: 0.5; }
 
-/* The machine lights the side you have money on. */
+/* The side you have money on goes magenta while bets are open. */
 .sud-btn.armed {
-    background: linear-gradient(180deg, #9df5a8 0%, #34b04a 55%, #157a2c 100%);
-    color: #06280f;
-    border-color: #ffeaa0;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 26px rgba(70, 230, 120, 0.55);
+    background: linear-gradient(180deg, #ff7de0 0%, #d51ba4 52%, #8e0a6c 100%);
+    color: #ffffff;
+    box-shadow: inset 0 0 0 3px rgba(255, 235, 170, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                0 0 30px rgba(255, 90, 210, 0.55);
 }
 
-.sud-btn-take { flex: 0 0 30%; }
+/* And green once it has come in. */
+.sud-btn.won {
+    background: linear-gradient(180deg, #b7f56a 0%, #57c02a 52%, #2f8016 100%);
+    color: #0a2a06;
+    box-shadow: inset 0 0 0 3px rgba(255, 235, 170, 0.85), 0 0 30px rgba(120, 235, 70, 0.5);
+}
+
+.sud-take {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    font-family: 'Gloock', ui-serif, Georgia, serif;
+    color: #f0e7d2;
+    background: linear-gradient(180deg, #1d1638 0%, #0a0618 56%, #191233 100%);
+    border: 2px solid #c2a54a;
+    box-shadow: inset 0 1px 0 rgba(255, 235, 170, 0.2), 0 5px 16px rgba(0, 0, 0, 0.6);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.75);
+}
+
+.sud-take:disabled { opacity: 0.55; }
+
+.sud-takewrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 
 /* ---------------------------------------------------------------- marquee */
 
 .sud-marquee {
     display: grid;
     place-items: center;
-    border-radius: 999px;
-    border: 2px solid #b8862a;
-    background: linear-gradient(180deg, rgba(12, 6, 26, 0.94), rgba(4, 2, 12, 0.97));
+    border-radius: 999px / 40px;
+    border: 2px solid #c2a54a;
+    background: linear-gradient(180deg, rgba(14, 7, 30, 0.94), rgba(5, 2, 14, 0.97));
     font-family: ui-serif, Georgia, serif;
-    font-size: 21px;
-    color: #f4ecd8;
+    font-size: 23px;
+    color: #f6efdc;
     text-align: center;
-    box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.8);
+    box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.82);
 }
+
+/* ------------------------------------------------------------- round gate */
+
+/* Between rounds the machine dims the table and says when the next one starts,
+   rather than leaving a live-looking board that refuses every press. */
+.sud-gate {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    background: rgba(3, 1, 10, 0.62);
+}
+
+.sud-gate-box {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    padding: 20px 44px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #1a2a6e, #0d1740);
+    border: 3px solid #ffd76a;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 25px;
+    line-height: 1.42;
+    color: #ffffff;
+}
+
+.sud-gate-spin {
+    height: 38px;
+    width: 38px;
+    border-radius: 50%;
+    border: 6px dotted #ffc93a;
+    animation: sud-spin 1.4s linear infinite;
+}
+
+@keyframes sud-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
     .sud-chip { transition: none; }
     .sud-btn { transition: none; }
+    .sud-gate-spin { animation: none; }
 }
