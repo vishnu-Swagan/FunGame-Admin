@@ -5,7 +5,14 @@ import { Disclaimer, formatChips, timeAgo } from "@/components/common";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 
-export const PlayShell = ({ game, balance, children }) => {
+/**
+ * `compact` is for a table that already carries its own chrome. Roulette prints
+ * the balance and a live ticker along its own money bar, so the full header
+ * above it is a second copy of both — and on a phone that duplicate costs the
+ * number board about seventy pixels it could be using to make every bet easier
+ * to hit.
+ */
+export const PlayShell = ({ game, balance, compact = false, children }) => {
   const navigate = useNavigate();
   const [muted, setMutedState] = useState(isMuted());
   useEffect(() => {
@@ -14,40 +21,49 @@ export const PlayShell = ({ game, balance, children }) => {
     return () => off();
   }, []);
   return (
-    <div className="space-y-4" data-testid="game-play-page">
-      <div className="relative rounded-2xl fg-glass px-3 pt-3 pb-2.5 overflow-hidden">
+    <div className={compact ? "space-y-1.5" : "space-y-4"} data-testid="game-play-page">
+      <div className={`relative rounded-2xl fg-glass overflow-hidden ${compact ? "px-2 py-1.5" : "px-3 pt-3 pb-2.5"}`}>
       <div className="flex items-center justify-between gap-3">
         <button
           data-testid="play-back-button"
           onClick={() => navigate(`/games/${game.slug}`)}
           aria-label="Back to game details"
-          className="h-10 w-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-[background-color] duration-150"
+          className={`flex items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-[background-color] duration-150 ${
+            compact ? "h-9 w-9" : "h-10 w-10 min-h-[44px] min-w-[44px]"
+          }`}
         >
           <ArrowLeft className="h-4 w-4 text-white/85" />
         </button>
-        <h1 className="font-display text-2xl text-white flex-1 truncate">{game.name}</h1>
+        <h1 className={`font-display text-white flex-1 truncate ${compact ? "text-base" : "text-2xl"}`}>{game.name}</h1>
         <button
           data-testid="play-sound-toggle"
           onClick={toggleMuted}
           aria-label={muted ? "Unmute game sounds" : "Mute game sounds"}
-          className={`h-10 w-10 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full border transition-[background-color,border-color] duration-150 ${
-            muted ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-primary/35 bg-primary/10 hover:bg-primary/15"
-          }`}
+          className={`flex items-center justify-center rounded-full border transition-[background-color,border-color] duration-150 ${
+            compact ? "h-9 w-9" : "h-10 w-10 min-h-[44px] min-w-[44px]"
+          } ${muted ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-primary/35 bg-primary/10 hover:bg-primary/15"}`}
         >
           {muted ? <VolumeX className="h-4 w-4 text-white/60" /> : <Volume2 className="h-4 w-4 text-primary" />}
         </button>
-        <div data-testid="play-balance" className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 px-3 py-1.5">
-          <Coins className="h-4 w-4 text-primary" />
-          <span className="tabular-nums text-sm font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>
-        </div>
+        {/* a table that prints its own balance does not need this one as well */}
+        {!compact && (
+          <div data-testid="play-balance" className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 px-3 py-1.5">
+            <Coins className="h-4 w-4 text-primary" />
+            <span className="tabular-nums text-sm font-bold text-primary">{balance === null ? "…" : formatChips(balance)}</span>
+          </div>
+        )}
       </div>
-        <div className="mt-2.5">
-          <LiveActivityBar slug={game.slug} />
-        </div>
-        <div className="fg-accent-line mt-2.5" aria-hidden="true" />
+        {!compact && (
+          <>
+            <div className="mt-2.5">
+              <LiveActivityBar slug={game.slug} />
+            </div>
+            <div className="fg-accent-line mt-2.5" aria-hidden="true" />
+          </>
+        )}
       </div>
       {children}
-      <Disclaimer />
+      {!compact && <Disclaimer />}
     </div>
   );
 };

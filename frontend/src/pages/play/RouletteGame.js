@@ -161,7 +161,7 @@ export default function RouletteGame({ game }) {
   }, []);
 
   return (
-    <PlayShell game={game} title="Fun Roulette">
+    <PlayShell game={game} title="Fun Roulette" compact>
       {fatal ? (
         <div className="p-6 text-center text-sm text-white/70" data-testid="roulette-error">
           The table could not be loaded. {fatal}

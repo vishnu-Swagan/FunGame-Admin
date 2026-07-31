@@ -23,7 +23,13 @@ export default function AppShell() {
   const [online, setOnline] = useState(navigator.onLine);
   const headerRef = useRef(null);
   // Roulette is exempt (PlayShell landscape/scroll page) — it keeps the bottom nav + safe-area padding.
-  const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname) && !/\/games\/fun-roulette\/play$/.test(location.pathname);
+  /* A table in play gets the screen to itself: no bottom navigation, no padding
+     reserved for it. Roulette used to be excluded from that and was the only
+     game paying for the nav bar twice over — 72px of fixed chrome across the
+     felt and 96px of padding underneath it — which is precisely the room its
+     number board needed. Every table leaves the same way, by the back button in
+     the game's own header. */
+  const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
 
   const loadInbox = useCallback(async () => {
     try {
