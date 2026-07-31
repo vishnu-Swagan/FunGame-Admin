@@ -15,6 +15,10 @@ from pymongo.errors import DuplicateKeyError
 
 from db import client, db
 from seed import run_seed
+import crm
+import revenue
+import commission
+import payouts
 import routes_auth
 import routes_player
 import routes_admin
@@ -64,48 +68,82 @@ async def _aviator_keepalive():
         await asyncio.sleep(0.7)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await run_seed()
-    # One-time migration: gameplay v1 - enable all games so players can play
-    cfg = await db.system_config.find_one({'key': 'main'})
-    if cfg and not cfg.get('gameplay_v1_migrated'):
-        await db.games.update_many({'status': 'COMING_SOON'}, {'$set': {'status': 'ENABLED'}})
-        await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
-        logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
-    # One-time: strip legacy "no cash value" wording from already-seeded/sent docs.
-    if cfg and not cfg.get('nocash_wording_stripped'):
-        await db.announcements.update_many({}, [{'$set': {'body': {
-            '$replaceAll': {
-                'input': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}},
-                'find': 'have no cash value and ', 'replacement': ''}}}}])
-        await db.notifications.update_many(
-            {'body': {'$regex': 'NO CASH VALUE'}},
-            [{'$set': {'body': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}}}}])
-        await db.system_config.update_one({'key': 'main'}, {'$set': {'nocash_wording_stripped': True}})
-        logger.info('Stripped legacy no-cash-value wording from existing announcements/notifications')
-    # Distributor uniqueness is enforced by the index, not by the check in the
-    # request handler — two admins creating the same code in the same second is
-    # a race the handler loses and the index does not.
-    await crm.ensure_indexes()
-    await crm.ensure_house_account()
-    await revenue.ensure_indexes()
-    await commission.ensure_indexes()
-    await payouts.ensure_indexes()
+async def _migrate_gameplay_v1():
+    await db.games.update_many({'status': 'COMING_SOON'}, {'$set': {'status': 'ENABLED'}})
+    await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
+    logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
+
+
+async def _migrate_nocash_wording():
+    await db.announcements.update_many({}, [{'$set': {'body': {
+        '$replaceAll': {
+            'input': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}},
+            'find': 'have no cash value and ', 'replacement': ''}}}}])
+    await db.notifications.update_many(
+        {'body': {'$regex': 'NO CASH VALUE'}},
+        [{'$set': {'body': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}}}}])
+    await db.system_config.update_one({'key': 'main'}, {'$set': {'nocash_wording_stripped': True}})
+    logger.info('Stripped legacy no-cash-value wording from existing announcements/notifications')
+
+
+async def _core_indexes():
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
     await db.roulette_rounds.create_index('round_number', unique=True)
     await db.roulette_bets.create_index([('user_id', 1), ('round_number', 1), ('status', 1)])
-    # Universal live rounds (all 18 games, 24/7)
     await db.live_outcomes.create_index([('slug', 1), ('round_number', 1)], unique=True)
     await db.live_bets.create_index([('user_id', 1), ('slug', 1), ('status', 1)])
     await db.live_bets.create_index([('slug', 1), ('round_number', 1)])
     await db.aviator_rounds.create_index('round_number', unique=True)
     await db.aviator_bets.create_index([('round_number', 1), ('status', 1)])
     await db.aviator_bets.create_index([('user_id', 1), ('round_number', 1)])
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the service, then do the housekeeping — in that order of importance.
+
+    Everything below is bootstrap: seeding, one-off migrations, index creation.
+    None of it is needed to answer a request, and all of it was able to kill the
+    process. Startup ran thirty-six index creations in sequence against a remote
+    database, and one raised exception anywhere in that chain exits uvicorn with
+    a status code and no service at all — a deploy that fails completely because
+    an index could not be built is the wrong trade every time.
+
+    Each step is now isolated and logged by name, so a failure degrades to a
+    missing index and a line in the log saying which one, instead of an outage.
+    """
+
+    async def step(name, coro):
+        try:
+            await coro
+        except Exception as e:                       # noqa: BLE001 - bootstrap must not be fatal
+            logger.error('startup step %r failed (continuing): %s: %s',
+                         name, type(e).__name__, e)
+
+    await step('seed', run_seed())
+
+    try:
+        cfg = await db.system_config.find_one({'key': 'main'})
+    except Exception as e:
+        logger.error('startup: could not read system_config (%s); skipping migrations', e)
+        cfg = None
+
+    if cfg and not cfg.get('gameplay_v1_migrated'):
+        await step('migrate:gameplay_v1', _migrate_gameplay_v1())
+    if cfg and not cfg.get('nocash_wording_stripped'):
+        await step('migrate:nocash_wording', _migrate_nocash_wording())
+
+    await step('indexes:crm', crm.ensure_indexes())
+    await step('crm:house_account', crm.ensure_house_account())
+    await step('indexes:revenue', revenue.ensure_indexes())
+    await step('indexes:commission', commission.ensure_indexes())
+    await step('indexes:payouts', payouts.ensure_indexes())
+    await step('indexes:core', _core_indexes())
+
     keepalive = asyncio.create_task(_aviator_keepalive())
-    logger.info('Chakri.Casino ready - 18 games running universal 24/7 live rounds')
+    logger.info('Chakri.Casino ready - 20 games running universal 24/7 live rounds')
     yield
     keepalive.cancel()
     client.close()
