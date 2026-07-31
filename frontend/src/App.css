@@ -31,10 +31,12 @@
   filter: drop-shadow(0 6px 7px rgba(2, 22, 12, 0.34));
 }
 
-/* A throw, not a spin: a long first flight, a hard contact, then shorter hops
-   as the energy goes, drifting across the felt and turning as it travels. The
-   face it shows changes with it — a die you can read in mid-air is a die that
-   is not really moving. */
+/* A throw, not a spin. The die going OVER is done by stepping through real
+   attitudes of the solid (see DIE_TUMBLE) — that is what a tumble is. All this
+   has to carry is the flight: a long first hop, a hard contact, then shorter
+   ones as the energy goes, with only a few degrees of wobble. Spinning the
+   whole thing 360 degrees here was the mistake: the picture turned while the
+   object never went over, which is exactly what reads as computerised. */
 .fg-die.rolling {
   animation-name: fg-toss-a;
   animation-timing-function: cubic-bezier(0.28, 0.06, 0.42, 0.96);
@@ -43,24 +45,24 @@
 }
 .fg-die.rolling.v2 { animation-name: fg-toss-b; }
 @keyframes fg-toss-a {
-  0%   { transform: translate(0, 0) rotate(0deg)     scale(1); }
-  14%  { transform: translate(7px, -46px) rotate(58deg)  scale(1.06); }
-  30%  { transform: translate(12px, -3px) rotate(126deg) scale(0.98); }
-  44%  { transform: translate(7px, -27px) rotate(188deg) scale(1.04); }
-  60%  { transform: translate(-2px, -2px) rotate(252deg) scale(0.99); }
-  74%  { transform: translate(-8px, -13px) rotate(300deg) scale(1.02); }
-  88%  { transform: translate(-5px, -1px) rotate(340deg) scale(1); }
-  100% { transform: translate(0, 0) rotate(360deg)   scale(1); }
+  0%   { transform: translate(0, 0) rotate(0deg)      scale(1); }
+  14%  { transform: translate(7px, -46px) rotate(9deg)   scale(1.05); }
+  30%  { transform: translate(12px, -3px) rotate(-6deg)  scale(0.98); }
+  44%  { transform: translate(7px, -27px) rotate(7deg)   scale(1.03); }
+  60%  { transform: translate(-2px, -2px) rotate(-4deg)  scale(0.99); }
+  74%  { transform: translate(-8px, -13px) rotate(5deg)  scale(1.02); }
+  88%  { transform: translate(-5px, -1px) rotate(-2deg)  scale(1); }
+  100% { transform: translate(0, 0) rotate(0deg)      scale(1); }
 }
 @keyframes fg-toss-b {
-  0%   { transform: translate(0, 0) rotate(0deg)      scale(1); }
-  16%  { transform: translate(-9px, -40px) rotate(-72deg)  scale(1.05); }
-  32%  { transform: translate(-13px, -2px) rotate(-166deg) scale(0.98); }
-  47%  { transform: translate(-8px, -23px) rotate(-242deg) scale(1.03); }
-  62%  { transform: translate(1px, -1px) rotate(-292deg)   scale(0.99); }
-  77%  { transform: translate(7px, -10px) rotate(-330deg)  scale(1.02); }
-  90%  { transform: translate(4px, -1px) rotate(-352deg)   scale(1); }
-  100% { transform: translate(0, 0) rotate(-360deg)    scale(1); }
+  0%   { transform: translate(0, 0) rotate(0deg)       scale(1); }
+  16%  { transform: translate(-9px, -40px) rotate(-11deg) scale(1.05); }
+  32%  { transform: translate(-13px, -2px) rotate(7deg)   scale(0.98); }
+  47%  { transform: translate(-8px, -23px) rotate(-8deg)  scale(1.03); }
+  62%  { transform: translate(1px, -1px) rotate(5deg)     scale(0.99); }
+  77%  { transform: translate(7px, -10px) rotate(-4deg)   scale(1.02); }
+  90%  { transform: translate(4px, -1px) rotate(2deg)     scale(1); }
+  100% { transform: translate(0, 0) rotate(0deg)       scale(1); }
 }
 
 /* The contact shadow is what puts the die ON the felt rather than above it, so

@@ -4,7 +4,7 @@ import { sfx } from "@/lib/sound";
 import { GameStage } from "@/components/play/GameStage";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { formatChips } from "@/components/common";
-import { DIE_ART } from "@/pages/play/diceArt";
+import { DIE_ART, DIE_TUMBLE } from "@/pages/play/diceArt";
 
 /* pip layout per face value on a 3x3 grid — the roadmap's flat mini dice */
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -16,8 +16,12 @@ const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6,
  * While it is in the air the value flickers and the whole die is thrown along an
  * arc — a die you can read mid-throw is a die that is not really moving.
  */
-const Die = ({ value, rolling, variant, duration = "0.8s" }) => {
-  const art = DIE_ART[value] || DIE_ART[1];
+const Die = ({ value, rolling, variant, duration = "0.8s", frame = 0 }) => {
+  /* Mid-throw the die is showing whatever attitude it is in; only when it comes
+     to rest does it show the number the server rolled. */
+  const art = rolling
+    ? DIE_TUMBLE[((frame | 0) % DIE_TUMBLE.length + DIE_TUMBLE.length) % DIE_TUMBLE.length]
+    : (DIE_ART[value] || DIE_ART[1]);
   const uid = useId().replace(/:/g, "");
   return (
     <div className="fg-die-scene">
@@ -110,14 +114,24 @@ export default function DiceGame({ game }) {
   /* A die that shows one number all the way through its flight reads as a
      picture being waved about. While it is in the air the face keeps changing,
      and only the server's result survives the landing. */
-  const [tumble, setTumble] = useState([3, 4]);
-  const dice = showFinal ? outcome.dice : tumble;
+  const [frames, setFrames] = useState([0, 3]);
+  const dice = showFinal ? outcome.dice : [3, 4];
 
+  /* A die thrown across a table turns fast, then slower, then tips onto a face.
+     A constant-rate flicker is what reads as computerised — it is a strobe, not
+     a throw. Each die steps through real attitudes on its own decaying interval,
+     and the two are deliberately out of step so the pair never turns together. */
   useEffect(() => {
     if (!rolling) return;
-    const roll = () => 1 + Math.floor(Math.random() * 6);
-    const flick = setInterval(() => setTumble([roll(), roll()]), 90);
-    return () => clearInterval(flick);
+    const timers = [];
+    const spin = (i, gap) => {
+      setFrames((f) => { const n = f.slice(); n[i] += 1; return n; });
+      const next = Math.min(230, gap * 1.16);
+      timers[i] = setTimeout(() => spin(i, next), next);
+    };
+    spin(0, 55);
+    timers[1] = setTimeout(() => spin(1, 62), 40);
+    return () => timers.forEach(clearTimeout);
   }, [rolling]);
 
   useEffect(() => {
@@ -219,6 +233,11 @@ export default function DiceGame({ game }) {
       balance={balance}
       live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
       labels={{ REVEAL: "ROLLING…" }}
+      /* This table is long — percentages, roadmap, the throw, the limits bar,
+         three side panels and ten totals. Squeezed to fit the stage it went to
+         85% and every betting cell with it. It takes the width it needs and
+         scrolls instead. */
+      fit={false}
       betDock={
         <div className="flex items-center gap-2" data-testid="dice-tray">
           <button type="button" onClick={again} disabled={!betting || busy || !prevRound.length}
@@ -290,8 +309,8 @@ export default function DiceGame({ game }) {
         {/* the dice, thrown onto open felt */}
         <div className="relative flex items-center justify-center py-2">
           <div className="fg-throw" data-testid="dice-throw">
-            <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
-            <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
+            <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} frame={frames[0]} />
+            <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} frame={frames[1]} />
           </div>
           {betting && countdown > 0 && (
             <span data-testid="dice-countdown"
@@ -313,18 +332,18 @@ export default function DiceGame({ game }) {
         <div className={`relative p-2 ${betting ? "" : "sud-locked"}`}>
           <div className="grid grid-cols-3 gap-1.5" data-testid="dice-sides">
             <Cell sel="down" testId="dice-side-down"
-              className="h-[104px] border-emerald-300/50 bg-gradient-to-b from-emerald-500 to-emerald-700">
+              className="h-[112px] border-emerald-300/50 bg-gradient-to-b from-emerald-500 to-emerald-700">
               <span className="pointer-events-none absolute inset-x-0 bottom-0 text-center sud-mark text-[40px] leading-[1.05]">DOWN</span>
               <span className="relative block pt-4 sud-num text-[30px] leading-none">2-6</span>
               <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("down")}</span>
             </Cell>
             <Cell sel="seven" testId="dice-side-seven"
-              className="h-[104px] border-sky-300/50 bg-gradient-to-b from-sky-500 to-sky-700">
+              className="h-[112px] border-sky-300/50 bg-gradient-to-b from-sky-500 to-sky-700">
               <span className="relative block pt-3 sud-num text-[42px] leading-none">7</span>
               <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("seven")}</span>
             </Cell>
             <Cell sel="up" testId="dice-side-up"
-              className="h-[104px] border-rose-300/50 bg-gradient-to-b from-rose-500 to-rose-700">
+              className="h-[112px] border-rose-300/50 bg-gradient-to-b from-rose-500 to-rose-700">
               <span className="pointer-events-none absolute inset-x-0 bottom-0 text-center sud-mark text-[40px] leading-[1.05]">UP</span>
               <span className="relative block pt-4 sud-num text-[30px] leading-none">8-12</span>
               <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("up")}</span>
@@ -335,7 +354,7 @@ export default function DiceGame({ game }) {
             <div key={ri} className="mt-1.5 grid grid-cols-5 gap-1.5" data-testid={`dice-totals-${ri}`}>
               {row.map((t) => (
                 <Cell key={t} sel={`t${t}`} testId={`dice-total-${t}`}
-                  className="h-[86px] border-emerald-200/25 bg-emerald-800/60">
+                  className="h-[92px] border-emerald-200/25 bg-emerald-800/60">
                   <span className="block pt-3 sud-num text-[26px] leading-none">{t}</span>
                   <span className="mt-1 block text-[12px] font-bold text-white/70">{oddsFor(`t${t}`)}</span>
                 </Cell>

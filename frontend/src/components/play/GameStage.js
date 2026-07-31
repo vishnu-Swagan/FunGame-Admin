@@ -9,7 +9,14 @@ import { ExtrasSheet } from "@/components/play/ExtrasSheet";
 import { FitToStage } from "@/components/play/FitToStage";
 import { useBettingAlarm } from "@/lib/useBettingAlarm";
 
-export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm = true, children }) => {
+/**
+ * `fit` scales the table down until it fits the stage, which is right for a
+ * board that must be seen whole — you cannot play a wheel you have to scroll.
+ * It is wrong for a long table: shrinking a tall board to fit makes every
+ * control smaller than a thumb to save a scroll nobody minded. Those pass
+ * fit={false} and use the full width, scrolling instead.
+ */
+export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm = true, fit = true, children }) => {
   const navigate = useNavigate();
   const [muted, setMuted] = useState(isMuted());
   useEffect(() => onMuteChange(setMuted), []);
@@ -43,7 +50,13 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
 
       {/* middle — the table is scaled to this box, so it fits any handset */}
       <div className="flex-1 min-h-0 px-3 py-3" data-testid="game-stage-middle">
-        <FitToStage className="h-full">{children}</FitToStage>
+        {fit ? (
+          <FitToStage className="h-full">{children}</FitToStage>
+        ) : (
+          <div className="h-full overflow-y-auto overflow-x-hidden" data-testid="game-stage-scroll">
+            {children}
+          </div>
+        )}
       </div>
 
       {/* extras sheet (pull-up) then the bet dock */}
