@@ -301,7 +301,13 @@ def play_joker_bonus(bet, payload):
 # A real 5-reel x 3-row slot: 10 fixed paylines, Diamond wild (substitutes on
 # lines), Scatter that pays anywhere; 5 scatters = the GIANT JACKPOT (1000x the
 # player's stake). One universal synced grid per round; payout = stake x total
-# multiplier. Tuned to ~90% RTP (see the Monte-Carlo check in the repo).
+# multiplier.
+#
+# MEASURED RTP: 68.1% over 120,000 spins. This comment previously claimed ~90%,
+# which was never true of this table — the claim was carried over rather than
+# re-measured after the weights changed. Corrected here because a paytable
+# twenty points more house-favourable than its documentation is something an
+# operator plans around.
 GJ_SYMBOLS = [
     {"id": "coin",    "weight": 30, "pay": {3: 2,  4: 5,   5: 15}},
     {"id": "bar",     "weight": 24, "pay": {3: 3,  4: 9,   5: 26}},
@@ -392,7 +398,9 @@ def play_giant_jackpot(bet, payload):
 # ---------------- Fever Joker Bonus: 5x3, 10-line + FEVER ----------------
 # 5x3, 10 lines. Joker is Wild (substitutes) AND drives the FEVER bonus: 3/4/5
 # jokers anywhere multiply the whole spin's win by 2x/3x/5x. Distinct from the
-# Giant Jackpot (no scatter); tuned to ~88% RTP.
+# Giant Jackpot (no scatter).
+#
+# MEASURED RTP: 68.8% over 120,000 spins, not the ~88% previously claimed here.
 FJ_SYMBOLS = [
     {"id": "cherry", "weight": 30, "pay": {3: 2,  4: 6,   5: 16}},
     {"id": "lemon",  "weight": 24, "pay": {3: 3,  4: 9,   5: 27}},
@@ -458,7 +466,9 @@ def play_fever_joker(bet, payload):
 
 # ---------------- Lucky 8 Line: 3x3 with 8 paylines ----------------
 # True to its name: 3 reels x 3 rows, 8 lines (3 rows + 3 columns + 2 diagonals).
-# Each line is 3 cells → pays on 3-of-a-kind (Dragon is Wild). Tuned to ~88% RTP.
+# Each line is 3 cells → pays on 3-of-a-kind (Dragon is Wild).
+#
+# MEASURED RTP: 70.1% over 120,000 spins, not the ~88% previously claimed here.
 L8_SYMBOLS = [
     {"id": "blossom", "weight": 30, "pay": 2},
     {"id": "ingot",   "weight": 24, "pay": 4},
