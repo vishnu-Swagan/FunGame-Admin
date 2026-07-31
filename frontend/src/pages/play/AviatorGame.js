@@ -86,11 +86,19 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
         crashed ? "border-destructive/45" : flying ? "border-[hsl(var(--emerald)/0.35)]" : "border-white/10"
       }`}
       style={{
+        /* Near-black, so the spokes and the lit core carry the panel. The navy
+           sky washed them out — on a dark ground the rays read as light rather
+           than as a texture laid over blue. */
         background:
-          "radial-gradient(120% 90% at 50% 118%, rgba(255,150,60," + warm + ") 0%, transparent 55%)," +
-          "radial-gradient(130% 130% at 22% 108%, #16244e 0%, #0d1834 42%, #060b1a 100%)",
+          "radial-gradient(120% 90% at 50% 120%, rgba(255,150,60," + warm + ") 0%, transparent 48%)," +
+          "radial-gradient(140% 120% at 8% 96%, #0a0a12 0%, #05050b 55%, #030307 100%)",
       }}
     >
+      {/* the spokes, and the lit core they fan out of */}
+      <div className="fg-av-core" aria-hidden="true" />
+      <div className="fg-av-rays" aria-hidden="true" />
+      <div className="fg-av-axis fg-av-axis-x" aria-hidden="true" />
+      <div className="fg-av-axis fg-av-axis-y" aria-hidden="true" />
       {/* stars */}
       <div className="absolute inset-0" aria-hidden="true">
         {[...Array(22)].map((_, i) => (
@@ -127,19 +135,23 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
           <defs>
             <linearGradient id="avFill" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor={heat.fill} stopOpacity="0.05" />
-              <stop offset="100%" stopColor={heat.fill} />
+              {/* One red, not a hue that shifts with the multiplier. The
+                  reference reads as a single instrument because the trace never
+                  changes colour — only the number climbs. */}
+              <stop offset="0%" stopColor="#c0121f" stopOpacity="0.10" />
+              <stop offset="55%" stopColor="#d81b2a" stopOpacity="0.42" />
+              <stop offset="100%" stopColor="#ef2337" stopOpacity="0.72" />
             </linearGradient>
           </defs>
           <path d={area} fill="url(#avFill)" />
           <path
             d={line}
             fill="none"
-            stroke={crashed ? "#e63946" : heat.c}
-            strokeWidth="1.6"
+            stroke={crashed ? "#8d1420" : "#ff2740"}
+            strokeWidth="2.1"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{ filter: `drop-shadow(0 0 2px ${crashed ? "rgba(230,57,70,0.8)" : heat.g})` }}
+            style={{ filter: `drop-shadow(0 0 2px rgba(255,39,64,0.85))` }}
           />
           {!crashed && <circle cx={tip[0]} cy={tip[1]} r="1.8" fill="#fff" style={{ filter: `drop-shadow(0 0 3px ${heat.g})` }} />}
         </svg>
@@ -195,7 +207,7 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
             <p
               data-testid="aviator-multiplier"
               className={`font-display tabular-nums leading-none ${crashed ? "text-red-400" : "fg-av-pulse"}`}
-              style={{ fontSize: `clamp(3rem, ${3 + Math.min(2.4, (shown - 1) * 0.3)}rem, 5.4rem)`, color: crashed ? undefined : heat.c, textShadow: `0 0 22px ${heat.g}` }}
+              style={{ fontSize: `clamp(3rem, ${3 + Math.min(2.4, (shown - 1) * 0.3)}rem, 5.4rem)`, color: crashed ? undefined : "#fff", textShadow: "0 2px 26px rgba(0,0,0,.7), 0 0 42px rgba(150,110,255,.35)" }}
             >
               {shown.toFixed(2)}x
             </p>
