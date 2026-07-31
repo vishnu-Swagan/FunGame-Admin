@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { PlayShell } from "@/components/play/PlayShell";
@@ -111,6 +111,54 @@ export default function RouletteGame({ game }) {
       engineRef.current = null;
     };
   }, [placeBet, undoBet, clearBets]);
+
+  /* The table is authored against a 430-wide phone and none of its metrics are
+     fluid, so on anything narrower it collides rather than compressing. Laying it
+     out at its design width and scaling the box down to the room that exists
+     keeps it the same table on every handset. The stylesheet does the scaling;
+     this only has to tell it how much room there is.
+
+     Document-relative top, not the viewport rect, so a scrolled page cannot make
+     the table think it has less height than it has. */
+  useLayoutEffect(() => {
+    const DESIGN_W = 430;
+    const fit = () => {
+      const el = hostRef.current;
+      if (!el) return;
+      if (!window.matchMedia("(orientation: portrait)").matches) {
+        el.removeAttribute("data-fit");
+        el.style.height = "";
+        return;
+      }
+      const w = el.clientWidth;
+      if (!w) return;
+      const docTop = el.getBoundingClientRect().top + window.scrollY;
+      const h = Math.max(360, Math.round(window.innerHeight - docTop - 8));
+      const s = Math.min(1, w / DESIGN_W);
+      el.style.height = `${h}px`;
+      el.style.setProperty("--fit-s", String(s));
+      el.style.setProperty("--fit-w", `${w / s}px`);
+      el.style.setProperty("--fit-h", `${h / s}px`);
+      el.setAttribute("data-fit", "");
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    if (hostRef.current) {
+      ro.observe(hostRef.current);
+      /* The chrome above the table settles after this runs — the live activity
+         bar arrives with its first poll and pushes the table down — so the
+         parent is watched too, otherwise the table keeps the height it was
+         given before the bar existed and overhangs the bottom of the screen. */
+      if (hostRef.current.parentElement) ro.observe(hostRef.current.parentElement);
+    }
+    window.addEventListener("resize", fit);
+    window.addEventListener("orientationchange", fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", fit);
+      window.removeEventListener("orientationchange", fit);
+    };
+  }, []);
 
   return (
     <PlayShell game={game} title="Fun Roulette">

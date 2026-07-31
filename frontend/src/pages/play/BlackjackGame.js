@@ -9,6 +9,7 @@ import { api, errMsg } from "@/lib/api";
 const REQ = { timeout: 22000 };
 import { sfx } from "@/lib/sound";
 import { PlayShell } from "@/components/play/PlayShell";
+import { FitToStage } from "@/components/play/FitToStage";
 import { CoinShower } from "@/pages/play/slots/slotFx";
 import { formatChips } from "@/components/common";
 
@@ -194,7 +195,12 @@ export default function BlackjackGame({ game }) {
 
   return (
     <PlayShell game={game} balance={balance}>
-      {/* ---- 3D felt table ---- */}
+      {/* ---- 3D felt table ----
+           Blackjack is the one table that lives in ordinary document flow rather
+           than on a fixed stage, so only its width is fitted: the dealer's row is
+           a flex of 46px cards that does not wrap, and a long hand runs past the
+           edge of a small phone. */}
+      <FitToStage fluid>
       <div style={{ perspective: "1100px" }}>
         <div
           className="relative rounded-2xl border-2 overflow-hidden p-3"
@@ -300,6 +306,7 @@ export default function BlackjackGame({ game }) {
           )}
         </div>
       </div>
+      </FitToStage>
 
       {/* ---- controls ---- */}
       {insurance && (

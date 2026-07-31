@@ -1554,3 +1554,44 @@
     .rvip .moneybar { padding-bottom: 4px; font-size: 11px; }
   }
 
+
+  /* ---------- fit the table to the handset ----------
+     Every metric inside this table — the number boxes, the chip rail, the money
+     bar, the type — is authored against a 430x932 phone, and none of it is
+     fluid. Below 430 the layout does not compress gracefully, it collides: the
+     money bar's two halves overlap at 390 and wrap into each other at 360, and
+     the board is pressed hard against both edges.
+
+     So the table is laid out at its design width whatever the device, and the
+     whole box is then scaled to the room that actually exists. A 360px handset
+     gets the 430px layout at 84% — the same table, drawn smaller, rather than a
+     broken one. Chip placement is unaffected: the engine reads its geometry
+     through getBoundingClientRect, which reports post-transform pixels, and
+     measures distance in cell widths that shrink by the same factor.
+
+     Portrait only. In landscape the phone is already sized to the viewport
+     (100dvw x 100dvh, above), so it fits by construction and there is nothing
+     left to scale. */
+  @media (orientation: portrait) {
+    .rvip[data-fit] { overflow: hidden; }
+    .rvip[data-fit] .stage {
+      min-height: 0;
+      height: 100%;
+      place-items: start;
+    }
+    .rvip[data-fit] .phone {
+      width: var(--fit-w);
+      height: var(--fit-h);
+      max-width: none;
+      max-height: none;
+      transform: scale(var(--fit-s));
+      transform-origin: top left;
+    }
+    /* The wheel is the one portrait metric measured against the viewport rather
+       than the table. Left alone it would shrink twice — once by its own vw
+       term and again by the transform — and come out smaller than the layout it
+       sits in, so it is measured against the fitted box instead. */
+    .rvip[data-fit] .wheelstage {
+      --wheelsz: min(378px, calc(var(--fit-w) * 0.94), calc(var(--fit-h) * 0.52));
+    }
+  }

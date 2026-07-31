@@ -889,7 +889,13 @@ export function mountRoulette(root, opts) {
        widths, because it is a question of fingertip precision on an edge. */
     for (const o of outsideRects) {
       if (px >= o.l && px <= o.r && py >= o.t && py <= o.b) {
-        if (best && best.edge && bestPx <= 9) return best.key;
+        /* Measured against the cell, not in raw pixels. The table is scaled to
+           fit the handset, so every rect the anchors were built from is already
+           smaller — a constant 9px window would keep its size while the felt
+           shrank around it, quietly handing more and more of each box to the
+           line printed on its border. 0.12 of a cell is that same 9px at the
+           430px design width, and stays that fraction at every other. */
+        if (best && best.edge && bestPx <= cw * 0.12) return best.key;
         return o.key;
       }
     }

@@ -6,6 +6,7 @@ import { formatChips } from "@/components/common";
 import { StickyTimeline } from "@/components/play/StickyTimeline";
 import { BetDock } from "@/components/play/BetDock";
 import { ExtrasSheet } from "@/components/play/ExtrasSheet";
+import { FitToStage } from "@/components/play/FitToStage";
 import { useBettingAlarm } from "@/lib/useBettingAlarm";
 
 export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm = true, children }) => {
@@ -40,9 +41,9 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
         <StickyTimeline phase={live?.phase} countdown={live?.countdown} timings={live?.timings} labels={labels} />
       </div>
 
-      {/* middle — scrolls only if the game overflows */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3" data-testid="game-stage-middle">
-        {children}
+      {/* middle — the table is scaled to this box, so it fits any handset */}
+      <div className="flex-1 min-h-0 px-3 py-3" data-testid="game-stage-middle">
+        <FitToStage className="h-full">{children}</FitToStage>
       </div>
 
       {/* extras sheet (pull-up) then the bet dock */}
