@@ -51,7 +51,11 @@ def _mask(name: str):
 # ======================================================================
 # AVIATOR - Spribe-style crash game with universal live rounds
 # ======================================================================
-AV_BETTING = 6.0   # seconds bets are open before takeoff
+# Aviator's betting window matches every other table at a minute. It is a crash
+# game and its rounds used to be much shorter; one length across the app is what
+# the operator asked for, and a player moving between tables now finds the same
+# clock everywhere.
+AV_BETTING = 60.0  # seconds bets are open before takeoff
 AV_RESULT = 4.0    # seconds the crash result stays on screen
 
 

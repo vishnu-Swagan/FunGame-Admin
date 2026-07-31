@@ -5,7 +5,7 @@ import { api, errMsg } from "@/lib/api";
 import { formatChips } from "@/components/common";
 import { Cabinet, CAB_W, CAB_H } from "@/components/play/arcade/Cabinet";
 import { at, atMid } from "@/components/play/arcade/parts";
-import { Scroll, TitleWing } from "./sudArt";
+import { Crest, Cap, Sparkle, Gem } from "./rouArt";
 import "./roulette.css";
 
 /**
@@ -202,79 +202,101 @@ export default function RouletteCabinet({ game }) {
      number is known — which is the whole of the drama, and the reason the
      reference has a zoomed and an unzoomed frame of the same table. */
   const wide = zoom || spinning;
-  const wheelSize = wide ? 440 : 340;
-  const wheelTop = wide ? 2 : 46;
+  const wheelSize = wide ? 470 : 360;
+  const wheelTop = wide ? -22 : 30;
 
   return (
     <Cabinet ground="#01120a" exitTo={`/games/${game.slug}`} testId="cab-fun-roulette" className="rou">
       <div className="rou-ground" aria-hidden="true" />
       <div className="rou-damask" aria-hidden="true" />
 
-      {/* the scrollwork the machine puts in the top corners */}
-      <div className="rou-corner" style={{ left: 8, top: 4 }}><TitleWing w={190} flip /></div>
-      <div className="rou-corner" style={{ right: 8, top: 4 }}><TitleWing w={190} /></div>
+      {/* the crest across the top of the table */}
+      <div className="rou-crest"><Crest w={CAB_W} opacity={0.55} /></div>
 
-      <div className="rou-title" style={atMid(CAB_W, 620, 6)}>Fun Roulette</div>
+      <div className="rou-titlebar" style={atMid(CAB_W, 460, 8)}>
+        <span className="rou-title">Fun Roulette</span>
+        <Gem size={30} />
+      </div>
 
       {/* ---- score, time --------------------------------------------------- */}
-      <div style={at(60, 46, 340)}>
+      <div style={at(56, 44, 360)}>
         <div className="rou-label">Score</div>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <Scroll w={38} flip />
-          <div className="rou-plaque" style={{ flex: 1 }}>
-            {state ? formatChips(state.balance) : "…"}
-          </div>
-          <Scroll w={38} />
+        <div className="rou-capped">
+          <Sparkle size={26} style={{ left: -6, top: -4 }} />
+          <div className="rou-plaque">{state ? formatChips(state.balance) : "…"}</div>
+          <Sparkle size={22} style={{ right: -4, top: -6 }} />
         </div>
       </div>
 
-      <div className="rou-time" style={at(60, 140, 340)} data-testid="rou-time">
-        {`0 : ${Math.max(0, Math.ceil(state?.phase_ends_in ?? 0))}`}
+      <div className="rou-capped" style={at(56, 132, 360)} data-testid="rou-time">
+        <Cap h={44} flip />
+        <div className="rou-plaque rou-time">
+          {`0 : ${Math.max(0, Math.ceil(state?.phase_ends_in ?? 0))}`}
+        </div>
+        <Cap h={44} />
+        <Sparkle size={22} style={{ left: 2, top: -8 }} />
       </div>
 
       {/* ---- winner, history, zoom ----------------------------------------- */}
-      <div style={at(CAB_W - 60 - 340, 46, 340)}>
+      <div style={at(CAB_W - 56 - 360, 44, 360)}>
         <div className="rou-label">Winner</div>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <Scroll w={38} flip />
-          <div className="rou-plaque" style={{ flex: 1 }}>{formatChips(settled?.payout || 0)}</div>
-          <Scroll w={38} />
+        <div className="rou-capped">
+          <Sparkle size={22} style={{ left: -4, top: -6 }} />
+          <div className="rou-plaque">{formatChips(settled?.payout || 0)}</div>
+          <Sparkle size={26} style={{ right: -6, top: -4 }} />
         </div>
       </div>
 
-      <div className="rou-history" style={at(CAB_W - 60 - 340, 140, 340)} data-testid="rou-history">
-        {(state?.last_results || []).slice(0, 5).map((r, i) => (
-          <span key={i} className={r.color === "red" ? "hot" : ""}>{r.winning_number}</span>
-        ))}
+      <div className="rou-capped" style={at(CAB_W - 56 - 360, 132, 360)} data-testid="rou-history">
+        <Cap h={44} flip />
+        <div className="rou-plaque rou-history">
+          {(state?.last_results || []).slice(0, 5).map((r, i) => (
+            <span key={i} className={r.color === "red" ? "hot" : ""}>{r.winning_number}</span>
+          ))}
+        </div>
+        <Cap h={44} />
+        <Sparkle size={22} style={{ right: 2, top: -8 }} />
       </div>
 
-      <button type="button" onClick={() => setZoom((z) => !z)} data-testid="rou-zoom"
-        className="rou-btn" style={at(CAB_W - 60 - 300, 186, 300, 34)}>
-        Wheel Zoom: {zoom ? "ON" : "OFF"}
-      </button>
+      <div className="rou-capped" style={at(CAB_W - 56 - 340, 190, 340)}>
+        <Cap h={36} flip />
+        <button type="button" onClick={() => setZoom((z) => !z)} data-testid="rou-zoom"
+          className="rou-btn" style={{ flex: 1, height: 34, fontSize: 19 }}>
+          Wheel Zoom: {zoom ? "ON" : "OFF"}
+        </button>
+        <Cap h={36} />
+      </div>
 
       {/* ---- the chips, two rows on the left -------------------------------- */}
-      <div style={{ ...at(56, 186, 274), display: "flex", flexWrap: "wrap", gap: 22, rowGap: 12 }}>
+      <div style={{ ...at(50, 196, 344), display: "flex", flexWrap: "wrap", gap: 22, rowGap: 14 }}>
         {CHIPS.map(([c, bg]) => (
           <button key={c} type="button" onClick={() => setChip(c)} aria-pressed={chip === c}
             data-testid={`rou-chip-${c}`} className={`rou-chip ${chip === c ? "on" : ""}`}
             style={{ background: bg }}>
-            {c >= 1000 ? `${c / 1000}k` : c}
+            {c}
           </button>
         ))}
       </div>
 
       <button type="button" onClick={clearBets} disabled={!betting || !state?.my_total}
-        data-testid="rou-clear-specific" className="rou-btn" style={at(56, 306, 300, 34)}>
+        data-testid="rou-clear-specific" className="rou-btn" style={at(50, 300, 344, 32)}>
         Cancel Specific Bet
       </button>
 
       {/* ---- take / bet ok / cancel ----------------------------------------- */}
-      <button type="button" disabled className="rou-btn" style={at(CAB_W - 60 - 300, 240, 140, 36)}>Take</button>
-      <button type="button" disabled={!betting} className="rou-btn go"
-        style={at(CAB_W - 60 - 150, 240, 150, 36)} data-testid="rou-bet-ok">Bet Ok</button>
+      <div className="rou-capped" style={at(CAB_W - 56 - 380, 240, 180)}>
+        <Cap h={34} flip />
+        <button type="button" disabled className="rou-btn" style={{ flex: 1, height: 32 }}>Take</button>
+        <Cap h={34} />
+      </div>
+      <div className="rou-capped" style={at(CAB_W - 56 - 180, 240, 180)}>
+        <Cap h={34} flip />
+        <button type="button" disabled={!betting} className="rou-btn"
+          style={{ flex: 1, height: 32 }} data-testid="rou-bet-ok">Bet Ok</button>
+        <Cap h={34} />
+      </div>
       <button type="button" onClick={clearBets} disabled={!betting || !state?.my_total}
-        data-testid="rou-clear" className="rou-btn" style={at(CAB_W - 60 - 300, 288, 300, 34)}>
+        data-testid="rou-clear" className="rou-btn" style={at(CAB_W - 56 - 340, 286, 340, 32)}>
         Cancel Bet
       </button>
 
@@ -282,7 +304,14 @@ export default function RouletteCabinet({ game }) {
       <div className="rou-wheel-wrap" style={atMid(CAB_W, wheelSize, wheelTop, wheelSize)}
            data-testid="rou-wheel">
         <div className="rou-wheel">
+          <div className="rou-wheel-bowl" />
           <div className="rou-wheel-rim" />
+          <div className="rou-wheel-chrome">
+            {Array.from({ length: 16 }, (_, i) => (
+              <span key={i} className="rou-stud"
+                style={{ transform: `rotate(${i * 22.5}deg) translateY(-${wheelSize * 0.395}px)` }} />
+            ))}
+          </div>
           <div className="rou-wheel-track" style={{
             transform: `rotate(${ring}deg)`,
             transition: spinning ? "transform 9s cubic-bezier(.12,.62,.12,1)"
@@ -304,8 +333,13 @@ export default function RouletteCabinet({ game }) {
               );
             })}
           </div>
-          <div className="rou-wheel-hub" />
-          <div className="rou-wheel-cross" />
+          <div className="rou-wheel-cone" />
+          <div className="rou-wheel-cross">
+            {[0, 45, 90, 135].map((a) => (
+              <span key={a} style={{ transform: `rotate(${a}deg)` }} />
+            ))}
+          </div>
+          <div className="rou-wheel-hubplate" />
           <div className="rou-wheel-gem" />
           {/* The marker and the ball both live at the top; the ring brings the
               number to them. */}
@@ -317,6 +351,8 @@ export default function RouletteCabinet({ game }) {
       </div>
 
       {/* ---- the felt -------------------------------------------------------- */}
+      {/* the double gold rule the machine draws round the whole betting area */}
+      <div className="rou-feltframe" style={at(36, 422, CAB_W - 72, 270)} />
       {/* 0 / 00 */}
       <div style={at(38, 424, 82, 174)}>
         {["00", "0"].map((z, i) => (
@@ -396,8 +432,10 @@ export default function RouletteCabinet({ game }) {
       <div className="rou-total" style={at(38, 700, 130, 32)} data-testid="rou-total">
         {formatChips(state?.my_total || 0)}
       </div>
-      <div className="rou-footer" style={at(200, 702, CAB_W - 400, 30)} data-testid="rou-message">
-        {message}
+      <div className="rou-capped" style={at(180, 700, CAB_W - 360)}>
+        <Cap h={38} flip />
+        <div className="rou-footer" style={{ flex: 1, height: 32 }} data-testid="rou-message">{message}</div>
+        <Cap h={38} />
       </div>
       <button type="button" onClick={() => navigate(`/games/${game.slug}`)} data-testid="rou-exit"
         className="rou-btn" style={at(CAB_W - 168, 700, 130, 32)}>Exit</button>
