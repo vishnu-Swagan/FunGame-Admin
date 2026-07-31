@@ -46,15 +46,18 @@ LIVE_GAMES = {
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 
 SIDE_OPTIONS = {
-    # 7Up7Down. The three sides plus a bet on the exact total, which is what the
-    # bottom two rows of the table are. Every multiplier is (5/6) / probability,
-    # so a stake on 2 and a stake on Down carry exactly the same 83.3% return —
-    # the reference table pays 72-83% depending on where you put the chip, which
-    # quietly punishes the longer odds.
+    # 7Up7Down. Sides plus a bet on the exact total. These are the odds printed
+    # on the reference felt — 1:1 on the sides, 1:4 on seven, then 1:26 / 1:12 /
+    # 1:8 / 1:6 / 1:5 out to the extremes — so the table shows exactly what it
+    # pays. Return multipliers are odds + 1.
+    #
+    # This is deliberately NOT a flat edge: a chip on 2 returns 75% and a chip on
+    # 6 returns 83%, so the long shots are the worse value. That is how the
+    # reference table is priced and it is what the printed odds commit us to.
     "seven-up-down": {
         "down": 2.0, "seven": 5.0, "up": 2.0,
-        "t2": 30.0, "t3": 15.0, "t4": 10.0, "t5": 7.5, "t6": 6.0,
-        "t8": 6.0, "t9": 7.5, "t10": 10.0, "t11": 15.0, "t12": 30.0,
+        "t2": 27.0, "t3": 13.0, "t4": 9.0, "t5": 7.0, "t6": 6.0,
+        "t8": 6.0, "t9": 7.0, "t10": 9.0, "t11": 13.0, "t12": 27.0,
     },
     "checker": {"gold": 1.4, "steel": 1.4},
     # Real casino Andar Bahar: Andar is dealt first (wins ~51.5%) so it pays

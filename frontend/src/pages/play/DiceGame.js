@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { sfx } from "@/lib/sound";
 import { GameStage } from "@/components/play/GameStage";
@@ -37,24 +37,20 @@ const Die = ({ value, rolling, variant, duration = "0.8s" }) => (
   </div>
 );
 
-/** A past round's dice, small — two 3x3 pip grids under the total. */
+/** A past round's die, drawn small for the roadmap. */
 const MiniDie = ({ value }) => (
-  <span className="grid grid-cols-3 gap-[1px] w-[15px] h-[15px] rounded-[2px] bg-white p-[1.5px]">
+  <span className="grid grid-cols-3 gap-[1px] w-[17px] h-[17px] rounded-[2px] bg-white p-[2px]">
     {Array.from({ length: 9 }, (_, i) => (
       <span key={i} className={`rounded-full ${PIPS[value]?.includes(i) ? (value === 1 ? "bg-red-600" : "bg-neutral-900") : ""}`} />
     ))}
   </span>
 );
 
-const TOTALS_TOP = [2, 3, 4, 5, 6];
-const TOTALS_BOTTOM = [8, 9, 10, 11, 12];
 const CHIPS = [10, 50, 100, 500, 1000];
+const TOTALS = [[2, 3, 4, 5, 6], [8, 9, 10, 11, 12]];
 
-/** Colour a total the way the table does: down green, seven blue, up red. */
-const totalTone = (t) =>
-  t === 7 ? { bg: "bg-sky-600", ring: "ring-sky-400" }
-  : t < 7 ? { bg: "bg-emerald-600", ring: "ring-emerald-400" }
-  : { bg: "bg-rose-600", ring: "ring-rose-400" };
+/** Down green, seven blue, up red — the colours the roadmap and the felt share. */
+const toneOf = (t) => (t === 7 ? "bg-sky-600" : t < 7 ? "bg-emerald-600" : "bg-rose-600");
 
 export default function DiceGame({ game }) {
   const { state, countdown, balance, betting, phase, outcome, result, setResult,
@@ -67,8 +63,12 @@ export default function DiceGame({ game }) {
     });
 
   const [chip, setChip] = useState(10);
-  const [lastRound, setLastRound] = useState([]);
   const [rollCfg, setRollCfg] = useState([{ v: false, d: "0.8s" }, { v: true, d: "0.9s" }]);
+  /* The order chips were laid this round, so undo can take the last one back and
+     "again" can repeat the round that just finished. */
+  const placedRef = useRef([]);
+  const [prevRound, setPrevRound] = useState([]);
+  const [busy, setBusy] = useState(false);
 
   const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
   const rolling = phase === "REVEAL" && !showFinal;
@@ -84,21 +84,26 @@ export default function DiceGame({ game }) {
   }, [rolling]);
   useEffect(() => { if (showFinal && phase === "REVEAL") sfx.diceLand(); }, [showFinal, phase]);
 
-  /* Odds come from the server's own paytable, so the table can never advertise a
-     price the backend would not pay. */
+  useEffect(() => {
+    if (phase === "BETTING" && placedRef.current.length) {
+      setPrevRound(placedRef.current);
+      placedRef.current = [];
+    }
+  }, [state?.round_number]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Odds come from the server's own paytable, so the felt can never print a price
+     the backend would not pay. */
   const options = state?.options || {};
   const oddsFor = (sel) => {
     const m = options[sel];
     if (!m) return "";
-    const profit = m - 1;
-    return `1:${Number.isInteger(profit) ? profit : profit.toFixed(1)}`;
+    const p = m - 1;
+    return `1:${Number.isInteger(p) ? p : p.toFixed(1)}`;
   };
 
   const staked = {};
   myBets.forEach((b) => { staked[b.selection] = (staked[b.selection] || 0) + b.amount; });
 
-  /* "Calculated from the last 100 rounds" — the real distribution of what this
-     table has actually produced, not a fixed 33/17/50. */
   const share = useMemo(() => {
     const rows = (lastResults || []).filter((r) => r.total != null);
     if (!rows.length) return null;
@@ -108,45 +113,57 @@ export default function DiceGame({ game }) {
     return { down: pct(c.down), seven: pct(c.seven), up: pct(c.up), n: rows.length };
   }, [lastResults]);
 
-  const bet = (sel) => {
-    if (!betting) return;
-    setLastRound((r) => [...r, { sel, amount: chip }]);
-    placeBet(sel, chip);
+  const lay = async (sel) => {
+    if (!betting || busy) return;
+    const res = await placeBet(sel, chip);
+    if (res) placedRef.current.push({ sel, amount: chip });
   };
 
-  /* "again" repeats the last COMPLETED round, so the running list is only
-     promoted once the round it belongs to has been settled. */
-  const [prevRound, setPrevRound] = useState([]);
-  useEffect(() => {
-    if (phase === "BETTING" && lastRound.length) { setPrevRound(lastRound); setLastRound([]); }
-  }, [state?.round_number]); // eslint-disable-line react-hooks/exhaustive-deps
-  /* Sequenced, not fired in a loop. placeBet guards against overlapping requests,
-     so a synchronous forEach races that guard and can silently drop chips. */
-  const repeatBets = async (list) => {
+  const replay = async (list) => {
+    setBusy(true);
     for (const b of list) {
       if (!betting) break;
       // eslint-disable-next-line no-await-in-loop
-      await placeBet(b.sel, b.amount);
+      const res = await placeBet(b.sel, b.amount);
+      if (res) placedRef.current.push(b);
     }
+    setBusy(false);
   };
-  const rebet = () => betting && repeatBets(prevRound);
-  const double = () => betting && repeatBets(myBets.map((b) => ({ sel: b.selection, amount: b.amount })));
 
-  const Cell = ({ sel, children, className = "", testId }) => (
+  /* There is no per-bet undo on the live API — only a clear for the whole round.
+     Undo is therefore the honest equivalent: drop everything, then lay the same
+     chips back minus the last one. */
+  const undo = async () => {
+    if (!betting || busy || !placedRef.current.length) return;
+    const keep = placedRef.current.slice(0, -1);
+    setBusy(true);
+    await clearBets();
+    placedRef.current = [];
+    setBusy(false);
+    if (keep.length) await replay(keep);
+  };
+
+  const again = () => !busy && replay(prevRound);
+  const double = () => !busy && replay(placedRef.current.slice());
+  const clearAll = async () => { if (betting && !busy) { await clearBets(); placedRef.current = []; } };
+
+  const Chip = ({ amount }) =>
+    amount > 0 ? (
+      <span className="sud-chip absolute right-1 bottom-1 h-6 min-w-[26px] px-1 text-[10px]">
+        {formatChips(amount)}
+      </span>
+    ) : null;
+
+  const Cell = ({ sel, className = "", testId, children }) => (
     <button
       type="button"
       data-testid={testId}
-      onClick={() => bet(sel)}
-      disabled={!betting}
-      className={`relative flex flex-col items-center justify-center rounded-lg border transition
-        ${betting ? "active:scale-[0.98] cursor-pointer" : "opacity-70 cursor-default"} ${className}`}
+      onClick={() => lay(sel)}
+      disabled={!betting || busy}
+      className={`relative overflow-hidden rounded-[6px] border text-center transition ${betting ? "active:scale-[0.985]" : ""} ${className}`}
     >
       {children}
-      {staked[sel] > 0 && (
-        <span className="absolute right-1 bottom-1 min-w-[26px] rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-amber-300 ring-1 ring-amber-300/50">
-          {formatChips(staked[sel])}
-        </span>
-      )}
+      <Chip amount={staked[sel]} />
     </button>
   );
 
@@ -157,127 +174,150 @@ export default function DiceGame({ game }) {
       live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
       labels={{ REVEAL: "ROLLING…" }}
       betDock={
-        <div className="space-y-2" data-testid="dice-bet-dock">
-          <div className="flex items-center justify-between text-[11px] text-white/60">
-            <span>Balance <b className="tabular-nums text-white">{formatChips(balance ?? 0)}</b></span>
-            <span>Your bet <b className="tabular-nums text-primary">{formatChips(myTotal)}</b></span>
+        <div className="flex items-center gap-2" data-testid="dice-tray">
+          <button type="button" onClick={again} disabled={!betting || busy || !prevRound.length}
+            data-testid="dice-again"
+            className="flex flex-col items-center gap-0.5 rounded-full px-2 py-1 text-[10px] font-bold text-white/85 disabled:opacity-35">
+            <span className="grid h-9 w-9 place-items-center rounded-full border border-white/25 bg-black/30 text-base">⟳</span>
+            again
+          </button>
+          <div className="flex flex-1 items-center justify-center gap-1.5">
+            {CHIPS.map((c) => (
+              <button key={c} type="button" onClick={() => setChip(c)} data-testid={`dice-chip-${c}`}
+                aria-pressed={chip === c}
+                className={`h-11 w-11 rounded-full border-[3px] border-dashed text-[11px] font-extrabold tabular-nums text-white transition
+                  ${chip === c ? "scale-110 ring-2 ring-amber-300" : "opacity-75"}`}
+                style={{ background: "radial-gradient(circle at 36% 28%, #22c268, #0d7a3f 70%)", borderColor: "rgba(255,255,255,.75)" }}>
+                {c >= 1000 ? `${c / 1000}k` : c}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={rebet} disabled={!betting || !prevRound.length}
-              className="rounded-full border border-white/15 px-3 py-2 text-[11px] font-bold disabled:opacity-40" data-testid="dice-again">again</button>
-            <div className="flex flex-1 items-center justify-center gap-1.5">
-              {CHIPS.map((c) => (
-                <button key={c} type="button" onClick={() => setChip(c)} data-testid={`dice-chip-${c}`}
-                  className={`h-10 w-10 rounded-full border-4 border-dashed text-[10px] font-extrabold tabular-nums transition
-                    ${chip === c ? "scale-110 ring-2 ring-primary" : "opacity-80"}`}
-                  style={{ background: "#0f7a3d", borderColor: "rgba(255,255,255,.6)", color: "#fff" }}>
-                  {c >= 1000 ? `${c / 1000}k` : c}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={double} disabled={!betting || !myBets.length}
-              className="rounded-full border border-white/15 px-3 py-2 text-[11px] font-bold disabled:opacity-40" data-testid="dice-double">×2</button>
-            <button type="button" onClick={clearBets} disabled={!betting || !myBets.length}
-              className="rounded-full border border-white/15 px-3 py-2 text-[11px] font-bold disabled:opacity-40" data-testid="dice-clear">clear</button>
-          </div>
+          <button type="button" onClick={double} disabled={!betting || busy || !placedRef.current.length}
+            data-testid="dice-double"
+            className="flex flex-col items-center gap-0.5 px-1 text-[10px] font-bold text-white/85 disabled:opacity-35">
+            <span className="grid h-9 w-9 place-items-center rounded-full border border-white/25 bg-black/30 text-xs font-black">×2</span>
+            double
+          </button>
+          <button type="button" onClick={undo} disabled={!betting || busy || !placedRef.current.length}
+            data-testid="dice-undo"
+            className="flex flex-col items-center gap-0.5 px-1 text-[10px] font-bold text-white/85 disabled:opacity-35">
+            <span className="grid h-9 w-9 place-items-center rounded-full border border-white/25 bg-black/30 text-base">↺</span>
+            undo
+          </button>
+          <button type="button" onClick={clearAll} disabled={!betting || busy || !myBets.length}
+            data-testid="dice-clear"
+            className="flex flex-col items-center gap-0.5 px-1 text-[10px] font-bold text-white/85 disabled:opacity-35">
+            <span className="grid h-9 w-9 place-items-center rounded-full border border-rose-400/50 bg-rose-900/40 text-base text-rose-300">✕</span>
+            clear
+          </button>
         </div>
       }
     >
-      {/* how this table has actually been running */}
-      {share && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-black/30 px-3 py-1.5 text-[11px]" data-testid="dice-share">
-          <span className="font-bold text-emerald-400">2–6 {share.down}%</span>
-          <span className="font-bold text-rose-400">8–12 {share.up}%</span>
-          <span className="font-bold text-sky-400">7 {share.seven}%</span>
-          <span className="text-white/45">from the last {share.n} rounds</span>
+      <div className="sud" data-testid="dice-table">
+        {/* how the table has actually been running */}
+        <div className="sud-wood flex flex-wrap items-center gap-x-3 px-3 py-1.5 text-[11px] font-bold">
+          {share ? (
+            <>
+              <span className="text-amber-200">2~6 <span className="text-amber-400">{share.down}%</span></span>
+              <span className="text-amber-200">8~12 <span className="text-amber-400">{share.up}%</span></span>
+              <span className="text-amber-200">7 <span className="text-amber-400">{share.seven}%</span></span>
+              <span className="font-normal text-amber-100/60">Calculated from the last {share.n} rounds.</span>
+            </>
+          ) : (
+            <span className="font-normal text-amber-100/60">Waiting for the first rounds…</span>
+          )}
         </div>
-      )}
 
-      {/* roadmap: each past round as its total over the two faces that made it */}
-      <div className="mt-2 flex gap-1 overflow-x-auto pb-1" data-testid="dice-roadmap">
-        {(lastResults || []).slice(0, 14).map((r, i) => {
-          const tone = totalTone(r.total);
-          return (
-            <div key={r.round_number ?? i} className="flex shrink-0 flex-col items-center gap-[2px]">
-              <span className={`grid h-5 w-6 place-items-center rounded text-[11px] font-bold text-white ${tone.bg}`}>{r.total}</span>
-              <span className="flex gap-[2px]">
-                {(r.dice || []).map((d, k) => <MiniDie key={k} value={d} />)}
+        {/* roadmap: every round as its total over the faces that made it */}
+        <div className="sud-wood flex gap-[3px] overflow-x-auto px-2 py-1.5" data-testid="dice-roadmap">
+          {(lastResults || []).slice(0, 14).map((r, i) => (
+            <div key={r.round_number ?? i}
+              className={`flex shrink-0 flex-col items-center gap-[2px] rounded-[3px] p-[2px] ${i === 0 ? "ring-2 ring-amber-400" : ""}`}>
+              <span className={`grid h-[18px] w-[22px] place-items-center rounded-[2px] text-[11px] font-black text-white ${toneOf(r.total)}`}>
+                {r.total}
               </span>
+              {(r.dice || []).map((d, k) => <MiniDie key={k} value={d} />)}
             </div>
-          );
-        })}
-      </div>
-
-      {/* the dice, under the glass */}
-      <div className="relative my-3 flex items-center justify-center py-1">
-        <div className="fg-dome" data-testid="dice-dome">
-          <div className="fg-dome-dish" />
-          <div className="fg-dome-stage">
-            <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
-            <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
-          </div>
-          <div className="fg-dome-glass" />
-          <div className="fg-dome-collar" />
+          ))}
         </div>
 
-        {/* the countdown sits beside the dome while bets are open */}
-        {betting && countdown > 0 && (
-          <div className="absolute right-2 top-1/2 -translate-y-1/2" data-testid="dice-countdown">
-            <span className={`grid h-14 w-14 place-items-center rounded-full border-2 text-xl font-black tabular-nums
-              ${countdown <= 3 ? "border-rose-400 text-rose-300" : "border-amber-400 text-amber-300"}`}>
+        {/* the dice, under the glass */}
+        <div className="relative flex items-center justify-center py-2">
+          <div className="fg-dome" data-testid="dice-dome">
+            <div className="fg-dome-dish" />
+            <div className="fg-dome-stage">
+              <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
+              <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
+            </div>
+            <div className="fg-dome-glass" />
+            <div className="fg-dome-collar" />
+          </div>
+          {betting && countdown > 0 && (
+            <span data-testid="dice-countdown"
+              className={`absolute right-3 top-1/2 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border-[3px] text-2xl font-black tabular-nums
+                ${countdown <= 3 ? "border-rose-400 text-rose-300" : "border-amber-400 text-amber-300"}`}>
               {Math.ceil(countdown)}
             </span>
+          )}
+        </div>
+
+        {/* table limits */}
+        <div className="sud-wood flex items-center gap-3 px-3 py-1 text-[11px] font-bold text-amber-100/85">
+          <span>Roadmap</span>
+          <span className="ml-auto">Min <span className="text-amber-300">{formatChips(10)}</span></span>
+          <span>Max <span className="text-amber-300">{formatChips(10000)}</span></span>
+        </div>
+
+        {/* the board */}
+        <div className={`relative p-2 ${betting ? "" : "sud-locked"}`}>
+          <div className="grid grid-cols-3 gap-1.5" data-testid="dice-sides">
+            <Cell sel="down" testId="dice-side-down"
+              className="h-[104px] border-emerald-300/50 bg-gradient-to-b from-emerald-500 to-emerald-700">
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 text-center sud-mark text-[40px] leading-[1.05]">DOWN</span>
+              <span className="relative block pt-4 sud-num text-[30px] leading-none">2-6</span>
+              <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("down")}</span>
+            </Cell>
+            <Cell sel="seven" testId="dice-side-seven"
+              className="h-[104px] border-sky-300/50 bg-gradient-to-b from-sky-500 to-sky-700">
+              <span className="relative block pt-3 sud-num text-[42px] leading-none">7</span>
+              <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("seven")}</span>
+            </Cell>
+            <Cell sel="up" testId="dice-side-up"
+              className="h-[104px] border-rose-300/50 bg-gradient-to-b from-rose-500 to-rose-700">
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 text-center sud-mark text-[40px] leading-[1.05]">UP</span>
+              <span className="relative block pt-4 sud-num text-[30px] leading-none">8-12</span>
+              <span className="relative mt-1 block text-[13px] font-bold text-white/85">{oddsFor("up")}</span>
+            </Cell>
           </div>
-        )}
 
-        {showFinal && (
-          <span className="absolute bottom-0 left-1/2 -translate-x-1/2 rounded-full bg-black/75 px-3 py-0.5 text-xs font-bold text-white"
-                data-testid="dice-total">
-            {outcome.total}
-          </span>
-        )}
-        {!betting && (
-          <div className="absolute inset-0 grid place-items-center" data-testid="dice-locked">
-            <span className="rounded-lg bg-black/65 px-6 py-2 text-lg font-extrabold tracking-wide text-amber-300">
-              Bet Locked
-            </span>
-          </div>
-        )}
+          {TOTALS.map((row, ri) => (
+            <div key={ri} className="mt-1.5 grid grid-cols-5 gap-1.5" data-testid={`dice-totals-${ri}`}>
+              {row.map((t) => (
+                <Cell key={t} sel={`t${t}`} testId={`dice-total-${t}`}
+                  className="h-[86px] border-emerald-200/25 bg-emerald-800/60">
+                  <span className="block pt-3 sud-num text-[26px] leading-none">{t}</span>
+                  <span className="mt-1 block text-[12px] font-bold text-white/70">{oddsFor(`t${t}`)}</span>
+                </Cell>
+              ))}
+            </div>
+          ))}
+
+          {!betting && (
+            <div className="absolute inset-0 grid place-items-center" data-testid="dice-locked">
+              <span className="rounded-md bg-black/55 px-7 py-2 text-2xl font-black tracking-wide text-amber-300"
+                    style={{ textShadow: "0 2px 6px rgba(0,0,0,.8)" }}>
+                Bet Locked
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* the money line */}
+        <div className="flex items-center justify-center gap-8 px-3 pb-2 text-[13px] font-bold text-white/80">
+          <span>Balance <span className="tabular-nums text-amber-300">{formatChips(balance ?? 0)}</span></span>
+          <span>Your Bet <span className="tabular-nums text-amber-300">{formatChips(myTotal)}</span></span>
+        </div>
       </div>
-
-      {/* the three main positions */}
-      <div className="grid grid-cols-3 gap-2" data-testid="dice-sides">
-        <Cell sel="down" testId="dice-side-down" className="h-24 border-emerald-400/40 bg-emerald-700/70">
-          <span className="text-2xl font-black text-white/90">2–6</span>
-          <span className="text-[11px] font-bold text-white/70">{oddsFor("down")}</span>
-          <span className="pointer-events-none absolute inset-0 grid place-items-center text-3xl font-black text-white/10">DOWN</span>
-        </Cell>
-        <Cell sel="seven" testId="dice-side-seven" className="h-24 border-sky-400/40 bg-sky-700/70">
-          <span className="text-3xl font-black text-white/90">7</span>
-          <span className="text-[11px] font-bold text-white/70">{oddsFor("seven")}</span>
-        </Cell>
-        <Cell sel="up" testId="dice-side-up" className="h-24 border-rose-400/40 bg-rose-700/70">
-          <span className="text-2xl font-black text-white/90">8–12</span>
-          <span className="text-[11px] font-bold text-white/70">{oddsFor("up")}</span>
-          <span className="pointer-events-none absolute inset-0 grid place-items-center text-3xl font-black text-white/10">UP</span>
-        </Cell>
-      </div>
-
-      {/* every exact total */}
-      <div className="mt-2 grid grid-cols-5 gap-1.5" data-testid="dice-totals">
-        {[...TOTALS_TOP, ...TOTALS_BOTTOM].map((t) => (
-          <Cell key={t} sel={`t${t}`} testId={`dice-total-${t}`}
-            className="h-16 border-emerald-300/20 bg-emerald-900/50">
-            <span className="text-xl font-black text-white/85">{t}</span>
-            <span className="text-[10px] font-bold text-white/55">{oddsFor(`t${t}`)}</span>
-          </Cell>
-        ))}
-      </div>
-
-      <p className="mt-2 text-center text-[11px] text-white/45">
-        A 7 beats both sides — Up and Down lose when the dice total 7. Every position pays the
-        same 83.3% return, whichever you back.
-      </p>
 
       <ResultBanner result={result} onClose={() => setResult(null)} />
     </GameStage>

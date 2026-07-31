@@ -86,6 +86,53 @@
   background: radial-gradient(circle at 35% 30%, #e0555a, #8f1d21);
 }
 
+/* ---------- 7Up7Down table ----------
+   The reference table is a green felt with wood-framed strips top and bottom.
+   Its numerals are the thing that carries it: heavy, cream-to-gold, cut into the
+   felt with a dark inner edge rather than sitting on top of it. */
+.sud {
+  background:
+    radial-gradient(120% 80% at 50% 8%, #1aa15c 0%, #0f7a45 42%, #0a5c34 74%, #05421f 100%);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.sud-wood {
+  background: linear-gradient(180deg, #7a4a20 0%, #5c3616 48%, #3f2410 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 214, 150, 0.28), inset 0 -2px 6px rgba(0, 0, 0, 0.45);
+}
+/* the big table numerals */
+.sud-num {
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  background: linear-gradient(180deg, #fff8e2 0%, #ffe9a8 42%, #d5a53c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+/* the DOWN / UP watermarks pressed into the felt */
+.sud-mark {
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.16);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  letter-spacing: 0.02em;
+}
+/* a staked chip, as a clay disc with an edge */
+.sud-chip {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9999px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: radial-gradient(circle at 36% 28%, #f2f5f8, #b9c3cc 62%, #8b959e 100%);
+  color: #16202a;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85) inset, 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+/* closed for betting: the whole board steps back */
+.sud-locked { filter: saturate(0.55) brightness(0.52); }
+
 /* ---------- The dice dome ----------
    A glass bell over a felt-lined dish, the way the dice actually sit on the
    table. Built in three stacked pieces so the dice can live BETWEEN the dish and
