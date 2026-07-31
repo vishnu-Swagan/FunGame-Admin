@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from db import db, serialize_doc
+import crm
 from models import (RegisterRequest, VerifyEmailRequest, ResendVerificationRequest,
                     LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
                     SignupRequestCreate)
@@ -61,6 +62,10 @@ async def signup_request(body: SignupRequestCreate):
         'date_of_birth': body.date_of_birth,
         'phone': body.phone,
         'status': 'PENDING',
+        # Kept as typed AND as folded, so an admin can see what the player
+        # actually entered when an attribution has to be corrected by hand.
+        'referral_code_raw': (body.referral_code or '').strip() or None,
+        'referral_code': crm.normalise_code(body.referral_code),
         'created_at': _now().isoformat(),
         'reviewed_at': None, 'reviewed_by': None, 'admin_note': None, 'assigned_username': None,
     }

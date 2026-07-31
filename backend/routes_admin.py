@@ -8,10 +8,15 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
-                    AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate)
+                    AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate,
+                    DistributorCreate,
+                    DistributorRate,
+                    DistributorStatus,
+                    PlayerReassign)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
+import crm
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -229,6 +234,9 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'provisioned_by': admin['id'], 'admin_note': body.note,
     }
     await db.users.insert_one(user)
+    # Attribution is bound at creation and never again — see crm.py. An account
+    # keyed in by an admin has no referral code, so it lands on the house.
+    await crm.attribute_user(user['id'], getattr(body, 'referral_code', None), actor=admin['id'])
     if body.starting_chips > 0:
         await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
     logger.info(f'admin {admin.get("email")} created account -> {username}')
@@ -284,6 +292,9 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         'provisioned_by': admin['id'], 'signup_request_id': request_id,
     }
     await db.users.insert_one(user)
+    # Attribution is bound at creation and never again — see crm.py. The code the
+    # player typed travels on the request; an unknown one falls to the house.
+    await crm.attribute_user(user['id'], req.get('referral_code'), actor=admin['id'])
     if body.starting_chips > 0:
         await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
     await _notify(user['id'], 'Welcome to Chakri.Casino!',
@@ -556,3 +567,86 @@ async def update_system(body: SystemConfigUpdate, admin: dict = Depends(require_
         await db.system_config.update_one({'key': 'main'}, {'$set': updates})
     cfg = await db.system_config.find_one({'key': 'main'}, {'_id': 0})
     return {'message': 'System config updated', 'config': serialize_doc(cfg)}
+
+
+# ---------- Distributors (CRM) ----------
+# The deck's section 1 and 5: referral code to distributor mapping, and the
+# figures a distributor's dashboard is built from.
+
+@router.get('/distributors')
+async def list_distributors(admin: dict = Depends(require_admin)):
+    await crm.ensure_house_account()
+    rows = await db.distributors.find({}, {'_id': 0}).sort('created_at', 1).to_list(500)
+    out = []
+    for d in rows:
+        d['rate_bps'] = await crm.rate_on(d['id'], crm.now_iso())
+        d['players'] = await db.users.count_documents({'distributor_id': d['id'], 'role': 'PLAYER'})
+        out.append(d)
+    return {'distributors': out}
+
+
+@router.post('/distributors')
+async def create_distributor(body: DistributorCreate, admin: dict = Depends(require_admin)):
+    try:
+        doc = await crm.create_distributor(
+            name=body.name, code=body.code, rate_bps=body.rate_bps,
+            created_by=admin['id'], email=body.email, phone=body.phone, note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    doc.pop('_id', None)
+    return {'message': f"Distributor {doc['code']} created", 'distributor': doc}
+
+
+@router.patch('/distributors/{distributor_id}/rate')
+async def change_rate(distributor_id: str, body: DistributorRate, admin: dict = Depends(require_admin)):
+    dist = await db.distributors.find_one({'id': distributor_id})
+    if not dist:
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    if dist.get('is_house'):
+        raise HTTPException(status_code=400, detail='The house account does not earn commission')
+    try:
+        row = await crm.set_rate(distributor_id, body.rate_bps, admin['id'], note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    row.pop('_id', None)
+    # The old rate is closed, not overwritten: statements already issued must
+    # keep reproducing the number they printed.
+    return {'message': 'Rate updated from now on; past periods are unchanged', 'rate': row}
+
+
+@router.patch('/distributors/{distributor_id}/status')
+async def set_distributor_status(distributor_id: str, body: DistributorStatus,
+                                 admin: dict = Depends(require_admin)):
+    dist = await db.distributors.find_one({'id': distributor_id})
+    if not dist:
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    if dist.get('is_house'):
+        raise HTTPException(status_code=400, detail='The house account cannot be suspended')
+    await db.distributors.update_one({'id': distributor_id}, {'$set': {
+        'status': body.status, 'status_changed_at': crm.now_iso(), 'status_changed_by': admin['id']}})
+    # Players stay where they are. Suspending a distributor stops new signups on
+    # the code and stops payouts; it does not orphan the players they brought.
+    return {'message': f'Distributor set to {body.status}'}
+
+
+@router.get('/distributors/{distributor_id}/players')
+async def distributor_players(distributor_id: str, admin: dict = Depends(require_admin)):
+    rows = await db.users.find(
+        {'distributor_id': distributor_id, 'role': 'PLAYER'},
+        {'_id': 0, 'id': 1, 'username': 1, 'full_name': 1, 'status': 1,
+         'chip_balance': 1, 'created_at': 1, 'distributor_code': 1},
+    ).sort('created_at', -1).to_list(1000)
+    return {'players': rows, 'count': len(rows)}
+
+
+@router.post('/players/{user_id}/distributor')
+async def move_player(user_id: str, body: PlayerReassign, admin: dict = Depends(require_admin)):
+    if not await db.users.find_one({'id': user_id}):
+        raise HTTPException(status_code=404, detail='Player not found')
+    try:
+        doc = await crm.reassign_user(user_id, body.distributor_id, admin['id'], note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    doc.pop('_id', None)
+    return {'message': 'Player reassigned from now on; settled periods are unchanged',
+            'attribution': doc}

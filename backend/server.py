@@ -84,6 +84,11 @@ async def lifespan(app: FastAPI):
             [{'$set': {'body': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}}}}])
         await db.system_config.update_one({'key': 'main'}, {'$set': {'nocash_wording_stripped': True}})
         logger.info('Stripped legacy no-cash-value wording from existing announcements/notifications')
+    # Distributor uniqueness is enforced by the index, not by the check in the
+    # request handler — two admins creating the same code in the same second is
+    # a race the handler loses and the index does not.
+    await crm.ensure_indexes()
+    await crm.ensure_house_account()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])

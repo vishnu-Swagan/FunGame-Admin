@@ -16,6 +16,10 @@ class SignupRequestCreate(BaseModel):
     email: EmailStr
     date_of_birth: str  # YYYY-MM-DD
     phone: str = Field(min_length=7, max_length=20)
+    # Optional, and deliberately not validated here: an unknown code must not
+    # cost the operator the registration. It is carried through and resolved at
+    # approval, falling back to the house account.
+    referral_code: Optional[str] = Field(default=None, max_length=16)
 
     @field_validator('phone')
     @classmethod
@@ -217,3 +221,38 @@ class ReturnChipsRequestCreate(BaseModel):
 class SupportMessageCreate(BaseModel):
     """A support/inbox message between a user and the admin."""
     body: str = Field(min_length=1, max_length=2000)
+
+
+# ---------- Distributor CRM ----------
+class DistributorCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    code: str = Field(min_length=4, max_length=12)
+    # Basis points, not a percentage float. 25.5% is 2550. A commission rate
+    # multiplies money, and money must not be multiplied by a float.
+    rate_bps: int = Field(ge=0, le=10000)
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    note: Optional[str] = None
+
+
+class DistributorRate(BaseModel):
+    rate_bps: int = Field(ge=0, le=10000)
+    note: Optional[str] = None
+
+
+class DistributorStatus(BaseModel):
+    status: str
+
+    @field_validator('status')
+    @classmethod
+    def known_status(cls, v):
+        allowed = {'ACTIVE', 'SUSPENDED', 'TERMINATED'}
+        u = str(v).upper()
+        if u not in allowed:
+            raise ValueError(f'Status must be one of {", ".join(sorted(allowed))}')
+        return u
+
+
+class PlayerReassign(BaseModel):
+    distributor_id: str
+    note: Optional[str] = None
