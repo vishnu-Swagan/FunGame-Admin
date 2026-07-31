@@ -82,7 +82,7 @@ const CurveScene = ({ phase, mult, growth, countdown, crashPoint }) => {
   return (
     <div
       data-testid="aviator-stage"
-      className={`relative overflow-hidden rounded-2xl border min-h-[248px] ${crashed ? "fg-av-shake" : ""} ${
+      className={`relative h-full min-h-[248px] overflow-hidden rounded-2xl border ${crashed ? "fg-av-shake" : ""} ${
         crashed ? "border-destructive/45" : flying ? "border-[hsl(var(--emerald)/0.35)]" : "border-white/10"
       }`}
       style={{
@@ -532,6 +532,12 @@ export default function AviatorGame({ game }) {
           <HistoryStrip history={history} />
         </>
       }
+      /* The flight stage is a canvas, not a document: it should occupy the
+         room it is given rather than stop at its minimum and leave the rest of
+         the screen empty. Fitting scales content DOWN to fit and leaves it at
+         its natural size when it is smaller, which for a 248px stage on a tall
+         handset means two thirds of the panel is dead space. */
+      fit={false}
     >
       <CurveScene phase={st?.phase} mult={mult} growth={st?.growth} countdown={countdown} crashPoint={st?.crash_point ?? mult} />
     </GameStage>

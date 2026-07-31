@@ -76,7 +76,12 @@ export const FitToStage = ({ children, min = 0.85, fluid = false, className = ""
   return (
     <div
       ref={boxRef}
-      className={`${fluid ? "overflow-hidden" : "overflow-y-auto"} overflow-x-hidden ${className}`}
+      /* Content shorter than the box is centred rather than pinned to the top.
+         A board that needs 300px of a 700px stage looked like a bug — a strip of
+         game with a screen of nothing under it — when it was only ever unused
+         room. */
+      className={`${fluid ? "overflow-hidden" : "overflow-y-auto"} overflow-x-hidden ${
+        fluid ? "" : "flex flex-col justify-center"} ${className}`}
       data-testid="fit-to-stage"
     >
       <div style={scale < 1 && reserved ? { height: reserved } : undefined}>
