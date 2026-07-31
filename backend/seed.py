@@ -121,10 +121,10 @@ async def run_seed():
         }))
 
     # Pre-approved test player
-    # Same reasoning for the demo player: keyed on the username, which is the
-    # thing the tests actually log in with.
-    if not await db.users.find_one({'$or': [{'email': 'player@fungame.app'},
-                                            {'username': 'lucky'}]}):
+    # The demo player has no username field, so this stays keyed on the address —
+    # which is what the test suites log in with. If that account is ever renamed,
+    # this needs the same treatment the admin just got.
+    if not await db.users.find_one({'email': 'player@fungame.app'}):
         pid = str(uuid.uuid4())
         await _safe_insert(db.users.insert_one({
             'id': pid, 'email': 'player@fungame.app',

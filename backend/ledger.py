@@ -18,13 +18,27 @@ the wrong day.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from db import db
 
 # Where the operator's day starts and ends. One declared zone, never the
 # server's local time — a container that moves region must not shift the books.
-SETTLEMENT_TZ = ZoneInfo(os.environ.get('SETTLEMENT_TZ', 'Europe/London'))
+_TZ_NAME = os.environ.get('SETTLEMENT_TZ', 'Europe/London')
+try:
+    SETTLEMENT_TZ = ZoneInfo(_TZ_NAME)
+except ZoneInfoNotFoundError:                       # no tz database in the image
+    # Evaluated at import, and imported by every route module, so raising here
+    # takes the entire API down before it serves a request — which is exactly
+    # what happened. Falling back keeps the service alive; the log is loud
+    # because the fallback silently shifts which day a bet is counted in, and a
+    # wrong gaming day is a wrong commission period.
+    logging.getLogger(__name__).error(
+        'TZ DATABASE MISSING: could not load %s, falling back to UTC. '
+        'Gaming days will be bucketed on UTC boundaries until tzdata is installed.',
+        _TZ_NAME)
+    SETTLEMENT_TZ = timezone.utc
 # A gaming day runs 00:00 to 00:00 in that zone unless the operator declares
 # otherwise. A constant, so the commission run and the ledger cannot disagree
 # about where the boundary sits.
