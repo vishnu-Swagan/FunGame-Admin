@@ -35,7 +35,8 @@ import AndarBaharCabinet from "@/pages/play/cabinet/AndarBaharCabinet";
 import FunTargetCabinet from "@/pages/play/cabinet/FunTargetCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
 import CheckerCabinet from "@/pages/play/cabinet/CheckerCabinet";
-import { RouletteCabinet, AviatorCabinet } from "@/pages/play/cabinet/FluidCabinets";
+import RouletteCabinet from "@/pages/play/cabinet/RouletteCabinet";
+import { AviatorCabinet } from "@/pages/play/cabinet/FluidCabinets";
 import {
   NoHoldCabinet, ChampionPokerCabinet, FeverJokerCabinet, GiantJackpotCabinet,
   Lucky8LineCabinet, TripleFunCabinet, BingoCabinet, GoldenWheelCabinet,
