@@ -53,7 +53,13 @@ export default function AppShell() {
     if (!config) return;
     if (config.maintenance_mode && user?.role !== "ADMIN") {
       navigate("/maintenance", { replace: true });
-    } else if (compareVersions(APP_VERSION, config.min_client_version) < 0) {
+    } else if (
+      user?.role !== "ADMIN" &&
+      compareVersions(APP_VERSION, config.min_client_version) < 0
+    ) {
+      // Admins are exempt on purpose. The minimum version is set from the admin
+      // panel, so a value above the shipped client would otherwise lock the one
+      // account that can lower it back out of the panel.
       navigate("/update-required", { replace: true });
     }
   }, [config, user, navigate]);

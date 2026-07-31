@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { api, errMsg, APP_VERSION } from "@/lib/api";
+import { api, errMsg, APP_VERSION, compareVersions } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { PageTransition, Disclaimer } from "@/components/common";
 
@@ -109,6 +109,12 @@ export default function AdminSettings() {
           placeholder="1.0.0"
           className="h-11 rounded-xl bg-white/5 border-white/12 max-w-[200px] tabular-nums"
         />
+        {compareVersions(APP_VERSION, minVersion) < 0 && (
+          <p data-testid="admin-min-version-warning" className="text-xs font-semibold text-amber-300">
+            v{minVersion || "?"} is above the shipped client (v{APP_VERSION}). Saving this locks
+            every player out on the update-required screen until a client that new is deployed.
+          </p>
+        )}
       </div>
 
       <Button data-testid="admin-system-save-button" onClick={saveConfig} disabled={busy || !config} className="rounded-xl font-bold h-11">
