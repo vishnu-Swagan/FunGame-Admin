@@ -31,7 +31,7 @@
 .fg-die-face {
   position: absolute;
   inset: 0;
-  border-radius: 10%;
+  border-radius: 20%;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
@@ -39,17 +39,16 @@
   gap: 3%;
   backface-visibility: hidden;
   background:
-    radial-gradient(122% 122% at 74% 16%, #fffdf7 0%, #f9f2e1 30%, #ece0c6 66%, #d6c8a6 100%);
+    radial-gradient(126% 126% at 62% 26%, #ffffff 0%, #fbfbfd 34%, #eef0f5 66%, #d3d7e0 88%, #bfc4d0 100%);
   box-shadow:
-    /* only the edges turned toward the key catch the chamfer highlight */
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.72),
-    inset -1.5px 0 0 rgba(255, 255, 255, 0.42),
-    /* and the two facing away from it fall into shade */
-    inset 0 -1.5px 0 rgba(104, 84, 46, 0.34),
-    inset 1.5px 0 0 rgba(104, 84, 46, 0.22),
-    /* the body of the face, brightest under the key, falling off opposite */
-    inset -5px 6px 13px rgba(255, 255, 255, 0.5),
-    inset 8px -9px 18px rgba(116, 94, 52, 0.2);
+    /* the chamfer catches a hard white line where it turns toward the key */
+    inset 0 2px 1px rgba(255, 255, 255, 0.95),
+    inset -2px 0 1px rgba(255, 255, 255, 0.7),
+    /* and rolls off into grey on the two edges facing away */
+    inset 0 -3px 5px rgba(120, 128, 148, 0.42),
+    inset 3px 0 5px rgba(120, 128, 148, 0.3),
+    /* the face is domed, so it lifts in the middle and falls at every edge */
+    inset 0 0 16px rgba(150, 158, 178, 0.24);
 }
 /* Six rounded faces do not close a cube: at each corner the curves pull away
    from one another and leave a notch straight through to the felt behind. A
@@ -61,7 +60,7 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: radial-gradient(56% 42% at 76% 14%, rgba(255, 255, 255, 0.42), transparent 74%);
+  background: radial-gradient(64% 48% at 70% 12%, rgba(255, 255, 255, 0.62), transparent 76%);
 }
 .fg-die-core {
   position: absolute;
@@ -69,29 +68,45 @@
   transform-style: preserve-3d;
 }
 .fg-die-core span {
+  /* Sized so the block reaches exactly as far along the corner diagonal as the
+     faces' arcs do: any less and the felt shows through the corner as a green
+     wedge, any more and it pokes out past the silhouette as a white sliver.
+     At a 74px die with a 20% face radius the faces reach 46.20px along the
+     diagonal; inset 2 with a 12% radius reaches 46.02. */
   position: absolute;
   inset: 2px;
-  border-radius: 4%;
-  background: #ece0c6;
+  border-radius: 12%;
+  background: radial-gradient(130% 130% at 62% 24%, #ffffff 0%, #f2f4f8 42%, #dcdfe8 74%, #c3c8d4 100%);
   backface-visibility: hidden;
 }
 .fg-pip {
   position: relative;
   align-self: center;
   justify-self: center;
-  width: 66%;
+  width: 72%;
   aspect-ratio: 1;
   border-radius: 50%;
-  /* lit from above: near wall shaded, far wall catching the bounce */
-  background: radial-gradient(circle at 50% 78%, #2c2c35 0%, #15151a 46%, #05050a 100%);
+  /* a drilled hole: black at the near wall, a touch of bounce off the far one */
+  background: radial-gradient(circle at 50% 76%, #23232a 0%, #0d0d11 44%, #000 100%);
   box-shadow:
-    inset 0 2.5px 3.5px rgba(0, 0, 0, 1),
-    inset 0 -1.5px 2px rgba(255, 255, 255, 0.22),
-    0 1px 0.5px rgba(255, 255, 255, 0.62),
-    0 0 2px rgba(0, 0, 0, 0.3);
+    inset 0 2px 3px rgba(0, 0, 0, 1),
+    inset 0 -1.5px 2px rgba(190, 195, 210, 0.2),
+    0 1px 1px rgba(255, 255, 255, 0.85),
+    0 0 2px rgba(90, 96, 112, 0.35);
+}
+/* the small hard highlight the reference dice carry on each pip */
+.fg-pip::after {
+  content: "";
+  position: absolute;
+  left: 22%;
+  top: 16%;
+  width: 30%;
+  height: 26%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.5), transparent 78%);
 }
 .fg-pip-red {
-  background: radial-gradient(circle at 50% 78%, #c8404a 0%, #8e1a22 46%, #4d040a 100%);
+  background: radial-gradient(circle at 50% 76%, #c03840 0%, #85161d 46%, #440308 100%);
   box-shadow:
     inset 0 2.5px 3.5px rgba(40, 0, 0, 0.95),
     inset 0 -1.5px 2px rgba(255, 190, 190, 0.3),
@@ -143,7 +158,7 @@
   height: 13px;
   transform: translateX(-50%);
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0.26) 56%, transparent 78%);
+  background: radial-gradient(closest-side, rgba(4, 20, 12, 0.62), rgba(4, 20, 12, 0.24) 56%, transparent 78%);
   filter: blur(3px);
 }
 .fg-die-shadow.rolling {
