@@ -25,7 +25,7 @@ from game_engines import (
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
-    settle_bet, summarize_outcome, make_bingo_card, paytable_for,
+    settle_bet, summarize_outcome, make_bingo_card, paytable_for, limits_for,
 )
 
 logger = logging.getLogger('live')
@@ -214,8 +214,11 @@ async def aviator_state(user: dict = Depends(require_active_player)):
 
 @router.post('/live/aviator/bets')
 async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_active_player)):
-    if body.amount < MIN_BET:
-        raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
+    _min, _max = limits_for('aviator')
+    if body.amount < _min:
+        raise HTTPException(status_code=400, detail=f'Minimum bet is {_min} chips')
+    if body.amount > _max:
+        raise HTTPException(status_code=400, detail=f'Maximum bet is {_max} chips')
     r = await advance_aviator()
     now = time.time()
     phase, t = _av_phase(r, now)
@@ -476,7 +479,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         # minimum that was not the minimum — would be lying to the player about
         # what it accepts. Sent rather than hardcoded in the client for the same
         # reason the odds are.
-        'min_bet': MIN_BET, 'max_bet': MAX_BET,
+        'min_bet': limits_for(slug)[0], 'max_bet': limits_for(slug)[1],
         # The engine's own price list, so the felt cannot quote an offer
         # settlement would not honour.
         'paytable': paytable_for(slug),
@@ -495,8 +498,11 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     rn, phase, ends_in, _ = _live_clock(slug)
     if phase != 'BETTING' or ends_in < 0.4:
         raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are closed - wait for the next round.'})
-    if body.amount < MIN_BET:
-        raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
+    _min, _max = limits_for(slug)
+    if body.amount < _min:
+        raise HTTPException(status_code=400, detail=f'Minimum bet is {_min} chips')
+    if body.amount > _max:
+        raise HTTPException(status_code=400, detail=f'Maximum bet is {_max} chips')
     selection = validate_selection(slug, body.selection)
     card = make_bingo_card() if slug == 'bingo' else None
     bet_id = str(uuid.uuid4())

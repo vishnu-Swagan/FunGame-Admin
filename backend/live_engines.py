@@ -6,6 +6,7 @@ Player-specific randomness (bingo cards) is created at bet time.
 """
 from fastapi import HTTPException
 from game_engines import (
+    MIN_BET, MAX_BET,
     RNG, new_deck, draw_cards, card_str, eval_poker5, eval_teen_patti, TP_LABELS,
     vp_result, play_slot, play_no_hold, play_checker, play_andar_bahar,
     play_giant_jackpot, play_fever_joker, play_lucky8, play_triple_fun, play_joker_bonus, KENO_PAYTABLE, WHEEL_SEGMENTS, weighted_choice,
@@ -146,6 +147,32 @@ def paytable_for(slug, picks=None):
     if slug == "fun-target":
         return [["EXACT NUMBER", 7]]
     return None
+
+
+# The stake limits each machine is held to. The reference cabinets print these
+# on the message rail and size their chip rail from them — 7Up7Down takes 5 to
+# 1,000 and carries a 1/5/50/100/500/1000 rail — so they are per-table rather
+# than one global pair. A table whose rail offered a chip this map refuses would
+# be advertising a bet the server rejects.
+TABLE_LIMITS = {
+    "seven-up-down": (1, 1000),
+    "fun-target": (1, 5000),
+    "andar-bahar": (10, 10000),
+    "triple-fun": (5, 5000),
+    "checker": (5, 1000),
+    "keno": (5, 1000),
+    "bingo": (5, 1000),
+    "super-golden-wheel": (5, 1000),
+    "no-hold": (5, 1000),
+    "champion-poker": (1, 1000),
+    "fever-joker-bonus": (5, 1000),
+    "giant-jackpot": (1, 1000),
+    "lucky-8-line": (1, 1000),
+}
+
+
+def limits_for(slug):
+    return TABLE_LIMITS.get(slug, (MIN_BET, MAX_BET))
 
 
 def cycle_seconds(slug):
