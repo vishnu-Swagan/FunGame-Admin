@@ -256,3 +256,12 @@ class DistributorStatus(BaseModel):
 class PlayerReassign(BaseModel):
     distributor_id: str
     note: Optional[str] = None
+
+
+class CommissionSettle(BaseModel):
+    period_start: str
+    period_end: Optional[str] = None
+    # A settled period is never silently reworked. Redoing one is an explicit
+    # new version, and the previous version is kept so a statement already sent
+    # still reproduces.
+    version: int = Field(default=1, ge=1, le=99)

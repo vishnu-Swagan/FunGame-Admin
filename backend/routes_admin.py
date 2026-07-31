@@ -12,12 +12,14 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     DistributorCreate,
                     DistributorRate,
                     DistributorStatus,
-                    PlayerReassign)
+                    PlayerReassign,
+                    CommissionSettle)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
 import revenue
+import commission
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -681,3 +683,40 @@ async def rebuild_revenue(day: str, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail='Day must be YYYY-MM-DD')
     result = await revenue.rebuild_day(day)
     return {'message': f'Rebuilt {day} from the ledger', **result}
+
+
+# ---------- Commission runs (CRM) ----------
+# Section 4 of the deck. The run is idempotent and refuses to settle a closed
+# period, so these endpoints are safe to call from an external scheduler and
+# safe to retry when one times out.
+
+@router.post('/commission/settle')
+async def settle_commission(body: CommissionSettle, admin: dict = Depends(require_admin)):
+    start = body.period_start
+    end = body.period_end or body.period_start
+    try:
+        datetime.strptime(start, '%Y-%m-%d'); datetime.strptime(end, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(status_code=400, detail='Dates must be YYYY-MM-DD')
+    if end < start:
+        raise HTTPException(status_code=400, detail='period_end is before period_start')
+    try:
+        result = await commission.run_commission(start, end, actor=admin['id'], version=body.version)
+    except commission.PeriodClosed as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except commission.PeriodBusy as e:
+        raise HTTPException(status_code=423, detail=str(e))
+    return {'message': f'Settled {start}..{end}', **result}
+
+
+@router.get('/commission/runs')
+async def commission_runs(admin: dict = Depends(require_admin)):
+    runs = await db.commission_runs.find({}, {'_id': 0}).sort('period_end', -1).to_list(120)
+    return {'runs': runs}
+
+
+@router.get('/commission/ledger')
+async def commission_ledger(distributor_id: str = None, admin: dict = Depends(require_admin)):
+    q = {'distributor_id': distributor_id} if distributor_id else {}
+    rows = await db.commission_ledger.find(q, {'_id': 0}).sort('period_end', -1).to_list(500)
+    return {'entries': rows, 'accrued': sum(r['commission'] for r in rows)}

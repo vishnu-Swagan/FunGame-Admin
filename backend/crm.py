@@ -154,12 +154,31 @@ async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=N
 
 async def rate_on(distributor_id, when_iso):
     """The rate in force at an instant — what a commission run must ask for."""
+    bps, _ = await rate_on_detailed(distributor_id, when_iso)
+    return bps
+
+
+async def rate_on_detailed(distributor_id, when_iso):
+    """The rate, and WHERE it came from.
+
+    Returning a bare 0 when no rate was in force is the dangerous answer: a
+    mistyped effective date, or a period predating the distributor, would
+    silently pay them nothing and nobody would find out until they queried a
+    statement. A miss falls back to their earliest known rate and says so, and
+    the caller writes that provenance onto the row where an auditor sees it.
+    """
     row = await db.distributor_rates.find_one({
         'distributor_id': distributor_id,
         'effective_from': {'$lte': when_iso},
         '$or': [{'effective_to': None}, {'effective_to': {'$gt': when_iso}}],
     }, sort=[('effective_from', -1)])
-    return int(row['rate_bps']) if row else 0
+    if row:
+        return int(row['rate_bps']), 'IN_FORCE'
+    earliest = await db.distributor_rates.find_one(
+        {'distributor_id': distributor_id}, sort=[('effective_from', 1)])
+    if earliest:
+        return int(earliest['rate_bps']), 'EARLIEST_FALLBACK'
+    return 0, 'NO_RATE'
 
 
 # ----------------------------------------------------------------- attribution
