@@ -7,7 +7,8 @@
       "namespace": "android_app",
       "package_name": "com.onrender.fungame_web.twa",
       "sha256_cert_fingerprints": [
-        "22:02:A2:30:13:2C:B4:FD:CF:C3:B4:75:53:C9:A7:93:61:36:5F:36:71:9F:AA:67:D1:8D:E4:85:50:1B:2F:77"
+        "22:02:A2:30:13:2C:B4:FD:CF:C3:B4:75:53:C9:A7:93:61:36:5F:36:71:9F:AA:67:D1:8D:E4:85:50:1B:2F:77",
+        "FA:E1:C0:02:3B:9F:72:67:F1:57:1B:A2:68:62:79:BB:B9:56:BD:E3:31:E4:B7:EE:88:4A:D5:FD:D2:84:EF:E1"
       ]
     }
   },
