@@ -12,9 +12,20 @@ const FACE_ROT = {
   3: "rotateX(0deg) rotateY(-90deg)", 4: "rotateX(0deg) rotateY(90deg)",
   5: "rotateX(90deg) rotateY(0deg)", 6: "rotateX(0deg) rotateY(180deg)",
 };
+/* Nobody looks at a die square-on, and a die drawn square-on is a square: one
+   face, no silhouette, no thickness. Landing it a few degrees off both axes
+   shows the top and one side as well, which is what makes it read as a solid
+   block rather than a printed tile — and it is how a die actually comes to
+   rest, never perfectly aligned to anyone's eye. */
+const DIE_TILT = "rotateX(-14deg) rotateY(19deg)";
 const FACE_PLACE = {
-  1: "translateZ(34px)", 2: "rotateX(90deg) translateZ(34px)", 3: "rotateY(90deg) translateZ(34px)",
-  4: "rotateY(-90deg) translateZ(34px)", 5: "rotateX(-90deg) translateZ(34px)", 6: "rotateY(180deg) translateZ(34px)",
+  1: "translateZ(37px)", 2: "rotateX(90deg) translateZ(37px)", 3: "rotateY(90deg) translateZ(37px)",
+  4: "rotateY(-90deg) translateZ(37px)", 5: "rotateX(-90deg) translateZ(37px)", 6: "rotateY(180deg) translateZ(37px)",
+};
+/* the solid block behind the rounded faces — see .fg-die-core */
+const CORE_PLACE = {
+  1: "translateZ(33px)", 2: "rotateX(90deg) translateZ(33px)", 3: "rotateY(90deg) translateZ(33px)",
+  4: "rotateY(-90deg) translateZ(33px)", 5: "rotateX(-90deg) translateZ(33px)", 6: "rotateY(180deg) translateZ(33px)",
 };
 
 const DieFace = ({ value }) => (
@@ -30,8 +41,11 @@ const Die = ({ value, rolling, variant, duration = "0.8s" }) => (
     <div className={`fg-die-shadow ${rolling ? "rolling" : ""}`} style={rolling ? { animationDuration: duration } : {}} />
     <div
       className={`fg-die ${rolling ? `rolling ${variant ? "v2" : ""}` : ""}`}
-      style={rolling ? { animationDuration: duration } : { transform: FACE_ROT[value] }}
+      style={rolling ? { animationDuration: duration } : { transform: `${DIE_TILT} ${FACE_ROT[value]}` }}
     >
+      <div className="fg-die-core" aria-hidden="true">
+        {[1, 2, 3, 4, 5, 6].map((v) => <span key={v} style={{ transform: CORE_PLACE[v] }} />)}
+      </div>
       {[1, 2, 3, 4, 5, 6].map((v) => <DieFace key={v} value={v} />)}
     </div>
   </div>
@@ -241,16 +255,11 @@ export default function DiceGame({ game }) {
           ))}
         </div>
 
-        {/* the dice, under the glass */}
+        {/* the dice, thrown onto open felt */}
         <div className="relative flex items-center justify-center py-2">
-          <div className="fg-dome" data-testid="dice-dome">
-            <div className="fg-dome-dish" />
-            <div className="fg-dome-stage">
-              <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
-              <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
-            </div>
-            <div className="fg-dome-glass" />
-            <div className="fg-dome-collar" />
+          <div className="fg-throw" data-testid="dice-throw">
+            <Die value={dice[0]} rolling={rolling} variant={rollCfg[0].v} duration={rollCfg[0].d} />
+            <Die value={dice[1]} rolling={rolling} variant={rollCfg[1].v} duration={rollCfg[1].d} />
           </div>
           {betting && countdown > 0 && (
             <span data-testid="dice-countdown"
