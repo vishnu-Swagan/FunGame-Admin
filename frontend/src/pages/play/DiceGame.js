@@ -233,11 +233,11 @@ export default function DiceGame({ game }) {
       balance={balance}
       live={{ phase, countdown, timings: state?.timings, roundNumber: state?.round_number }}
       labels={{ REVEAL: "ROLLING…" }}
-      /* This table is long — percentages, roadmap, the throw, the limits bar,
-         three side panels and ten totals. Squeezed to fit the stage it went to
-         85% and every betting cell with it. It takes the width it needs and
-         scrolls instead. */
-      fit={false}
+      /* The table now measures 585px against a 581px stage on a 360px handset,
+         so fitting it costs about half a percent of scale — invisible — and
+         buys back the thing that actually mattered: no scrolling. It was only
+         worth turning off when the board was 653px and fitting meant shrinking
+         every betting cell by 15%. */
       betDock={
         <div className="flex items-center gap-2" data-testid="dice-tray">
           <button type="button" onClick={again} disabled={!betting || busy || !prevRound.length}
