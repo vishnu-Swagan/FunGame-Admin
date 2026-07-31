@@ -265,3 +265,18 @@ class CommissionSettle(BaseModel):
     # new version, and the previous version is kept so a statement already sent
     # still reproduces.
     version: int = Field(default=1, ge=1, le=99)
+
+
+class PayoutAction(BaseModel):
+    note: Optional[str] = None
+
+
+class PayoutPaid(BaseModel):
+    # Required: an unreferenced payment cannot be reconciled against a bank
+    # statement, and a payout nobody can trace is a payout nobody can prove.
+    payment_ref: str = Field(min_length=2, max_length=80)
+
+
+class ClawbackCreate(BaseModel):
+    amount: int = Field(gt=0)
+    reason: str = Field(min_length=4, max_length=300)

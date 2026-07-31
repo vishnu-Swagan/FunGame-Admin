@@ -4,7 +4,7 @@ import string
 import secrets
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
@@ -13,13 +13,18 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     DistributorRate,
                     DistributorStatus,
                     PlayerReassign,
-                    CommissionSettle)
+                    CommissionSettle,
+                    PayoutAction,
+                    PayoutPaid,
+                    ClawbackCreate)
 from auth_utils import require_admin, hash_password
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
 import revenue
 import commission
+import payouts
+import os
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -720,3 +725,95 @@ async def commission_ledger(distributor_id: str = None, admin: dict = Depends(re
     q = {'distributor_id': distributor_id} if distributor_id else {}
     rows = await db.commission_ledger.find(q, {'_id': 0}).sort('period_end', -1).to_list(500)
     return {'entries': rows, 'accrued': sum(r['commission'] for r in rows)}
+
+
+# ---------- Payout queue (CRM) ----------
+
+@router.post('/payouts/build')
+async def build_payouts(admin: dict = Depends(require_admin)):
+    made = await payouts.build_all(actor=admin['id'])
+    for m in made:
+        m.pop('_id', None)
+    return {'message': f'{len(made)} payout(s) raised', 'payouts': made,
+            'note': 'Commission inside the holdback, or under the threshold, stays accrued'}
+
+
+@router.get('/payouts')
+async def list_payouts(status: str = None, admin: dict = Depends(require_admin)):
+    q = {'status': status.upper()} if status else {}
+    rows = await db.payouts.find(q, {'_id': 0}).sort('created_at', -1).to_list(300)
+    return {'payouts': rows, 'pending_total': sum(
+        r['amount'] for r in rows if r['status'] == payouts.PENDING)}
+
+
+@router.post('/payouts/{payout_id}/approve')
+async def approve_payout(payout_id: str, body: PayoutAction, admin: dict = Depends(require_admin)):
+    try:
+        doc = await payouts.approve(payout_id, admin['id'], note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {'message': 'Payout approved', 'payout': doc}
+
+
+@router.post('/payouts/{payout_id}/reject')
+async def reject_payout(payout_id: str, body: PayoutAction, admin: dict = Depends(require_admin)):
+    try:
+        doc = await payouts.reject(payout_id, admin['id'], body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {'message': 'Payout rejected; the commission returns to the pool', 'payout': doc}
+
+
+@router.post('/payouts/{payout_id}/paid')
+async def mark_payout_paid(payout_id: str, body: PayoutPaid, admin: dict = Depends(require_admin)):
+    try:
+        doc = await payouts.mark_paid(payout_id, admin['id'], body.payment_ref)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {'message': 'Payout marked paid', 'payout': doc}
+
+
+@router.post('/distributors/{distributor_id}/clawback')
+async def raise_clawback(distributor_id: str, body: ClawbackCreate,
+                         admin: dict = Depends(require_admin)):
+    if not await db.distributors.find_one({'id': distributor_id}):
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    try:
+        row = await payouts.clawback(distributor_id, body.amount, body.reason, admin['id'])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'message': 'Clawback raised; it nets off the next payout', 'entry': row}
+
+
+@router.get('/distributors/{distributor_id}/balance')
+async def distributor_balance(distributor_id: str, admin: dict = Depends(require_admin)):
+    return await payouts.balance_for(distributor_id)
+
+
+@router.post('/cron/night')
+async def night_run(request: Request):
+    """The 02:00 job: aggregate yesterday, settle it, then raise payouts.
+
+    Authenticated by a shared secret rather than an admin session, because a
+    scheduler has no session. Every step is idempotent, so a retry after a
+    timeout repeats nothing — the aggregation is derived, the settlement claims
+    its period, and the payout build claims its entries.
+    """
+    secret = os.environ.get('CRON_SECRET')
+    if not secret:
+        raise HTTPException(status_code=503, detail='CRON_SECRET is not configured')
+    if request.headers.get('x-cron-key') != secret:
+        raise HTTPException(status_code=401, detail='Bad cron key')
+
+    day = commission.previous_day(ledger.gaming_day())
+    steps = {'day': day}
+    steps['revenue'] = await revenue.rebuild_day(day)
+    try:
+        steps['commission'] = await commission.run_commission(day, day, actor='cron')
+    except commission.PeriodClosed:
+        steps['commission'] = 'already settled'
+    except commission.PeriodBusy as e:
+        steps['commission'] = f'skipped: {e}'
+    built = await payouts.build_all(actor='cron')
+    steps['payouts_raised'] = len(built)
+    return steps

@@ -38,6 +38,13 @@ services:
         value: production                            # production: never leak verification codes (dev_code)
       - key: EMAIL_PROVIDER
         value: demo                                  # resets are admin-handled; no code is exposed
+      - key: CRON_SECRET
+        sync: false          # set in dashboard — the night job's shared key
+      - key: SETTLEMENT_TZ
+        # The operator's day. Every gaming day, every commission period and the
+        # night job's own schedule are derived from this one value, so the books
+        # cannot disagree with the clock that settles them.
+        value: Europe/London
 
   # Static frontend (CDN-served, always on). Built by Render; serves the PWA
   # that PWABuilder wraps into the Android APK.
@@ -78,3 +85,26 @@ services:
       - path: /*
         name: Permissions-Policy
         value: geolocation=(), microphone=(), camera=()
+
+  # The night run: aggregate yesterday's revenue, settle commission, raise
+  # payouts. 02:00 Europe/London — Render schedules in UTC, so this is 01:00 UTC
+  # and drifts an hour across BST. That is deliberate and harmless: the job
+  # settles a NAMED day rather than "the last 24 hours", and every step is
+  # idempotent, so firing early, late or twice changes nothing.
+  - type: cron
+    name: chakri-casino-night
+    runtime: docker
+    branch: main
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    schedule: "0 1 * * *"
+    dockerCommand: >-
+      sh -c "curl -sS -X POST -H \"x-cron-key: $CRON_SECRET\"
+      $API_BASE/api/admin/cron/night -w '\n%{http_code}\n' --fail-with-body"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: API_BASE
+        value: https://chakri-casino-api.onrender.com
