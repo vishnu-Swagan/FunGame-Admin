@@ -17,3 +17,9 @@ export const IS_ADMIN_CONSOLE =
 
 export const ADMIN_LOGIN_PATH = IS_ADMIN_CONSOLE ? "/admin/login" : "/gk-admin-portal";
 export const ADMIN_LOGOUT_PATH = IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/welcome";
+
+// A newly opened console has no remembered failover host. Route it to the
+// verified branded API instead of relying on a historical Render hostname.
+export function apiOriginForRuntime(defaultBackendUrl, isAdminConsole = IS_ADMIN_CONSOLE) {
+  return isAdminConsole ? "https://api.chakri.casino" : defaultBackendUrl;
+}

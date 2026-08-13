@@ -1,5 +1,5 @@
 import axios from "axios";
-import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
+import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE, apiOriginForRuntime } from "@/lib/adminConsole";
 
 export const APP_VERSION = "1.0.0";
 
@@ -12,7 +12,9 @@ export const APP_VERSION = "1.0.0";
    others once, keeps whichever answers, and remembers it. That turns the rename
    from a synchronised cutover into two independent deploys in either order. */
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const PRIMARY_BACKEND_URL = apiOriginForRuntime(BACKEND_URL);
 const ALTERNATES = [
+  PRIMARY_BACKEND_URL,
   BACKEND_URL,
   "https://api.chakri.casino",
   "https://chakri-casino-api.onrender.com",
