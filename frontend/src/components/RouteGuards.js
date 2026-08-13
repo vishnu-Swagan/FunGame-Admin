@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
+import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 import { LoadingScreen } from "@/components/common";
 
 export function PublicOnly({ children }) {
@@ -41,7 +42,7 @@ export function RequirePartner({ children }) {
 export function RequireAdmin({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" replace />;
-  if (user.role !== "ADMIN") return <Navigate to="/home" replace />;
+  if (!user) return <Navigate to={IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/welcome"} replace />;
+  if (user.role !== "ADMIN") return <Navigate to={IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/home"} replace />;
   return children;
 }

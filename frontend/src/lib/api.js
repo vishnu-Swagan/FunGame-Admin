@@ -1,4 +1,5 @@
 import axios from "axios";
+import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
 export const APP_VERSION = "1.0.0";
 
@@ -47,7 +48,7 @@ function failover() {
   return failoverInFlight;
 }
 
-const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required"];
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH];
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("fg_token");
@@ -79,7 +80,7 @@ api.interceptors.response.use(
         localStorage.setItem("fg_logout_reason", detail.message || "You were signed out because this Login ID was used on another device.");
       }
       localStorage.removeItem("fg_token");
-      window.location.assign("/login");
+      window.location.assign(IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/login");
       return Promise.reject(error);
     }
     /* A refusal that closes the whole app to this player gets its own screen.

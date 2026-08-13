@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
+import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
 import { PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
@@ -75,7 +76,35 @@ function FallbackRedirect() {
   return <Navigate to={routeForUser(user)} replace />;
 }
 
-function App() {
+function AdminConsoleApp() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Toaster position="top-center" theme="dark" richColors closeButton />
+        <Routes>
+          <Route path={ADMIN_LOGIN_PATH} element={<PublicOnly><AdminLogin /></PublicOnly>} />
+          <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="signups" element={<AdminSignups />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="distributors" element={<AdminDistributors />} />
+            <Route path="commission" element={<AdminCommission />} />
+            <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="compliance" element={<AdminCompliance />} />
+            <Route path="support" element={<AdminSupport />} />
+            <Route path="games" element={<AdminGames />} />
+            <Route path="announcements" element={<AdminAnnouncements />} />
+            <Route path="settings" element={<AdminSettings />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+function PlayerApp() {
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -162,4 +191,6 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return IS_ADMIN_CONSOLE ? <AdminConsoleApp /> : <PlayerApp />;
+}

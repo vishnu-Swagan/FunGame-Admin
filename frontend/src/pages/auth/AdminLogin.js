@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { BrandWordmark } from "@/components/Brand";
+import { ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
 
 /** Private operator sign-in — deliberately distinct from the player login
     (secure "control console" look, no casino branding). Admin-only. */
@@ -26,7 +27,7 @@ export default function AdminLogin() {
       const { data } = await api.post("/auth/login", { email, password });
       if (data.user.role !== "ADMIN") {
         toast.error("Access denied — administrators only.");
-        navigate("/login", { replace: true });
+        navigate(ADMIN_LOGIN_PATH, { replace: true });
         return;
       }
       login(data.access_token, data.user);

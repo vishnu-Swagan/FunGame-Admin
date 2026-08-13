@@ -39,7 +39,7 @@ services:
         # The custom domain is the origin the browser actually sends once DNS is
         # cut over; the .onrender.com hosts stay listed so nothing breaks during
         # the changeover and so a direct Render URL still works for debugging.
-        value: "https://chakri.casino,https://www.chakri.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
+        value: "https://chakri.casino,https://www.chakri.casino,https://mydgp.casino,https://www.mydgp.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
       - key: APP_ENV
         value: production                            # production: never leak verification codes (dev_code)
       - key: EMAIL_PROVIDER

@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
 import { toast } from "sonner";
+import { ADMIN_LOGOUT_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
@@ -42,22 +43,24 @@ export default function AdminLayout() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Disclaimer className="hidden md:block" />
-            <button
-              data-testid="admin-open-player-app"
-              onClick={() => navigate("/home")}
-              className="flex items-center gap-1.5 text-xs font-semibold text-white/65 hover:text-white border border-white/10 bg-white/5 rounded-full px-2.5 sm:px-3 py-1.5 min-h-[36px]"
-              aria-label="Open the player app"
-            >
-              {/* The label goes on a phone; the icon still says what it does,
-                  and the two buttons plus the wordmark do not fit at 390px. */}
-              <Smartphone className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden sm:inline">Player app</span>
-            </button>
+            {!IS_ADMIN_CONSOLE && (
+              <button
+                data-testid="admin-open-player-app"
+                onClick={() => navigate("/home")}
+                className="flex items-center gap-1.5 text-xs font-semibold text-white/65 hover:text-white border border-white/10 bg-white/5 rounded-full px-2.5 sm:px-3 py-1.5 min-h-[36px]"
+                aria-label="Open the player app"
+              >
+                {/* The label goes on a phone; the icon still says what it does,
+                    and the two buttons plus the wordmark do not fit at 390px. */}
+                <Smartphone className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden sm:inline">Player app</span>
+              </button>
+            )}
             <button
               data-testid="admin-logout-button"
               onClick={() => {
                 logout();
-                navigate("/welcome");
+                navigate(ADMIN_LOGOUT_PATH);
                 toast.success("Logged out");
               }}
               aria-label="Log out"
