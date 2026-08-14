@@ -29,6 +29,7 @@ import routes_games
 import routes_live
 import routes_blackjack
 import routes_security
+import routes_migration_export
 
 logging.basicConfig(
     level=logging.INFO,
@@ -191,6 +192,9 @@ api_router.include_router(routes_distributor.router)
 api_router.include_router(routes_compliance.router)
 api_router.include_router(routes_compliance.admin_router)
 api_router.include_router(routes_security.router)
+# Kept hidden from OpenAPI and disabled unless a short-lived, HMAC-protected
+# migration window is explicitly configured.  See routes_migration_export.py.
+api_router.include_router(routes_migration_export.router)
 app.include_router(api_router)
 
 # --- Security middleware ---
