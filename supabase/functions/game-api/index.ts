@@ -14,6 +14,7 @@ import {
   generateServerOutcome,
   normalizePlayerAction,
   outcomeForPublicPhase,
+  snapshotRevealSeconds,
   type ClockState,
   type GameSpec,
   type RuntimeMode,
@@ -397,7 +398,10 @@ async function snapshot(actor: PlayerActor, session: SessionRow, runtime: Runtim
     min_bet: spec.min_bet,
     max_bet: spec.max_bet,
     last_payout: 0,
-    reveal_seconds: clock.phase === "REVEAL" ? phaseEndsIn : 0,
+    // Unity uses this as the full animation duration. `phase_ends_in` above
+    // is the only clock that counts down between polls; feeding it here would
+    // change the speed/restart position halfway through a reveal.
+    reveal_seconds: snapshotRevealSeconds(spec),
     outcome_json: publicOutcome ? JSON.stringify(publicOutcome) : null,
     my_bets: bets,
     paytable: [],

@@ -7,6 +7,7 @@ import {
   normalizePlayerAction,
   rouletteMultiplier,
   settleReviewedWager,
+  snapshotRevealSeconds,
   validateSelection,
 } from "./game-core.ts";
 
@@ -47,6 +48,18 @@ Deno.test("roulette clock preserves open/lock/reveal/result boundaries", () => {
   assert(result.phase === "RESULT", "roulette result must start after 56 seconds");
   const next = clockState(roulette, 60_000);
   assert(next.round_number === 1 && next.phase === "BETTING", "roulette must begin a new 60-second shared round");
+});
+
+Deno.test("snapshot reveal duration stays fixed while phase time counts down", () => {
+  const roulette = gameSpec("fun-roulette");
+  const early = clockState(roulette, 45_100);
+  const late = clockState(roulette, 54_900);
+  assert(early.phase === "REVEAL" && late.phase === "REVEAL", "test samples must be inside reveal");
+  assert(early.phase_ends_in_ms > late.phase_ends_in_ms, "phase clock should count down");
+  assert(snapshotRevealSeconds(roulette) === 11, "roulette reveal needs its full approved duration");
+  assert(snapshotRevealSeconds(roulette) !== early.phase_ends_in_ms / 1000
+    && snapshotRevealSeconds(roulette) !== late.phase_ends_in_ms / 1000,
+  "polling must not turn reveal duration into remaining time");
 });
 
 Deno.test("roulette validates and settles only Unity-whitelisted positions", () => {

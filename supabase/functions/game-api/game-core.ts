@@ -503,6 +503,20 @@ export function clockState(
   };
 }
 
+/**
+ * The renderer needs the full approved reveal duration for the whole round,
+ * not the changing time remaining in the current REVEAL phase.  The latter is
+ * supplied separately as `phase_ends_in`; returning it here would restart or
+ * accelerate a Unity animation after every poll.
+ */
+export function snapshotRevealSeconds(spec: GameSpec): number {
+  const seconds = spec.timing.reveal_seconds;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+    throw new GameRuleError("OUTCOME_NOT_IMPLEMENTED", "This cabinet has no approved reveal duration.");
+  }
+  return seconds;
+}
+
 function asSafePositiveInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw new GameRuleError("INVALID_STAKE", `${label} must be a positive whole number.`);
