@@ -1,4 +1,10 @@
-"""Idempotent seed data: admin user, test player, 18 games, announcements, system config."""
+"""Idempotent system data and opt-in local demo identities.
+
+Games, configuration and announcements are safe to seed in a new environment.
+The old ``@fungame.app`` administrator/player pair is not: those credentials
+must exist only when a local developer explicitly asks for demo seeds.
+"""
+import os
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -16,6 +22,17 @@ async def _safe_insert(coro):
         await coro
     except DuplicateKeyError:
         pass
+
+
+def demo_seed_enabled(environment=None):
+    """Return whether legacy demo login accounts were explicitly requested.
+
+    Production defaults to ``False``.  A developer who needs the old fixture
+    accounts must set ``ENABLE_DEMO_SEEDS=true`` for that local/test process.
+    """
+
+    env = environment if environment is not None else os.environ
+    return (env.get('ENABLE_DEMO_SEEDS') or '').strip().lower() == 'true'
 
 GAMES = [
     {"slug": "aviator", "name": "Aviator", "category": "Crash", "tagline": "Fly high, ride the multiplier", "featured": True,
@@ -103,42 +120,40 @@ async def run_seed():
             'min_client_version': '1.0.0', 'updated_at': now,
         }))
 
-    # Admin user
-    # Keyed on the ROLE, not on an address. Seeding exists to bootstrap an empty
-    # database; if an admin already exists under any address, there is nothing to
-    # bootstrap. Keyed on the address, renaming the operator's login would make
-    # the next restart quietly recreate the old one — with the seed password —
-    # and that account would be a live way in that nobody knew about.
-    if not await db.users.find_one({'role': 'ADMIN'}):
-        await _safe_insert(db.users.insert_one({
-            'id': str(uuid.uuid4()), 'email': 'admin@fungame.app',
-            'password_hash': hash_password('FunGame@Admin2025'),
-            'role': 'ADMIN', 'status': 'ACTIVE', 'email_verified': True,
-            'display_name': 'Chakri.Casino Operator', 'country': 'India', 'avatar': 'crown',
-            'chip_balance': 0, 'favorites': [], 'recent_games': [],
-            'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
-            'created_at': now,
-        }))
+    if demo_seed_enabled():
+        logger.warning('ENABLE_DEMO_SEEDS=true: inserting legacy demo login accounts')
+        # Admin user.  Keyed on the role, not on an address, so an existing live
+        # administrator prevents an old demo login from being recreated.
+        if not await db.users.find_one({'role': 'ADMIN'}):
+            await _safe_insert(db.users.insert_one({
+                'id': str(uuid.uuid4()), 'email': 'admin@fungame.app',
+                'password_hash': hash_password('FunGame@Admin2025'),
+                'role': 'ADMIN', 'status': 'ACTIVE', 'email_verified': True,
+                'display_name': 'Chakri.Casino Operator', 'country': 'India', 'avatar': 'crown',
+                'chip_balance': 0, 'favorites': [], 'recent_games': [],
+                'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
+                'created_at': now,
+            }))
 
-    # Pre-approved test player
-    # The demo player has no username field, so this stays keyed on the address —
-    # which is what the test suites log in with. If that account is ever renamed,
-    # this needs the same treatment the admin just got.
-    if not await db.users.find_one({'email': 'player@fungame.app'}):
-        pid = str(uuid.uuid4())
-        await _safe_insert(db.users.insert_one({
-            'id': pid, 'email': 'player@fungame.app',
-            'password_hash': hash_password('Player@123'),
-            'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
-            'display_name': 'Lucky Tester', 'country': 'India', 'avatar': 'star',
-            'chip_balance': 5000, 'favorites': ['aviator', 'teen-patti'], 'recent_games': [],
-            'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
-            'created_at': now,
-        }))
-        await _safe_insert(db.chip_transactions.insert_one({
-            'id': str(uuid.uuid4()), 'user_id': pid, 'type': 'CREDIT', 'amount': 5000,
-            'balance_after': 5000, 'note': 'Welcome play chips (seed)', 'ref': None, 'created_at': now,
-        }))
+        # Pre-approved test player.  It remains keyed by its exact fixture
+        # address because the legacy test suites log in with that address.
+        if not await db.users.find_one({'email': 'player@fungame.app'}):
+            pid = str(uuid.uuid4())
+            await _safe_insert(db.users.insert_one({
+                'id': pid, 'email': 'player@fungame.app',
+                'password_hash': hash_password('Player@123'),
+                'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
+                'display_name': 'Lucky Tester', 'country': 'India', 'avatar': 'star',
+                'chip_balance': 5000, 'favorites': ['aviator', 'teen-patti'], 'recent_games': [],
+                'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
+                'created_at': now,
+            }))
+            await _safe_insert(db.chip_transactions.insert_one({
+                'id': str(uuid.uuid4()), 'user_id': pid, 'type': 'CREDIT', 'amount': 5000,
+                'balance_after': 5000, 'note': 'Welcome play chips (seed)', 'ref': None, 'created_at': now,
+            }))
+    else:
+        logger.info('legacy demo login accounts are disabled (set ENABLE_DEMO_SEEDS=true only for local fixtures)')
 
     # Games — exactly 18
     await db.games.create_index('slug', unique=True)

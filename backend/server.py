@@ -30,6 +30,7 @@ import routes_live
 import routes_blackjack
 import routes_security
 import routes_migration_export
+import routes_game_settlement
 
 logging.basicConfig(
     level=logging.INFO,
@@ -146,6 +147,9 @@ async def lifespan(app: FastAPI):
     await step('indexes:payouts', payouts.ensure_indexes())
     await step('indexes:compliance', compliance.ensure_indexes())
     await step('indexes:core', _core_indexes())
+    # Disabled by default; this creates no collection or index until the
+    # separately reviewed Supabase game-settlement bridge is explicitly enabled.
+    await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
 
     keepalive = asyncio.create_task(_aviator_keepalive())
     logger.info('Chakri.Casino ready - 20 games running universal 24/7 live rounds')
@@ -195,6 +199,7 @@ api_router.include_router(routes_security.router)
 # Kept hidden from OpenAPI and disabled unless a short-lived, HMAC-protected
 # migration window is explicitly configured.  See routes_migration_export.py.
 api_router.include_router(routes_migration_export.router)
+api_router.include_router(routes_game_settlement.router)
 app.include_router(api_router)
 
 # --- Security middleware ---
