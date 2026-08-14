@@ -1,0 +1,24 @@
+project_id = "otlhseyofakjiridxthb"
+
+[api]
+enabled = true
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "https://mydgp.casino"
+additional_redirect_urls = ["https://mydgp.casino/admin", "https://mydgp.casino/admin/login"]
+
+[functions.admin-api]
+verify_jwt = false
+
+[functions.migration-import]
+verify_jwt = false
+
+# The function handles CORS preflight itself and uses auth.getUser() to ensure
+# every public route has a real PLAYER session before the service role touches
+# protected game state.  Unity never receives the service-role credential.
+[functions.game-api]
+verify_jwt = false
