@@ -387,7 +387,7 @@ async function dbResult<T>(
 
 async function runtimePolicies(db: SupabaseClient): Promise<RuntimePolicyRow[]> {
   const { data, error } = await db.from("game_runtime_catalog").select(
-    "catalog_slug,availability,parity_state,disabled_reason,ruleset_version",
+    "catalog_slug,unity_lobby_slug,unity_scene,engine_slug,runtime_mode,availability,parity_state,timing,action_contract,outcome_contract,ruleset_version,min_bet,max_bet,disabled_reason",
   ).returns<RuntimePolicyRow[]>();
   if (error) {
     throw new HttpError(400, error.message || "Could not load game runtime policy");
@@ -400,7 +400,7 @@ async function runtimePolicy(
   catalogSlug: string,
 ): Promise<RuntimePolicyRow | null> {
   const { data, error } = await db.from("game_runtime_catalog").select(
-    "catalog_slug,availability,parity_state,disabled_reason,ruleset_version",
+    "catalog_slug,unity_lobby_slug,unity_scene,engine_slug,runtime_mode,availability,parity_state,timing,action_contract,outcome_contract,ruleset_version,min_bet,max_bet,disabled_reason",
   ).eq("catalog_slug", catalogSlug).maybeSingle<RuntimePolicyRow>();
   if (error && error.code !== "PGRST116") {
     throw new HttpError(400, error.message || "Could not load game runtime policy");

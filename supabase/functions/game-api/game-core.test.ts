@@ -1,11 +1,14 @@
 import {
   clockState,
+  compiledRuntimeContractFor,
   GAME_SPECS,
   GameRuleError,
   gameSpec,
   generateServerOutcome,
   normalizePlayerAction,
+  publicClockWire,
   rouletteMultiplier,
+  runtimeContractIssue,
   settleReviewedWager,
   snapshotRevealSeconds,
   validateSelection,
@@ -36,12 +39,54 @@ Deno.test("canonical catalog has all 15 client-to-Unity mappings", () => {
   assert(gameSpec("fever-joker-bonus").unity_lobby_slug === "fever-joker", "Fever Joker tile mapping is wrong");
 });
 
+Deno.test("every database runtime must exactly match the compiled timing, outcome, ruleset, and stake contract", () => {
+  for (const spec of GAME_SPECS) {
+    const expected = compiledRuntimeContractFor(spec);
+    assert(runtimeContractIssue(spec, expected) === null, `${spec.catalog_slug} static contract should be self-consistent`);
+  }
+  const roulette = gameSpec("fun-roulette");
+  const expected = compiledRuntimeContractFor(roulette);
+  assert(
+    runtimeContractIssue(roulette, { ...expected, ruleset_version: 2 }) === "ruleset_version",
+    "a database ruleset label cannot outrun the deployed resolver contract",
+  );
+  assert(
+    runtimeContractIssue(roulette, { ...expected, min_bet: 1 }) === "min_bet",
+    "a database stake limit cannot undercut the compiled game limit",
+  );
+  assert(
+    runtimeContractIssue(roulette, {
+      ...expected,
+      outcome_contract: { type: "american_roulette", pockets: 37, selection: "type:value" },
+    }) === "outcome_contract",
+    "a payout/outcome shape drift must close the runtime",
+  );
+  const checker = gameSpec("checker");
+  const checkerContract = compiledRuntimeContractFor(checker);
+  assert(
+    runtimeContractIssue(checker, {
+      ...checkerContract,
+      timing: { ...checkerContract.timing, result_seconds: 3 },
+    }) === "timing",
+    "the known Checker player-paced timing drift must fail closed",
+  );
+});
+
 Deno.test("roulette clock preserves open/lock/reveal/result boundaries", () => {
   const roulette = gameSpec("fun-roulette");
   const open = clockState(roulette, 33_999);
   assert(open.phase === "BETTING" && open.bets_open, "roulette should accept at 00:34");
+  const openWire = publicClockWire(open);
+  assert(openWire.bets_open === true && typeof openWire.bets_open === "boolean", "Unity must receive a strict server bets_open boolean");
+  assert(
+    openWire.server_time_unix_ms === 33_999 &&
+      openWire.phase_ends_at_unix_ms > openWire.server_time_unix_ms &&
+      Number.isSafeInteger(openWire.phase_ends_at_unix_ms),
+    "Unity must receive numeric server time and an absolute phase deadline in epoch milliseconds",
+  );
   const locked = clockState(roulette, 34_000);
   assert(locked.phase === "BETTING" && !locked.bets_open, "roulette must lock while its betting phase remains visible");
+  assert(publicClockWire(locked).bets_open === false, "the wire flag must close exactly at the server lock boundary");
   const reveal = clockState(roulette, 45_000);
   assert(reveal.phase === "REVEAL", "roulette reveal must start after 45 seconds");
   const result = clockState(roulette, 56_000);
@@ -77,6 +122,18 @@ Deno.test("roulette validates and settles only Unity-whitelisted positions", () 
   assert(
     throwsCode(() => validateSelection(roulette, "split:1-36"), "INVALID_SELECTION"),
     "an impossible split must fail closed",
+  );
+  assert(
+    throwsCode(() => validateSelection(roulette, "straight:17:ignored"), "INVALID_SELECTION"),
+    "a roulette selection may not contain ignored suffix fields",
+  );
+  assert(
+    throwsCode(() => rouletteMultiplier("split:2-3:ignored", "2"), "INVALID_SELECTION"),
+    "settlement must reject an ignored roulette suffix too",
+  );
+  assert(
+    throwsCode(() => validateSelection(roulette, "split:2-3-"), "INVALID_SELECTION"),
+    "empty roulette number segments must not be ignored",
   );
 });
 
@@ -134,6 +191,14 @@ Deno.test("Unity wire action normalization refuses outcome and balance semantics
   assert(
     throwsCode(() => normalizePlayerAction(roulette, "place_bet", { selection: "straight:17", amount: 0 }), "INVALID_STAKE"),
     "zero stake must be rejected",
+  );
+  assert(
+    throwsCode(() => normalizePlayerAction(roulette, "place_bet", { selection: "straight:17", amount: 4 }), "INVALID_STAKE"),
+    "a stake below the cabinet minimum must be rejected",
+  );
+  assert(
+    throwsCode(() => normalizePlayerAction(roulette, "place_bet", { selection: "straight:17", amount: 5001 }), "INVALID_STAKE"),
+    "a stake above the cabinet maximum must be rejected",
   );
   assert(
     throwsCode(() => normalizePlayerAction(roulette, "deal", {}), "UNSUPPORTED_ACTION"),

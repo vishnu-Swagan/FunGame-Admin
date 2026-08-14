@@ -14,6 +14,8 @@ import {
   generateServerOutcome,
   normalizePlayerAction,
   outcomeForPublicPhase,
+  publicClockWire,
+  runtimeContractIssue,
   snapshotRevealSeconds,
   type ClockState,
   type GameSpec,
@@ -21,6 +23,7 @@ import {
   type ServerOutcome,
 } from "./game-core.ts";
 import { isPubliclyPlayableRuntime } from "../shared/runtime-availability.ts";
+import { hasRegisteredLiveResolver } from "../shared/live-resolver-registry.ts";
 
 type Json = Record<string, unknown>;
 type Profile = {
@@ -45,6 +48,8 @@ type RuntimeRow = {
   action_contract: unknown;
   outcome_contract: Json;
   ruleset_version: number;
+  min_bet: number | string;
+  max_bet: number | string;
   disabled_reason: string | null;
 };
 type SessionRow = {
@@ -245,15 +250,9 @@ async function currentBalance(playerId: string): Promise<number> {
 }
 
 function assertRuntimeMap(runtime: RuntimeRow, spec: GameSpec): void {
-  const actions = Array.isArray(runtime.action_contract) ? runtime.action_contract : [];
-  const sameActions = actions.length === spec.actions.length
-    && actions.every((action, index) => action === spec.actions[index]);
-  if (
-    runtime.catalog_slug !== spec.catalog_slug || runtime.unity_lobby_slug !== spec.unity_lobby_slug ||
-    runtime.unity_scene !== spec.unity_scene || runtime.engine_slug !== spec.engine_slug ||
-    runtime.runtime_mode !== spec.runtime_mode || !sameActions
-  ) {
-    console.error("game-api runtime contract mismatch", runtime.catalog_slug);
+  const issue = runtimeContractIssue(spec, runtime);
+  if (issue) {
+    console.error("game-api runtime contract mismatch", runtime.catalog_slug, issue);
     throw new HttpError(503, "Game configuration needs review.", "RUNTIME_MAP_MISMATCH");
   }
 }
@@ -266,12 +265,18 @@ async function assertPlayableRuntime(actor: PlayerActor, catalogSlug: string): P
   });
   const runtime = rpcOne<RuntimeRow>(data as RuntimeRow | RuntimeRow[] | null, error, "Game runtime is unavailable.");
   assertRuntimeMap(runtime, spec);
+  // Database approval is necessary but not sufficient.  A session can only be
+  // created when this deployed bundle has an explicit resolver for exactly
+  // the persisted ruleset version.
+  if (!hasRegisteredLiveResolver(runtime.catalog_slug, runtime.ruleset_version)) {
+    throw new HttpError(409, "This game is not available yet.", "GAME_UNAVAILABLE");
+  }
   return { runtime, spec };
 }
 
 async function runtimeCatalog(): Promise<RuntimeRow[]> {
   const { data, error } = await service().from("game_runtime_catalog").select(
-    "catalog_slug,unity_lobby_slug,unity_scene,engine_slug,runtime_mode,parity_state,availability,timing,action_contract,outcome_contract,ruleset_version,disabled_reason",
+    "catalog_slug,unity_lobby_slug,unity_scene,engine_slug,runtime_mode,parity_state,availability,timing,action_contract,outcome_contract,ruleset_version,min_bet,max_bet,disabled_reason",
   ).order("catalog_slug", { ascending: true }).returns<RuntimeRow[]>();
   if (error) dbError(error, "Game lobby is unavailable.");
   return data || [];
@@ -282,6 +287,17 @@ async function gameStatuses(): Promise<Map<string, string>> {
     .returns<GameStatusRow[]>();
   if (error) dbError(error, "Game lobby is unavailable.");
   return new Map((data || []).map((game) => [game.slug, game.status]));
+}
+
+function isAdvertisableRuntime(runtime: RuntimeRow, gameStatus: string | undefined): boolean {
+  if (!isPubliclyPlayableRuntime(gameStatus, runtime)) return false;
+  try {
+    return runtimeContractIssue(gameSpec(runtime.catalog_slug), runtime) === null;
+  } catch {
+    // Do not send a player to a cabinet whose local contract cannot be
+    // verified. The session gate repeats this check before any RPC is opened.
+    return false;
+  }
 }
 
 async function sessionFor(actor: PlayerActor, sessionId: string): Promise<SessionRow> {
@@ -397,11 +413,17 @@ async function snapshot(actor: PlayerActor, session: SessionRow, runtime: Runtim
   const myTotal = wireInteger(bets.reduce((total, wager) => total + wager.amount, 0), "my_total");
   const allowed = allowedActions(spec, clock, openWagers);
   const publicOutcome = round.outcome ? outcomeForPublicPhase(clock, round.outcome) : null;
-  const phaseEndsIn = Math.max(0, Math.round((clock.phase_ends_in_ms / 1000) * 1000) / 1000);
+  const clockWire = publicClockWire(clock);
   const state: Json = {
     round_number: wireInteger(round.round_number, "round number"),
-    phase: clock.phase,
-    phase_ends_in: phaseEndsIn,
+    phase: clockWire.phase,
+    // Unity consumes these exact numeric server timestamps. It may render a
+    // local countdown from them, but must use `bets_open` rather than guessing
+    // whether an apparent BETTING phase still accepts a stake.
+    server_time_unix_ms: clockWire.server_time_unix_ms,
+    phase_ends_at_unix_ms: clockWire.phase_ends_at_unix_ms,
+    phase_ends_in: clockWire.phase_ends_in,
+    bets_open: clockWire.bets_open,
     balance,
     my_total: myTotal,
     min_bet: spec.min_bet,
@@ -471,7 +493,7 @@ async function lobby(req: Request): Promise<Response> {
     // The same gate is used by the administrator console and the session RPC.
     // An operator disabling the catalogue entry must immediately make a
     // previously verified runtime unavailable in the player lobby too.
-    availability: isPubliclyPlayableRuntime(statuses.get(runtime.catalog_slug), runtime)
+    availability: isAdvertisableRuntime(runtime, statuses.get(runtime.catalog_slug))
       ? "AVAILABLE"
       : "UNAVAILABLE",
     ruleset_version: runtime.ruleset_version,
@@ -557,10 +579,16 @@ async function events(req: Request, sessionId: string): Promise<Response> {
   if (error) dbError(error, "Game events are unavailable.");
   const events = (data || []).map((event) => {
     const cursor = wireInteger(event.event_id, "event cursor");
-    return { id: cursor, cursor, payload: { state: current.body.state } };
+    return { cursor, state: current.body.state };
   });
   const nextAfter = events.length ? events[events.length - 1].cursor : Math.max(after, wireInteger(current.body.cursor, "event cursor"));
-  return ok(req, { cursor: nextAfter, next_after: nextAfter, allowed_actions: current.allowed, events });
+  return ok(req, {
+    session_id: session.id,
+    cursor: nextAfter,
+    next_after: nextAfter,
+    allowed_actions: current.allowed,
+    events,
+  });
 }
 
 function failure(req: Request, error: unknown): Response {

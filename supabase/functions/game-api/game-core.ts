@@ -399,6 +399,135 @@ export const GAME_SPECS: readonly GameSpec[] = Object.freeze([
 
 const gameBySlug = new Map(GAME_SPECS.map((spec) => [spec.catalog_slug, spec]));
 
+/**
+ * The static Edge bundle owns the complete runtime contract.  A database row
+ * may carry operational state, but it must never be allowed to silently
+ * redefine a cabinet's timing, outcome shape, stake limits, or ruleset.
+ */
+export const COMPILED_RUNTIME_RULESET_VERSION = 1;
+
+export type RuntimeContractCandidate = {
+  catalog_slug?: unknown;
+  unity_lobby_slug?: unknown;
+  unity_scene?: unknown;
+  engine_slug?: unknown;
+  runtime_mode?: unknown;
+  timing?: unknown;
+  action_contract?: unknown;
+  outcome_contract?: unknown;
+  ruleset_version?: unknown;
+  min_bet?: unknown;
+  max_bet?: unknown;
+};
+
+export type CompiledRuntimeContract = {
+  catalog_slug: string;
+  unity_lobby_slug: string;
+  unity_scene: string;
+  engine_slug: string;
+  runtime_mode: RuntimeMode;
+  timing: Timing;
+  action_contract: readonly PlayerAction[];
+  outcome_contract: Readonly<Record<string, string | number>>;
+  ruleset_version: number;
+  min_bet: number;
+  max_bet: number;
+};
+
+const OUTCOME_CONTRACTS: Readonly<Record<string, Readonly<Record<string, string | number>>>> = Object.freeze({
+  "7up7down": Object.freeze({ type: "card_window", selection: "seven|up|down" }),
+  "fun-ab": Object.freeze({ type: "andar_bahar", selection: "named side or rank" }),
+  "triple-fun": Object.freeze({ type: "three_digit_draw", selection: "single:N|double:NN|triple:NNN" }),
+  "fun-roulette": Object.freeze({ type: "american_roulette", pockets: 38, selection: "type:value" }),
+  "fun-target": Object.freeze({ type: "digit_wheel", selection: "number:0..9" }),
+  "bingo": Object.freeze({ type: "fixed_six_cards", draw_count: 15 }),
+  "joker-bonus": Object.freeze({ type: "joker_poker" }),
+  "giant-jackpot": Object.freeze({ type: "four_window_ladder" }),
+  "golden-wheel": Object.freeze({ type: "multiplier_wheel" }),
+  "keno": Object.freeze({ type: "keno", pool: 80, draw_count: 20, max_picks: 10 }),
+  "checker": Object.freeze({ type: "two_ring_checker", cells: 25 }),
+  "lucky-8-line": Object.freeze({ type: "eight_line_reel" }),
+  "fever-joker-bonus": Object.freeze({ type: "joker_poker" }),
+  "no-hold": Object.freeze({ type: "five_card_no_hold" }),
+  "champion-poker": Object.freeze({ type: "five_card_draw_poker" }),
+});
+
+function canonicalRuntimeJson(value: unknown): string | null {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? JSON.stringify(value) : null;
+  }
+  if (Array.isArray(value)) {
+    const entries = value.map(canonicalRuntimeJson);
+    return entries.some((entry) => entry === null) ? null : `[${entries.join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record).sort().map((key) => {
+      const rendered = canonicalRuntimeJson(record[key]);
+      return rendered === null ? null : `${JSON.stringify(key)}:${rendered}`;
+    });
+    return entries.some((entry) => entry === null) ? null : `{${entries.join(",")}}`;
+  }
+  return null;
+}
+
+function contractInteger(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value
+    : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/** Build the only runtime representation this deployed Edge bundle accepts. */
+export function compiledRuntimeContractFor(spec: GameSpec): CompiledRuntimeContract {
+  const outcome = OUTCOME_CONTRACTS[spec.catalog_slug];
+  if (!outcome) throw new Error(`Missing static outcome contract for ${spec.catalog_slug}.`);
+  return {
+    catalog_slug: spec.catalog_slug,
+    unity_lobby_slug: spec.unity_lobby_slug,
+    unity_scene: spec.unity_scene,
+    engine_slug: spec.engine_slug,
+    runtime_mode: spec.runtime_mode,
+    timing: spec.timing,
+    action_contract: spec.actions,
+    outcome_contract: outcome,
+    ruleset_version: COMPILED_RUNTIME_RULESET_VERSION,
+    min_bet: spec.min_bet,
+    max_bet: spec.max_bet,
+  };
+}
+
+/**
+ * Return the first unsafe runtime field, or null only when the database row
+ * exactly matches the compiled client/server contract.  JSON object key order
+ * is intentionally irrelevant; array order (the Unity wire action order) is
+ * intentionally significant.
+ */
+export function runtimeContractIssue(
+  spec: GameSpec,
+  runtime: RuntimeContractCandidate,
+): string | null {
+  const expected = compiledRuntimeContractFor(spec);
+  if (runtime.catalog_slug !== expected.catalog_slug) return "catalog_slug";
+  if (runtime.unity_lobby_slug !== expected.unity_lobby_slug) return "unity_lobby_slug";
+  if (runtime.unity_scene !== expected.unity_scene) return "unity_scene";
+  if (runtime.engine_slug !== expected.engine_slug) return "engine_slug";
+  if (runtime.runtime_mode !== expected.runtime_mode) return "runtime_mode";
+  if (canonicalRuntimeJson(runtime.timing) !== canonicalRuntimeJson(expected.timing)) return "timing";
+  if (canonicalRuntimeJson(runtime.action_contract) !== canonicalRuntimeJson(expected.action_contract)) {
+    return "action_contract";
+  }
+  if (canonicalRuntimeJson(runtime.outcome_contract) !== canonicalRuntimeJson(expected.outcome_contract)) {
+    return "outcome_contract";
+  }
+  if (contractInteger(runtime.ruleset_version) !== expected.ruleset_version) return "ruleset_version";
+  if (contractInteger(runtime.min_bet) !== expected.min_bet) return "min_bet";
+  if (contractInteger(runtime.max_bet) !== expected.max_bet) return "max_bet";
+  return null;
+}
+
 export function gameSpec(catalogSlug: string): GameSpec {
   const spec = gameBySlug.get(catalogSlug);
   if (!spec) throw new GameRuleError("UNKNOWN_GAME", "Unknown game catalog slug.");
@@ -443,6 +572,8 @@ export type ClockState = {
   round_number: number;
   phase: PublicPhase;
   phase_ends_at: string;
+  server_time_unix_ms: number;
+  phase_ends_at_unix_ms: number;
   phase_ends_in_ms: number;
   bets_open: boolean;
   starts_at: string;
@@ -451,6 +582,29 @@ export type ClockState = {
   result_starts_at: string;
   ends_at: string;
 };
+
+/**
+ * Stable server clock fields consumed by Unity. The absolute timestamps are
+ * epoch milliseconds generated by the server; clients must not derive either
+ * one from a local timer or from the rounded remaining value.
+ */
+export type PublicClockWire = {
+  phase: PublicPhase;
+  bets_open: boolean;
+  server_time_unix_ms: number;
+  phase_ends_at_unix_ms: number;
+  phase_ends_in: number;
+};
+
+export function publicClockWire(clock: ClockState): PublicClockWire {
+  return {
+    phase: clock.phase,
+    bets_open: clock.bets_open === true,
+    server_time_unix_ms: clock.server_time_unix_ms,
+    phase_ends_at_unix_ms: clock.phase_ends_at_unix_ms,
+    phase_ends_in: Math.max(0, Math.round((clock.phase_ends_in_ms / 1000) * 1000) / 1000),
+  };
+}
 
 /**
  * Derive one global clock from server Unix time.  It is used only for a game
@@ -493,6 +647,8 @@ export function clockState(
     round_number: round,
     phase,
     phase_ends_at: new Date(phaseEnd).toISOString(),
+    server_time_unix_ms: nowMs,
+    phase_ends_at_unix_ms: phaseEnd,
     phase_ends_in_ms: Math.max(0, phaseEnd - nowMs),
     bets_open: phase === "BETTING" && nowMs < bettingClosesAt,
     starts_at: new Date(startsAt).toISOString(),
@@ -522,6 +678,17 @@ function asSafePositiveInteger(value: unknown, label: string): number {
     throw new GameRuleError("INVALID_STAKE", `${label} must be a positive whole number.`);
   }
   return value;
+}
+
+function stakeWithinGameLimits(spec: GameSpec, value: unknown, label = "amount"): number {
+  const amount = asSafePositiveInteger(value, label);
+  if (amount < spec.min_bet || amount > spec.max_bet) {
+    throw new GameRuleError(
+      "INVALID_STAKE",
+      `${label} must be between ${spec.min_bet} and ${spec.max_bet} for this game.`,
+    );
+  }
+  return amount;
 }
 
 function asText(value: unknown, label: string, max = 160): string {
@@ -572,7 +739,7 @@ export function normalizePlayerAction(
     internal_action: actionMap[wireAction],
   };
   if (wireAction === "place_bet") {
-    normalized.amount = asSafePositiveInteger(payload.amount, "amount");
+    normalized.amount = stakeWithinGameLimits(spec, payload.amount);
     const selection = asText(payload.selection ?? "__stake__", "selection");
     normalized.selection = validateSelection(spec, selection);
   } else if (wireAction === "cancel_bet") {
@@ -617,8 +784,10 @@ function rouletteNumber(label: string): number {
 }
 
 export function canonicalRouletteNumbers(value: string): string {
-  const labels = value.split("-").filter(Boolean);
-  if (!labels.length) throw new GameRuleError("INVALID_SELECTION", "Roulette numbers are required.");
+  const labels = value.split("-");
+  if (!labels.length || labels.some((label) => !label)) {
+    throw new GameRuleError("INVALID_SELECTION", "Roulette numbers are required.");
+  }
   const numeric = labels.map((label) => ({ label, number: rouletteNumber(label) }));
   if (new Set(numeric.map((entry) => entry.label)).size !== numeric.length) {
     throw new GameRuleError("INVALID_SELECTION", "Roulette bet numbers must be distinct.");
@@ -684,15 +853,25 @@ export function rouletteColor(pocket: string): "red" | "black" | "green" {
   return ROULETTE_REDS.has(Number(pocket)) ? "red" : "black";
 }
 
+function parseRouletteSelection(selection: string): { type: string; rawValue: string } {
+  if (typeof selection !== "string" || selection.trim() !== selection) {
+    throw new GameRuleError("INVALID_SELECTION", "Roulette bet format is invalid.");
+  }
+  const separator = selection.indexOf(":");
+  if (
+    separator < 1 || separator !== selection.lastIndexOf(":") ||
+    separator === selection.length - 1
+  ) {
+    throw new GameRuleError("INVALID_SELECTION", "A roulette bet needs exactly one type and value.");
+  }
+  return { type: selection.slice(0, separator), rawValue: selection.slice(separator + 1) };
+}
+
 export function rouletteMultiplier(selection: string, winningPocket: string): number {
   if (!ROULETTE_POCKETS.has(winningPocket)) {
     throw new GameRuleError("INVALID_OUTCOME", "Unknown roulette pocket.");
   }
-  const split = selection.split(":", 2);
-  if (split.length !== 2) {
-    throw new GameRuleError("INVALID_SELECTION", "A roulette bet needs a type and value.");
-  }
-  const [type, rawValue] = split;
+  const { type, rawValue } = parseRouletteSelection(selection);
   const zero = winningPocket === "0" || winningPocket === "00";
   const number = zero ? -1 : Number(winningPocket);
   switch (type) {
@@ -752,10 +931,10 @@ export function validateSelection(spec: GameSpec, selection: string): string {
     // Calling the multiplier with a valid fixed pocket validates the bet shape
     // without making a client-selected result part of the decision.
     rouletteMultiplier(selection, "0");
-    return selection.startsWith("split:") || selection.startsWith("street:") ||
-        selection.startsWith("corner:") || selection.startsWith("sixline:") ||
-        selection.startsWith("basket:")
-      ? `${selection.split(":", 2)[0]}:${canonicalRouletteNumbers(selection.split(":", 2)[1])}`
+    const { type, rawValue } = parseRouletteSelection(selection);
+    return type === "split" || type === "street" || type === "corner" ||
+        type === "sixline" || type === "basket"
+      ? `${type}:${canonicalRouletteNumbers(rawValue)}`
       : selection;
   }
   if (spec.catalog_slug === "fun-target") {
@@ -858,7 +1037,7 @@ export function settleReviewedWager(
   amount: number,
   outcome: ServerOutcome,
 ): number {
-  asSafePositiveInteger(amount, "amount");
+  stakeWithinGameLimits(spec, amount);
   if (spec.catalog_slug !== "fun-roulette" || outcome.kind !== "american_roulette") {
     throw new GameRuleError(
       "RULES_NOT_VERIFIED",
