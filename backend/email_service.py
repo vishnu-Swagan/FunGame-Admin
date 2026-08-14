@@ -1,18 +1,14 @@
-"""Abstracted email service.
+"""Production email delivery service.
 
-Providers: demo (default), resend, sendgrid, smtp.
-Switch via EMAIL_PROVIDER env var. In demo mode, codes are logged and
-returned to the caller so the frontend can display them (development only).
+Providers: resend, sendgrid, smtp.  Delivery is disabled by default and fails
+closed until a real provider is configured; verification or recovery codes are
+never logged or returned to a player-facing client.
 """
 import os
 import asyncio
 import logging
 
 logger = logging.getLogger('email')
-
-EMAIL_PROVIDER = os.environ.get('EMAIL_PROVIDER', 'demo')
-APP_ENV = os.environ.get('APP_ENV', 'development')
-
 
 def _code_email_html(title: str, intro: str, code: str) -> str:
     """Branded HTML template (inline CSS + table layout for email clients)."""
@@ -59,16 +55,17 @@ class EmailService:
 
     @staticmethod
     async def _send(to_email: str, subject: str, body: str, code: str, html: str = None) -> dict:
-        provider = os.environ.get('EMAIL_PROVIDER', 'demo')
+        provider = (os.environ.get('EMAIL_PROVIDER') or 'disabled').strip().lower()
         if provider == 'resend':
             return await EmailService._send_resend(to_email, subject, body, html)
         if provider == 'sendgrid':
             return await EmailService._send_sendgrid(to_email, subject, body)
         if provider == 'smtp':
             return await EmailService._send_smtp(to_email, subject, body)
-        # demo mode: log only; the code is surfaced via API in development
-        logger.info(f"[DEMO EMAIL] to={to_email} subject={subject} code={code}")
-        return {'sent': True, 'provider': 'demo'}
+        # A missing/unknown provider must not turn into a local-code fallback.
+        # Never include a code or recipient address in this diagnostic.
+        logger.error('Email delivery is disabled or misconfigured (provider=%s)', provider)
+        return {'sent': False, 'provider': provider or 'disabled', 'error': 'not_configured'}
 
     @staticmethod
     async def _send_resend(to_email: str, subject: str, body: str, html: str = None) -> dict:
@@ -140,7 +137,3 @@ class EmailService:
         except Exception as e:
             logger.error(f'SMTP send failed: {type(e).__name__}')
             return {'sent': False, 'provider': 'smtp', 'error': str(type(e).__name__)}
-
-
-def is_dev_mode() -> bool:
-    return os.environ.get('APP_ENV', 'development') == 'development' and os.environ.get('EMAIL_PROVIDER', 'demo') == 'demo'

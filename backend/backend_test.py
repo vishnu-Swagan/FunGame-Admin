@@ -1,12 +1,25 @@
-"""Backend API tests for Chakri.Casino slot games and confetti feature."""
+"""Explicitly configured integration checks for the legacy game API.
+
+This manual diagnostic never creates or assumes a player account.  Run it only
+against a disposable test environment after an operator has provisioned a
+test-only player there::
+
+    FUNGAME_TEST_BASE_URL=https://test.example/api \\
+    FUNGAME_TEST_LOGIN_ID=GK0000000 \\
+    FUNGAME_TEST_PASSWORD='...' \\
+    python backend/backend_test.py
+"""
+import os
 import requests
 import sys
 import time
 
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class SlotGameTester:
     def __init__(self):
+        self.login_id = os.environ.get("FUNGAME_TEST_LOGIN_ID", "").strip()
+        self.password = os.environ.get("FUNGAME_TEST_PASSWORD", "")
         self.token = None
         self.tests_run = 0
         self.tests_passed = 0
@@ -28,7 +41,7 @@ class SlotGameTester:
         try:
             response = requests.post(
                 f"{BASE_URL}/auth/login",
-                json={"email": "player@fungame.app", "password": "Player@123"},
+                json={"email": self.login_id, "password": self.password},
                 timeout=10
             )
             if response.status_code == 200:
@@ -187,6 +200,12 @@ class SlotGameTester:
 
     def run_all_tests(self):
         """Run all backend tests"""
+        if not BASE_URL or not self.login_id or not self.password:
+            print(
+                "Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and "
+                "FUNGAME_TEST_PASSWORD for an operator-provisioned test account."
+            )
+            return None
         print("=" * 60)
         print("🎰 CHAKRI.CASINO SLOT GAMES BACKEND TEST SUITE")
         print("=" * 60)
@@ -230,4 +249,4 @@ class SlotGameTester:
 if __name__ == "__main__":
     tester = SlotGameTester()
     success = tester.run_all_tests()
-    sys.exit(0 if success else 1)
+    sys.exit(0 if success is True else 2)

@@ -39,8 +39,8 @@ export default function Login() {
       if (detail?.code === "EMAIL_NOT_VERIFIED") {
         toast.info("Please verify your email first");
         try {
-          const { data: rs } = await api.post("/auth/resend-verification", { email });
-          navigate("/verify-email", { state: { email, devCode: rs.dev_code } });
+          await api.post("/auth/resend-verification", { email });
+          navigate("/verify-email", { state: { email } });
         } catch (_e) {
           navigate("/verify-email", { state: { email } });
         }

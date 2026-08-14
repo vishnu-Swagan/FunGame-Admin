@@ -13,7 +13,7 @@ from models import (RegisterRequest, VerifyEmailRequest, ResendVerificationReque
                     LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
                     SignupRequestCreate)
 from auth_utils import hash_password, verify_password, create_access_token, get_current_user
-from email_service import EmailService, is_dev_mode
+from email_service import EmailService
 
 logger = logging.getLogger('auth')
 router = APIRouter(prefix='/auth', tags=['auth'])
@@ -126,8 +126,6 @@ async def resend_verification(body: ResendVerificationRequest):
     if not sent.get('sent'):
         resp['message'] = 'The verification email could not be delivered right now. Please try again in a moment.'
         resp['email_delivery'] = 'failed'
-    if is_dev_mode():
-        resp['dev_code'] = code
     return resp
 
 
@@ -141,6 +139,8 @@ async def login(body: LoginRequest):
         user = await db.users.find_one({'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'}})
     if not user or not verify_password(body.password, user.get('password_hash', '')):
         raise HTTPException(status_code=401, detail='Invalid login ID or password')
+    if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail='Administrator access is disabled')
     if not user.get('email_verified'):
         raise HTTPException(status_code=403, detail={'code': 'EMAIL_NOT_VERIFIED', 'message': 'Please verify your email first.', 'email': user.get('email')})
     # Single active session per Login ID: a new login replaces any previous session.
@@ -167,15 +167,17 @@ async def forgot_password(body: ForgotPasswordRequest):
     user = await db.users.find_one({'email': email})
     # Do not leak account existence
     resp = {'message': 'If an account exists for this email, a reset code has been sent.'}
-    if user:
+    # Administrators never use a public email reset. Some operator accounts
+    # intentionally use an internal placeholder email, which must not become a
+    # recovery factor for elevated access. Their primary administrator can
+    # reset access through the protected admin route instead.
+    if user and user.get('role') != 'ADMIN':
         code = _gen_code()
         await db.users.update_one({'email': email}, {'$set': {
             'reset_code_hash': _hash_code(code),
             'reset_expires_at': (_now() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(),
         }})
         await EmailService.send_password_reset_code(email, code)
-        if is_dev_mode():
-            resp['dev_code'] = code
     return resp
 
 
@@ -183,7 +185,7 @@ async def forgot_password(body: ForgotPasswordRequest):
 async def reset_password(body: ResetPasswordRequest):
     email = body.email.lower().strip()
     user = await db.users.find_one({'email': email})
-    if not user:
+    if not user or user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Invalid reset request')
     expires = user.get('reset_expires_at')
     if not expires or datetime.fromisoformat(expires) < _now():

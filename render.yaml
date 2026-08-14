@@ -41,9 +41,9 @@ services:
         # the changeover and so a direct Render URL still works for debugging.
         value: "https://chakri.casino,https://www.chakri.casino,https://mydgp.casino,https://www.mydgp.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
       - key: APP_ENV
-        value: production                            # production: never leak verification codes (dev_code)
+        value: production                            # production requires live-only account flows
       - key: EMAIL_PROVIDER
-        value: demo                                  # resets are admin-handled; no code is exposed
+        value: disabled                              # configure resend, sendgrid, or smtp before enabling recovery email
       - key: CRON_SECRET
         sync: false          # set in dashboard — the night job's shared key
       - key: SETTLEMENT_TZ

@@ -16,9 +16,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 client = AsyncMongoMockClient()
 sys.modules["db"] = types.SimpleNamespace(db=client["retire_seed_import_test"])
-# The seed module only needs this helper for the test of its environment gate;
-# avoid importing the production auth/dependency graph in this focused test.
-sys.modules["auth_utils"] = types.SimpleNamespace(hash_password=lambda value: f"hash:{value}")
 
 import retire_legacy_demo_accounts as retirement
 import seed
@@ -70,44 +67,26 @@ def delete_environment():
 
 
 async def main():
-    check("legacy demo seeds default off", seed.demo_seed_enabled({}) is False)
-    check("legacy demo seeds require exact true", seed.demo_seed_enabled({"ENABLE_DEMO_SEEDS": "TRUE"}) is True)
-    check("other truthy-looking seed values stay off", seed.demo_seed_enabled({"ENABLE_DEMO_SEEDS": "1"}) is False)
-
-    seed_database = client["seed_default_no_demo"]
+    seed_database = client["startup_never_creates_accounts"]
     original_seed_database = seed.db
-    original_demo_seed = os.environ.get("ENABLE_DEMO_SEEDS")
+    original_legacy_switch = os.environ.get("ENABLE_DEMO_SEEDS")
     try:
         seed.db = seed_database
-        os.environ.pop("ENABLE_DEMO_SEEDS", None)
+        # This legacy variable is deliberately ignored now.  The check proves
+        # a stale deployment setting cannot recreate a usable fixture account.
+        os.environ["ENABLE_DEMO_SEEDS"] = "true"
         await seed.run_seed()
         check(
-            "a normal startup seeds shared configuration but no legacy logins",
+            "startup never creates legacy login accounts",
             await seed_database.users.count_documents({"email": {"$in": ["admin@fungame.app", "player@fungame.app"]}}) == 0
             and await seed_database.games.count_documents({}) > 0,
         )
     finally:
         seed.db = original_seed_database
-        if original_demo_seed is None:
+        if original_legacy_switch is None:
             os.environ.pop("ENABLE_DEMO_SEEDS", None)
         else:
-            os.environ["ENABLE_DEMO_SEEDS"] = original_demo_seed
-
-    demo_seed_database = client["seed_explicit_demo"]
-    try:
-        seed.db = demo_seed_database
-        os.environ["ENABLE_DEMO_SEEDS"] = "true"
-        await seed.run_seed()
-        check(
-            "explicit local demo flag is the only path that seeds legacy logins",
-            await demo_seed_database.users.count_documents({"email": {"$in": ["admin@fungame.app", "player@fungame.app"]}}) == 2,
-        )
-    finally:
-        seed.db = original_seed_database
-        if original_demo_seed is None:
-            os.environ.pop("ENABLE_DEMO_SEEDS", None)
-        else:
-            os.environ["ENABLE_DEMO_SEEDS"] = original_demo_seed
+            os.environ["ENABLE_DEMO_SEEDS"] = original_legacy_switch
 
     check("delete guard defaults to dry-run", retirement.deletion_guard_error({}) is not None)
     check(
