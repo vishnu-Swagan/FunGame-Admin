@@ -20,6 +20,7 @@ import {
   type RuntimeMode,
   type ServerOutcome,
 } from "./game-core.ts";
+import { isPubliclyPlayableRuntime } from "../shared/runtime-availability.ts";
 
 type Json = Record<string, unknown>;
 type Profile = {
@@ -68,6 +69,7 @@ type RoundRow = {
   ruleset_version: number;
 };
 type WagerRow = { id: string; selection: string; amount: number | string; status: string };
+type GameStatusRow = { slug: string; status: string };
 
 const PROJECT_URL = Deno.env.get("SUPABASE_URL");
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -275,6 +277,13 @@ async function runtimeCatalog(): Promise<RuntimeRow[]> {
   return data || [];
 }
 
+async function gameStatuses(): Promise<Map<string, string>> {
+  const { data, error } = await service().from("games").select("slug,status")
+    .returns<GameStatusRow[]>();
+  if (error) dbError(error, "Game lobby is unavailable.");
+  return new Map((data || []).map((game) => [game.slug, game.status]));
+}
+
 async function sessionFor(actor: PlayerActor, sessionId: string): Promise<SessionRow> {
   const { data, error } = await service().from("game_player_sessions").select(
     "id,player_id,catalog_slug,engine_slug,runtime_mode,ruleset_version,status,opened_at,last_seen_at",
@@ -448,14 +457,23 @@ function actionRequest(req: Request, body: Json): ActionRequest {
 
 async function lobby(req: Request): Promise<Response> {
   const actor = await requirePlayer(req);
-  const [balance, catalog] = await Promise.all([currentBalance(actor.id), runtimeCatalog()]);
+  const [balance, catalog, statuses] = await Promise.all([
+    currentBalance(actor.id),
+    runtimeCatalog(),
+    gameStatuses(),
+  ]);
   const games = catalog.map((runtime) => ({
     catalog_slug: runtime.catalog_slug,
     unity_lobby_slug: runtime.unity_lobby_slug,
     unity_scene: runtime.unity_scene,
     engine_slug: runtime.engine_slug,
     runtime_mode: runtime.runtime_mode,
-    availability: runtime.availability === "ENABLED" && runtime.parity_state === "QA_VERIFIED" ? "AVAILABLE" : "UNAVAILABLE",
+    // The same gate is used by the administrator console and the session RPC.
+    // An operator disabling the catalogue entry must immediately make a
+    // previously verified runtime unavailable in the player lobby too.
+    availability: isPubliclyPlayableRuntime(statuses.get(runtime.catalog_slug), runtime)
+      ? "AVAILABLE"
+      : "UNAVAILABLE",
     ruleset_version: runtime.ruleset_version,
   }));
   return ok(req, { player: publicPlayer(actor), balance, games, virtual_points_only: true });

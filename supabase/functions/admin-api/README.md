@@ -24,8 +24,9 @@ paths return HTTP 410. Browser origins are limited to `mydgp.casino` and
 
 `POST /player/auth/login` accepts an issued `login_id` (or `username`) and
 `password`. It signs in only an `ACTIVE` `PLAYER` identity and returns a
-Supabase access token plus a profile with no internal auth email. Migrated
-client IDs with either seven or eight digits after `GK` are accepted.
+Supabase access token plus a profile with no internal auth email. The operator
+console and player sign-in both accept the client-compatible `GK` + seven- or
+eight-digit ID forms.
 
 Unity sends that token as `Authorization: Bearer <access_token>` to:
 

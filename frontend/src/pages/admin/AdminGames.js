@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, errMsg } from "@/lib/api";
 import { GameArt } from "@/components/GameArt";
 import { PageTransition, GameStatusBadge } from "@/components/common";
+import { IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
 const STATUSES = ["COMING_SOON", "ENABLED", "DISABLED", "MAINTENANCE", "UPDATE_REQUIRED", "RETIRED"];
 
@@ -58,6 +59,7 @@ export default function AdminGames() {
                 <TableHead className="text-white/50">Game</TableHead>
                 <TableHead className="text-white/50">Category</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
+                {IS_ADMIN_CONSOLE && <TableHead className="text-white/50">Live runtime</TableHead>}
                 <TableHead className="text-white/50">Set status</TableHead>
                 <TableHead className="text-white/50 text-center">Featured</TableHead>
               </TableRow>
@@ -68,11 +70,27 @@ export default function AdminGames() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <GameArt game={g} className="h-10 w-14 rounded-lg" glyphSize="text-sm" showGlints={false} />
-                      <p className="font-display text-sm">{g.name}</p>
+                      <div>
+                        <p className="font-display text-sm">{g.name}</p>
+                        {IS_ADMIN_CONSOLE && !g.runtime_ready_for_enable && (
+                          <p data-testid="admin-game-runtime-blocked" className="mt-0.5 max-w-[240px] text-[10px] leading-snug text-amber-300/80">
+                            {g.runtime?.disabled_reason || "Awaiting server parity verification"}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-white/70">{g.category}</TableCell>
                   <TableCell><GameStatusBadge status={g.status} /></TableCell>
+                  {IS_ADMIN_CONSOLE && (
+                    <TableCell>
+                      <span className={`text-[11px] font-semibold ${g.runtime_ready_for_enable ? "text-emerald-300" : "text-amber-300"}`}>
+                        {g.runtime_ready_for_enable
+                          ? (g.runtime_available ? "Live" : "Verified")
+                          : g.runtime?.parity_state || "Not configured"}
+                      </span>
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Select value={g.status} onValueChange={(v) => update(g.slug, { status: v })}>
                       <SelectTrigger data-testid="admin-game-status-select" className="h-9 w-[170px] rounded-lg bg-white/5 border-white/12 text-xs">
@@ -80,7 +98,20 @@ export default function AdminGames() {
                       </SelectTrigger>
                       <SelectContent>
                         {STATUSES.map((s) => (
-                          <SelectItem key={s} value={s} className="text-xs">{s.replaceAll("_", " ")}</SelectItem>
+                          <SelectItem
+                            key={s}
+                            value={s}
+                            // Preserve a previously misconfigured ENABLED
+                            // value long enough for an operator to change it
+                            // back, while preventing a blocked cabinet from
+                            // being promoted from any other state in the UI.
+                            disabled={IS_ADMIN_CONSOLE && s === "ENABLED" && !g.runtime_ready_for_enable && g.status !== "ENABLED"}
+                            className="text-xs"
+                          >
+                            {s === "ENABLED" && IS_ADMIN_CONSOLE && !g.runtime_ready_for_enable
+                              ? "ENABLED (runtime blocked)"
+                              : s.replaceAll("_", " ")}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

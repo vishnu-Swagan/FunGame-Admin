@@ -8,6 +8,11 @@
  * SQL RPCs so the immutable virtual-points ledger remains authoritative.
  */
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  isPubliclyPlayableRuntime,
+  runtimeReadinessMessage,
+  type RuntimeAvailabilityRecord,
+} from "../shared/runtime-availability.ts";
 
 type Json = Record<string, unknown>;
 type Profile = {
@@ -44,6 +49,10 @@ type LedgerBalance = {
   ledger_entry_sequence: number | null;
   updated_at: string | null;
 };
+type RuntimePolicyRow = RuntimeAvailabilityRecord & {
+  catalog_slug: string;
+  ruleset_version: number;
+};
 
 const PROJECT_URL = Deno.env.get("SUPABASE_URL");
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -57,11 +66,11 @@ const ALLOWED_ORIGINS = new Set([
   "https://www.mydgp.casino",
 ]);
 const OPERATOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._]{1,22}[A-Za-z0-9]$/;
-// Legacy client accounts use both seven- and eight-digit GK suffixes. New
-// provisioning keeps its existing seven-digit generator, while player sign-in
-// and migration accept either canonical issued form.
+// Client accounts use both seven- and eight-digit GK suffixes. The automatic
+// generator keeps its established seven-digit form, while an administrator may
+// explicitly issue either canonical form and player sign-in accepts both.
 const PLAYER_ID_PATTERN = /^GK[0-9]{7,8}$/;
-const NEW_PLAYER_ID_PATTERN = /^GK[0-9]{7}$/;
+const NEW_PLAYER_ID_PATTERN = /^GK[0-9]{7,8}$/;
 const USER_STATUSES = new Set(["PENDING", "ACTIVE", "SUSPENDED", "REJECTED"]);
 const GAME_STATUSES = new Set([
   "COMING_SOON",
@@ -376,6 +385,29 @@ async function dbResult<T>(
   return data;
 }
 
+async function runtimePolicies(db: SupabaseClient): Promise<RuntimePolicyRow[]> {
+  const { data, error } = await db.from("game_runtime_catalog").select(
+    "catalog_slug,availability,parity_state,disabled_reason,ruleset_version",
+  ).returns<RuntimePolicyRow[]>();
+  if (error) {
+    throw new HttpError(400, error.message || "Could not load game runtime policy");
+  }
+  return data || [];
+}
+
+async function runtimePolicy(
+  db: SupabaseClient,
+  catalogSlug: string,
+): Promise<RuntimePolicyRow | null> {
+  const { data, error } = await db.from("game_runtime_catalog").select(
+    "catalog_slug,availability,parity_state,disabled_reason,ruleset_version",
+  ).eq("catalog_slug", catalogSlug).maybeSingle<RuntimePolicyRow>();
+  if (error && error.code !== "PGRST116") {
+    throw new HttpError(400, error.message || "Could not load game runtime policy");
+  }
+  return data || null;
+}
+
 async function requireActor(req: Request): Promise<Actor> {
   const authorization = req.headers.get("authorization") || "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
@@ -654,20 +686,33 @@ async function handlePlayerLogin(req: Request): Promise<Response> {
 async function handlePlayerSession(req: Request): Promise<Response> {
   const player = await requirePlayer(req);
   const db = service();
-  const [balance, games] = await Promise.all([
+  const [balance, games, runtimes] = await Promise.all([
     authoritativePlayerBalance(db, player.profile),
     dbResult<Json[]>(
       db.from("games").select(
-        "slug,name,category,tagline,description,art,display_order",
-      ).eq("status", "ENABLED").order("display_order", { ascending: true }),
+        "slug,name,category,tagline,description,art,display_order,status",
+      ).order("display_order", { ascending: true }),
     ),
+    runtimePolicies(db),
   ]);
+  const runtimeByCatalog = new Map(
+    runtimes.map((runtime) => [runtime.catalog_slug, runtime]),
+  );
+  // Do not advertise a game merely because a legacy catalogue row says
+  // ENABLED. The player session and game-api lobby must describe the same
+  // launchable set, otherwise a real player can reach a dead cabinet.
+  const playableGames = games.filter((game) =>
+    isPubliclyPlayableRuntime(
+      typeof game.status === "string" ? game.status : null,
+      runtimeByCatalog.get(String(game.slug || "")),
+    )
+  ).map(({ status: _status, ...game }) => game);
   const profile = playerSessionProfile(player.profile);
   return json(req, {
     profile,
     user: profile,
     balance,
-    games,
+    games: playableGames,
   });
 }
 
@@ -845,7 +890,7 @@ async function createPlayer(req: Request): Promise<Response> {
         .padStart(7, "0")
     }`;
   if (!NEW_PLAYER_ID_PATTERN.test(loginId)) {
-    throw new HttpError(400, "Player ID must be GK followed by seven digits");
+    throw new HttpError(400, "Player ID must be GK followed by seven or eight digits");
   }
   const password = optionalText(body, "password", 128) || randomPassword();
   if (password.length < 7) {
@@ -1154,12 +1199,40 @@ async function revokeOperator(
 
 async function listGames(req: Request): Promise<Response> {
   await requireActor(req);
-  const games = await dbResult<Json[]>(
-    service().from("games").select(
+  const db = service();
+  const [games, runtimes] = await Promise.all([
+    dbResult<Json[]>(
+      db.from("games").select(
       "id,slug,name,category,tagline,description,status,featured,art,display_order,created_at,updated_at",
-    ).order("display_order", { ascending: true }),
+      ).order("display_order", { ascending: true }),
+    ),
+    runtimePolicies(db),
+  ]);
+  const runtimeByCatalog = new Map(
+    runtimes.map((runtime) => [runtime.catalog_slug, runtime]),
   );
-  return json(req, { games });
+  return json(req, {
+    games: games.map((game) => {
+      const runtime = runtimeByCatalog.get(String(game.slug || ""));
+      const gameStatus = typeof game.status === "string" ? game.status : null;
+      return {
+        ...game,
+        runtime: runtime
+          ? {
+            availability: runtime.availability,
+            parity_state: runtime.parity_state,
+            disabled_reason: runtime.disabled_reason || null,
+            ruleset_version: runtime.ruleset_version,
+          }
+          : null,
+        // This deliberately excludes the mutable catalogue status. It answers
+        // whether a reviewed server runtime is capable of being promoted; the
+        // distinct `runtime_available` field answers whether it is public now.
+        runtime_ready_for_enable: isPubliclyPlayableRuntime("ENABLED", runtime),
+        runtime_available: isPubliclyPlayableRuntime(gameStatus, runtime),
+      };
+    }),
+  });
 }
 
 async function updateGame(req: Request, slug: string): Promise<Response> {
@@ -1205,6 +1278,16 @@ async function updateGame(req: Request, slug: string): Promise<Response> {
     throw new HttpError(400, "No supported game fields were provided");
   }
   const db = service();
+  if (patch.status === "ENABLED") {
+    const runtime = await runtimePolicy(db, slug);
+    if (!isPubliclyPlayableRuntime("ENABLED", runtime)) {
+      throw new HttpError(
+        409,
+        runtimeReadinessMessage("ENABLED", runtime),
+        "GAME_RUNTIME_NOT_READY",
+      );
+    }
+  }
   const before = await dbResult<Json>(
     db.from("games").select(
       "id,slug,name,category,tagline,description,status,featured,art,display_order,created_at,updated_at",
