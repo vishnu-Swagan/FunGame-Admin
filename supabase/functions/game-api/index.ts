@@ -544,8 +544,13 @@ type Snapshot = {
  * JSON selection is parsed back to the object its resolver expects. A plain
  * token is passed through untouched.
  */
-function pacedSelection(selection: string | undefined, catalogSlug: string): unknown {
-  const raw = selection || pacedDefaultSelection(catalogSlug);
+function pacedSelection(selection: string | undefined, catalogSlug: string, stake: number): unknown {
+  // "__stake__" is the normalizer's sentinel for a stake-only table, not a
+  // selection a resolver understands. It means the same thing as no selection
+  // at all: stake the machine, let the cabinet default decide the shape.
+  const raw = (selection && selection !== "__stake__")
+    ? selection
+    : pacedDefaultSelection(catalogSlug, stake);
   if (raw.startsWith("{")) {
     try {
       return JSON.parse(raw);
@@ -565,12 +570,21 @@ function pacedSelection(selection: string | undefined, catalogSlug: string): unk
  * they genuinely differ, and a wrong token fails the resolver rather than
  * silently pricing the wrong bet.
  */
-function pacedDefaultSelection(catalogSlug: string): string {
+function pacedDefaultSelection(catalogSlug: string, stake: number): string {
   switch (catalogSlug) {
     case "checker":
       return "cell:3-3";
-    case "lucky-8-line":
-      return JSON.stringify({ line_stakes: [1, 1, 1, 1, 1, 1, 1, 1] });
+    case "lucky-8-line": {
+      // The reel machine settles the eight line stakes it was dealt, and its
+      // settle() refuses any staked total that differs from their sum. So the
+      // default selection distributes the player's stake across the eight
+      // lines exactly: floor per line, remainder one point at a time from the
+      // first line. Every point staked lands on a line, none invented.
+      const per = Math.floor(stake / 8);
+      const rem = stake % 8;
+      const lines = Array.from({ length: 8 }, (_, i) => per + (i < rem ? 1 : 0));
+      return JSON.stringify({ line_stakes: lines });
+    }
     default:
       return "hand";
   }
@@ -900,7 +914,7 @@ async function dealPacedHand(
       catalog_slug: spec.catalog_slug,
       ruleset_version: runtime.ruleset_version,
       runtime_mode: "PLAYER_PACED",
-      selection: pacedSelection(normalized.selection, spec.catalog_slug),
+      selection: pacedSelection(normalized.selection, spec.catalog_slug, stake as number),
       stake_points: stake as number,
       outcome: generated.outcome,
     });
@@ -915,7 +929,9 @@ async function dealPacedHand(
     p_player_id: actor.id,
     p_session_id: session.id,
     p_stake_points: plan.stake_points,
-    p_selection: normalized.selection || pacedDefaultSelection(spec.catalog_slug),
+    p_selection: (normalized.selection && normalized.selection !== "__stake__")
+      ? normalized.selection
+      : pacedDefaultSelection(spec.catalog_slug, stake as number),
     p_outcome: plan.outcome,
     p_payout_points: plan.payout_points,
     p_resolver_id: plan.resolver_id,

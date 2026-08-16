@@ -143,7 +143,18 @@ export function validateLucky8Outcome(input: unknown): Lucky8Outcome {
     throw new ResolverInputError("INVALID_OUTCOME", "Lucky 8 outcome must be a grid object.");
   }
   const record = input as Record<string, unknown>;
-  exactKeys(record, ["grid"], "INVALID_OUTCOME");
+  // Accept the validator's OWN output as well as the compact wire form. The
+  // projected outcome carries kind alongside grid, and the single-player
+  // settlement path validates twice (once at generation, once at planning), so
+  // a validator that rejects its own projection makes every hand undealable.
+  if (Object.hasOwn(record, "kind")) {
+    if (record.kind !== "eight_line_reel") {
+      throw new ResolverInputError("INVALID_OUTCOME", "Lucky 8 outcome kind is invalid.");
+    }
+    exactKeys(record, ["kind", "grid"], "INVALID_OUTCOME");
+  } else {
+    exactKeys(record, ["grid"], "INVALID_OUTCOME");
+  }
   if (
     !Array.isArray(record.grid) || record.grid.length !== 3 ||
     record.grid.some((reel) => !Array.isArray(reel) || reel.length !== 3)
