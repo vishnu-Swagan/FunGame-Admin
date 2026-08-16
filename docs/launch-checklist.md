@@ -56,7 +56,7 @@ Legend: 🧑 You · 🤖 Agent · 🤝 Together
 
   > Back up the current `public_html/admin`, upload and extract the prepared MyDGP admin ZIP into that directory, purge Hostinger CDN cache, and verify deep-link fallback at `/admin/login`.
 
-  **Verified:** `https://mydgp.casino/admin/` serves `MYDGP.CASINO — Admin`, `main.96a596ea.js`, and deep links at `/admin/login` and `/admin/users` return 200. The public JavaScript hash exactly matches the reviewed local build. The previous folder is retained as `public_html/admin.rollback-20260815-0105`.
+  **Verified (updated 2026-08-16):** `https://mydgp.casino/admin/` serves `main.77a8ec08.js` — the rebuilt console with the Point Collector page, auto-issued GK+8 credentials and runtime promotion controls. Deep links return 200 and `/admin/point-collector` renders authenticated with live ledger data. The bundle is reproducible from `frontend/build` at commit 6c517e7+; prior folder retained as `public_html/admin.rollback-20260816`.
 
 - [ ] 🤖 **Publish the new APK without changing download names** — 10 minutes. Back up the current `FunGame.apk`, upload the newly signed build under the same public filename, and keep Windows files unchanged.
 
