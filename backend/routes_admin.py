@@ -3,12 +3,15 @@ import uuid
 import string
 import secrets
 import logging
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
                     AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate,
+                    AdminCreateOperator,
                     DistributorCreate,
                     DistributorRate,
                     DistributorStatus,
@@ -48,6 +51,43 @@ def _issue_password():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _login_key(username: str) -> str:
+    """One case-insensitive namespace for every issued Login ID."""
+    return username.strip().lower()
+
+
+async def _login_id_taken(username: str) -> bool:
+    """Check legacy and canonical Login IDs before provisioning an account."""
+    clean = username.strip()
+    return bool(await db.users.find_one({
+        '$or': [
+            {'login_key': _login_key(clean)},
+            {'username': {'$regex': f'^{re.escape(clean)}$', '$options': 'i'}},
+        ],
+    }))
+
+
+def _require_primary_admin(admin: dict):
+    """Delegated administrators may operate the service but not its identities."""
+    if admin.get('operator_created_by'):
+        raise HTTPException(
+            status_code=403,
+            detail='Only the primary administrator can manage administrator accounts',
+        )
+
+
+def _assert_can_change_admin_identity(actor: dict, target: dict):
+    """Keep delegated operators from taking over their primary administrator.
+
+    Player credentials remain manageable by any administrator, but an operator
+    created by the primary administrator cannot reset or replace the login
+    identity of any administrator.  A delegated operator can still use the
+    normal self-service password-change route for their own account.
+    """
+    if target.get('role') == 'ADMIN':
+        _require_primary_admin(actor)
 
 
 async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO'):
@@ -203,6 +243,7 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
     user = await db.users.find_one({'id': user_id})
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
+    _assert_can_change_admin_identity(admin, user)
     await db.users.update_one({'id': user_id}, {
         '$set': {
             'password_hash': hash_password(body.password),
@@ -216,7 +257,124 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
     return {'message': 'Password reset. The user must log in again with the new password.'}
 
 
-# ---------- Direct account provisioning (admin creates the login) ----------
+# ---------- Account provisioning ----------
+@router.post('/operators', status_code=201)
+async def admin_create_operator(body: AdminCreateOperator, admin: dict = Depends(require_admin)):
+    """Create a second administrator with no player wallet or point balance.
+
+    Only the primary administrator can invoke this route. Passwords are hashed
+    immediately and intentionally never returned or written to logs.
+    """
+    _require_primary_admin(admin)
+
+    username = body.username.strip()
+    login_key = _login_key(username)
+    if await _login_id_taken(username):
+        raise HTTPException(status_code=409, detail='That operator ID is already in use')
+
+    # This synthetically generated, verified email satisfies the existing unique
+    # email index. Operators sign in with their Operator ID, not this address.
+    email = f'operator.{username.lower()}@mydgp.casino'
+    if await db.users.find_one({'email': email}):
+        raise HTTPException(status_code=409, detail='That operator ID is already in use')
+
+    now = _now()
+    operator = {
+        'id': str(uuid.uuid4()),
+        'email': email,
+        'username': username,
+        'login_key': login_key,
+        'password_hash': hash_password(body.password),
+        # Do not make the account live until the immutable audit record has
+        # been written successfully. This avoids an untraceable admin if the
+        # database fails part-way through provisioning.
+        'role': 'ADMIN', 'status': 'PENDING_AUDIT', 'email_verified': True,
+        'display_name': body.display_name or username, 'full_name': body.display_name or username,
+        'country': None, 'date_of_birth': None, 'phone': None, 'avatar': 'crown',
+        'chip_balance': 0, 'points_balance': 0,
+        'favorites': [], 'recent_games': [],
+        'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
+        'accepted_terms': True,
+        'created_at': now, 'operator_created_by': admin['id'],
+    }
+    try:
+        await db.users.insert_one(operator)
+    except DuplicateKeyError:
+        # The sparse unique login_key index closes the small race between the
+        # preflight check above and the insert. Never expose whether a row was
+        # already present beyond the generic duplicate message.
+        raise HTTPException(status_code=409, detail='That operator ID is already in use')
+    try:
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()), 'action': 'OPERATOR_CREATED',
+            'actor_id': admin['id'], 'actor_email': admin.get('email'),
+            'target_id': operator['id'], 'target_username': username,
+            'target_role': 'ADMIN', 'created_at': now,
+        })
+    except Exception as exc:  # An unaudited administrator must never become active.
+        logger.exception('operator audit insert failed for %s', username)
+        try:
+            await db.users.delete_one({'id': operator['id'], 'status': 'PENDING_AUDIT'})
+        except Exception:  # If compensation also fails, it remains unable to sign in.
+            logger.exception('operator compensation delete failed for %s', username)
+        raise HTTPException(status_code=503, detail='Administrator creation could not be recorded; please try again') from exc
+    activated = await db.users.update_one(
+        {'id': operator['id'], 'status': 'PENDING_AUDIT'},
+        {'$set': {'status': 'ACTIVE', 'activated_at': _now()}},
+    )
+    if activated.modified_count != 1:
+        logger.error('operator %s was audited but could not be activated', username)
+        raise HTTPException(status_code=503, detail='Administrator was recorded but is not active; contact the primary administrator')
+    logger.info('admin %s created operator %s', admin.get('email'), username)
+    return {
+        'message': 'Administrator created. Give the Operator ID and password to the operator now.',
+        'operator': {'id': operator['id'], 'username': username, 'display_name': operator['display_name']},
+    }
+
+
+@router.get('/operators')
+async def admin_list_operators(admin: dict = Depends(require_admin)):
+    """List the primary administrator's delegated accounts for incident response."""
+    _require_primary_admin(admin)
+    rows = await db.users.find(
+        {'role': 'ADMIN', 'operator_created_by': admin['id']},
+        {'_id': 0, 'id': 1, 'username': 1, 'display_name': 1, 'status': 1,
+         'created_at': 1, 'activated_at': 1, 'operator_revoked_at': 1},
+    ).sort('created_at', -1).to_list(100)
+    return {'operators': serialize_doc(rows)}
+
+
+@router.post('/operators/{operator_id}/revoke')
+async def admin_revoke_operator(operator_id: str, admin: dict = Depends(require_admin)):
+    """Immediately suspend a delegated administrator and revoke its session."""
+    _require_primary_admin(admin)
+    operator = await db.users.find_one({
+        'id': operator_id, 'role': 'ADMIN', 'operator_created_by': admin['id'],
+    })
+    if not operator:
+        raise HTTPException(status_code=404, detail='Administrator not found')
+    if operator.get('status') == 'SUSPENDED':
+        return {'message': 'Administrator is already revoked'}
+    now = _now()
+    await db.users.update_one({'id': operator_id}, {'$set': {
+        'status': 'SUSPENDED', 'active_session_id': f'revoked-{uuid.uuid4()}',
+        'operator_revoked_at': now, 'operator_revoked_by': admin['id'],
+    }})
+    try:
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()), 'action': 'OPERATOR_REVOKED',
+            'actor_id': admin['id'], 'actor_email': admin.get('email'),
+            'target_id': operator_id, 'target_username': operator.get('username'),
+            'target_role': 'ADMIN', 'created_at': now,
+        })
+    except Exception:
+        # The security action is already effective; leave the account revoked
+        # rather than reporting it as active because an audit write failed.
+        logger.exception('operator revoke audit insert failed for %s', operator_id)
+    logger.warning('admin %s revoked operator %s', admin.get('email'), operator.get('username'))
+    return {'message': 'Administrator access revoked'}
+
+
 @router.post('/users')
 async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require_admin)):
     """Create a player account directly. The server issues the Login ID
@@ -226,7 +384,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     username = None
     for _ in range(40):
         cand = _issue_username()
-        if not await db.users.find_one({'username': cand}):
+        if not await _login_id_taken(cand):
             username = cand
             break
     if not username:
@@ -241,6 +399,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'id': str(uuid.uuid4()),
         'email': email,
         'username': username,
+        'login_key': _login_key(username),
         'password_hash': hash_password(password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': body.full_name, 'full_name': body.full_name,
@@ -253,7 +412,10 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'admin_note': body.note,
     }
-    await db.users.insert_one(user)
+    try:
+        await db.users.insert_one(user)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail='Login ID is already in use; please try again')
     # Attribution is bound at creation and never again — see crm.py. An account
     # keyed in by an admin has no referral code, so it lands on the house.
     await crm.attribute_user(user['id'], getattr(body, 'referral_code', None), actor=admin['id'])
@@ -283,22 +445,15 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
     if req.get('status') != 'PENDING':
         raise HTTPException(status_code=400, detail='Request already resolved')
     username = body.username  # validated + lowercased by the model
-    if await db.users.find_one({'username': username}):
+    if await _login_id_taken(username):
         raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
     if await db.users.find_one({'email': req['email']}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
-    # resolve the request atomically first (idempotency guard), then create the user
-    result = await db.signup_requests.update_one(
-        {'id': request_id, 'status': 'PENDING'},
-        {'$set': {'status': 'APPROVED', 'reviewed_at': _now(), 'reviewed_by': admin['id'],
-                  'assigned_username': username, 'admin_note': body.note}},
-    )
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail='Request already resolved')
     user = {
         'id': str(uuid.uuid4()),
         'email': req['email'],
         'username': username,
+        'login_key': _login_key(username),
         'password_hash': hash_password(body.password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': req['full_name'], 'full_name': req['full_name'],
@@ -311,7 +466,20 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'signup_request_id': request_id,
     }
-    await db.users.insert_one(user)
+    try:
+        # Insert before resolving the request, so a unique-index collision can
+        # never leave it marked approved without a corresponding account.
+        await db.users.insert_one(user)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
+    result = await db.signup_requests.update_one(
+        {'id': request_id, 'status': 'PENDING'},
+        {'$set': {'status': 'APPROVED', 'reviewed_at': _now(), 'reviewed_by': admin['id'],
+                  'assigned_username': username, 'admin_note': body.note}},
+    )
+    if result.modified_count == 0:
+        await db.users.delete_one({'id': user['id']})
+        raise HTTPException(status_code=400, detail='Request already resolved')
     # Attribution is bound at creation and never again — see crm.py. The code the
     # player typed travels on the request; an unknown one falls to the house.
     await crm.attribute_user(user['id'], req.get('referral_code'), actor=admin['id'])
@@ -505,16 +673,21 @@ async def support_threads(admin: dict = Depends(require_admin)):
 
 @router.get('/support/threads/{user_id}')
 async def support_thread_detail(user_id: str, admin: dict = Depends(require_admin)):
+    u = await db.users.find_one(
+        {'id': user_id, 'role': 'PLAYER'},
+        {'_id': 0, 'email': 1, 'display_name': 1, 'status': 1},
+    )
+    if not u:
+        raise HTTPException(status_code=404, detail='Player not found')
     msgs = await db.support_messages.find({'user_id': user_id}, {'_id': 0}).sort('created_at', 1).to_list(500)
     await db.support_messages.update_many(
         {'user_id': user_id, 'sender': 'USER', 'read_admin': False}, {'$set': {'read_admin': True}})
-    u = await db.users.find_one({'id': user_id}, {'_id': 0, 'email': 1, 'display_name': 1, 'status': 1})
     return {'messages': serialize_doc(msgs), 'user': serialize_doc(u)}
 
 
 @router.post('/support/threads/{user_id}/reply')
 async def support_reply(user_id: str, body: SupportMessageCreate, admin: dict = Depends(require_admin)):
-    u = await db.users.find_one({'id': user_id})
+    u = await db.users.find_one({'id': user_id, 'role': 'PLAYER'})
     if not u:
         raise HTTPException(status_code=404, detail='User not found')
     msg = {
@@ -697,7 +870,7 @@ async def distributor_players(distributor_id: str, admin: dict = Depends(require
 
 @router.post('/players/{user_id}/distributor')
 async def move_player(user_id: str, body: PlayerReassign, admin: dict = Depends(require_admin)):
-    if not await db.users.find_one({'id': user_id}):
+    if not await db.users.find_one({'id': user_id, 'role': 'PLAYER'}):
         raise HTTPException(status_code=404, detail='Player not found')
     try:
         doc = await crm.reassign_user(user_id, body.distributor_id, admin['id'], note=body.note)
@@ -880,6 +1053,7 @@ async def admin_change_email(user_id: str, body: AdminSetEmail, admin: dict = De
     user = await db.users.find_one({'id': user_id})
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
+    _assert_can_change_admin_identity(admin, user)
     clash = await db.users.find_one({'email': email, 'id': {'$ne': user_id}})
     if clash:
         raise HTTPException(status_code=409, detail='Another account already uses that email')

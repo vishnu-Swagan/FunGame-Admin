@@ -157,7 +157,11 @@ async def run_seed():
     # Indexes (idempotent)
     await db.users.create_index('email', unique=True)
     await db.users.create_index('id')
-    await db.users.create_index('username')  # fast Login-ID lookups / uniqueness checks
+    await db.users.create_index('username')  # fast legacy Login-ID lookups
+    # New operator IDs carry a canonical, case-folded login key. The sparse
+    # index leaves all pre-existing player documents untouched while making a
+    # concurrent operator-ID collision impossible.
+    await db.users.create_index('login_key', unique=True, sparse=True)
     await db.games.create_index('slug', unique=True)
     await db.chip_transactions.create_index([('user_id', 1), ('created_at', -1)])
     await db.chip_requests.create_index([('user_id', 1), ('created_at', -1)])

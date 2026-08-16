@@ -51,6 +51,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await db.users.find_one({'id': payload.get('sub')})
     if not user:
         raise HTTPException(status_code=401, detail='User not found')
+    if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail='Administrator access is disabled')
     # Single active session per user: a newer login replaces the previous session.
     active_sid = user.get('active_session_id')
     if active_sid and payload.get('sid') != active_sid:

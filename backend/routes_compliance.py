@@ -44,6 +44,19 @@ async def _spend_summary(user_id):
     return out
 
 
+async def _require_player_target(user_id: str, projection=None):
+    """Resolve an admin action target only when it is a player account.
+
+    The admin compliance endpoints are deliberately named ``/players``.  The
+    role check is also the authorization boundary that prevents an operator
+    from revoking another administrator's session through a crafted request.
+    """
+    user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'}, projection)
+    if not user:
+        raise HTTPException(status_code=404, detail='Player not found')
+    return user
+
+
 # ------------------------------------------------------------------- player
 
 @router.get('/me')
@@ -203,8 +216,7 @@ async def list_exclusions(admin: dict = Depends(require_admin)):
 async def admin_exclude(user_id: str, body: AdminExclusion,
                         admin: dict = Depends(require_admin)):
     """The operator excluding a player — for a concern the player has not raised."""
-    if not await db.users.find_one({'id': user_id}):
-        raise HTTPException(status_code=404, detail='Player not found')
+    await _require_player_target(user_id)
     if not body.reason:
         raise HTTPException(status_code=400, detail='An operator exclusion has to have a reason recorded')
     kind = compliance.SELF_EXCLUSION if body.days is None else compliance.BREAK
@@ -220,6 +232,7 @@ async def admin_exclude(user_id: str, body: AdminExclusion,
 
 @admin_router.post('/players/{user_id}/exclusion/lift')
 async def admin_lift(user_id: str, body: AdminExclusion, admin: dict = Depends(require_admin)):
+    await _require_player_target(user_id)
     try:
         doc = await compliance.admin_lift(user_id, admin['id'], body.reason)
     except ValueError as e:
@@ -229,9 +242,7 @@ async def admin_lift(user_id: str, body: AdminExclusion, admin: dict = Depends(r
 
 @admin_router.post('/players/{user_id}/age-verify')
 async def verify_age(user_id: str, body: AgeVerify, admin: dict = Depends(require_admin)):
-    user = await db.users.find_one({'id': user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail='Player not found')
+    user = await _require_player_target(user_id)
     age = compliance.age_on(user.get('date_of_birth'))
     if body.verified and age is None:
         raise HTTPException(status_code=400, detail=(
@@ -248,12 +259,11 @@ async def verify_age(user_id: str, body: AgeVerify, admin: dict = Depends(requir
 
 @admin_router.get('/players/{user_id}')
 async def player_detail(user_id: str, admin: dict = Depends(require_admin)):
-    user = await db.users.find_one(
-        {'id': user_id},
+    user = await _require_player_target(
+        user_id,
         {'_id': 0, 'id': 1, 'username': 1, 'country': 1, 'date_of_birth': 1,
-         'age_verified': 1, 'age_verified_at': 1, 'status': 1, 'chip_balance': 1})
-    if not user:
-        raise HTTPException(status_code=404, detail='Player not found')
+         'age_verified': 1, 'age_verified_at': 1, 'status': 1, 'chip_balance': 1},
+    )
     return {
         'player': serialize_doc(user),
         'age': compliance.age_on(user.get('date_of_birth')),
@@ -272,6 +282,7 @@ async def admin_set_limit(user_id: str, body: LimitSet, admin: dict = Depends(re
     would. The delay protects against a decision made in the moment, and an
     operator asked to lift it in the moment is the same decision.
     """
+    await _require_player_target(user_id)
     try:
         result = await compliance.set_limit(user_id, body.kind.upper(),
                                             body.period.upper(), body.amount,

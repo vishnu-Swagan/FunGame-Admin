@@ -78,6 +78,36 @@ class AdminCreateUser(BaseModel):
         return v or None
 
 
+class AdminCreateOperator(BaseModel):
+    """Provision a second administrator without creating a player wallet."""
+    username: str = Field(min_length=3, max_length=24)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: Optional[str] = Field(default=None, max_length=80)
+
+    @field_validator('username')
+    @classmethod
+    def valid_operator_username(cls, v):
+        v = v.strip()
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._]{1,22}[A-Za-z0-9]', v):
+            raise ValueError('Operator ID must be 3-24 characters: letters, numbers, dots or underscores')
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def strong_operator_password(cls, v):
+        if not (re.search(r'[a-z]', v) and re.search(r'[A-Z]', v) and re.search(r'\d', v) and re.search(r'[^A-Za-z0-9]', v)):
+            raise ValueError('Operator password must include upper- and lowercase letters, a number and a symbol')
+        return v
+
+    @field_validator('display_name')
+    @classmethod
+    def normalise_operator_name(cls, v):
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
 class VerifyEmailRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=4, max_length=8)

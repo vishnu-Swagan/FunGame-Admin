@@ -40,7 +40,11 @@ LIVE_GAMES = {
     "poker":             {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "sides"},
     "no-hold":           {"bet": BET_SECONDS, "reveal": 8, "result": 5, "kind": "stake"},
     "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
-    "andar-bahar":       {"bet": BET_SECONDS, "reveal": 16, "result": 5, "kind": "sides"},
+    # Fun AB is timed off the client's own table (148s recording,
+    # 2026-08-08, two complete rounds): their plate resets to 0:42 and
+    # runs one continuous 43-second count to 0:00. The cabinet's Timing
+    # row in Rounds.cs carries the same three numbers and the reasoning.
+    "andar-bahar":       {"bet": 36, "reveal": 2, "result": 5, "kind": "sides"},
     "keno":              {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "picks"},
     "bingo":             {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "stake"},
     "fever-joker-bonus": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},

@@ -56,6 +56,7 @@ async def main():
     # --- provisioning ---------------------------------------------------
     user = await crm.attach_login(north['id'], 'north@example.com', 'hashed', 'admin')
     T("login id is the referral code",  user['username'] == 'NRTH1')
+    T("partner login uses the canonical namespace", user['login_key'] == 'nrth1')
     T("role is DISTRIBUTOR",            user['role'] == 'DISTRIBUTOR')
     T("no wallet on the account",       user.get('chip_balance') == 0)
     T("no email round trip needed",     user['email_verified'] is True)
@@ -65,6 +66,16 @@ async def main():
       await raises(crm.attach_login(house['id'], 'h@x.com', 'h', 'admin'), 'house'))
     T("an email cannot be shared",
       await raises(crm.attach_login(south['id'], 'north@example.com', 'h', 'admin'), 'already belongs'))
+
+    # A distributor's referral code becomes a Login ID, so it cannot overlap a
+    # case-insensitive administrator Login ID either.
+    clash = await crm.create_distributor('Clash Agents', 'X9YZ', 2500, 'admin')
+    await db.users.insert_one({
+        'id': 'operator-clash', 'username': 'X9yz', 'login_key': 'x9yz',
+        'role': 'ADMIN', 'status': 'ACTIVE', 'email': 'operator-clash@example.com',
+    })
+    T("partner login cannot shadow an operator login",
+      await raises(crm.attach_login(clash['id'], 'clash-agent@example.com', 'h', 'admin'), 'already in use'))
 
     # A reset must not leave the old session alive.
     before = await db.users.find_one({'id': user['id']})

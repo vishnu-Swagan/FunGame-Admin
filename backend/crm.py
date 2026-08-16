@@ -27,6 +27,7 @@ money must not be floats.
 import re
 import uuid
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 
 from db import db
 
@@ -310,13 +311,18 @@ async def attach_login(distributor_id, email, password_hash, actor):
 
     # The referral code doubles as the Login ID so a partner has one identifier
     # to remember, which only works while it is unique across every account.
-    taken = await db.users.find_one({'username': {'$regex': f"^{re.escape(dist['code'])}$", '$options': 'i'}})
+    login_key = dist['code'].lower()
+    taken = await db.users.find_one({'$or': [
+        {'login_key': login_key},
+        {'username': {'$regex': f"^{re.escape(dist['code'])}$", '$options': 'i'}},
+    ]})
     if taken:
         raise ValueError(f"Login ID {dist['code']} is already in use — change the referral code first")
 
     user = {
         'id': str(uuid.uuid4()),
         'username': dist['code'],
+        'login_key': login_key,
         'email': email,
         'password_hash': password_hash,
         'role': 'DISTRIBUTOR',
@@ -330,7 +336,10 @@ async def attach_login(distributor_id, email, password_hash, actor):
         'created_at': now_iso(),
         'created_by': actor,
     }
-    await db.users.insert_one(user)
+    try:
+        await db.users.insert_one(user)
+    except DuplicateKeyError as exc:
+        raise ValueError(f"Login ID {dist['code']} is already in use — change the referral code first") from exc
     await db.distributors.update_one({'id': distributor_id}, {'$set': {
         'user_id': user['id'], 'email': email}})
     user.pop('_id', None)

@@ -136,7 +136,10 @@ async def login(body: LoginRequest):
     if '@' in ident:
         user = await db.users.find_one({'email': ident.lower()})
     else:
-        user = await db.users.find_one({'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'}})
+        user = await db.users.find_one({'$or': [
+            {'login_key': ident.lower()},
+            {'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'}},
+        ]})
     if not user or not verify_password(body.password, user.get('password_hash', '')):
         raise HTTPException(status_code=401, detail='Invalid login ID or password')
     if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
