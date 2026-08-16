@@ -15,6 +15,7 @@ import {
   matchesPersistedGameActionReplay,
   matchesRoundActionPrecondition,
   normalizePlayerAction,
+  type NormalizedAction,
   normalizedActionRequest,
   publicClockWire,
   roundActionPrecondition,
@@ -29,7 +30,9 @@ import { hasRegisteredLiveResolver } from "../shared/live-resolver-registry.ts";
 import { hasExecutableReviewResolver } from "./resolvers/review-registry.ts";
 import {
   generateClockedRoundOutcome,
+  generatePlayerPacedOutcome,
   planClockedSettlements,
+  planPlayerPacedSettlement,
   SettlementLifecycleError,
 } from "./settlement-lifecycle.ts";
 
@@ -528,13 +531,136 @@ function publicReveal(outcome: unknown | null): Json | null {
 type Snapshot = {
   body: Json;
   clock: ClockState;
-  round: RoundRow;
+  /** Null on a single-player cabinet: those have no shared round. */
+  round: RoundRow | null;
   openWagers: WagerRow[];
   allowed: string[];
   actionPrecondition: string;
 };
 
+/**
+ * Some cabinets take a structured selection rather than a token: the reel
+ * machine stakes eight lines independently. The wire field is a string, so a
+ * JSON selection is parsed back to the object its resolver expects. A plain
+ * token is passed through untouched.
+ */
+function pacedSelection(selection: string | undefined, catalogSlug: string): unknown {
+  const raw = selection || pacedDefaultSelection(catalogSlug);
+  if (raw.startsWith("{")) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new HttpError(400, "That selection is not valid for this table.", "INVALID_SELECTION");
+    }
+  }
+  return raw;
+}
+
+/**
+ * The selection a single-player cabinet stakes with when the client sends none.
+ *
+ * These machines have no felt: the player stakes the machine itself rather than
+ * picking a position, so the resolver still needs the one selection token it
+ * recognises. Each is that module's own accepted value, not a shared default —
+ * they genuinely differ, and a wrong token fails the resolver rather than
+ * silently pricing the wrong bet.
+ */
+function pacedDefaultSelection(catalogSlug: string): string {
+  switch (catalogSlug) {
+    case "checker":
+      return "cell:3-3";
+    case "lucky-8-line":
+      return JSON.stringify({ line_stakes: [1, 1, 1, 1, 1, 1, 1, 1] });
+    default:
+      return "hand";
+  }
+}
+
+/**
+ * The one action a single-player cabinet exposes.
+ *
+ * Most deal. The reel machines have no deal control at all and stake straight
+ * from place_bet, so the paced path accepts whichever of the two that cabinet
+ * actually declares rather than assuming every machine has a DEAL button.
+ */
+function pacedActions(spec: GameSpec): string[] {
+  if (spec.actions.includes("deal")) return ["deal"];
+  if (spec.actions.includes("place_bet")) return ["place_bet"];
+  return [];
+}
+
+/**
+ * State for a single-player cabinet.
+ *
+ * There is no shared round and no betting window: the hand is dealt on the
+ * player's press and settles in the same request. So the snapshot carries no
+ * round, and the clock is a constant that reports "open" — a countdown here
+ * would be a fiction the client then rendered.
+ *
+ * `deal` is the only action. Placing a stake and resolving it are one atomic
+ * operation in resolve_player_paced_hand, which is what keeps a hand from
+ * existing in a half-staked state.
+ */
+async function pacedSnapshot(
+  actor: PlayerActor,
+  session: SessionRow,
+  spec: GameSpec,
+): Promise<Snapshot> {
+  const [balance, cursor] = await Promise.all([
+    currentBalance(actor.id),
+    eventCursor(actor, session.id),
+  ]);
+  const clock: ClockState = {
+    round_number: 0,
+    phase: "BETTING",
+    bets_open: true,
+    starts_at: new Date().toISOString(),
+    betting_closes_at: new Date().toISOString(),
+    reveal_starts_at: new Date().toISOString(),
+    result_starts_at: new Date().toISOString(),
+    ends_at: new Date().toISOString(),
+    phase_ends_in: 0,
+  } as unknown as ClockState;
+  const state: Json = {
+    round_number: 0,
+    phase: "BETTING",
+    server_time_unix_ms: Date.now(),
+    phase_ends_at_unix_ms: 0,
+    phase_ends_in: 0,
+    bets_open: true,
+    balance,
+    my_total: 0,
+    min_bet: spec.min_bet,
+    max_bet: spec.max_bet,
+    last_payout: 0,
+    runtime_mode: "PLAYER_PACED",
+  };
+  return {
+    body: {
+      schema_version: 1,
+      status: "ok",
+      session_id: session.id,
+      cursor,
+      // Reuses the round precondition shape, bound to the session instead of a
+    // round: a single-player cabinet has no round, but the action must still be
+    // bound to the state the player actually saw, and one validated format is
+    // better than a second one to keep in step.
+    action_precondition: roundActionPrecondition(session.id),
+      allowed_actions: pacedActions(spec),
+      state,
+    },
+    clock,
+    round: null,
+    openWagers: [],
+    allowed: pacedActions(spec),
+    actionPrecondition: roundActionPrecondition(session.id),
+  };
+}
+
 async function snapshot(actor: PlayerActor, session: SessionRow, runtime: RuntimeRow, spec: GameSpec): Promise<Snapshot> {
+  if (spec.runtime_mode === "PLAYER_PACED") {
+    return await pacedSnapshot(actor, session, spec);
+  }
   const { clock, round } = await ensureClockedRound(spec, runtime);
   await settleDueClockedWagers(actor, session, runtime);
   const { data: advanced, error: advanceError } = await service().rpc("advance_ready_clocked_game_round", {
@@ -729,6 +855,84 @@ async function getSession(req: Request, sessionId: string): Promise<Response> {
   return ok(req, (await snapshot(actor, session, runtime, spec)).body);
 }
 
+/**
+ * Deal and settle one single-player hand.
+ *
+ * The server generates the outcome from the registered resolver, prices it with
+ * that resolver's own settle(), and hands the database a stake and a payout to
+ * apply in one transaction. The client never sees the outcome before it is
+ * committed, and never supplies it.
+ *
+ * The resolver's arithmetic is re-validated by planPlayerPacedSettlement before
+ * anything is written, so a resolver returning an inconsistent net cannot move
+ * a balance.
+ */
+async function dealPacedHand(
+  req: Request,
+  actor: PlayerActor,
+  session: SessionRow,
+  runtime: RuntimeRow,
+  spec: GameSpec,
+  normalized: NormalizedAction,
+  incoming: { idempotencyKey: string; amount?: number | null },
+  request: Json,
+): Promise<Response> {
+  const identity = {
+    catalog_slug: spec.catalog_slug,
+    ruleset_version: runtime.ruleset_version,
+    runtime_mode: "PLAYER_PACED" as const,
+  };
+  // `deal` carries no amount through the normalizer, so the stake comes from
+  // the raw request. A single-player hand stakes and settles in one press,
+  // so there is no earlier action that could have carried it.
+  const stake = typeof normalized.amount === "number"
+    ? normalized.amount
+    : incoming.amount;
+  if (!Number.isSafeInteger(stake) || (stake as number) < spec.min_bet || (stake as number) > spec.max_bet) {
+    throw new HttpError(400, "That stake is not accepted at this table.", "INVALID_STAKE");
+  }
+
+  let plan;
+  try {
+    const generated = generatePlayerPacedOutcome(identity);
+    plan = planPlayerPacedSettlement(identity, {
+      session_id: session.id,
+      catalog_slug: spec.catalog_slug,
+      ruleset_version: runtime.ruleset_version,
+      runtime_mode: "PLAYER_PACED",
+      selection: pacedSelection(normalized.selection, spec.catalog_slug),
+      stake_points: stake as number,
+      outcome: generated.outcome,
+    });
+  } catch (error) {
+    // A resolver that cannot generate or price its own hand is an operational
+    // fault, not something the player did.
+    console.error("game-api paced settlement", spec.catalog_slug, String(error));
+    throw new HttpError(503, "This game could not be dealt.", "GAME_SERVICE_UNAVAILABLE");
+  }
+
+  const { data, error } = await service().rpc("resolve_player_paced_hand", {
+    p_player_id: actor.id,
+    p_session_id: session.id,
+    p_stake_points: plan.stake_points,
+    p_selection: normalized.selection || pacedDefaultSelection(spec.catalog_slug),
+    p_outcome: plan.outcome,
+    p_payout_points: plan.payout_points,
+    p_resolver_id: plan.resolver_id,
+    p_ruleset_version: plan.ruleset_version,
+    p_idempotency_key: incoming.idempotencyKey,
+  });
+  rpcOne<unknown>(data, error, "Could not deal this hand.");
+
+  const after = await snapshot(actor, session, runtime, spec);
+  const body = after.body as Record<string, unknown>;
+  const state = (body.state || {}) as Record<string, unknown>;
+  state.last_payout = plan.payout_points;
+  state.outcome = plan.outcome;
+  body.state = state;
+  return ok(req, body as Json);
+}
+
 async function act(req: Request, sessionId: string): Promise<Response> {
   const actor = await requirePlayer(req);
   const session = await sessionFor(actor, sessionId);
@@ -755,6 +959,20 @@ async function act(req: Request, sessionId: string): Promise<Response> {
   }
 
   const before = await snapshot(actor, session, runtime, spec);
+
+  // A single-player cabinet takes one action: deal. Stake and settlement are a
+  // single atomic operation, so there is no round to precondition against and
+  // no window that can close between the press and the result.
+  if (spec.runtime_mode === "PLAYER_PACED") {
+    if (!before.allowed.includes(normalized.action)) {
+      throw new HttpError(409, "That action is not available in the current game state.", "ACTION_UNAVAILABLE");
+    }
+    return await dealPacedHand(req, actor, session, runtime, spec, normalized, incoming, request);
+  }
+
+  if (!before.round) {
+    throw new HttpError(503, "Game round is unavailable.", "ROUND_INVALID");
+  }
   if (!matchesRoundActionPrecondition(incoming.actionPrecondition, before.round.id)) {
     throw new HttpError(
       409,

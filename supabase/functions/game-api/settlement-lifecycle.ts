@@ -274,7 +274,8 @@ export type StoredPlayerPacedHand = Readonly<{
   catalog_slug: string;
   ruleset_version: number;
   runtime_mode: "PLAYER_PACED";
-  selection: string;
+  /** A token on most cabinets; a structured object on the reel machine. */
+  selection: unknown;
   stake_points: number | string;
   outcome: unknown;
 }>;
@@ -387,7 +388,7 @@ export function planPlayerPacedSettlement(
     hand.session_id.length === 0 ||
     hand.catalog_slug !== runtime.catalog_slug ||
     hand.ruleset_version !== runtime.ruleset_version ||
-    typeof hand.selection !== "string"
+    hand.selection === undefined || hand.selection === null
   ) {
     throw new SettlementLifecycleError(
       "ROUND_IDENTITY_MISMATCH",
