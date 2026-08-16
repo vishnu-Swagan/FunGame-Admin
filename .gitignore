@@ -86,3 +86,8 @@ android-sdk/frontend/node_modules/.cache/default-development/3.pack
 credentials.json
 *.key
 .credentials
+
+# Stale one-off admin bundles. Reproducible via `PUBLIC_URL=/admin npm run build`
+# plus frontend/scripts/prepare-admin-build.mjs; never source of truth.
+frontend/build-admin*/
+frontend/build-demo-*/

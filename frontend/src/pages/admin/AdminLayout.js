@@ -1,26 +1,43 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale, ArrowDownToLine } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
-import { BrandWordmark } from "@/components/Brand";
+import { BrandWordmark, MydgpAdminWordmark } from "@/components/Brand";
 import { toast } from "sonner";
 import { ADMIN_LOGOUT_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
-const NAV = [
+const CORE_NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
   { to: "/admin/signups", label: "Create User", icon: UserPlus, testId: "admin-nav-signups" },
   { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
-  { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
+  {
+    to: IS_ADMIN_CONSOLE ? "/admin/point-requests" : "/admin/chip-requests",
+    label: IS_ADMIN_CONSOLE ? "Play Point Requests" : "Chip Requests",
+    icon: HandCoins,
+    testId: IS_ADMIN_CONSOLE ? "admin-nav-point-requests" : "admin-nav-chip-requests",
+  },
+  // Incoming player transfers land here. Console-only: the collector account is
+  // a Supabase control-plane concept and has no legacy Render equivalent.
+  ...(IS_ADMIN_CONSOLE
+    ? [{ to: "/admin/point-collector", label: "Point Collector", icon: ArrowDownToLine, testId: "admin-nav-point-collector" }]
+    : []),
   { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
-  // The distributor CRM — the deck's sections 1, 4 and 5.
-  { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
-  { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
-  { to: "/admin/payouts", label: "Payouts", icon: Banknote, testId: "admin-nav-payouts" },
   { to: "/admin/compliance", label: "Compliance", icon: Scale, testId: "admin-nav-compliance" },
   { to: "/admin/games", label: "Games", icon: Gamepad2, testId: "admin-nav-games" },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, testId: "admin-nav-announcements" },
   { to: "/admin/settings", label: "System", icon: Settings, testId: "admin-nav-settings" },
 ];
+
+// Partner settlement is intentionally not part of the virtual-points-only
+// Supabase console. These links stay on the legacy player host while its Render
+// system is kept available for rollback.
+const LEGACY_PARTNER_NAV = [
+  { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
+  { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
+  { to: "/admin/payouts", label: "Payouts", icon: Banknote, testId: "admin-nav-payouts" },
+];
+
+const NAV = IS_ADMIN_CONSOLE ? CORE_NAV : [...CORE_NAV.slice(0, 5), ...LEGACY_PARTNER_NAV, ...CORE_NAV.slice(5)];
 
 export default function AdminLayout() {
   const navigate = useNavigate();
@@ -35,7 +52,9 @@ export default function AdminLayout() {
             wider than a 390px phone on every admin page. */}
         <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0" data-testid="admin-logo">
-            <BrandWordmark logoClassName="h-8 w-8" textClassName="text-base" />
+            {IS_ADMIN_CONSOLE
+              ? <MydgpAdminWordmark logoClassName="h-8 w-8" textClassName="text-base" />
+              : <BrandWordmark logoClassName="h-8 w-8" textClassName="text-base" />}
             <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
               <ShieldCheck className="h-3 w-3 text-sky-400" />
               <span className="font-mono text-[9px] tracking-[0.2em] text-sky-300 uppercase">Admin</span>

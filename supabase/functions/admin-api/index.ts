@@ -13,6 +13,12 @@ import {
   runtimeReadinessMessage,
   type RuntimeAvailabilityRecord,
 } from "../shared/runtime-availability.ts";
+import {
+  AdminRequestError,
+  readBoundedJsonObject,
+  requireStableIdempotencyKey,
+} from "./request-security.ts";
+import { parseRuntimePromotion } from "./runtime-promotion.ts";
 
 type Json = Record<string, unknown>;
 type Profile = {
@@ -147,7 +153,7 @@ function json(req: Request, value: unknown, status = 200): Response {
 }
 
 function failure(req: Request, error: unknown): Response {
-  if (error instanceof HttpError) {
+  if (error instanceof HttpError || error instanceof AdminRequestError) {
     return json(req, {
       detail: error.code
         ? { code: error.code, message: error.message }
@@ -171,24 +177,8 @@ function routePath(req: Request): string {
   return (path || "/").replace(/\/+$/, "") || "/";
 }
 
-function asRecord(value: unknown): Json {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new HttpError(400, "A JSON object is required");
-  }
-  return value as Json;
-}
-
 async function readBody(req: Request): Promise<Json> {
-  const length = Number(req.headers.get("content-length") || "0");
-  if (Number.isFinite(length) && length > 65_536) {
-    throw new HttpError(413, "Request body is too large");
-  }
-  try {
-    return asRecord(await req.json());
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    throw new HttpError(400, "Invalid JSON request body");
-  }
+  return await readBoundedJsonObject(req);
 }
 
 function requiredText(
@@ -266,7 +256,7 @@ function uuid(value: string, name = "id"): string {
 }
 
 function makeAuthEmail(
-  kind: "admin" | "operator" | "player",
+  kind: "admin" | "operator" | "player" | "collector",
   loginId: string,
 ): string {
   const local = loginId.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(
@@ -277,21 +267,14 @@ function makeAuthEmail(
   return `${kind}.${local}@auth.mydgp.casino`;
 }
 
-function randomPassword(): string {
+function randomPassword(length = 7): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(7));
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
-function retryKey(req: Request, prefix: string): string {
-  const supplied = req.headers.get("x-idempotency-key")?.trim();
-  if (supplied) {
-    if (supplied.length < 8 || supplied.length > 160) {
-      throw new HttpError(400, "x-idempotency-key must be 8-160 characters");
-    }
-    return supplied;
-  }
-  return `${prefix}:${crypto.randomUUID()}`;
+function pointAdjustmentKey(req: Request): string {
+  return requireStableIdempotencyKey(req.headers.get("x-idempotency-key"));
 }
 
 function adminUser(profile: Profile, admin: AdminAccount): Json {
@@ -650,6 +633,17 @@ async function handlePlayerLogin(req: Request): Promise<Response> {
     throw new HttpError(400, "Sign-in is temporarily unavailable");
   }
   const profile = lookup.data as Profile | null;
+  // The collector is a PLAYER-kind profile so it carries a normal ledger, but
+  // it is operator property: it must never be signed into from the game client.
+  // Same generic message as any other failure, so its ID is not discoverable.
+  if (profile) {
+    const collector = await db.from("point_collector_accounts")
+      .select("profile_id").eq("profile_id", profile.id).eq("active", true)
+      .maybeSingle();
+    if (collector.data) {
+      throw new HttpError(401, "Invalid player ID or password");
+    }
+  }
   if (!profile || profile.status !== "ACTIVE") {
     throw new HttpError(401, "Invalid player ID or password");
   }
@@ -919,7 +913,10 @@ async function createPlayer(req: Request): Promise<Response> {
         p_full_name: fullName,
         p_starting_play_points: startingPoints,
         p_note: optionalText(body, "note", 500) || null,
-        p_idempotency_key: retryKey(req, "player-create"),
+        // Profile creation already owns this UUID. Using it for the optional
+        // opening ledger entry is deterministic and needs no generated retry
+        // credential from the API.
+        p_idempotency_key: `player-create:${created.user.id}`,
       }),
     );
     return json(req, {
@@ -992,7 +989,7 @@ async function adjustPoints(req: Request, playerId: string): Promise<Response> {
       p_player_id: playerId,
       p_delta: delta,
       p_kind: "ADMIN_ADJUSTMENT",
-      p_idempotency_key: retryKey(req, "admin-points"),
+      p_idempotency_key: pointAdjustmentKey(req),
       p_reference_type: "ADMIN_CONSOLE",
       p_reference_id: null,
       p_note: note,
@@ -1065,7 +1062,9 @@ async function resolvePointRequest(
       p_request_id: requestId,
       p_approve: approve,
       p_note: optionalText(body, "note", 500) || null,
-      p_idempotency_key: retryKey(req, "point-request"),
+      // A point request can be resolved once, and its UUID is the durable
+      // identity of the resulting allocation across every caller retry.
+      p_idempotency_key: `point-request:${requestId}`,
     }),
   );
   return json(req, {
@@ -1301,6 +1300,43 @@ async function updateGame(req: Request, slug: string): Promise<Response> {
   );
   await audit(db, actor, "GAME_UPDATED", "GAME", String(game.id), before, game);
   return json(req, { message: "Game updated", game });
+}
+
+// Promoting a runtime is the only supported way to move `parity_state` and
+// `availability`. The RPC re-asserts the administrator and writes its own audit
+// row, so this handler validates the request and reports the stored result.
+async function updateGameRuntime(req: Request, slug: string): Promise<Response> {
+  const actor = await requireActor(req);
+  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
+    throw new HttpError(400, "Game slug is invalid");
+  }
+  const body = await readBody(req);
+  const patch = parseRuntimePromotion(body);
+  const reason = optionalText(body, "reason", 500) || null;
+  const db = service();
+  if (!(await runtimePolicy(db, slug))) {
+    throw new HttpError(404, "Game runtime not found");
+  }
+  const runtime = await dbResult<RuntimePolicyRow>(
+    db.rpc("set_game_runtime_state", {
+      p_actor_id: actor.id,
+      p_catalog_slug: slug,
+      p_parity_state: patch.parity_state,
+      p_availability: patch.availability,
+      p_reason: reason,
+    }),
+  );
+  return json(req, {
+    message: "Game runtime updated",
+    runtime: {
+      catalog_slug: runtime.catalog_slug,
+      availability: runtime.availability,
+      parity_state: runtime.parity_state,
+      disabled_reason: runtime.disabled_reason || null,
+      ruleset_version: runtime.ruleset_version,
+    },
+    runtime_ready_for_enable: isPubliclyPlayableRuntime("ENABLED", runtime),
+  });
 }
 
 async function listAnnouncements(req: Request): Promise<Response> {
@@ -2010,6 +2046,350 @@ async function bootstrapPrimary(req: Request): Promise<Response> {
   }
 }
 
+/* ---------------------------------------------------------------------------
+ * Point transfers
+ *
+ * Players send virtual points to a single operator-owned collector account.
+ * There is deliberately no player-to-player path: points may only ever flow
+ * inward, to an account the operator controls.
+ *
+ * The database owns every invariant here (escrow, idempotency, PIN lockout,
+ * exactly-once settlement). These handlers validate the wire shape and
+ * translate; they must never re-implement a rule.
+ * ------------------------------------------------------------------------ */
+
+type CollectorSummary = {
+  profile_id: string;
+  login_id: string;
+  label: string | null;
+  available_balance: number;
+  received_total: number;
+  received_count: number;
+  pending_total: number;
+  pending_count: number;
+  rejected_count: number;
+  distinct_senders: number;
+};
+
+/* Resolved with two plain lookups rather than an embedded join: PostgREST's
+ * embedding needs a foreign-key constraint name in the select string, which
+ * silently becomes a runtime error if the constraint is ever renamed. */
+async function activeCollector(): Promise<
+  { id: string; login_id: string; label: string | null } | null
+> {
+  const db = service();
+  const accounts = await dbResult<
+    Array<{ profile_id: string; label: string | null }>
+  >(
+    db.from("point_collector_accounts").select("profile_id,label").eq(
+      "active",
+      true,
+    ).limit(1),
+  );
+  const account = accounts[0];
+  if (!account) return null;
+  const profiles = await dbResult<Array<{ id: string; login_id: string }>>(
+    db.from("profiles").select("id,login_id").eq("id", account.profile_id)
+      .limit(1),
+  );
+  const profile = profiles[0];
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    login_id: profile.login_id,
+    label: account.label,
+  };
+}
+
+async function handleCollectorOverview(req: Request): Promise<Response> {
+  const actor = await requireActor(req);
+  const rows = await dbResult<CollectorSummary[]>(
+    service().rpc("point_collector_summary", { p_actor_id: actor.id }),
+  );
+  const collector = rows[0];
+  if (!collector) {
+    return json(req, {
+      configured: false,
+      detail: "No collector account has been provisioned yet.",
+    });
+  }
+  return json(req, { configured: true, collector });
+}
+
+/* The operator-facing tracking list: who sent, how much, and where it landed. */
+async function listCollectorTransfers(req: Request): Promise<Response> {
+  await requireActor(req);
+  const url = new URL(req.url);
+  const status = url.searchParams.get("status")?.toUpperCase() || null;
+  if (status && !["PENDING", "RECEIVED", "REJECTED", "CANCELLED"].includes(status)) {
+    throw new HttpError(400, "Unknown transfer status filter");
+  }
+  const sender = url.searchParams.get("sender")?.trim().toUpperCase() || null;
+  const limit = Math.min(
+    Math.max(Number(url.searchParams.get("limit") || 100) || 100, 1),
+    500,
+  );
+
+  const db = service();
+  type TransferRow = {
+    id: string;
+    reference_code: string;
+    amount: number;
+    status: string;
+    note: string | null;
+    settle_note: string | null;
+    created_at: string;
+    settled_at: string | null;
+    from_player_id: string;
+    settled_by: string | null;
+  };
+  let query = db.from("point_transfers").select(
+    "id,reference_code,amount,status,note,settle_note,created_at,settled_at,from_player_id,settled_by",
+  ).order("created_at", { ascending: false }).limit(limit);
+  if (status) query = query.eq("status", status);
+  const rows = await dbResult<TransferRow[]>(query);
+
+  const senderIds = [...new Set(rows.map((row) => row.from_player_id))];
+  const senders = senderIds.length
+    ? await dbResult<
+      Array<
+        {
+          id: string;
+          login_id: string;
+          display_name: string | null;
+          full_name: string | null;
+        }
+      >
+    >(
+      db.from("profiles").select("id,login_id,display_name,full_name").in(
+        "id",
+        senderIds,
+      ),
+    )
+    : [];
+  const senderById = new Map(senders.map((row) => [row.id, row]));
+
+  const transfers = rows
+    .map((row) => {
+      const from = senderById.get(row.from_player_id);
+      return {
+        ...row,
+        sender_login_id: from?.login_id || null,
+        sender_name: from?.display_name || from?.full_name || null,
+      };
+    })
+    // Search on the login ID the operator actually sees, not an opaque UUID.
+    .filter((row) =>
+      !sender || String(row.sender_login_id || "").includes(sender)
+    );
+
+  return json(req, { transfers, count: transfers.length });
+}
+
+async function settleCollectorTransfer(
+  req: Request,
+  transferId: string,
+  accept: boolean,
+): Promise<Response> {
+  const actor = await requireActor(req);
+  const body = await readBody(req);
+  const note = optionalText(body, "note", 500);
+  const rows = await dbResult<
+    Array<{ status: string; ledger_id: string; balance_after: number }>
+  >(
+    service().rpc("settle_point_transfer", {
+      p_actor_id: actor.id,
+      p_transfer_id: transferId,
+      p_accept: accept,
+      p_note: note,
+    }),
+  );
+  const settled = rows[0];
+  if (!settled) {
+    throw new HttpError(500, "Settlement did not return a ledger entry");
+  }
+  return json(req, {
+    message: accept ? "Points received" : "Transfer rejected and refunded",
+    ...settled,
+  });
+}
+
+/* Provisioning the collector is a one-time, primary-administrator action. */
+async function createPointCollector(req: Request): Promise<Response> {
+  const actor = await requireActor(req);
+  requirePrimary(actor);
+  const body = await readBody(req);
+  const loginId = requiredText(body, "login_id", 10, 10).toUpperCase();
+  if (!/^GK[0-9]{8}$/.test(loginId)) {
+    throw new HttpError(
+      400,
+      "A collector ID must be GK followed by eight digits",
+    );
+  }
+  const label = optionalText(body, "label", 120) || "Point Collector";
+
+  const db = service();
+  const authEmail = makeAuthEmail("collector", loginId);
+  const created = await db.auth.admin.createUser({
+    email: authEmail,
+    password: randomPassword(24),
+    email_confirm: true,
+  });
+  if (created.error || !created.data.user) {
+    if ((created.error?.message || "").toLowerCase().includes("already")) {
+      throw new HttpError(409, "That collector ID is already in use");
+    }
+    throw new HttpError(400, created.error?.message || "Could not create the collector");
+  }
+  try {
+    await dbResult(
+      db.rpc("provision_point_collector", {
+        p_actor_id: actor.id,
+        p_auth_user_id: created.data.user.id,
+        p_login_id: loginId,
+        p_auth_email: authEmail,
+        p_label: label,
+      }),
+    );
+    return json(req, {
+      message: "Collector account created",
+      collector: { id: created.data.user.id, login_id: loginId, label },
+    }, 201);
+  } catch (error) {
+    await db.auth.admin.deleteUser(created.data.user.id);
+    throw error;
+  }
+}
+
+/* --- player-facing --- */
+
+/* The destination is server-published so a player never types a GK ID that a
+ * typo could send elsewhere; the client shows what this returns. */
+async function handleTransferDestination(req: Request): Promise<Response> {
+  await requirePlayer(req);
+  const collector = await activeCollector();
+  if (!collector) return json(req, { configured: false });
+  return json(req, {
+    configured: true,
+    to_login_id: collector.login_id,
+    label: collector.label,
+  });
+}
+
+async function handleSetTransferPin(req: Request): Promise<Response> {
+  const player = await requirePlayer(req);
+  const body = await readBody(req);
+  const pin = requiredText(body, "pin", 4, 8);
+  if (!/^[0-9]{4,8}$/.test(pin)) {
+    throw new HttpError(400, "A transfer PIN must be 4 to 8 digits");
+  }
+  await dbResult(
+    service().rpc("set_player_transfer_pin", {
+      p_player_id: player.id,
+      p_pin: pin,
+      p_set_by: player.id,
+    }),
+  );
+  return json(req, { message: "Transfer PIN updated" });
+}
+
+/* A wrong PIN is reported by the database as an error_code rather than an
+ * exception, so that the failed-attempt counter survives. Map those codes to
+ * HTTP here; anything else has already raised. */
+const TRANSFER_PIN_FAILURES: Record<string, { status: number; detail: string }> = {
+  PIN_NOT_SET: { status: 409, detail: "Set a transfer PIN before sending points" },
+  PIN_LOCKED: {
+    status: 429,
+    detail: "Too many incorrect PIN attempts. Try again in 15 minutes.",
+  },
+  INVALID_PIN: { status: 401, detail: "Incorrect transfer PIN" },
+};
+
+async function handleSubmitTransfer(req: Request): Promise<Response> {
+  const player = await requirePlayer(req);
+  const body = await readBody(req);
+  const amount = integer(body.amount ?? body.points, "amount", 1, 1_000_000);
+  const pin = requiredText(body, "pin", 4, 8);
+  const note = optionalText(body, "note", 500);
+  const toLoginId = optionalText(body, "to_login_id", 16)?.toUpperCase();
+
+  const destination = await activeCollector();
+  if (!destination) {
+    throw new HttpError(409, "Point transfers are not available right now");
+  }
+  const activeLoginId = destination.login_id;
+  // A supplied destination is checked rather than trusted, so a mistyped ID
+  // fails here instead of being silently redirected to the collector.
+  if (toLoginId && toLoginId !== activeLoginId.toUpperCase()) {
+    throw new HttpError(400, "That destination account does not accept transfers");
+  }
+
+  const rows = await dbResult<
+    Array<{
+      transfer_id: string | null;
+      reference_code: string | null;
+      balance_after: number | null;
+      duplicate: boolean;
+      error_code: string | null;
+    }>
+  >(
+    service().rpc("submit_point_transfer", {
+      p_player_id: player.id,
+      p_to_login_id: activeLoginId,
+      p_pin: pin,
+      p_amount: amount,
+      p_idempotency_key: pointAdjustmentKey(req),
+      p_note: note,
+    }),
+  );
+  const result = rows[0];
+  if (!result) throw new HttpError(500, "The transfer did not return a result");
+  if (result.error_code) {
+    const failure = TRANSFER_PIN_FAILURES[result.error_code] ||
+      { status: 400, detail: "The transfer could not be completed" };
+    throw new HttpError(failure.status, failure.detail, result.error_code);
+  }
+  return json(req, {
+    message: result.duplicate
+      ? "Transfer already submitted"
+      : "Transfer submitted and awaiting approval",
+    transfer_id: result.transfer_id,
+    reference_code: result.reference_code,
+    balance_after: result.balance_after,
+    duplicate: result.duplicate,
+    status: "PENDING",
+  }, result.duplicate ? 200 : 201);
+}
+
+async function listPlayerTransfers(req: Request): Promise<Response> {
+  const player = await requirePlayer(req);
+  const rows = await dbResult<Array<Record<string, unknown>>>(
+    service().from("point_transfers").select(
+      "id,reference_code,amount,status,note,created_at,settled_at",
+    ).eq("from_player_id", player.id).order("created_at", { ascending: false })
+      .limit(100),
+  );
+  return json(req, { transfers: rows });
+}
+
+async function cancelPlayerTransfer(
+  req: Request,
+  transferId: string,
+): Promise<Response> {
+  const player = await requirePlayer(req);
+  const rows = await dbResult<
+    Array<{ status: string; ledger_id: string; balance_after: number }>
+  >(
+    service().rpc("cancel_point_transfer", {
+      p_player_id: player.id,
+      p_transfer_id: transferId,
+    }),
+  );
+  const cancelled = rows[0];
+  if (!cancelled) throw new HttpError(500, "Cancellation did not return a result");
+  return json(req, { message: "Transfer cancelled and refunded", ...cancelled });
+}
+
 function dispatch(req: Request): Response | Promise<Response> {
   assertAllowedOrigin(req);
   if (req.method === "OPTIONS") {
@@ -2067,6 +2447,48 @@ function dispatch(req: Request): Response | Promise<Response> {
     return adjustPoints(req, uuid(pointAdjustment[1], "player ID"));
   }
 
+  if (req.method === "GET" && path === "/player/transfer-destination") {
+    return handleTransferDestination(req);
+  }
+  if (req.method === "POST" && path === "/player/transfer-pin") {
+    return handleSetTransferPin(req);
+  }
+  if (req.method === "POST" && path === "/player/transfers") {
+    return handleSubmitTransfer(req);
+  }
+  if (req.method === "GET" && path === "/player/transfers") {
+    return listPlayerTransfers(req);
+  }
+  const playerTransferCancel = path.match(
+    /^\/player\/transfers\/([^/]+)\/cancel$/,
+  );
+  if (req.method === "POST" && playerTransferCancel) {
+    return cancelPlayerTransfer(
+      req,
+      uuid(playerTransferCancel[1], "transfer ID"),
+    );
+  }
+
+  if (req.method === "GET" && path === "/admin/point-collector") {
+    return handleCollectorOverview(req);
+  }
+  if (req.method === "POST" && path === "/admin/point-collector") {
+    return createPointCollector(req);
+  }
+  if (req.method === "GET" && path === "/admin/point-collector/transfers") {
+    return listCollectorTransfers(req);
+  }
+  const collectorSettle = path.match(
+    /^\/admin\/point-collector\/transfers\/([^/]+)\/(receive|reject)$/,
+  );
+  if (req.method === "POST" && collectorSettle) {
+    return settleCollectorTransfer(
+      req,
+      uuid(collectorSettle[1], "transfer ID"),
+      collectorSettle[2] === "receive",
+    );
+  }
+
   if (req.method === "GET" && path === "/admin/point-requests") {
     return listPointRequests(req);
   }
@@ -2096,6 +2518,10 @@ function dispatch(req: Request): Response | Promise<Response> {
   const gamePatch = path.match(/^\/admin\/games\/([^/]+)$/);
   if (req.method === "PATCH" && gamePatch) {
     return updateGame(req, decodeURIComponent(gamePatch[1]));
+  }
+  const gameRuntimePatch = path.match(/^\/admin\/games\/([^/]+)\/runtime$/);
+  if (req.method === "PATCH" && gameRuntimePatch) {
+    return updateGameRuntime(req, decodeURIComponent(gameRuntimePatch[1]));
   }
 
   if (req.method === "GET" && path === "/admin/announcements") {

@@ -1,4 +1,5 @@
 import "@/App.css";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
@@ -45,14 +46,19 @@ import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminSignups from "@/pages/admin/AdminSignups";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
+import AdminPointCollector from "@/pages/admin/AdminPointCollector";
 import AdminGames from "@/pages/admin/AdminGames";
 import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
 import AdminSettings from "@/pages/admin/AdminSettings";
-import AdminDistributors from "@/pages/admin/AdminDistributors";
-import AdminCommission from "@/pages/admin/AdminCommission";
-import AdminPayouts from "@/pages/admin/AdminPayouts";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
+
+// These legacy partner-money pages remain available on the existing player
+// host while it is being retired. Lazy imports ensure the Supabase-backed
+// dedicated console never fetches or renders them.
+const AdminDistributors = lazy(() => import("@/pages/admin/AdminDistributors"));
+const AdminCommission = lazy(() => import("@/pages/admin/AdminCommission"));
+const AdminPayouts = lazy(() => import("@/pages/admin/AdminPayouts"));
 
 // Partner portal (distributors)
 import PartnerLayout from "@/pages/partner/PartnerLayout";
@@ -76,7 +82,14 @@ function FallbackRedirect() {
   return <Navigate to={routeForUser(user)} replace />;
 }
 
+function DeferredAdminPage({ children }) {
+  return <Suspense fallback={<LoadingScreen />}>{children}</Suspense>;
+}
+
 function AdminConsoleApp() {
+  useEffect(() => {
+    document.title = "MyDGP.Casino — Admin";
+  }, []);
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -87,10 +100,8 @@ function AdminConsoleApp() {
             <Route index element={<AdminDashboard />} />
             <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
-            <Route path="chip-requests" element={<AdminChipRequests />} />
-            <Route path="distributors" element={<AdminDistributors />} />
-            <Route path="commission" element={<AdminCommission />} />
-            <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="point-requests" element={<AdminChipRequests />} />
+            <Route path="point-collector" element={<AdminPointCollector />} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
             <Route path="games" element={<AdminGames />} />
@@ -164,9 +175,9 @@ function PlayerApp() {
             <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
-            <Route path="distributors" element={<AdminDistributors />} />
-            <Route path="commission" element={<AdminCommission />} />
-            <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="distributors" element={<DeferredAdminPage><AdminDistributors /></DeferredAdminPage>} />
+            <Route path="commission" element={<DeferredAdminPage><AdminCommission /></DeferredAdminPage>} />
+            <Route path="payouts" element={<DeferredAdminPage><AdminPayouts /></DeferredAdminPage>} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
             <Route path="games" element={<AdminGames />} />
