@@ -18,12 +18,18 @@ export default function AdminSignups() {
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [temporaryPasswordConfirmation, setTemporaryPasswordConfirmation] = useState("");
   const [startingChips, setStartingChips] = useState(IS_ADMIN_CONSOLE ? "" : 1000);
+  // Issuing both credentials is the default: the operator types a name and the
+  // server returns a GK + 8 digit ID and a password. Manual entry stays
+  // available for the case where a specific ID has to be matched.
+  const [autoIssue, setAutoIssue] = useState(true);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(null); // {username, password}
   const [copied, setCopied] = useState(false);
 
+  const manualEntry = IS_ADMIN_CONSOLE && !autoIssue;
+
   const create = async () => {
-    if (IS_ADMIN_CONSOLE) {
+    if (manualEntry) {
       const validationError = validatePlayerProvisioning({
         loginId,
         fullName,
@@ -35,29 +41,44 @@ export default function AdminSignups() {
         toast.error(validationError);
         return;
       }
+    } else if (IS_ADMIN_CONSOLE && fullName.trim().length < 1) {
+      toast.error("Enter a display name");
+      return;
     }
 
     setBusy(true);
     try {
-      const payload = IS_ADMIN_CONSOLE
-        ? buildPlayerCreatePayload({
+      let payload;
+      if (manualEntry) {
+        payload = buildPlayerCreatePayload({
           loginId,
           fullName,
           password: temporaryPassword,
           startingPoints: startingChips,
-        })
-        : {
+        });
+      } else if (IS_ADMIN_CONSOLE) {
+        // Omitting login_id and password is what makes the server issue them.
+        payload = {
+          full_name: fullName.trim(),
+          starting_points: Number(startingChips) || 0,
+        };
+      } else {
+        payload = {
           full_name: fullName.trim(),
           starting_chips: Number(startingChips) || 0,
         };
+      }
       const { data } = await api.post("/admin/users", payload);
       setCreated({
         username: IS_ADMIN_CONSOLE
           ? (data.login_id || normalizePlayerLoginId(loginId))
           : data.username,
-        // Keep this only in React state for the immediate confirmation. Do not
-        // use the server echo for the MyDGP flow or persist it anywhere.
-        password: IS_ADMIN_CONSOLE ? temporaryPassword : data.password,
+        // When the operator supplied the password, keep their value and ignore
+        // the server echo. When the server issued it, the echo is the only
+        // copy that exists — it is never stored and never shown again.
+        password: manualEntry
+          ? temporaryPassword
+          : (data.temporary_password || data.password),
       });
       setTemporaryPassword("");
       setTemporaryPasswordConfirmation("");
@@ -98,7 +119,7 @@ export default function AdminSignups() {
         </h1>
         <p className="text-sm text-white/55 mt-0.5">
           {IS_ADMIN_CONSOLE ? (
-            <>Enter a Player Login ID (<span className="font-mono text-white/70">GK</span> + 7 or 8 digits) and a temporary password. The password is shown only in the immediate confirmation and is never saved by this console.</>
+            <>Enter a display name. The Player ID (<span className="font-mono text-white/70">GK</span> + 8 digits) and password are issued automatically. The password is shown only in the immediate confirmation and is never saved by this console.</>
           ) : (
             <>The Username (<span className="font-mono text-white/70">GK</span> + 7 digits) and Password (7 capital letters) are issued automatically. Hand them to the player — they log in with those.</>
           )}
@@ -127,7 +148,27 @@ export default function AdminSignups() {
             <Label htmlFor="cu-name">{IS_ADMIN_CONSOLE ? "Display name" : "Player name"}</Label>
             <Input id="cu-name" data-testid="create-name-input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Ravi Kumar" maxLength={IS_ADMIN_CONSOLE ? 120 : undefined} autoComplete={IS_ADMIN_CONSOLE ? "name" : undefined} className="bg-white/5 border-white/12" />
           </div>
-          {IS_ADMIN_CONSOLE && <>
+          {IS_ADMIN_CONSOLE && (
+            <label
+              className="flex items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3 cursor-pointer"
+              data-testid="create-auto-issue-toggle"
+            >
+              <input
+                type="checkbox"
+                checked={autoIssue}
+                onChange={(e) => setAutoIssue(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span className="text-sm">
+                <span className="font-semibold text-white">Issue ID and password automatically</span>
+                <span className="block text-[12px] text-white/50 mt-0.5">
+                  Generates a <span className="font-mono">GK</span> + 8 digit Player ID and a password.
+                  Uncheck only if this account must match a specific existing ID.
+                </span>
+              </span>
+            </label>
+          )}
+          {manualEntry && <>
             <div className="space-y-1.5">
               <Label htmlFor="cu-login-id">Player Login ID</Label>
               <Input
@@ -135,7 +176,7 @@ export default function AdminSignups() {
                 data-testid="create-login-id-input"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value.toUpperCase())}
-                placeholder="GK1234567 or GK00290877"
+                placeholder="GK00290877"
                 maxLength={10}
                 autoCapitalize="characters"
                 autoComplete="off"

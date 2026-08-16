@@ -267,6 +267,28 @@ function makeAuthEmail(
   return `${kind}.${local}@auth.mydgp.casino`;
 }
 
+/**
+ * Generate a player ID in the operator's format: GK followed by eight digits.
+ *
+ * Eight rather than seven, so a generated player ID can never collide with the
+ * collector account, which the schema requires to be exactly GK plus eight
+ * digits... and more importantly so every issued ID looks the same to an
+ * operator reading a list.
+ *
+ * Rejection sampling rather than `% 100_000_000`: a 32-bit draw is not a whole
+ * number of 100-million blocks, so the modulo would make low IDs measurably
+ * likelier. Uniqueness is still enforced by the unique index on login_id, which
+ * surfaces as a 409, but a biased generator raises the collision rate for no
+ * reason.
+ */
+function generatePlayerLoginId(): string {
+  const range = 0x1_0000_0000;
+  const limit = range - (range % 100_000_000);
+  const draw = new Uint32Array(1);
+  do crypto.getRandomValues(draw); while (draw[0] >= limit);
+  return `GK${String(draw[0] % 100_000_000).padStart(8, "0")}`;
+}
+
 function randomPassword(length = 7): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -907,10 +929,7 @@ async function createPlayer(req: Request): Promise<Response> {
   const suppliedLogin = optionalText(body, "login_id", 16);
   const loginId = suppliedLogin
     ? suppliedLogin.toUpperCase()
-    : `GK${
-      String(crypto.getRandomValues(new Uint32Array(1))[0] % 10_000_000)
-        .padStart(7, "0")
-    }`;
+    : generatePlayerLoginId();
   if (!NEW_PLAYER_ID_PATTERN.test(loginId)) {
     throw new HttpError(400, "Player ID must be GK followed by seven or eight digits");
   }
