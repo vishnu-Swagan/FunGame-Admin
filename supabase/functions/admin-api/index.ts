@@ -2283,13 +2283,18 @@ async function handleSetTransferPin(req: Request): Promise<Response> {
   if (!/^[0-9]{4,8}$/.test(pin)) {
     throw new HttpError(400, "A transfer PIN must be 4 to 8 digits");
   }
-  await dbResult(
-    service().rpc("set_player_transfer_pin", {
-      p_player_id: player.id,
-      p_pin: pin,
-      p_set_by: player.id,
-    }),
-  );
+  // set_player_transfer_pin returns void, so PostgREST replies with a null
+  // body. dbResult treats null as "no data" and throws, which reported a
+  // failure to the caller on a PIN that had in fact been set. Check only the
+  // error here.
+  const { error } = await service().rpc("set_player_transfer_pin", {
+    p_player_id: player.id,
+    p_pin: pin,
+    p_set_by: player.id,
+  });
+  if (error) {
+    throw new HttpError(400, error.message || "Could not update the transfer PIN");
+  }
   return json(req, { message: "Transfer PIN updated" });
 }
 
