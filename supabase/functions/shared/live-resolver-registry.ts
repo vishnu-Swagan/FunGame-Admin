@@ -4,11 +4,13 @@
  * A database QA flag is an operational approval, not executable evidence that
  * the deployed Edge bundle can run a complete result/settlement lifecycle.
  * Every title therefore needs an explicit source-code registration tied to a
- * ruleset version before it may be advertised or opened.  The registry is
- * intentionally all-null today: no cabinet has a reviewed server resolver.
+ * ruleset version before it may be advertised or opened.
  *
- * When a title is implemented, change exactly that row in the same change set
- * as its resolver, settlement tests, and compiled runtime-contract version.
+ * All fifteen titles are registered at ruleset v1. Each runs the operator's own
+ * declared paytable; none claims to reproduce another product's rules.
+ *
+ * When a title changes, change exactly that row in the same change set as its
+ * resolver, settlement tests, and compiled runtime-contract version.
  */
 
 export type ResolverRegistration = {
@@ -17,32 +19,42 @@ export type ResolverRegistration = {
   readonly ruleset_version: number | null;
 };
 
-const CATALOG_SLUGS = [
-  "7up7down",
-  "fun-ab",
-  "triple-fun",
-  "fun-roulette",
-  "fun-target",
-  "bingo",
-  "joker-bonus",
-  "giant-jackpot",
-  "golden-wheel",
-  "keno",
-  "checker",
-  "lucky-8-line",
-  "fever-joker-bonus",
-  "no-hold",
-  "champion-poker",
-] as const;
+/**
+ * Ruleset v1 registrations. Every title runs on the operator's own declared
+ * paytable, implemented in the matching resolver module and covered by that
+ * module's settlement tests. A row here is the second of the two keys: the
+ * resolver must independently declare the same `live_resolver_id` and
+ * `ruleset_version`, and `assertReviewResolverRegistryIntegrity` fails the
+ * build if the two ever disagree.
+ *
+ * To retire or re-price a title, change its resolver and this row together, in
+ * one change set, and bump the ruleset version.
+ */
+const REGISTRATIONS = [
+  ["7up7down", "7up7down-v1", 1],
+  ["fun-ab", "fun-ab-v1", 1],
+  ["triple-fun", "triple-fun-v1", 1],
+  ["fun-roulette", "fun-roulette-v1", 1],
+  ["fun-target", "fun-target-v1", 1],
+  ["bingo", "bingo-v1", 1],
+  ["joker-bonus", "joker-bonus-v1", 1],
+  ["giant-jackpot", "giant-jackpot-v1", 1],
+  ["golden-wheel", "golden-wheel-v1", 1],
+  ["keno", "keno-v1", 1],
+  ["checker", "checker-v1", 1],
+  ["lucky-8-line", "lucky-8-line-v1", 1],
+  ["fever-joker-bonus", "fever-joker-bonus-v1", 1],
+  ["no-hold", "no-hold-v1", 1],
+  ["champion-poker", "champion-poker-v1", 1],
+] as const satisfies readonly (readonly [string, string, number])[];
 
 export const LIVE_RESOLVER_REGISTRY: Readonly<Record<string, ResolverRegistration>> =
   Object.freeze(
     Object.fromEntries(
-      CATALOG_SLUGS.map((catalog_slug) => [catalog_slug, Object.freeze({
+      REGISTRATIONS.map(([catalog_slug, resolver_id, ruleset_version]) => [
         catalog_slug,
-        resolver_id: null,
-        ruleset_version: null,
-      })]),
+        Object.freeze({ catalog_slug, resolver_id, ruleset_version }),
+      ]),
     ),
   );
 

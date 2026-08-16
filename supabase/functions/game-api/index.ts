@@ -11,19 +11,27 @@ import {
   clockState,
   GameRuleError,
   gameSpec,
-  generateServerOutcome,
+  isRoundActionPrecondition,
+  matchesPersistedGameActionReplay,
+  matchesRoundActionPrecondition,
   normalizePlayerAction,
-  outcomeForPublicPhase,
+  normalizedActionRequest,
   publicClockWire,
+  roundActionPrecondition,
   runtimeContractIssue,
   snapshotRevealSeconds,
   type ClockState,
   type GameSpec,
   type RuntimeMode,
-  type ServerOutcome,
 } from "./game-core.ts";
 import { isPubliclyPlayableRuntime } from "../shared/runtime-availability.ts";
 import { hasRegisteredLiveResolver } from "../shared/live-resolver-registry.ts";
+import { hasExecutableReviewResolver } from "./resolvers/review-registry.ts";
+import {
+  generateClockedRoundOutcome,
+  planClockedSettlements,
+  SettlementLifecycleError,
+} from "./settlement-lifecycle.ts";
 
 type Json = Record<string, unknown>;
 type Profile = {
@@ -70,11 +78,17 @@ type RoundRow = {
   session_id: string | null;
   round_number: number | string;
   outcome_commitment: string;
-  outcome: ServerOutcome | null;
+  outcome: unknown | null;
+  resolver_id: string | null;
   ruleset_version: number;
+  reveal_starts_at: string;
+  result_starts_at: string;
+  ends_at: string;
 };
 type WagerRow = { id: string; selection: string; amount: number | string; status: string };
+type DueWagerRow = WagerRow & { round_id: string };
 type GameStatusRow = { slug: string; status: string };
+type PersistedActionRow = { session_id: string; round_id: string; kind: string; status: string; request: unknown };
 
 const PROJECT_URL = Deno.env.get("SUPABASE_URL");
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -268,7 +282,8 @@ async function assertPlayableRuntime(actor: PlayerActor, catalogSlug: string): P
   // Database approval is necessary but not sufficient.  A session can only be
   // created when this deployed bundle has an explicit resolver for exactly
   // the persisted ruleset version.
-  if (!hasRegisteredLiveResolver(runtime.catalog_slug, runtime.ruleset_version)) {
+  if (!hasRegisteredLiveResolver(runtime.catalog_slug, runtime.ruleset_version) ||
+      !hasExecutableReviewResolver(runtime.catalog_slug, runtime.ruleset_version)) {
     throw new HttpError(409, "This game is not available yet.", "GAME_UNAVAILABLE");
   }
   return { runtime, spec };
@@ -291,6 +306,7 @@ async function gameStatuses(): Promise<Map<string, string>> {
 
 function isAdvertisableRuntime(runtime: RuntimeRow, gameStatus: string | undefined): boolean {
   if (!isPubliclyPlayableRuntime(gameStatus, runtime)) return false;
+  if (!hasExecutableReviewResolver(runtime.catalog_slug, runtime.ruleset_version)) return false;
   try {
     return runtimeContractIssue(gameSpec(runtime.catalog_slug), runtime) === null;
   } catch {
@@ -340,8 +356,8 @@ async function ensureClockedRound(spec: GameSpec, runtime: RuntimeRow): Promise<
     throw new HttpError(409, "This player-paced cabinet has not been enabled.", "GAME_UNAVAILABLE");
   }
   const clock = clockState(spec, Date.now());
-  const outcome = generateServerOutcome(spec);
-  const { data, error } = await service().rpc("create_clocked_game_round", {
+  const generated = generateClockedRoundOutcome(runtime);
+  const { data, error } = await service().rpc("create_ready_clocked_game_round", {
     p_catalog_slug: spec.catalog_slug,
     p_round_number: clock.round_number,
     p_starts_at: clock.starts_at,
@@ -349,16 +365,94 @@ async function ensureClockedRound(spec: GameSpec, runtime: RuntimeRow): Promise<
     p_reveal_starts_at: clock.reveal_starts_at,
     p_result_starts_at: clock.result_starts_at,
     p_ends_at: clock.ends_at,
-    p_outcome_commitment: await sha256Hex(JSON.stringify(outcome)),
-    p_outcome: outcome,
-    p_metadata: { ruleset_version: runtime.ruleset_version, resolver: "game-api-v1" },
+    p_outcome_commitment: await sha256Hex(JSON.stringify(generated.outcome)),
+    p_outcome: generated.outcome,
+    p_resolver_id: generated.resolver_id,
+    p_ruleset_version: generated.ruleset_version,
+    p_metadata: { lifecycle: "ready-clocked-v2" },
   });
   const round = asRoundRow(rpcOne<unknown>(data, error, "Could not prepare game round."));
-  if (round.catalog_slug !== spec.catalog_slug || round.engine_slug !== spec.engine_slug ||
+  if (!UUID_RE.test(round.id) || round.catalog_slug !== spec.catalog_slug || round.engine_slug !== spec.engine_slug ||
+      round.session_id !== null || round.resolver_id !== generated.resolver_id ||
+      wireInteger(round.ruleset_version, "ruleset version") !== runtime.ruleset_version ||
       wireInteger(round.round_number, "round number") !== clock.round_number || !round.outcome) {
     throw new HttpError(503, "Game round needs review.", "ROUND_INVALID");
   }
   return { clock, round };
+}
+
+/**
+ * Reconcile every due OPEN wager for this player/session before returning a
+ * balance. This includes older shared rounds so a missed reveal poll cannot
+ * leave a stake behind when the player later resumes the cabinet.
+ */
+async function settleDueClockedWagers(
+  actor: PlayerActor,
+  session: SessionRow,
+  runtime: RuntimeRow,
+): Promise<void> {
+  if (runtime.runtime_mode !== "CLOCKED_SHARED") {
+    throw new HttpError(409, "Player-paced games cannot use clocked settlement.", "GAME_UNAVAILABLE");
+  }
+  for (let batch = 0; batch < 20; batch++) {
+    const { data: wagers, error: wagerError } = await service().from("game_wagers")
+      .select("id,selection,amount,status,round_id")
+      .eq("player_id", actor.id)
+      .eq("session_id", session.id)
+      .eq("status", "OPEN")
+      .order("placed_at", { ascending: true })
+      .limit(200)
+      .returns<DueWagerRow[]>();
+    if (wagerError) dbError(wagerError, "Game wagers could not be reconciled.");
+    if (!wagers?.length) return;
+
+    const roundIds = [...new Set(wagers.map((wager) => wager.round_id))];
+    const { data: rounds, error: roundError } = await service().from("game_rounds")
+      .select("id,catalog_slug,engine_slug,session_id,round_number,outcome_commitment,outcome,resolver_id,ruleset_version,reveal_starts_at,result_starts_at,ends_at")
+      .in("id", roundIds)
+      .returns<RoundRow[]>();
+    if (roundError) dbError(roundError, "Game rounds could not be reconciled.");
+    const byId = new Map((rounds || []).map((round) => [round.id, round]));
+    const due = wagers.filter((wager) => {
+      const round = byId.get(wager.round_id);
+      return round && Date.parse(round.reveal_starts_at) <= Date.now();
+    });
+    if (!due.length) return;
+
+    const dueRoundIds = [...new Set(due.map((wager) => wager.round_id))];
+    for (const roundId of dueRoundIds) {
+      const round = byId.get(roundId);
+      if (!round || round.outcome === null) {
+        throw new HttpError(503, "Authoritative game outcome is unavailable.", "ROUND_INVALID");
+      }
+      const plans = planClockedSettlements(runtime, {
+        id: round.id,
+        catalog_slug: round.catalog_slug,
+        ruleset_version: wireInteger(round.ruleset_version, "ruleset version"),
+        runtime_mode: "CLOCKED_SHARED",
+        session_id: round.session_id as null,
+        outcome_commitment: round.outcome_commitment,
+        outcome: round.outcome,
+      }, due.filter((wager) => wager.round_id === roundId).map((wager) => ({
+        id: wager.id,
+        selection: wager.selection,
+        amount: wager.amount,
+        status: "OPEN" as const,
+      })));
+      for (const plan of plans) {
+        const { data, error } = await service().rpc("resolve_ready_clocked_game_wager", {
+          p_wager_id: plan.wager_id,
+          p_payout: plan.payout_points,
+          p_outcome: plan.outcome,
+          p_outcome_commitment: plan.outcome_commitment,
+          p_resolver_id: plan.resolver_id,
+          p_ruleset_version: plan.ruleset_version,
+        });
+        rpcOne<unknown>(data, error, "Game wager could not be settled.");
+      }
+    }
+  }
+  throw new HttpError(503, "Game settlement backlog requires another worker pass.", "SETTLEMENT_BACKLOG");
 }
 
 async function wagersFor(actor: PlayerActor, sessionId: string, roundId: string): Promise<WagerRow[]> {
@@ -388,22 +482,40 @@ function allowedActions(spec: GameSpec, clock: ClockState, openWagers: WagerRow[
   return actions;
 }
 
-function publicReveal(outcome: ServerOutcome | null): Json | null {
-  if (!outcome) return null;
-  switch (outcome.kind) {
-    case "american_roulette": return { pocket: outcome.pocket };
-    case "digit_wheel": return { pocket: String(outcome.digit) };
-    case "multiplier_wheel": return { multiplier: outcome.multiplier };
-    case "keno_80_of_20": return { sequence: outcome.drawn.map(String) };
+function publicReveal(outcome: unknown | null): Json | null {
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) return null;
+  const value = outcome as Json;
+  if (typeof value.pocket === "string") return { pocket: value.pocket };
+  if (Number.isSafeInteger(value.digit)) return { pocket: String(value.digit) };
+  if (typeof value.multiplier === "number" && Number.isFinite(value.multiplier)) {
+    return { multiplier: value.multiplier };
   }
+  if (Array.isArray(value.drawn) && value.drawn.every((item) => Number.isSafeInteger(item))) {
+    return { sequence: value.drawn.map(String) };
+  }
+  return null;
 }
 
-type Snapshot = { body: Json; clock: ClockState; round: RoundRow; openWagers: WagerRow[]; allowed: string[] };
+type Snapshot = {
+  body: Json;
+  clock: ClockState;
+  round: RoundRow;
+  openWagers: WagerRow[];
+  allowed: string[];
+  actionPrecondition: string;
+};
 
 async function snapshot(actor: PlayerActor, session: SessionRow, runtime: RuntimeRow, spec: GameSpec): Promise<Snapshot> {
   const { clock, round } = await ensureClockedRound(spec, runtime);
+  await settleDueClockedWagers(actor, session, runtime);
+  const { data: advanced, error: advanceError } = await service().rpc("advance_ready_clocked_game_round", {
+    p_round_id: round.id,
+    p_resolver_id: round.resolver_id,
+    p_ruleset_version: runtime.ruleset_version,
+  });
+  const currentRound = asRoundRow(rpcOne<unknown>(advanced, advanceError, "Could not advance game round."));
   const [balance, wagers, cursor] = await Promise.all([
-    currentBalance(actor.id), wagersFor(actor, session.id, round.id), eventCursor(actor, session.id),
+    currentBalance(actor.id), wagersFor(actor, session.id, currentRound.id), eventCursor(actor, session.id),
   ]);
   const openWagers = wagers.filter((wager) => wager.status === "OPEN");
   const bets = openWagers.map((wager) => ({
@@ -412,10 +524,11 @@ async function snapshot(actor: PlayerActor, session: SessionRow, runtime: Runtim
   }));
   const myTotal = wireInteger(bets.reduce((total, wager) => total + wager.amount, 0), "my_total");
   const allowed = allowedActions(spec, clock, openWagers);
-  const publicOutcome = round.outcome ? outcomeForPublicPhase(clock, round.outcome) : null;
+  const publicOutcome = clock.phase === "BETTING" ? null : currentRound.outcome;
   const clockWire = publicClockWire(clock);
+  const actionPrecondition = roundActionPrecondition(currentRound.id);
   const state: Json = {
-    round_number: wireInteger(round.round_number, "round number"),
+    round_number: wireInteger(currentRound.round_number, "round number"),
     phase: clockWire.phase,
     // Unity consumes these exact numeric server timestamps. It may render a
     // local countdown from them, but must use `bets_open` rather than guessing
@@ -442,7 +555,20 @@ async function snapshot(actor: PlayerActor, session: SessionRow, runtime: Runtim
     reveal: publicReveal(publicOutcome),
     allowed_actions: allowed,
   };
-  return { body: { session_id: session.id, cursor, allowed_actions: allowed, state }, clock, round, openWagers, allowed };
+  return {
+    body: {
+      session_id: session.id,
+      cursor,
+      action_precondition: actionPrecondition,
+      allowed_actions: allowed,
+      state,
+    },
+    clock,
+    round: currentRound,
+    openWagers,
+    allowed,
+    actionPrecondition,
+  };
 }
 
 function rejectUntrustedFields(body: Json): void {
@@ -451,10 +577,16 @@ function rejectUntrustedFields(body: Json): void {
   }
 }
 
-type ActionRequest = { action: string; selection?: string; amount?: number; idempotencyKey: string };
+type ActionRequest = {
+  action: string;
+  selection?: string;
+  amount?: number;
+  idempotencyKey: string;
+  actionPrecondition: string;
+};
 function actionRequest(req: Request, body: Json): ActionRequest {
   rejectUntrustedFields(body);
-  const allowed = new Set(["action", "selection", "amount", "idempotency_key"]);
+  const allowed = new Set(["action", "selection", "amount", "idempotency_key", "action_precondition"]);
   if (Object.keys(body).some((key) => !allowed.has(key))) {
     throw new HttpError(400, "Unsupported action field.", "INVALID_ACTION");
   }
@@ -470,11 +602,58 @@ function actionRequest(req: Request, body: Json): ActionRequest {
   if (typeof body.idempotency_key !== "string" || !IDEMPOTENCY_RE.test(body.idempotency_key)) {
     throw new HttpError(400, "idempotency_key must be 8-160 safe characters.", "IDEMPOTENCY_KEY_REQUIRED");
   }
+  if (!isRoundActionPrecondition(body.action_precondition)) {
+    throw new HttpError(400, "action_precondition is required and invalid.", "ACTION_PRECONDITION_REQUIRED");
+  }
   const header = req.headers.get("x-idempotency-key")?.trim();
   if (header && header !== body.idempotency_key) {
     throw new HttpError(400, "Conflicting idempotency keys.", "IDEMPOTENCY_CONFLICT");
   }
-  return { action: body.action, selection: body.selection as string | undefined, amount: body.amount as number | undefined, idempotencyKey: body.idempotency_key };
+  return {
+    action: body.action,
+    selection: body.selection as string | undefined,
+    amount: body.amount as number | undefined,
+    idempotencyKey: body.idempotency_key,
+    actionPrecondition: body.action_precondition,
+  };
+}
+
+/**
+ * Find an already-applied intent before consulting the current round clock.
+ * A response can be lost after the RPC commits; by the time Unity retries, the
+ * original round may be locked or over.  Re-running phase admission first would
+ * strand the client's pending idempotency key even though its ledger receipt
+ * already exists.
+ */
+async function hasAppliedActionReplay(
+  actor: PlayerActor,
+  session: SessionRow,
+  idempotencyKey: string,
+  internalAction: Parameters<typeof matchesPersistedGameActionReplay>[2],
+  request: Record<string, string | number>,
+  actionPrecondition: string,
+): Promise<boolean> {
+  const { data, error } = await service().from("game_actions")
+    .select("session_id,round_id,kind,status,request")
+    .eq("player_id", actor.id)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle<PersistedActionRow>();
+  if (error) dbError(error, "Could not reconcile the game action.");
+  if (!data) return false;
+  if (!matchesPersistedGameActionReplay(
+    data,
+    session.id,
+    internalAction,
+    request,
+    actionPrecondition,
+  )) {
+    throw new HttpError(
+      409,
+      "This idempotency key belongs to a different action.",
+      "IDEMPOTENCY_CONFLICT",
+    );
+  }
+  return true;
 }
 
 async function lobby(req: Request): Promise<Response> {
@@ -530,13 +709,33 @@ async function act(req: Request, sessionId: string): Promise<Response> {
     selection: incoming.selection,
     amount: incoming.amount,
   });
+  const request = normalizedActionRequest(normalized);
+
+  // This lookup is deliberately before snapshot()/allowed-actions. A retry of
+  // an action that already committed must return a current authoritative state
+  // even after the original round has locked or rolled over.
+  if (await hasAppliedActionReplay(
+    actor,
+    session,
+    incoming.idempotencyKey,
+    normalized.internal_action,
+    request,
+    incoming.actionPrecondition,
+  )) {
+    return ok(req, (await snapshot(actor, session, runtime, spec)).body);
+  }
+
   const before = await snapshot(actor, session, runtime, spec);
+  if (!matchesRoundActionPrecondition(incoming.actionPrecondition, before.round.id)) {
+    throw new HttpError(
+      409,
+      "The game round changed before this action was accepted.",
+      "ACTION_PRECONDITION_FAILED",
+    );
+  }
   if (!before.allowed.includes(normalized.action)) {
     throw new HttpError(409, "That action is not available in the current game state.", "ACTION_UNAVAILABLE");
   }
-  const request: Json = { action: normalized.action };
-  if (normalized.selection !== undefined) request.selection = normalized.selection;
-  if (normalized.amount !== undefined) request.amount = normalized.amount;
   if (normalized.action === "place_bet") {
     const { data, error } = await service().rpc("submit_game_stake", {
       p_player_id: actor.id,
@@ -573,19 +772,36 @@ async function events(req: Request, sessionId: string): Promise<Response> {
   const after = parseCursor(new URL(req.url).searchParams.get("after"));
   const current = await snapshot(actor, session, runtime, spec);
   const { data, error } = await service().from("game_event_outbox")
-    .select("event_id").eq("player_id", actor.id).eq("session_id", session.id)
+    .select("event_id,event_type,payload,created_at,round_id,action_id")
+    .eq("player_id", actor.id).eq("session_id", session.id)
     .gt("event_id", after).order("event_id", { ascending: true }).limit(MAX_EVENT_LIMIT)
-    .returns<Array<{ event_id: number | string }>>();
+    .returns<Array<{
+      event_id: number | string;
+      event_type: string;
+      payload: Json;
+      created_at: string;
+      round_id: string | null;
+      action_id: string | null;
+    }>>();
   if (error) dbError(error, "Game events are unavailable.");
   const events = (data || []).map((event) => {
     const cursor = wireInteger(event.event_id, "event cursor");
-    return { cursor, state: current.body.state };
+    return {
+      id: cursor,
+      cursor,
+      event_type: event.event_type,
+      payload: event.payload,
+      created_at: event.created_at,
+      round_id: event.round_id,
+      action_id: event.action_id,
+    };
   });
   const nextAfter = events.length ? events[events.length - 1].cursor : Math.max(after, wireInteger(current.body.cursor, "event cursor"));
   return ok(req, {
     session_id: session.id,
     cursor: nextAfter,
     next_after: nextAfter,
+    action_precondition: current.actionPrecondition,
     allowed_actions: current.allowed,
     events,
   });
@@ -597,6 +813,12 @@ function failure(req: Request, error: unknown): Response {
   }
   if (error instanceof GameRuleError) {
     return response(req, { detail: { code: error.code, message: error.message } }, 400);
+  }
+  if (error instanceof SettlementLifecycleError) {
+    console.error("game-api settlement lifecycle error", error.code, error.message);
+    return response(req, {
+      detail: { code: "GAME_UNAVAILABLE", message: "This game is not available yet." },
+    }, 409);
   }
   console.error("game-api request failed", error instanceof Error ? error.message : "unknown error");
   return response(req, { detail: { code: "GAME_SERVICE_UNAVAILABLE", message: "The game service could not complete the request." } }, 503);

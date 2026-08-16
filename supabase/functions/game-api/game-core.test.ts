@@ -4,12 +4,15 @@ import {
   GAME_SPECS,
   GameRuleError,
   gameSpec,
-  generateServerOutcome,
+  isRoundActionPrecondition,
+  matchesPersistedGameActionReplay,
+  matchesRoundActionPrecondition,
   normalizePlayerAction,
+  normalizedActionRequest,
   publicClockWire,
+  roundActionPrecondition,
   rouletteMultiplier,
   runtimeContractIssue,
-  settleReviewedWager,
   snapshotRevealSeconds,
   validateSelection,
 } from "./game-core.ts";
@@ -107,18 +110,11 @@ Deno.test("snapshot reveal duration stays fixed while phase time counts down", (
   "polling must not turn reveal duration into remaining time");
 });
 
-Deno.test("roulette validates and settles only Unity-whitelisted positions", () => {
+Deno.test("roulette validates only Unity-whitelisted review positions", () => {
   const roulette = gameSpec("fun-roulette");
   const normalized = validateSelection(roulette, "split:3-2");
   assert(normalized === "split:2-3", "split must be canonicalized before persistence");
   assert(rouletteMultiplier(normalized, "2") === 18, "split should return 18x total");
-  const payout = settleReviewedWager(
-    roulette,
-    normalized,
-    5,
-    { kind: "american_roulette", pocket: "2", color: "black" },
-  );
-  assert(payout === 90, "roulette payout must use the server-stored pocket");
   assert(
     throwsCode(() => validateSelection(roulette, "split:1-36"), "INVALID_SELECTION"),
     "an impossible split must fail closed",
@@ -148,39 +144,11 @@ Deno.test("the known zero-end mismatch is not silently reinterpreted", () => {
   );
 });
 
-Deno.test("unobserved Fun Target and Keno payout rules cannot settle", () => {
+Deno.test("unobserved Fun Target and Keno selections remain validation-only", () => {
   const target = gameSpec("fun-target");
   const keno = gameSpec("keno");
   assert(validateSelection(target, "number:7") === "number:7", "Fun Target digit validation should remain available for review");
   assert(validateSelection(keno, "pick:1,4,80") === "picks:1,4,80", "Keno picks should normalize to one wire form");
-  assert(
-    throwsCode(
-      () => settleReviewedWager(target, "number:7", 5, { kind: "digit_wheel", digit: 7 }),
-      "RULES_NOT_VERIFIED",
-    ),
-    "Fun Target cannot pay an inferred multiplier",
-  );
-  assert(
-    throwsCode(
-      () => settleReviewedWager(keno, "picks:1,4,80", 5, { kind: "keno_80_of_20", drawn: [1, 4, 80] }),
-      "RULES_NOT_VERIFIED",
-    ),
-    "Keno cannot pay an unobserved paytable",
-  );
-});
-
-Deno.test("server outcome generators use only server-supplied entropy", () => {
-  const sequence = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  const random = (max: number) => {
-    const value = sequence.shift();
-    assert(value !== undefined && value >= 0 && value < max, "test entropy is invalid");
-    return value;
-  };
-  const roulette = generateServerOutcome(gameSpec("fun-roulette"), random);
-  assert(roulette.kind === "american_roulette" && roulette.pocket === "0", "roulette outcome source is wrong");
-  const keno = generateServerOutcome(gameSpec("keno"), random);
-  assert(keno.kind === "keno_80_of_20" && keno.drawn.length === 20, "Keno draw shape is wrong");
-  assert(new Set(keno.drawn).size === 20, "Keno draw must be without replacement");
 });
 
 Deno.test("Unity wire action normalization refuses outcome and balance semantics", () => {
@@ -216,4 +184,128 @@ Deno.test("Unity hold, release, and cash-out aliases retain server-only semantic
     throwsCode(() => normalizePlayerAction(champion, "cash_out", { selection: "panel1" }), "UNSUPPORTED_ACTION"),
     "a non-Aviator cabinet cannot acquire cash-out from a client request",
   );
+});
+
+Deno.test("an accepted idempotent action matches before current-round admission", () => {
+  const roulette = gameSpec("fun-roulette");
+  const normalized = normalizePlayerAction(roulette, "place_bet", {
+    selection: "split:3-2",
+    amount: 10,
+  });
+  const request = normalizedActionRequest(normalized);
+  const roundId = "2d2e4055-7f7a-4c88-a64d-436d273aaf56";
+  const precondition = roundActionPrecondition(roundId);
+  assert(request.selection === "split:2-3", "the persisted replay request must use the canonical marker");
+  assert(
+    matchesPersistedGameActionReplay(
+      {
+        session_id: "session-1",
+        round_id: roundId,
+        kind: "STAKE",
+        status: "APPLIED",
+        request: { amount: 10, selection: "split:2-3", action: "place_bet" },
+      },
+      "session-1",
+      normalized.internal_action,
+      request,
+      precondition,
+    ),
+    "JSON key order must not prevent replaying the original immutable receipt",
+  );
+  assert(
+    !matchesPersistedGameActionReplay(
+      { session_id: "session-2", round_id: roundId, kind: "STAKE", status: "APPLIED", request },
+      "session-1",
+      normalized.internal_action,
+      request,
+      precondition,
+    ),
+    "a key from another session must remain a conflict",
+  );
+  assert(
+    !matchesPersistedGameActionReplay(
+      {
+        session_id: "session-1",
+        round_id: roundId,
+        kind: "STAKE",
+        status: "APPLIED",
+        request: { ...request, amount: 20 },
+      },
+      "session-1",
+      normalized.internal_action,
+      request,
+      precondition,
+    ),
+    "a key with a different canonical intent must remain a conflict",
+  );
+  assert(
+    !matchesPersistedGameActionReplay(
+      { session_id: "session-1", round_id: roundId, kind: "STAKE", status: "REJECTED", request },
+      "session-1",
+      normalized.internal_action,
+      request,
+      precondition,
+    ),
+    "a rejected action must never be acknowledged as an applied replay",
+  );
+});
+
+Deno.test("round action preconditions reject stale first delivery but retain applied replay identity", () => {
+  const firstRound = "2d2e4055-7f7a-4c88-a64d-436d273aaf56";
+  const laterRound = "7cd77315-0eb5-4bc7-b939-d415601cc7f2";
+  const precondition = roundActionPrecondition(firstRound);
+  assert(isRoundActionPrecondition(precondition), "a server-issued round token must be wire-valid");
+  assert(matchesRoundActionPrecondition(precondition, firstRound), "the issuing round must accept its token");
+  assert(
+    !matchesRoundActionPrecondition(precondition, laterRound),
+    "an uncommitted retry must not acquire a later round",
+  );
+  assert(
+    !isRoundActionPrecondition("round-v1_not-a-round"),
+    "an invented token must fail request validation",
+  );
+  assert(
+    !isRoundActionPrecondition("round-v1_7CD77315-0EB5-4BC7-B939-D415601CC7F2"),
+    "the wire token must retain the server's canonical casing",
+  );
+
+  const request = { action: "place_bet", selection: "straight:17", amount: 10 };
+  assert(
+    matchesPersistedGameActionReplay(
+      {
+        session_id: "session-1",
+        round_id: firstRound,
+        kind: "STAKE",
+        status: "APPLIED",
+        request,
+      },
+      "session-1",
+      "stake",
+      request,
+      precondition,
+    ),
+    "the original APPLIED receipt must reconcile after the clock advances",
+  );
+  assert(
+    !matchesPersistedGameActionReplay(
+      {
+        session_id: "session-1",
+        round_id: laterRound,
+        kind: "STAKE",
+        status: "APPLIED",
+        request,
+      },
+      "session-1",
+      "stake",
+      request,
+      precondition,
+    ),
+    "the same idempotency key cannot be rebound to another round receipt",
+  );
+});
+
+Deno.test("typed player-paced selections survive canonical replay construction", () => {
+  const champion = gameSpec("champion-poker");
+  const hold = normalizedActionRequest(normalizePlayerAction(champion, "hold", { selection: "2" }));
+  assert(hold.action === "hold" && hold.selection === "2", "hold replay must retain the validated card index");
 });

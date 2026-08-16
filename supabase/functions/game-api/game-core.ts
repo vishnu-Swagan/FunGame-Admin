@@ -334,15 +334,15 @@ export const GAME_SPECS: readonly GameSpec[] = Object.freeze([
     unity_lobby_slug: "lucky8line",
     unity_scene: "lucky-8-line",
     engine_slug: "lucky-8-line",
-    runtime_mode: "CLOCKED_SHARED",
+    // Single-player, not a shared clocked round: level10 ships no timer
+    // object, so there is no betting window to share. The 60/5/5/3 schedule
+    // here was a shared default, never a measurement. This must stay in step
+    // with the resolver manifest, which also declares PLAYER_PACED; the two
+    // lifecycles are mutually exclusive, so a disagreement leaves the title
+    // unsettleable by either path.
+    runtime_mode: "PLAYER_PACED",
     parity_state: "BLOCKED",
-    timing: CLOCKED({
-      kind: "stake",
-      bet_seconds: 60,
-      lock_seconds: 5,
-      reveal_seconds: 5,
-      result_seconds: 3,
-    }),
+    timing: PLAYER_PACED(5),
     actions: ["place_bet", "clear_bets", "cancel_bet", "repeat_bets", "collect_full", "collect_half"],
     min_bet: 10,
     max_bet: 1000,
@@ -708,6 +708,79 @@ export type NormalizedAction = {
   panel?: number;
 };
 
+export type PersistedGameActionReplay = {
+  session_id: string;
+  round_id: string;
+  kind: string;
+  status: string;
+  request: unknown;
+};
+
+const ROUND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ROUND_ACTION_PRECONDITION_PREFIX = "round-v1_";
+
+/**
+ * The client receives this opaque value with every authoritative snapshot and
+ * must echo it with an action.  It binds a delayed first delivery to the round
+ * the player actually saw without accepting a client-authored round number.
+ */
+export function roundActionPrecondition(roundId: string): string {
+  return `${ROUND_ACTION_PRECONDITION_PREFIX}${roundId.toLowerCase()}`;
+}
+
+export function isRoundActionPrecondition(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith(ROUND_ACTION_PRECONDITION_PREFIX)) return false;
+  const roundId = value.slice(ROUND_ACTION_PRECONDITION_PREFIX.length);
+  return roundId === roundId.toLowerCase() && ROUND_ID_RE.test(roundId);
+}
+
+export function matchesRoundActionPrecondition(value: unknown, roundId: string): boolean {
+  return ROUND_ID_RE.test(roundId) &&
+    isRoundActionPrecondition(value) &&
+    value === roundActionPrecondition(roundId);
+}
+
+/**
+ * Build the exact intent persisted by the game RPCs.  Keeping this separate
+ * from the HTTP body matters for normalized selections (Roulette marker order)
+ * and for future player-paced controls whose wire selection is represented by
+ * a typed field after validation.
+ */
+export function normalizedActionRequest(action: NormalizedAction): Record<string, string | number> {
+  const request: Record<string, string | number> = { action: action.action };
+  if (action.selection !== undefined) {
+    request.selection = action.selection;
+  } else if (action.hold_index !== undefined) {
+    request.selection = String(action.hold_index);
+  } else if (action.panel !== undefined) {
+    request.selection = `panel${action.panel}`;
+  }
+  if (action.amount !== undefined) request.amount = action.amount;
+  return request;
+}
+
+/**
+ * An accepted retry belongs to the original immutable receipt even if the
+ * server clock has already entered lock/reveal or advanced to another round.
+ * The client never supplies a round id, so replay identity is the authenticated
+ * player lookup performed by the caller plus session, persisted round, action
+ * kind, key, action precondition and canonical request checked here. A
+ * mismatch is an idempotency conflict.
+ */
+export function matchesPersistedGameActionReplay(
+  persisted: PersistedGameActionReplay,
+  sessionId: string,
+  internalAction: InternalAction,
+  request: Record<string, string | number>,
+  actionPrecondition: string,
+): boolean {
+  return persisted.status === "APPLIED" &&
+    persisted.session_id === sessionId &&
+    matchesRoundActionPrecondition(actionPrecondition, persisted.round_id) &&
+    persisted.kind === internalAction.toUpperCase() &&
+    canonicalRuntimeJson(persisted.request) === canonicalRuntimeJson(request);
+}
+
 /**
  * Validate only the player intent.  This is not settlement validation: outcome,
  * payout and balance are deliberately absent from the input and return value.
@@ -959,101 +1032,6 @@ export function validateSelection(spec: GameSpec, selection: string): string {
   // cabinets retain their literal Unity selection until their separate ruleset
   // becomes available; this path never performs a payout.
   return selection;
-}
-
-export type ServerRandom = (exclusiveMax: number) => number;
-
-/** Unbiased server RNG for production outcome generation. */
-export function secureRandomInt(exclusiveMax: number): number {
-  if (!Number.isInteger(exclusiveMax) || exclusiveMax < 1 || exclusiveMax > 0x1_0000_0000) {
-    throw new Error("exclusiveMax must be a positive 32-bit integer.");
-  }
-  const range = 0x1_0000_0000;
-  const limit = range - (range % exclusiveMax);
-  const bytes = new Uint32Array(1);
-  do crypto.getRandomValues(bytes); while (bytes[0] >= limit);
-  return bytes[0] % exclusiveMax;
-}
-
-export type ServerOutcome =
-  | { kind: "american_roulette"; pocket: string; color: "red" | "black" | "green" }
-  | { kind: "digit_wheel"; digit: number }
-  | { kind: "multiplier_wheel"; multiplier: number }
-  | { kind: "keno_80_of_20"; drawn: number[] };
-
-const GOLDEN_WHEEL_SEGMENTS: ReadonlyArray<readonly [number, number]> = [
-  [0, 670], [1.2, 150], [1.5, 90], [2.3, 50], [4, 25], [8, 10], [15, 4], [40, 1],
-];
-
-/**
- * Generate an outcome only where the Unity engine exposes a deterministic
- * drawing shape.  This does not make blocked games playable and the Edge
- * function only calls it after the database parity gate has approved a title.
- */
-export function generateServerOutcome(spec: GameSpec, random: ServerRandom = secureRandomInt): ServerOutcome {
-  switch (spec.catalog_slug) {
-    case "fun-roulette": {
-      const pocket = ROULETTE_WHEEL[random(ROULETTE_WHEEL.length)];
-      return { kind: "american_roulette", pocket, color: rouletteColor(pocket) };
-    }
-    case "fun-target":
-      return { kind: "digit_wheel", digit: random(10) };
-    case "golden-wheel": {
-      const total = GOLDEN_WHEEL_SEGMENTS.reduce((sum, [, weight]) => sum + weight, 0);
-      let cursor = random(total);
-      for (const [multiplier, weight] of GOLDEN_WHEEL_SEGMENTS) {
-        if (cursor < weight) return { kind: "multiplier_wheel", multiplier };
-        cursor -= weight;
-      }
-      throw new Error("Golden Wheel source weights did not resolve an outcome.");
-    }
-    case "keno": {
-      const pool = Array.from({ length: 80 }, (_, index) => index + 1);
-      const drawn: number[] = [];
-      for (let index = 0; index < 20; index++) {
-        const at = random(pool.length);
-        drawn.push(pool[at]);
-        pool.splice(at, 1);
-      }
-      drawn.sort((a, b) => a - b);
-      return { kind: "keno_80_of_20", drawn };
-    }
-    default:
-      throw new GameRuleError(
-        "OUTCOME_NOT_IMPLEMENTED",
-        "This game has no reviewed server outcome implementation.",
-      );
-  }
-}
-
-/**
- * The only fully transcribed settlement in this foundation is Roulette.  The
- * other draw generators remain useful for review/testing, but their unknown
- * client paytables fail closed rather than paying a locally assumed amount.
- */
-export function settleReviewedWager(
-  spec: GameSpec,
-  selection: string,
-  amount: number,
-  outcome: ServerOutcome,
-): number {
-  stakeWithinGameLimits(spec, amount);
-  if (spec.catalog_slug !== "fun-roulette" || outcome.kind !== "american_roulette") {
-    throw new GameRuleError(
-      "RULES_NOT_VERIFIED",
-      "This game has no production-approved server settlement rule.",
-    );
-  }
-  return Math.round(amount * rouletteMultiplier(validateSelection(spec, selection), outcome.pocket));
-}
-
-export function outcomeForPublicPhase(
-  state: ClockState,
-  outcome: ServerOutcome,
-): ServerOutcome | null {
-  // The stored database row may contain a committed server outcome from the
-  // beginning of a round.  A player sees it only after betting closes.
-  return state.phase === "BETTING" ? null : outcome;
 }
 
 assertGameMapIntegrity();
