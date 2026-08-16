@@ -204,10 +204,31 @@ function parseCursor(value: string | null): number {
   return parsed;
 }
 
-function dbError(error: { message?: string } | null, fallback: string): never {
+/**
+ * Map a database failure to a player-facing code.
+ *
+ * Matching is anchored on the exact sentences the procedures raise, not on
+ * loose keywords. The previous `/insufficient|not enough|balance/` matched any
+ * message merely containing the word "balance" — including
+ * "Virtual play-point balances can only change through the ledger" and every
+ * permission error naming a balance column — so unrelated faults were reported
+ * to the player as INSUFFICIENT_POINTS. That masked a live outage: staking
+ * failed for a completely different reason while the client was told the player
+ * was short of points, on an account holding 3800.
+ *
+ * The genuine shortfall raises SQLSTATE 22003, which is checked first and is
+ * unambiguous.
+ */
+function dbError(
+  error: { message?: string; code?: string } | null,
+  fallback: string,
+): never {
   const source = error?.message || "";
-  if (/insufficient|not enough|balance/i.test(source)) {
+  if (error?.code === "22003" || /insufficient virtual play points/i.test(source)) {
     throw new HttpError(409, "Insufficient virtual play points.", "INSUFFICIENT_POINTS");
+  }
+  if (/round not found for this game session/i.test(source)) {
+    throw new HttpError(409, "This round has already closed.", "ACTION_CLOSED");
   }
   if (/bets are closed|outcome is not available/i.test(source)) {
     throw new HttpError(409, "This round no longer accepts that action.", "ACTION_CLOSED");
@@ -221,11 +242,19 @@ function dbError(error: { message?: string } | null, fallback: string): never {
   if (/idempotency key/i.test(source)) {
     throw new HttpError(409, "This idempotency key belongs to a different action.", "IDEMPOTENCY_CONFLICT");
   }
-  console.error("game-api database error", source);
+  // Unmapped faults are operational, not player mistakes. Log the SQLSTATE with
+  // the message: without the code, diagnosing this from the outside meant
+  // reproducing each RPC by hand against production to find out what actually
+  // failed.
+  console.error("game-api database error", error?.code || "-", source);
   throw new HttpError(503, fallback, "GAME_SERVICE_UNAVAILABLE");
 }
 
-function rpcOne<T>(data: T | T[] | null, error: { message?: string } | null, fallback: string): T {
+function rpcOne<T>(
+  data: T | T[] | null,
+  error: { message?: string; code?: string } | null,
+  fallback: string,
+): T {
   if (error || data === null) dbError(error, fallback);
   const value = Array.isArray(data) ? data[0] : data;
   if (!value) throw new HttpError(503, fallback, "GAME_SERVICE_UNAVAILABLE");
