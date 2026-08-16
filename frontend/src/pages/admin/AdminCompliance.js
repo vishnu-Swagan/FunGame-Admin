@@ -212,18 +212,16 @@ export default function AdminCompliance() {
           onChange={(v) => patch({ require_age_verification: v })}
           testId="compliance-require-age"
         />
-        <div className="grid gap-3 sm:grid-cols-3 pt-1">
+        <div className="grid gap-3 sm:grid-cols-2 pt-1">
           <Num label="Minimum age" value={cfg.min_age}
                onSave={(v) => patch({ min_age: v })} testId="compliance-min-age" />
-          <Num label="Limit increase delay (h)" value={cfg.limit_increase_delay_hours}
-               onSave={(v) => patch({ limit_increase_delay_hours: v })} testId="compliance-delay" />
           <Num label="Reactivation wait (h)" value={cfg.reactivation_cooling_hours}
                onSave={(v) => patch({ reactivation_cooling_hours: v })} testId="compliance-cooling" />
         </div>
         <p className="text-[11px] text-white/40">
-          The minimum age is enforced at registration whatever these switches say.
-          Raising it above 18 applies to existing accounts only once the market
-          rules are enforced.
+          This console has no cash, deposit, payout, or purchase controls. The
+          minimum age is enforced at registration; raising it above 18 applies to
+          existing accounts only once the market rules are enforced.
         </p>
       </section>
 

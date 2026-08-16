@@ -1,4 +1,8 @@
-import { newPointAdjustmentKey, validatePointAdjustment } from "./pointAdjustment";
+import {
+  newPointAdjustmentKey,
+  pointAdjustmentHeaders,
+  validatePointAdjustment,
+} from "./pointAdjustment";
 
 describe("virtual point adjustment form", () => {
   it("accepts a signed whole-number correction with an audit note", () => {
@@ -34,5 +38,13 @@ describe("virtual point adjustment form", () => {
   it("fails closed when secure browser randomness is unavailable", () => {
     expect(() => newPointAdjustmentKey({}))
       .toThrow("Secure randomness is unavailable");
+  });
+
+  it("reuses the caller-owned key for every retry and never invents a missing one", () => {
+    const key = "admin-points-d5a8a9f4-5a7e-4b08-aee0-3f99fc2e186e";
+    expect(pointAdjustmentHeaders(key)).toEqual({ "X-Idempotency-Key": key });
+    expect(pointAdjustmentHeaders(key)).toEqual({ "X-Idempotency-Key": key });
+    expect(() => pointAdjustmentHeaders(""))
+      .toThrow("stable point-adjustment retry key");
   });
 });

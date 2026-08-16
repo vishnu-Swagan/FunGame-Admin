@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { AUTH_TOKEN_STORAGE_KEY } from "@/lib/adminConsole";
 
 const AuthContext = createContext(null);
 
@@ -9,7 +10,7 @@ export function AuthProvider({ children }) {
   const [config, setConfig] = useState(null);
 
   const refreshUser = useCallback(async () => {
-    const token = localStorage.getItem("fg_token");
+    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     if (!token) {
       setUser(null);
       setLoading(false);
@@ -50,14 +51,14 @@ export function AuthProvider({ children }) {
   }, [user]);
 
   const login = useCallback((token, u) => {
-    localStorage.setItem("fg_token", token);
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
     setUser(u);
   }, []);
 
   const logout = useCallback(() => {
     // Best-effort: release the single active session on the server
     api.post("/auth/logout").catch(() => {});
-    localStorage.removeItem("fg_token");
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     setUser(null);
   }, []);
 

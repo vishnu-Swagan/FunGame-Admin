@@ -20,7 +20,7 @@ Therefore:
 | Protection | Where | Effect |
 |---|---|---|
 | **CORS locked** to `https://chakri.casino` | `render.yaml` / `server.py` | A copied frontend on another domain can't call your backend from a browser |
-| **Production mode** (`APP_ENV=production`) | `render.yaml` | Verification/reset codes are **never** returned in API responses (`dev_code` killed) |
+| **Live-only email delivery** | `email_service.py` / `render.yaml` | Verification/reset codes are never returned or logged; delivery fails closed until a real provider is configured |
 | **Rate limiting** (per-IP) on auth endpoints | `backend/security.py` | Brute-force / abuse throttled (login 8/5min, resets 5/15min, etc.) |
 | **Security headers** | `security.py` + static `render.yaml` headers | `nosniff`, `X-Frame-Options: DENY` (anti-clickjacking/embedding), Referrer-Policy, Permissions-Policy |
 | **Server-authoritative games** | `game_engines.py`, `live_engines.py` | Outcomes/balances decided server-side — can't be forged client-side |

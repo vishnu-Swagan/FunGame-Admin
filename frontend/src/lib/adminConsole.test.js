@@ -1,4 +1,4 @@
-import { apiOriginForRuntime, isAdminConsoleHost } from "./adminConsole";
+import { apiOriginForRuntime, isAdminConsoleHost, SUPABASE_ADMIN_API_ORIGIN } from "./adminConsole";
 
 describe("isAdminConsoleHost", () => {
   it("recognizes the dedicated operator hosts", () => {
@@ -11,8 +11,10 @@ describe("isAdminConsoleHost", () => {
     expect(isAdminConsoleHost("example.com")).toBe(false);
   });
 
-  it("uses the verified branded API for a fresh dedicated-console session", () => {
-    expect(apiOriginForRuntime("https://old-api.example", true)).toBe("https://api.chakri.casino");
+  it("uses the Supabase Edge Function path for a fresh dedicated-console session", () => {
+    expect(apiOriginForRuntime("https://old-api.example", true)).toBe(SUPABASE_ADMIN_API_ORIGIN);
+    expect(SUPABASE_ADMIN_API_ORIGIN).toBe("https://otlhseyofakjiridxthb.supabase.co/functions/v1/admin-api");
+    expect(SUPABASE_ADMIN_API_ORIGIN.endsWith("/api")).toBe(false);
     expect(apiOriginForRuntime("https://player-api.example", false)).toBe("https://player-api.example");
   });
 });

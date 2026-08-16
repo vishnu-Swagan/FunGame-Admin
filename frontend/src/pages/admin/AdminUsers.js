@@ -11,7 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { api, errMsg } from "@/lib/api";
 import { IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
-import { newPointAdjustmentKey, validatePointAdjustment } from "@/lib/pointAdjustment";
+import {
+  newPointAdjustmentKey,
+  pointAdjustmentHeaders,
+  validatePointAdjustment,
+} from "@/lib/pointAdjustment";
 import { PageTransition, UserStatusBadge, EmptyState, formatChips, timeAgo, AvatarBadge } from "@/components/common";
 
 const FILTERS = ["PENDING", "ACTIVE", "SUSPENDED", "REJECTED", "ALL"];
@@ -32,6 +36,7 @@ export default function AdminUsers() {
   const [pointTarget, setPointTarget] = useState(null);
   const [pointAmount, setPointAmount] = useState("");
   const [pointNote, setPointNote] = useState("");
+  const [pointAttempted, setPointAttempted] = useState(false);
   const [busyId, setBusyId] = useState(null);
   // This stays stable if the operator retries after a lost response, so the
   // immutable server ledger can return the original receipt rather than apply
@@ -88,6 +93,7 @@ export default function AdminUsers() {
     setPointTarget(player);
     setPointAmount("");
     setPointNote("");
+    setPointAttempted(false);
   };
 
   const closePointAdjustment = () => {
@@ -96,6 +102,7 @@ export default function AdminUsers() {
     setPointTarget(null);
     setPointAmount("");
     setPointNote("");
+    setPointAttempted(false);
   };
 
   const submitPointAdjustment = async () => {
@@ -106,25 +113,30 @@ export default function AdminUsers() {
       return;
     }
     if (!pointAdjustmentKey.current) {
-      try {
-        pointAdjustmentKey.current = newPointAdjustmentKey();
-      } catch (e) {
-        toast.error(errMsg(e, "Secure browser randomness is required to adjust points."));
-        return;
-      }
+      toast.error("The stable retry key is missing. Close and reopen this correction.");
+      return;
     }
+    let headers;
+    try {
+      headers = pointAdjustmentHeaders(pointAdjustmentKey.current);
+    } catch (e) {
+      toast.error(errMsg(e, "The stable retry key is invalid. Close and reopen this correction."));
+      return;
+    }
+    setPointAttempted(true);
     setBusyId(pointTarget.id);
     try {
       const { data } = await api.post(
         `/admin/users/${pointTarget.id}/points`,
         { delta: validated.delta, note: validated.note },
-        { headers: { "X-Idempotency-Key": pointAdjustmentKey.current } },
+        { headers },
       );
       toast.success(data.message || "Virtual play points updated");
       pointAdjustmentKey.current = "";
       setPointTarget(null);
       setPointAmount("");
       setPointNote("");
+      setPointAttempted(false);
       await load(filter);
     } catch (e) {
       // Keep the same key and values in memory so a deliberate retry is safe.
@@ -312,6 +324,7 @@ export default function AdminUsers() {
                 data-testid="admin-point-adjustment-amount"
                 value={pointAmount}
                 onChange={(e) => setPointAmount(e.target.value)}
+                disabled={pointAttempted}
                 placeholder="e.g. 250 or -250"
                 inputMode="text"
                 pattern="-?[0-9]*"
@@ -326,6 +339,7 @@ export default function AdminUsers() {
                 data-testid="admin-point-adjustment-note"
                 value={pointNote}
                 onChange={(e) => setPointNote(e.target.value)}
+                disabled={pointAttempted}
                 placeholder="Reason for this virtual-point correction"
                 maxLength={500}
                 className="rounded-xl bg-white/5 border-white/12"
@@ -340,7 +354,7 @@ export default function AdminUsers() {
               disabled={busyId === pointTarget?.id}
               className="rounded-xl font-bold"
             >
-              <Coins className="h-4 w-4 mr-1.5" /> {busyId === pointTarget?.id ? "Saving…" : "Record correction"}
+              <Coins className="h-4 w-4 mr-1.5" /> {busyId === pointTarget?.id ? "Saving…" : pointAttempted ? "Retry correction" : "Record correction"}
             </Button>
           </DialogFooter>
         </DialogContent>

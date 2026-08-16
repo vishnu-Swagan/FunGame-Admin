@@ -2,8 +2,8 @@
    the CHAKRI (white) · .CASINO (gold) wordmark. Used everywhere: app header,
    admin, boot splash, game intros. */
 
-export const ChakriLogo = ({ className = "h-7 w-7" }) => (
-  <svg viewBox="0 0 48 48" className={className} role="img" aria-label="Chakri.Casino logo">
+export const ChakriLogo = ({ className = "h-7 w-7", ariaLabel = "Chakri.Casino logo" }) => (
+  <svg viewBox="0 0 48 48" className={className} role="img" aria-label={ariaLabel}>
     <defs>
       <linearGradient id="fgLogoGold" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stopColor="#fff4cf" />
@@ -34,6 +34,18 @@ export const BrandWordmark = ({ logoClassName = "h-7 w-7", textClassName = "text
     <span className={`font-tech font-black tracking-tight leading-none ${textClassName}`}>
       <span className="text-white">CHAKRI</span>
       <span style={{ color: "#ffca3a" }}>.CASINO</span>
+    </span>
+  </span>
+);
+
+/** Dedicated wordmark for the isolated MyDGP operator console. Keeping it
+ * separate prevents the legacy player host from being rebranded mid-cutover. */
+export const MydgpAdminWordmark = ({ logoClassName = "h-7 w-7", textClassName = "text-lg", className = "" }) => (
+  <span className={`inline-flex items-center gap-2 ${className}`}>
+    <ChakriLogo className={logoClassName} ariaLabel="MyDGP.Casino logo" />
+    <span className={`font-tech font-black tracking-tight leading-none ${textClassName}`}>
+      <span className="text-white">MYDGP</span>
+      <span style={{ color: "#38bdf8" }}>.CASINO</span>
     </span>
   </span>
 );

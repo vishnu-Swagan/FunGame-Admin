@@ -1,9 +1,11 @@
 # Live-game parity readiness audit
 
-**Date:** 2026-08-14
-**Scope:** recovered client documentation and locally recovered source only.
-**Out of scope:** emulator use, bets, account changes, runtime promotion,
-deployment, or any external-server mutation.
+**Last updated:** 2026-08-15
+**Scope:** recovered client documentation, locally recovered source, the exact
+15-title Unity/API identity contract, and the fail-closed server-resolver
+review modules.
+**Out of scope:** runtime promotion or any claim of production parity without
+the per-title evidence package and release gate below.
 
 ## Decision
 
@@ -13,15 +15,19 @@ end-to-end, server-authoritative result and virtual-points settlement path for
 any cabinet. Keep every `game_runtime_catalog` row `DISABLED` and not
 `QA_VERIFIED`.
 
-The current API integration is intentionally fail-closed, but its remaining
-cross-cabinet gaps are material:
+The current API integration is intentionally fail-closed. Two former
+cross-cabinet transport gaps are closed: Unity now has one immutable
+catalog/lobby/scene/engine identity map for all 15 titles, and the state wire
+sends a fixed reveal duration separately from the absolute phase deadline.
+The remaining release gaps are material:
 
-1. Unity still needs its immutable catalog/lobby/scene identity mapping before
-   all cabinet rows can open the intended server session.
-2. No Edge resolver currently settles completed wagers through
-   `resolve_game_wager`; `last_payout` is consequently always zero.
-3. The state sends a *remaining* `reveal_seconds`, rather than the approved
-   fixed reveal duration Unity needs for repeatable reveal animation.
+1. All 15 review modules are present, but all 15 remain `BLOCKED`; none has
+   both an authoritative outcome generator and complete settlement function.
+2. No production-approved Edge resolver currently settles completed wagers
+   through `resolve_game_wager`; a title must not accept stakes until its full
+   stake-to-ledger lifecycle is executable and replay-tested.
+3. Player-paced cabinets still need their client-backed deal/hold/draw,
+   collect/double-up, reconnect, and replay state machines.
 4. The event stream is private to a player/session. It is not evidence of a
    public table-round/history feed or other multiplayer presentation.
 

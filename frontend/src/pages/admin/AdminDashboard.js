@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Users, HandCoins, Gamepad2, Megaphone, Wrench, UserCheck, ChevronRight, Ban } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 import { PageTransition } from "@/components/common";
 
 export default function AdminDashboard() {
@@ -23,10 +24,20 @@ export default function AdminDashboard() {
     );
   }
 
+  const pendingRequests = IS_ADMIN_CONSOLE
+    ? (stats.pending_point_requests ?? 0)
+    : (stats.pending_chip_requests ?? 0);
   const KPIS = [
     { label: "Pending signups", value: stats.pending_signups ?? 0, icon: UserCheck, to: "/admin/signups", accent: "text-primary", urgent: (stats.pending_signups ?? 0) > 0 },
     { label: "Pending approvals", value: stats.pending_users, icon: UserCheck, to: "/admin/users?status=PENDING", accent: "text-primary", urgent: stats.pending_users > 0 },
-    { label: "Pending chip requests", value: stats.pending_chip_requests, icon: HandCoins, to: "/admin/chip-requests", accent: "text-[hsl(var(--cyan))]", urgent: stats.pending_chip_requests > 0 },
+    {
+      label: IS_ADMIN_CONSOLE ? "Pending play-point requests" : "Pending chip requests",
+      value: pendingRequests,
+      icon: HandCoins,
+      to: IS_ADMIN_CONSOLE ? "/admin/point-requests" : "/admin/chip-requests",
+      accent: "text-[hsl(var(--cyan))]",
+      urgent: pendingRequests > 0,
+    },
     { label: "Active players", value: stats.active_users, icon: Users, to: "/admin/users?status=ACTIVE", accent: "text-[hsl(var(--emerald))]" },
     { label: "Suspended", value: stats.suspended_users, icon: Ban, to: "/admin/users?status=SUSPENDED", accent: "text-[hsl(var(--magenta))]" },
     { label: "Games enabled", value: `${stats.enabled_games}/${stats.total_games}`, icon: Gamepad2, to: "/admin/games", accent: "text-white" },
@@ -37,7 +48,9 @@ export default function AdminDashboard() {
     <PageTransition className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Operator dashboard</h1>
-        <p className="text-sm text-white/55 mt-1">{stats.total_users} registered players · foundation gate: 0 playable games</p>
+        <p className="text-sm text-white/55 mt-1">
+          {stats.total_users} registered players · {IS_ADMIN_CONSOLE ? "virtual points only" : "foundation gate: 0 playable games"}
+        </p>
       </div>
 
       {stats.maintenance_mode && (
@@ -69,7 +82,9 @@ export default function AdminDashboard() {
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">Foundation build gate</p>
         <p className="text-xs text-white/55 mt-1 leading-relaxed">
-          All 20 games are registered and playable. Players can browse the lobby, favourite games and request play chips.
+          {IS_ADMIN_CONSOLE
+            ? `${stats.total_games} game listings are enabled in the MyDGP control plane. New player accounts and virtual-point balances are live; trusted game settlement is enabled only after its server cutover.`
+            : "All 20 games are registered and playable. Players can browse the lobby, favourite games and request play chips."}
         </p>
       </div>
     </PageTransition>

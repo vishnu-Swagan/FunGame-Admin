@@ -1,20 +1,14 @@
 import axios from "axios";
-import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE, apiOriginForRuntime } from "@/lib/adminConsole";
+import { ADMIN_LOGIN_PATH, AUTH_TOKEN_STORAGE_KEY, LOGOUT_REASON_STORAGE_KEY, IS_ADMIN_CONSOLE, apiOriginForRuntime } from "@/lib/adminConsole";
 
 export const APP_VERSION = "1.0.0";
 
-/* The backend URL is baked in at build time, which makes renaming the API host a
-   coordinated change: the moment its .onrender.com name changes, every already-
-   built client is pointing at a host that no longer answers, and it stays broken
-   until the frontend is rebuilt and redeployed.
-
-   So the client carries the alternates too. On the first failure it tries the
-   others once, keeps whichever answers, and remembers it. That turns the rename
-   from a synchronised cutover into two independent deploys in either order. */
+/* The player app keeps its established Render failover behaviour. The dedicated
+   administrator console does not: it is pinned to the Supabase Edge Function
+   below, without a trailing `/api` path or any historical host fallback. */
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const PRIMARY_BACKEND_URL = apiOriginForRuntime(BACKEND_URL);
-const ALTERNATES = [
-  PRIMARY_BACKEND_URL,
+const PLAYER_ALTERNATES = [
   BACKEND_URL,
   "https://api.chakri.casino",
   "https://chakri-casino-api.onrender.com",
@@ -23,18 +17,25 @@ const ALTERNATES = [
 
 const REMEMBERED = "cc_api_base";
 const stored = typeof localStorage !== "undefined" ? localStorage.getItem(REMEMBERED) : null;
-const initial = ALTERNATES.includes(stored) ? stored : ALTERNATES[0];
+// A browser that previously used the player API must not carry that remembered
+// host into the isolated console.
+const initial = IS_ADMIN_CONSOLE
+  ? PRIMARY_BACKEND_URL
+  : (PLAYER_ALTERNATES.includes(stored) ? stored : PLAYER_ALTERNATES[0]);
 
-export const API_BASE = `${initial}/api`;
+export const API_BASE = IS_ADMIN_CONSOLE ? initial : `${initial}/api`;
 
 export const api = axios.create({ baseURL: API_BASE });
 
 /** Try the other hosts once, in order, and keep the first that answers. */
 let failoverInFlight = null;
 function failover() {
+  // This must remain a hard stop for the admin console. Falling back to Render
+  // would mix two authority systems after the Supabase control-plane cutover.
+  if (IS_ADMIN_CONSOLE) return Promise.resolve(null);
   if (failoverInFlight) return failoverInFlight;
   const current = api.defaults.baseURL.replace(/\/api$/, "");
-  const others = ALTERNATES.filter((h) => h !== current);
+  const others = PLAYER_ALTERNATES.filter((h) => h !== current);
   failoverInFlight = (async () => {
     for (const host of others) {
       try {
@@ -53,7 +54,7 @@ function failover() {
 const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH];
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("fg_token");
+  const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -79,9 +80,9 @@ api.interceptors.response.use(
     const path = window.location.pathname;
     if (status === 401 && !PUBLIC_PATHS.includes(path)) {
       if (detail && detail.code === "SESSION_REPLACED") {
-        localStorage.setItem("fg_logout_reason", detail.message || "You were signed out because this Login ID was used on another device.");
+        localStorage.setItem(LOGOUT_REASON_STORAGE_KEY, detail.message || "You were signed out because this Login ID was used on another device.");
       }
-      localStorage.removeItem("fg_token");
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
       window.location.assign(IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/login");
       return Promise.reject(error);
     }

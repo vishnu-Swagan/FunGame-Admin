@@ -7,8 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { BrandWordmark } from "@/components/Brand";
-import { ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
+import { BrandWordmark, MydgpAdminWordmark } from "@/components/Brand";
+import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
 /** Private operator sign-in — deliberately distinct from the player login
     (secure "control console" look, no casino branding). Admin-only. */
@@ -72,7 +72,9 @@ export default function AdminLogin() {
       >
         {/* brand wordmark + ops tag */}
         <div className="flex items-center justify-center gap-2.5 mb-6">
-          <BrandWordmark logoClassName="h-7 w-7" textClassName="text-base" />
+          {IS_ADMIN_CONSOLE
+            ? <MydgpAdminWordmark logoClassName="h-7 w-7" textClassName="text-base" />
+            : <BrandWordmark logoClassName="h-7 w-7" textClassName="text-base" />}
           <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
             <Terminal className="h-3 w-3 text-sky-400" />
             <span className="font-mono text-[9px] tracking-[0.25em] text-sky-300 uppercase">Ops</span>
