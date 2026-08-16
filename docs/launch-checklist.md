@@ -26,7 +26,7 @@ Legend: 🧑 You · 🤖 Agent · 🤝 Together
 
   **You'll know it worked when:** Supabase lists only `admin-api` and `game-api`, and the retired importer URL returns 404.
 
-- [ ] 🤖 **Build a new signed Android APK** — 20–60 minutes. The published APK predates the Supabase login/lobby/session client and cannot use the new backend.
+- [x] 🤖 **Build a new signed Android APK** — done 2026-08-16: `FunGame-release.apk` (211,034,661 bytes, sha256 5251103b…) built via `tools/unity.sh android-release`, signed with the pinned `chakri-upload` key (`FA:E1:C0:02…`), includes the Supabase client, transfer dialog wiring and today's fixes. — 20–60 minutes. The published APK predates the Supabase login/lobby/session client and cannot use the new backend.
 
   > Load the six signing inputs from a private shell (keystore path outside the repository, alias, both passwords, pinned certificate SHA-256, and apksigner path), build the current Unity project as a signed Android release, and report the APK SHA-256 without exposing credentials.
 
@@ -58,7 +58,7 @@ Legend: 🧑 You · 🤖 Agent · 🤝 Together
 
   **Verified (updated 2026-08-16):** `https://mydgp.casino/admin/` serves `main.77a8ec08.js` — the rebuilt console with the Point Collector page, auto-issued GK+8 credentials and runtime promotion controls. Deep links return 200 and `/admin/point-collector` renders authenticated with live ledger data. The bundle is reproducible from `frontend/build` at commit 6c517e7+; prior folder retained as `public_html/admin.rollback-20260816`.
 
-- [ ] 🤖 **Publish the new APK without changing download names** — 10 minutes. Back up the current `FunGame.apk`, upload the newly signed build under the same public filename, and keep Windows files unchanged.
+- [x] 🤖 **Publish the new APK without changing download names** — done 2026-08-16: the download is Supabase Storage (`releases/FunGame.apk`), not Hostinger; prior build backed up server-side as `FunGame.rollback-20260816.apk`, new build uploaded with upsert, public content-length verified byte-exact and first-KB compared identical. Same signing key, so installed apps update in place. — 10 minutes. Back up the current `FunGame.apk`, upload the newly signed build under the same public filename, and keep Windows files unchanged.
 
   > Compare the existing and new APK hashes, create a recoverable backup, upload the signed replacement to the current download directory, purge CDN cache, and verify the public Content-Length and SHA-256 hash.
 
