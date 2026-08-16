@@ -8,14 +8,18 @@ Backend API tests for Chakri.Casino LIVE-11 features:
 6. BUY flow regression
 7. GET /api/admin/users includes stats (total_deposits, winning_chips, loss_chips)
 8. Live game endpoints regression
+
+Test-only: all hosts and credentials must be supplied through FUNGAME_TEST_*
+environment variables for a disposable environment.
 """
+import os
 import requests
 import sys
 import time
 from datetime import datetime
 
-# Public endpoint from frontend/.env
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
+# No host or account is selected by default.
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class Colors:
     GREEN = '\033[92m'
@@ -26,6 +30,10 @@ class Colors:
 
 class LIVE11Tester:
     def __init__(self):
+        self.player_login_id = os.environ.get("FUNGAME_TEST_LOGIN_ID", "").strip()
+        self.player_password = os.environ.get("FUNGAME_TEST_PASSWORD", "")
+        self.admin_login_id = os.environ.get("FUNGAME_TEST_ADMIN_LOGIN_ID", "").strip()
+        self.admin_password = os.environ.get("FUNGAME_TEST_ADMIN_PASSWORD", "")
         self.tests_run = 0
         self.tests_passed = 0
         self.admin_token = None
@@ -108,6 +116,15 @@ class LIVE11Tester:
 
     def run_all_tests(self):
         """Run all LIVE-11 backend tests"""
+        if not all((BASE_URL, self.player_login_id, self.player_password,
+                    self.admin_login_id, self.admin_password)):
+            self.log(
+                "Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, "
+                "FUNGAME_TEST_PASSWORD, FUNGAME_TEST_ADMIN_LOGIN_ID, and "
+                "FUNGAME_TEST_ADMIN_PASSWORD for a disposable test environment.",
+                Colors.RED,
+            )
+            return 2
         self.log("\n" + "="*80, Colors.YELLOW)
         self.log("CHAKRI.CASINO BACKEND API TESTS - LIVE-11 FEATURES", Colors.YELLOW)
         self.log("="*80 + "\n", Colors.YELLOW)
@@ -119,7 +136,7 @@ class LIVE11Tester:
         success, resp = self.test(
             "Player login #1",
             "POST", "/auth/login", 200,
-            data={"email": "player@fungame.app", "password": "Player@123"},
+            data={"email": self.player_login_id, "password": self.player_password},
             description="First login as player - should succeed"
         )
         if success:
@@ -140,7 +157,7 @@ class LIVE11Tester:
         success, resp = self.test(
             "Player login #2 (same account)",
             "POST", "/auth/login", 200,
-            data={"email": "player@fungame.app", "password": "Player@123"},
+            data={"email": self.player_login_id, "password": self.player_password},
             description="Second login should succeed and invalidate first token"
         )
         if success:
@@ -187,7 +204,7 @@ class LIVE11Tester:
         success, resp = self.test(
             "Fresh login after logout",
             "POST", "/auth/login", 200,
-            data={"email": "player@fungame.app", "password": "Player@123"},
+            data={"email": self.player_login_id, "password": self.player_password},
             description="Fresh login after logout should work"
         )
         if success:
@@ -311,8 +328,8 @@ class LIVE11Tester:
         success, resp = self.test(
             "Admin login",
             "POST", "/auth/login", 200,
-            data={"email": "admin@fungame.app", "password": "Chakri.Casino@Admin2025"},
-            description="Login as admin"
+            data={"email": self.admin_login_id, "password": self.admin_password},
+            description="Login as the configured test administrator"
         )
         if success:
             self.admin_token = resp.get('access_token')

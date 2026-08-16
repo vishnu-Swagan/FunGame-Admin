@@ -186,7 +186,7 @@
 ---
 
 ### Phase 4: Email Provider Integration (Resend) — real delivery for verification/reset
-**Goal (P1):** Replace demo email verification with real transactional delivery.
+**Goal (P1):** Replace development-only email handling with real transactional delivery.
 
 **Status:** ✅ COMPLETED + VERIFIED
 - Resend provider added + branded HTML templates + graceful failure handling.
@@ -358,6 +358,8 @@
 - ✅ LIVE‑10 completed: points economy + admin-provisioned accounts verified (**iteration_9.json**).
 - ✅ **LIVE‑11 completed: sessions + SELL approvals + admin aggregates verified (**iteration_10.json**).**
 
-**Test credentials**
-- Admin: `admin@fungame.app` / `Chakri.Casino@Admin2025`
-- Player: `player@fungame.app` / `Player@123`
+**Test accounts**
+
+Use only operator-provisioned disposable accounts supplied through the
+`FUNGAME_TEST_*` environment variables. No fixed account credentials exist in
+the repository.

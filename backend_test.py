@@ -1,16 +1,20 @@
 """
+Explicitly configured integration checks for a disposable, non-production
+environment. This script contains no live account credentials.
+
 Backend API tests for Chakri.Casino Points Economy + Admin-Provisioned Accounts features.
 Tests both new features:
 1. Points economy (chips <-> points conversion, admin adjustments)
 2. Admin-provisioned accounts (signup requests, admin approval with username/password)
 """
+import os
 import requests
 import sys
 import time
 from datetime import datetime
 
-# Public endpoint from frontend/.env
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
+# Set this explicitly for a disposable test environment.
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class Colors:
     GREEN = '\033[92m'
@@ -21,6 +25,8 @@ class Colors:
 
 class APITester:
     def __init__(self):
+        self.admin_login_id = os.environ.get("FUNGAME_TEST_ADMIN_LOGIN_ID", "").strip()
+        self.admin_password = os.environ.get("FUNGAME_TEST_ADMIN_PASSWORD", "")
         self.tests_run = 0
         self.tests_passed = 0
         self.admin_token = None
@@ -88,6 +94,13 @@ class APITester:
 
     def run_all_tests(self):
         """Run all backend tests"""
+        if not BASE_URL or not self.admin_login_id or not self.admin_password:
+            self.log(
+                "Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_ADMIN_LOGIN_ID, and "
+                "FUNGAME_TEST_ADMIN_PASSWORD for a disposable test environment.",
+                Colors.RED,
+            )
+            return 2
         self.log("\n" + "="*80, Colors.YELLOW)
         self.log("CHAKRI.CASINO BACKEND API TESTS - Points Economy + Admin-Provisioned Accounts", Colors.YELLOW)
         self.log("="*80 + "\n", Colors.YELLOW)
@@ -146,19 +159,6 @@ class APITester:
             description="Phone without country code should return 422"
         )
 
-        # Existing user email
-        self.test(
-            "Signup request with existing user email - 409",
-            "POST", "/auth/signup-request", 409,
-            data={
-                "full_name": "Existing User",
-                "email": "player@fungame.app",
-                "date_of_birth": "1994-05-20",
-                "phone": "+14155552671"
-            },
-            description="Email of existing user should return 409"
-        )
-
         # ========== FEATURE 3: ADMIN LOGIN & SIGNUP APPROVAL ==========
         self.log("\n### FEATURE 3: ADMIN LOGIN & SIGNUP APPROVAL ###", Colors.YELLOW)
         
@@ -166,8 +166,8 @@ class APITester:
         success, resp = self.test(
             "Admin login",
             "POST", "/auth/login", 200,
-            data={"email": "admin@fungame.app", "password": "Chakri.Casino@Admin2025"},
-            description="Login as admin"
+            data={"email": self.admin_login_id, "password": self.admin_password},
+            description="Login as the configured test administrator"
         )
         if success:
             self.admin_token = resp.get('access_token')
@@ -272,18 +272,6 @@ class APITester:
                 data={"email": "QA_TESTER_01", "password": self.test_password},
                 description="Login with uppercase username should work"
             )
-
-        # Legacy email login
-        success, resp = self.test(
-            "Legacy email login",
-            "POST", "/auth/login", 200,
-            data={"email": "player@fungame.app", "password": "Player@123"},
-            description="Legacy player email login should still work"
-        )
-        if success:
-            legacy_player_token = resp.get('access_token')
-            legacy_user = resp.get('user', {})
-            print(f"  Legacy user: email={legacy_user.get('email')}, chips={legacy_user.get('chip_balance')}")
 
         # ========== FEATURE 5: CHIPS <-> POINTS CONVERSION ==========
         self.log("\n### FEATURE 5: CHIPS <-> POINTS CONVERSION ###", Colors.YELLOW)

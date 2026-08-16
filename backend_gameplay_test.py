@@ -2,13 +2,17 @@
 Chakri.Casino Gameplay Engine Test Suite
 Tests the bug fix: ALL 18 games should be playable with real engines.
 NO 'later build gate' 501 errors should appear.
+
+Test-only: provide an operator-provisioned disposable player explicitly with
+FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and FUNGAME_TEST_PASSWORD.
 """
+import os
 import requests
 import sys
 import time
 from datetime import datetime
 
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class Colors:
     GREEN = '\033[92m'
@@ -20,6 +24,8 @@ class Colors:
 
 class GameplayTester:
     def __init__(self):
+        self.player_login_id = os.environ.get("FUNGAME_TEST_LOGIN_ID", "").strip()
+        self.player_password = os.environ.get("FUNGAME_TEST_PASSWORD", "")
         self.tests_run = 0
         self.tests_passed = 0
         self.tests_failed = 0
@@ -83,10 +89,10 @@ class GameplayTester:
             raise AssertionError(f"Request failed: {str(e)}")
 
     def login_player(self):
-        """Login as player@fungame.app"""
+        """Login as the explicitly configured disposable test player."""
         data = self.req('POST', '/auth/login', 200, data={
-            'email': 'player@fungame.app',
-            'password': 'Player@123'
+            'email': self.player_login_id,
+            'password': self.player_password,
         }, desc="Player login")
         
         assert 'access_token' in data, "Login should return access_token"
@@ -402,13 +408,20 @@ class GameplayTester:
 
     def run_all_tests(self):
         """Run all gameplay tests"""
+        if not BASE_URL or not self.player_login_id or not self.player_password:
+            self.log(
+                "Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and "
+                "FUNGAME_TEST_PASSWORD for a disposable test environment.",
+                Colors.RED,
+            )
+            return 2
         self.log("\n" + "="*70, Colors.YELLOW)
         self.log("Chakri.Casino Gameplay Engine Test Suite", Colors.YELLOW)
         self.log("BUG FIX VERIFICATION: No 'later build gate' errors", Colors.YELLOW)
         self.log("="*70 + "\n", Colors.YELLOW)
 
         # Login
-        self.log("🔐 Logging in as player@fungame.app...", Colors.MAGENTA)
+        self.log("🔐 Logging in as the configured test player...", Colors.MAGENTA)
         self.login_player()
 
         # Verify all games are ENABLED

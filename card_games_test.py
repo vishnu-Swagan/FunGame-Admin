@@ -1,17 +1,23 @@
 """
 Backend API tests for Chakri.Casino card games flicker fix verification.
 Tests all 5 card game endpoints and phase progression.
+
+Test-only: supply FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and
+FUNGAME_TEST_PASSWORD for an operator-provisioned disposable player.
 """
+import os
 import requests
 import sys
 import time
 from datetime import datetime
 
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com"
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class CardGameTester:
     def __init__(self):
         self.base_url = BASE_URL
+        self.player_login_id = os.environ.get("FUNGAME_TEST_LOGIN_ID", "").strip()
+        self.player_password = os.environ.get("FUNGAME_TEST_PASSWORD", "")
         self.token = None
         self.tests_run = 0
         self.tests_passed = 0
@@ -80,11 +86,11 @@ class CardGameTester:
         """Test login and get token"""
         self.log("\n=== AUTHENTICATION ===", "INFO")
         success, response = self.run_test(
-            "Login with player@fungame.app",
+            "Login with the configured test player",
             "POST",
             "api/auth/login",
             200,
-            data={"email": "player@fungame.app", "password": "Player@123"}
+            data={"email": self.player_login_id, "password": self.player_password}
         )
         if success and 'access_token' in response:
             self.token = response['access_token']
@@ -304,6 +310,9 @@ class CardGameTester:
 
 def main():
     """Run all backend tests"""
+    if not BASE_URL or not os.environ.get("FUNGAME_TEST_LOGIN_ID") or not os.environ.get("FUNGAME_TEST_PASSWORD"):
+        print("Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and FUNGAME_TEST_PASSWORD for a disposable test environment.")
+        return 2
     print(f"\n{'='*60}")
     print("Chakri.Casino Card Games Backend Test Suite")
     print(f"Testing flicker fix verification")

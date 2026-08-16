@@ -1,13 +1,17 @@
 """
 Chakri.Casino Live Games Backend Test Suite
 Tests Aviator and 16 live casino games with server-synchronized rounds.
+
+Test-only: supply FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and
+FUNGAME_TEST_PASSWORD for an operator-provisioned disposable player.
 """
+import os
 import requests
 import sys
 import time
 from datetime import datetime
 
-BASE_URL = "https://casino-reference-app.preview.emergentagent.com/api"
+BASE_URL = os.environ.get("FUNGAME_TEST_BASE_URL", "").rstrip("/")
 
 class Colors:
     GREEN = '\033[92m'
@@ -18,6 +22,8 @@ class Colors:
 
 class LiveGamesTester:
     def __init__(self):
+        self.player_login_id = os.environ.get("FUNGAME_TEST_LOGIN_ID", "").strip()
+        self.player_password = os.environ.get("FUNGAME_TEST_PASSWORD", "")
         self.tests_run = 0
         self.tests_passed = 0
         self.tests_failed = 0
@@ -80,8 +86,8 @@ class LiveGamesTester:
     def test_login_player(self):
         """Login as player"""
         data = self.req('POST', '/auth/login', 200, data={
-            'email': 'player@fungame.app',
-            'password': 'Player@123'
+            'email': self.player_login_id,
+            'password': self.player_password,
         }, desc="Player login")
         
         assert 'access_token' in data, "Login should return access_token"
@@ -489,6 +495,13 @@ class LiveGamesTester:
 
     def run_all_tests(self):
         """Run all live games tests"""
+        if not BASE_URL or not self.player_login_id or not self.player_password:
+            self.log(
+                "Set FUNGAME_TEST_BASE_URL, FUNGAME_TEST_LOGIN_ID, and "
+                "FUNGAME_TEST_PASSWORD for a disposable test environment.",
+                Colors.RED,
+            )
+            return 2
         self.log("\n" + "="*70, Colors.YELLOW)
         self.log("Chakri.Casino Live Games Backend Test Suite", Colors.YELLOW)
         self.log("Testing Aviator + 16 Live Casino Games", Colors.YELLOW)
