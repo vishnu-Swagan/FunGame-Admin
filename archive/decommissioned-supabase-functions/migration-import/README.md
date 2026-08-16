@@ -1,9 +1,18 @@
-# MyDGP Mongo snapshot importer
+# Archived MyDGP Mongo snapshot importer
+
+> **DECOMMISSIONED — REFERENCE ONLY.** This directory is deliberately outside
+> `supabase/functions`, so Supabase CLI deploy workflows cannot publish it as an
+> Edge Function. Do not copy it back into the deployable function tree. The
+> source and tests remain here only for audit history and incident review.
+
+The source-side decommission does not delete a previously deployed remote
+function or alter retained migration data. Those operational and retention
+actions require a separate, explicitly authorized production procedure.
 
 `migration-import` is a short-lived, server-to-server Supabase Edge Function
-used only during the MongoDB cutover. It has no CORS policy and rejects browser
-requests. Do not expose its endpoint or any of its secrets in the Android app
-or the admin web build.
+that was used only during the MongoDB cutover. It had no CORS policy and
+rejected browser requests. Never expose its historical endpoint or any of its
+secrets in the Android app or the admin web build.
 
 ## Required function secrets
 

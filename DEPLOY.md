@@ -1,5 +1,28 @@
 # Deploying Chakri.Casino
 
+## Supabase Edge Functions
+
+The production Supabase function surface contains exactly two entry points:
+`admin-api` and `game-api`. The one-time Mongo importer is decommissioned and
+retained for audit only under
+`archive/decommissioned-supabase-functions/migration-import`; it must never be
+copied back under `supabase/functions`.
+
+Run the source-surface guard, then use the scoped deploy helper. Do not use an
+unscoped `supabase functions deploy` command.
+
+```sh
+./supabase/scripts/check-live-function-surface.sh
+./supabase/scripts/deploy-live-functions.sh --project-ref otlhseyofakjiridxthb
+```
+
+The helper expands to these two explicit deployments and nothing else:
+
+```sh
+supabase functions deploy admin-api --project-ref otlhseyofakjiridxthb
+supabase functions deploy game-api --project-ref otlhseyofakjiridxthb
+```
+
 Two Render services, and they are **not** interchangeable in how they behave.
 
 | Service | Type | What it serves |
@@ -55,8 +78,8 @@ name, so rename in the dashboard rather than expecting the file to do it.
 
 * `DB_NAME` (`fungame`) — the live MongoDB database. Every user, balance, bet and
   round is in it.
-* `admin@fungame.app` / `player@fungame.app` — real rows. `seed` only inserts when
-  a row is absent, so renaming creates a second empty pair you cannot sign in to.
+* Live player and administrator identities — provision them through the MyDGP
+  control plane only. Application startup never creates a login account.
 * `com.onrender.fungame_web.twa` in `assetlinks.json` — the published Android
   package. Installed apps keep it; dropping the statement breaks the Digital
   Asset Link and puts a browser address bar over the app.
