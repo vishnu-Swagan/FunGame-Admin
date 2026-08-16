@@ -20,6 +20,7 @@ import {
   type ServerEntropy,
   type SettlementResult,
 } from "./resolvers/resolver-contract.ts";
+import { planParimutuelRound, type ParimutuelWager } from "./parimutuel.ts";
 
 export type RuntimeSettlementIdentity = Readonly<{
   catalog_slug: string;
@@ -254,6 +255,111 @@ export function planClockedSettlements(
     });
   });
   return Object.freeze(plans);
+}
+
+/* ---------------------------------------------------------------------------
+ * Pari-mutuel settlement for shared clocked tables
+ *
+ * The house does not bank a fixed multiplier on these tables. The whole round
+ * pool is redistributed: 90% goes to the players who backed the winning
+ * outcome, in proportion to their winning stake. WHO wins is decided exactly as
+ * fixed-odds decides it — a selection wins iff its resolver would have paid it —
+ * so this never re-derives game rules; it changes only how much a winner gets.
+ *
+ * The plan is computed from the ENTIRE round book (every wager, every player,
+ * every status), because the pool and the winning-stake pool depend on all of
+ * them. Betting is closed before settlement, so the book is fixed and the
+ * per-wager payout is deterministic — which is what makes settling the same
+ * round twice (two players polling) idempotent: both compute identical payouts,
+ * and the per-wager RPC no-ops an already-settled wager.
+ * ------------------------------------------------------------------------ */
+
+export type ClockedRoundWager = Readonly<{
+  id: string;
+  player_id: string;
+  selection: string;
+  amount: number | string;
+  status: string;
+}>;
+
+export type ParimutuelClockedPlan = Readonly<{
+  outcome: unknown;
+  outcome_commitment: string;
+  resolver_id: string;
+  ruleset_version: number;
+  round_pool: number;
+  maximum_distribution: number;
+  winning_stake_pool: number;
+  remainder_points: number;
+  no_winner: boolean;
+  payouts: readonly { wager_id: string; payout_points: number }[];
+}>;
+
+export function planParimutuelClockedRound(
+  runtime: RuntimeSettlementIdentity,
+  round: StoredClockedRound,
+  wagers: readonly ClockedRoundWager[],
+  resolverLookup: ExecutableClockedResolverLookup = executableClockedResolverFor,
+): ParimutuelClockedPlan {
+  const resolver = resolverLookup(runtime);
+  if (
+    round.runtime_mode !== "CLOCKED_SHARED" ||
+    round.session_id !== null ||
+    round.catalog_slug !== runtime.catalog_slug ||
+    round.ruleset_version !== runtime.ruleset_version ||
+    !/^[0-9a-f]{64}$/.test(round.outcome_commitment)
+  ) {
+    throw new SettlementLifecycleError(
+      "ROUND_IDENTITY_MISMATCH",
+      "The stored round does not match the clocked runtime identity.",
+    );
+  }
+  const outcome = resolver.validateOutcome(round.outcome);
+  const seen = new Set<string>();
+  const pm: ParimutuelWager[] = wagers.map((wager) => {
+    if (
+      typeof wager.id !== "string" || wager.id.length === 0 || seen.has(wager.id) ||
+      typeof wager.player_id !== "string" || wager.player_id.length === 0 ||
+      typeof wager.selection !== "string"
+    ) {
+      throw new SettlementLifecycleError("INVALID_STORED_WAGER", "Stored round wager identity is invalid.");
+    }
+    seen.add(wager.id);
+    const stakePoints = storedPoints(wager.amount);
+    const selection = resolver.normalizeSelection(wager.selection);
+    // Win determination only: a selection wins iff the fixed resolver would
+    // have paid it. The amount it returns is discarded; pari-mutuel sets the
+    // payout. This is status-independent, so an already-settled wager still
+    // contributes correctly to the pool.
+    const settlement = resolver.settle(selection, stakePoints, outcome);
+    if (
+      !Number.isSafeInteger(settlement.payout_points) || settlement.payout_points < 0
+    ) {
+      throw new SettlementLifecycleError(
+        "INVALID_RESOLVER_SETTLEMENT",
+        "Resolver returned an invalid win determination.",
+      );
+    }
+    return {
+      wager_id: wager.id,
+      player_id: wager.player_id,
+      stake_points: stakePoints,
+      winner: settlement.payout_points > 0,
+    };
+  });
+  const plan = planParimutuelRound(pm);
+  return Object.freeze({
+    outcome,
+    outcome_commitment: round.outcome_commitment,
+    resolver_id: resolver.manifest.live_resolver_id as string,
+    ruleset_version: runtime.ruleset_version,
+    round_pool: plan.round_pool,
+    maximum_distribution: plan.maximum_distribution,
+    winning_stake_pool: plan.winning_stake_pool,
+    remainder_points: plan.remainder_points,
+    no_winner: plan.no_winner,
+    payouts: plan.payouts.map((p) => ({ wager_id: p.wager_id, payout_points: p.payout_points })),
+  });
 }
 
 /* ---------------------------------------------------------------------------

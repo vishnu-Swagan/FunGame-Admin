@@ -32,6 +32,7 @@ import {
   generateClockedRoundOutcome,
   generatePlayerPacedOutcome,
   planClockedSettlements,
+  planParimutuelClockedRound,
   planPlayerPacedSettlement,
   SettlementLifecycleError,
 } from "./settlement-lifecycle.ts";
@@ -460,37 +461,44 @@ async function settleDueClockedWagers(
     throw new HttpError(409, "Player-paced games cannot use clocked settlement.", "GAME_UNAVAILABLE");
   }
   for (let batch = 0; batch < 20; batch++) {
-    const { data: wagers, error: wagerError } = await service().from("game_wagers")
-      .select("id,selection,amount,status,round_id")
+    // Which rounds does THIS player have OPEN money in, past reveal? That set
+    // decides which rounds to settle; the settlement itself covers the WHOLE
+    // round's book across every player, because a pari-mutuel payout depends on
+    // the entire pool.
+    const { data: mine, error: mineError } = await service().from("game_wagers")
+      .select("round_id")
       .eq("player_id", actor.id)
       .eq("session_id", session.id)
       .eq("status", "OPEN")
-      .order("placed_at", { ascending: true })
       .limit(200)
-      .returns<DueWagerRow[]>();
-    if (wagerError) dbError(wagerError, "Game wagers could not be reconciled.");
-    if (!wagers?.length) return;
+      .returns<{ round_id: string }[]>();
+    if (mineError) dbError(mineError, "Game wagers could not be reconciled.");
+    if (!mine?.length) return;
 
-    const roundIds = [...new Set(wagers.map((wager) => wager.round_id))];
+    const roundIds = [...new Set(mine.map((w) => w.round_id))];
     const { data: rounds, error: roundError } = await service().from("game_rounds")
       .select("id,catalog_slug,engine_slug,session_id,round_number,outcome_commitment,outcome,resolver_id,ruleset_version,reveal_starts_at,result_starts_at,ends_at")
       .in("id", roundIds)
       .returns<RoundRow[]>();
     if (roundError) dbError(roundError, "Game rounds could not be reconciled.");
-    const byId = new Map((rounds || []).map((round) => [round.id, round]));
-    const due = wagers.filter((wager) => {
-      const round = byId.get(wager.round_id);
-      return round && Date.parse(round.reveal_starts_at) <= Date.now();
-    });
-    if (!due.length) return;
+    const dueRounds = (rounds || []).filter((round) =>
+      round.outcome !== null && Date.parse(round.reveal_starts_at) <= Date.now()
+    );
+    if (!dueRounds.length) return;
 
-    const dueRoundIds = [...new Set(due.map((wager) => wager.round_id))];
-    for (const roundId of dueRoundIds) {
-      const round = byId.get(roundId);
-      if (!round || round.outcome === null) {
-        throw new HttpError(503, "Authoritative game outcome is unavailable.", "ROUND_INVALID");
-      }
-      const plans = planClockedSettlements(runtime, {
+    for (const round of dueRounds) {
+      // The full round book: every player, every status. Settled wagers still
+      // count toward the pool, so a round settled in two passes (two players
+      // polling) computes the same payouts both times.
+      const { data: book, error: bookError } = await service().from("game_wagers")
+        .select("id,player_id,selection,amount,status")
+        .eq("round_id", round.id)
+        .limit(4000)
+        .returns<Array<{ id: string; player_id: string; selection: string; amount: number | string; status: string }>>();
+      if (bookError) dbError(bookError, "Game wagers could not be reconciled.");
+      if (!book?.length) continue;
+
+      const plan = planParimutuelClockedRound(runtime, {
         id: round.id,
         catalog_slug: round.catalog_slug,
         ruleset_version: wireInteger(round.ruleset_version, "ruleset version"),
@@ -498,16 +506,16 @@ async function settleDueClockedWagers(
         session_id: round.session_id as null,
         outcome_commitment: round.outcome_commitment,
         outcome: round.outcome,
-      }, due.filter((wager) => wager.round_id === roundId).map((wager) => ({
-        id: wager.id,
-        selection: wager.selection,
-        amount: wager.amount,
-        status: "OPEN" as const,
-      })));
-      for (const plan of plans) {
+      }, book);
+
+      const payoutByWager = new Map(plan.payouts.map((p) => [p.wager_id, p.payout_points]));
+      // Settle only the wagers still OPEN; the per-wager RPC is atomic and
+      // no-ops an already-settled one. Order by id for a stable lock order.
+      const open = book.filter((w) => w.status === "OPEN").sort((a, b) => a.id.localeCompare(b.id));
+      for (const wager of open) {
         const { data, error } = await service().rpc("resolve_ready_clocked_game_wager", {
-          p_wager_id: plan.wager_id,
-          p_payout: plan.payout_points,
+          p_wager_id: wager.id,
+          p_payout: payoutByWager.get(wager.id) ?? 0,
           p_outcome: plan.outcome,
           p_outcome_commitment: plan.outcome_commitment,
           p_resolver_id: plan.resolver_id,
