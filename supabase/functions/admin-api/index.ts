@@ -695,6 +695,13 @@ async function handlePlayerLogin(req: Request): Promise<Response> {
     expires_at: sessionData.session.expires_at || null,
     user: player,
     profile: player,
+    // Unity's JsonUtility auto-instantiates ANY declared serializable class
+    // field that is absent from the JSON — so the client's envelope always has
+    // a non-null but EMPTY `player`, which its PlayerFrom() prefers over the
+    // populated `user`, and sign-in failed with "player record was missing".
+    // Sending the player under this exact key populates the field the client
+    // reads first, and heals every already-installed build without an update.
+    player,
     ...playerBalanceEnvelope(balance),
   });
 }
@@ -755,6 +762,9 @@ async function handlePlayerSession(req: Request): Promise<Response> {
   return json(req, {
     profile,
     user: profile,
+    // Same JsonUtility auto-instantiation trap as the sign-in response: the
+    // client prefers `player`, which must therefore carry the real identity.
+    player: profile,
     ...playerBalanceEnvelope(balance),
     games: playableGames,
   });
