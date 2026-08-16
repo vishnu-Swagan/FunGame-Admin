@@ -113,14 +113,21 @@ class HttpError extends Error {
   }
 }
 
+// One client per role for the life of the isolate, not one per request.
+// Rebuilding on every call re-ran the client's own startup each time and was a
+// measurable slice of the login and lobby latency. The clients are stateless
+// here (no session persistence, no auto-refresh), so sharing them is safe.
+let _serviceClient: SupabaseClient | null = null;
+let _publicClient: SupabaseClient | null = null;
+
 function service(): SupabaseClient {
-  return createClient(PROJECT_URL!, SERVICE_ROLE_KEY!, {
+  return _serviceClient ??= createClient(PROJECT_URL!, SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
 
 function publicAuth(): SupabaseClient {
-  return createClient(PROJECT_URL!, ANON_KEY!, {
+  return _publicClient ??= createClient(PROJECT_URL!, ANON_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
@@ -264,20 +271,46 @@ function rpcOne<T>(
   return value;
 }
 
+// A validated token → user-id cache with a short TTL.
+//
+// The client polls session state about once a second, and every poll re-ran a
+// network round-trip to Supabase Auth to validate the same JWT. That round-trip
+// was the largest part of each authenticated request. Caching the validated
+// (token → user id) for a few seconds removes it from the hot path without
+// weakening the boundary: an entry lives at most TTL, and it caches only the
+// fact that this exact token validated — the profile row (balance, status) is
+// still read fresh on every call, so a suspension or balance change is never
+// stale. The token's own signed expiry still bounds its lifetime.
+const AUTH_CACHE_TTL_MS = 5_000;
+const _authCache = new Map<string, { userId: string; expiresAt: number }>();
+
+async function validatedUserId(token: string): Promise<string> {
+  const now = Date.now();
+  const cached = _authCache.get(token);
+  if (cached && cached.expiresAt > now) return cached.userId;
+  const { data: userData, error: userError } = await publicAuth().auth.getUser(token);
+  if (userError || !userData.user) {
+    _authCache.delete(token);
+    throw new HttpError(401, "Player session is invalid or expired.", "AUTH_INVALID");
+  }
+  // Bound the map: this is one warm isolate, but a long-lived one should not
+  // accumulate every token it has ever seen.
+  if (_authCache.size > 500) _authCache.clear();
+  _authCache.set(token, { userId: userData.user.id, expiresAt: now + AUTH_CACHE_TTL_MS });
+  return userData.user.id;
+}
+
 async function requirePlayer(req: Request): Promise<PlayerActor> {
   const token = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if (!token) throw new HttpError(401, "Player authentication is required.", "AUTH_REQUIRED");
-  const { data: userData, error: userError } = await publicAuth().auth.getUser(token);
-  if (userError || !userData.user) {
-    throw new HttpError(401, "Player session is invalid or expired.", "AUTH_INVALID");
-  }
+  const userId = await validatedUserId(token);
   const { data: profile, error } = await service().from("profiles")
     .select("id,login_id,account_kind,status,display_name,full_name,play_points_balance")
-    .eq("id", userData.user.id).maybeSingle<Profile>();
+    .eq("id", userId).maybeSingle<Profile>();
   if (error || !profile || profile.account_kind !== "PLAYER" || profile.status !== "ACTIVE") {
     throw new HttpError(403, "An active player account is required.", "PLAYER_REQUIRED");
   }
-  return { id: userData.user.id, profile };
+  return { id: userId, profile };
 }
 
 function publicPlayer(actor: PlayerActor): Json {
