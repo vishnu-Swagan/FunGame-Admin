@@ -23,6 +23,7 @@ import { CHECKER_RESOLVER } from "./checker.ts";
 import { FEVER_JOKER_BONUS_RESOLVER } from "./fever-joker-bonus.ts";
 import { NO_HOLD_RESOLVER } from "./no-hold.ts";
 import { CHAMPION_POKER_RESOLVER } from "./champion-poker.ts";
+import { AVIATOR_RESOLVER } from "./aviator.ts";
 
 /**
  * Review evidence for every public cabinet.  This map is deliberately distinct
@@ -46,6 +47,7 @@ export const REVIEW_RESOLVER_REGISTRY = Object.freeze({
   "fever-joker-bonus": FEVER_JOKER_BONUS_RESOLVER,
   "no-hold": NO_HOLD_RESOLVER,
   "champion-poker": CHAMPION_POKER_RESOLVER,
+  "aviator": AVIATOR_RESOLVER,
 });
 
 export type ReviewResolver =

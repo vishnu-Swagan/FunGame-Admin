@@ -45,13 +45,13 @@ Deno.test("a public cabinet requires catalogue, runtime, parity, and a compiled 
 
 Deno.test("the resolver registry registers all fifteen titles at ruleset v1", () => {
   const entries = Object.values(LIVE_RESOLVER_REGISTRY);
-  assert(entries.length === 15, "registry must cover the complete live catalog");
+  assert(entries.length === 16, "registry must cover the complete live catalog");
   assert(
     entries.every((entry) => entry.resolver_id !== null && entry.ruleset_version === 1),
     "every title ships on ruleset v1 with a compiled resolver",
   );
   assert(
-    new Set(entries.map((entry) => entry.resolver_id)).size === 15,
+    new Set(entries.map((entry) => entry.resolver_id)).size === 16,
     "each title must carry its own distinct resolver id",
   );
   assert(hasRegisteredLiveResolver("fun-roulette", 1), "a registered title must pass code registration");

@@ -13,6 +13,7 @@ import * as lucky8Line from "./lucky-8-line.ts";
 import * as feverJokerBonus from "./fever-joker-bonus.ts";
 import * as noHold from "./no-hold.ts";
 import * as championPoker from "./champion-poker.ts";
+import * as aviator from "./aviator.ts";
 import { REVIEW_RESOLVER_REGISTRY } from "./review-registry.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -45,6 +46,7 @@ const TITLE_MODULES = Object.freeze({
   "fever-joker-bonus": feverJokerBonus,
   "no-hold": noHold,
   "champion-poker": championPoker,
+  aviator,
 });
 
 const SETTLEMENT_EXPORT = /(settle|payout|price|award|credit|refund|ledger|winningpoint)/i;
@@ -67,7 +69,7 @@ function assertNoLedgerShapedExpected(value: unknown, path: string): void {
 }
 
 test("all fifteen titles settle only through the reviewed module contract", () => {
-  assert(Object.keys(TITLE_MODULES).length === 15, "surface audit must cover all fifteen titles");
+  assert(Object.keys(TITLE_MODULES).length === 16, "surface audit must cover all sixteen titles");
 
   // Every title is live on ruleset v1, so settlement is expected to exist. The
   // invariant is that there is exactly ONE of it: a module may export its

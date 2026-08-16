@@ -223,3 +223,68 @@ test("Checker pins the base ladders and observed D-suffix evidence but not serve
     "an outcome absent from the recovered base ladder must fail",
   );
 });
+
+// --- Aviator (crash game, player-paced auto cash-out) -----------------------
+
+import {
+  AVIATOR_RESOLVER,
+  AVIATOR_MIN_CASH_OUT_CENTIS,
+  generateAviatorOutcome,
+  normalizeAviatorSelection,
+  settleAviatorHand,
+  validateAviatorOutcome,
+} from "./aviator.ts";
+
+test("Aviator is an executable, ready, player-paced resolver", () => {
+  requireExecutableResolver(
+    AVIATOR_RESOLVER as unknown as ReviewResolverModule<unknown, unknown, unknown>,
+  );
+  assert(AVIATOR_RESOLVER.manifest.live_resolver_id === "aviator-v1", "aviator live id");
+  assert(AVIATOR_RESOLVER.manifest.timing.mode === "PLAYER_PACED", "aviator is player-paced");
+  assert(AVIATOR_RESOLVER.manifest.settlement.payout_semantics === "TOTAL_RETURN", "aviator total-return");
+});
+
+test("Aviator rejects a 1.00x target so the house edge cannot be voided", () => {
+  assert(AVIATOR_MIN_CASH_OUT_CENTIS === 101, "lowest valid target is 1.01x");
+  assert(throwsInputCode(() => normalizeAviatorSelection({ cash_out_centis: 100 }), "INVALID_SELECTION"),
+    "1.00x must be rejected");
+  assert(throwsInputCode(() => normalizeAviatorSelection({ cash_out_centis: 0 }), "INVALID_SELECTION"),
+    "0 must be rejected");
+  assert(throwsInputCode(() => normalizeAviatorSelection({ cash_out_centis: 100001 }), "INVALID_SELECTION"),
+    "above the 1000x ceiling must be rejected");
+  // A bare or legacy string still resolves rather than bricking the hand.
+  assert(normalizeAviatorSelection("panel1:250").cash_out_centis === 250, "legacy string form parses");
+  assert(normalizeAviatorSelection({ cash_out_centis: 200 }).cash_out_centis === 200, "object form parses");
+});
+
+test("Aviator settles total-return integer points through the resolver", () => {
+  const sel = normalizeAviatorSelection({ cash_out_centis: 250 });
+  const win = settleAviatorHand(sel, 40, validateAviatorOutcome({ crash_centis: 400 }));
+  assert(win.payout_points === 100 && win.net_points === 60, "2.50x on a 4.00x flight pays floor(40*2.5)=100");
+  const loss = settleAviatorHand(sel, 40, validateAviatorOutcome({ crash_centis: 200 }));
+  assert(loss.payout_points === 0 && loss.net_points === -40, "a target above the crash pays nothing");
+});
+
+test("Aviator returns about 90% through the resolver for any fixed target", () => {
+  // Deterministic mulberry32 PRNG so the proof is reproducible without a crypto
+  // source; uniform enough that a broken edge shows up well outside tolerance.
+  let a = 0x9e3779b9 >>> 0;
+  const entropy = (max: number): number => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    const u = ((t ^ (t >>> 14)) >>> 0) / 4294967296; // [0, 1)
+    return Math.floor(u * max);
+  };
+  for (const target of [150, 200, 500, 1000]) {
+    const sel = normalizeAviatorSelection({ cash_out_centis: target });
+    let staked = 0, returned = 0;
+    for (let i = 0; i < 150000; i++) {
+      const outcome = generateAviatorOutcome(entropy);
+      const r = settleAviatorHand(sel, 10000, outcome);
+      staked += 10000; returned += r.payout_points;
+    }
+    const rtp = returned / staked;
+    assert(rtp > 0.86 && rtp < 0.94, `target ${target}: RTP ${rtp.toFixed(4)} off 0.90`);
+  }
+});

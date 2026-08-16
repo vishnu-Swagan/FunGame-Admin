@@ -46,6 +46,7 @@ const REGISTRATIONS = [
   ["fever-joker-bonus", "fever-joker-bonus-v1", 1],
   ["no-hold", "no-hold-v1", 1],
   ["champion-poker", "champion-poker-v1", 1],
+  ["aviator", "aviator-v1", 1],
 ] as const satisfies readonly (readonly [string, string, number])[];
 
 export const LIVE_RESOLVER_REGISTRY: Readonly<Record<string, ResolverRegistration>> =

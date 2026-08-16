@@ -12,8 +12,8 @@ function assert(condition: unknown, message: string): asserts condition {
 Deno.test("review registry covers all fifteen cabinets and is internally consistent", () => {
   assertReviewResolverRegistryIntegrity();
   const resolvers = Object.values(REVIEW_RESOLVER_REGISTRY);
-  assert(resolvers.length === 15, "review registry must contain exactly fifteen cabinets");
-  assert(new Set(resolvers.map((resolver) => resolver.manifest.module_id)).size === 15,
+  assert(resolvers.length === 16, "review registry must contain exactly sixteen cabinets");
+  assert(new Set(resolvers.map((resolver) => resolver.manifest.module_id)).size === 16,
     "review module IDs must be unique");
   assert(resolvers.every((resolver) => resolver.manifest.virtual_points_only),
     "every cabinet must remain virtual-points-only");

@@ -615,6 +615,11 @@ function pacedDefaultSelection(catalogSlug: string, stake: number): string {
   switch (catalogSlug) {
     case "checker":
       return "cell:3-3";
+    case "aviator":
+      // A player who presses without setting a target auto-cashes at 2.00x, the
+      // conventional default. Any fixed target returns the same 90%, so this is
+      // a UX default, not an economic one.
+      return JSON.stringify({ cash_out_centis: 200 });
     case "lucky-8-line": {
       // The reel machine settles the eight line stakes it was dealt, and its
       // settle() refuses any staked total that differs from their sum. So the

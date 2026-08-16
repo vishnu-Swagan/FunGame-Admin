@@ -30,8 +30,8 @@ function throwsCode(callback: () => unknown, code: string): boolean {
   }
 }
 
-Deno.test("canonical catalog has all 15 client-to-Unity mappings", () => {
-  assert(GAME_SPECS.length === 15, "catalog must contain exactly fifteen cabinets");
+Deno.test("canonical catalog has all 16 client-to-Unity mappings", () => {
+  assert(GAME_SPECS.length === 16, "catalog must contain exactly sixteen cabinets");
   const roulette = gameSpec("fun-roulette");
   assert(roulette.unity_lobby_slug === "roulette", "roulette tile mapping is wrong");
   assert(roulette.unity_scene === "fun-roulette", "roulette scene mapping is wrong");

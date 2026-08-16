@@ -103,7 +103,7 @@ const PLAYER_PACED = (revealSeconds = 4): Timing => ({
   result_seconds: null,
 });
 
-/** The public catalog is intentionally exactly 15 entries. */
+/** The public catalog is intentionally exactly 16 entries. */
 export const GAME_SPECS: readonly GameSpec[] = Object.freeze([
   {
     catalog_slug: "7up7down",
@@ -395,6 +395,21 @@ export const GAME_SPECS: readonly GameSpec[] = Object.freeze([
     rule_source: "Unity ChampionTable.cs + SevenUpDown.cs (ChampionPoker)",
     blocked_reason: "The client double-up result is unobserved.",
   },
+  {
+    catalog_slug: "aviator",
+    unity_lobby_slug: "aviator",
+    unity_scene: "aviator",
+    engine_slug: "aviator",
+    runtime_mode: "PLAYER_PACED",
+    parity_state: "DERIVED",
+    timing: PLAYER_PACED(),
+    actions: ["place_bet", "clear_bets", "collect_full"],
+    min_bet: 5,
+    max_bet: 1000,
+    outcome_kind: "crash_flight",
+    rule_source: "Unity Engines/AviatorTable.cs + Tables.cs (Aviator)",
+    blocked_reason: null,
+  },
 ]);
 
 const gameBySlug = new Map(GAME_SPECS.map((spec) => [spec.catalog_slug, spec]));
@@ -450,6 +465,7 @@ const OUTCOME_CONTRACTS: Readonly<Record<string, Readonly<Record<string, string 
   "fever-joker-bonus": Object.freeze({ type: "joker_poker" }),
   "no-hold": Object.freeze({ type: "five_card_no_hold" }),
   "champion-poker": Object.freeze({ type: "five_card_draw_poker" }),
+  "aviator": Object.freeze({ type: "crash_flight" }),
 });
 
 function canonicalRuntimeJson(value: unknown): string | null {
@@ -535,8 +551,8 @@ export function gameSpec(catalogSlug: string): GameSpec {
 }
 
 export function assertGameMapIntegrity(): void {
-  if (GAME_SPECS.length !== 15) {
-    throw new Error(`Expected 15 game catalog entries, got ${GAME_SPECS.length}`);
+  if (GAME_SPECS.length !== 16) {
+    throw new Error(`Expected 16 game catalog entries, got ${GAME_SPECS.length}`);
   }
   const values = <K extends keyof GameSpec>(key: K) =>
     GAME_SPECS.map((spec) => String(spec[key]));
