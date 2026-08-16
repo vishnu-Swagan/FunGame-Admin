@@ -10,6 +10,10 @@ import { PageTransition, GameStatusBadge } from "@/components/common";
 import { IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 
 const STATUSES = ["COMING_SOON", "ENABLED", "DISABLED", "MAINTENANCE", "UPDATE_REQUIRED", "RETIRED"];
+// Mirrors the game_parity_state / game_runtime_availability enums. The server
+// re-validates both and refuses ENABLED without QA_VERIFIED regardless of this.
+const PARITY_STATES = ["BLOCKED", "DERIVED", "QA_VERIFIED"];
+const AVAILABILITIES = ["DISABLED", "MAINTENANCE", "ENABLED"];
 
 export default function AdminGames() {
   const [games, setGames] = useState([]);
@@ -42,6 +46,34 @@ export default function AdminGames() {
     }
   };
 
+  // Promotion is a separate route because it writes the server runtime record
+  // rather than the operator-visible catalogue row, and is audited on its own.
+  const updateRuntime = async (slug, patch) => {
+    // optimistic
+    setGames((prev) => prev.map((g) => (g.slug === slug ? { ...g, runtime: { ...g.runtime, ...patch } } : g)));
+    try {
+      const { data } = await api.patch(`/admin/games/${slug}/runtime`, patch);
+      setGames((prev) =>
+        prev.map((g) =>
+          g.slug === slug
+            ? {
+                ...g,
+                runtime: data.runtime,
+                runtime_ready_for_enable: data.runtime_ready_for_enable,
+                // A verified runtime is only public while the catalogue row is
+                // ENABLED too; this keeps both badges honest without a refetch.
+                runtime_available: data.runtime_ready_for_enable && g.status === "ENABLED",
+              }
+            : g,
+        ),
+      );
+      toast.success("Game runtime updated");
+    } catch (e) {
+      toast.error(errMsg(e));
+      load();
+    }
+  };
+
   return (
     <PageTransition className="space-y-4">
       <div>
@@ -60,6 +92,7 @@ export default function AdminGames() {
                 <TableHead className="text-white/50">Category</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
                 {IS_ADMIN_CONSOLE && <TableHead className="text-white/50">Live runtime</TableHead>}
+                {IS_ADMIN_CONSOLE && <TableHead className="text-white/50">Set runtime</TableHead>}
                 <TableHead className="text-white/50">Set status</TableHead>
                 <TableHead className="text-white/50 text-center">Featured</TableHead>
               </TableRow>
@@ -89,6 +122,46 @@ export default function AdminGames() {
                           ? (g.runtime_available ? "Live" : "Verified")
                           : g.runtime?.parity_state || "Not configured"}
                       </span>
+                    </TableCell>
+                  )}
+                  {IS_ADMIN_CONSOLE && (
+                    <TableCell>
+                      <div className="flex flex-col gap-1.5">
+                        <Select value={g.runtime?.parity_state || ""} onValueChange={(v) => updateRuntime(g.slug, { parity_state: v })}>
+                          <SelectTrigger data-testid="admin-game-parity-select" className="h-9 w-[170px] rounded-lg bg-white/5 border-white/12 text-xs" disabled={!g.runtime} aria-label={`Parity state for ${g.name}`}>
+                            <SelectValue placeholder="No runtime" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PARITY_STATES.map((s) => (
+                              <SelectItem key={s} value={s} className="text-xs">
+                                {s.replaceAll("_", " ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={g.runtime?.availability || ""} onValueChange={(v) => updateRuntime(g.slug, { availability: v })}>
+                          <SelectTrigger data-testid="admin-game-availability-select" className="h-9 w-[170px] rounded-lg bg-white/5 border-white/12 text-xs" disabled={!g.runtime} aria-label={`Runtime availability for ${g.name}`}>
+                            <SelectValue placeholder="No runtime" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {AVAILABILITIES.map((a) => (
+                              <SelectItem
+                                key={a}
+                                value={a}
+                                // The database CHECK forbids this pair, so the
+                                // console refuses it rather than sending a
+                                // request that can only come back rejected.
+                                disabled={a === "ENABLED" && g.runtime?.parity_state !== "QA_VERIFIED"}
+                                className="text-xs"
+                              >
+                                {a === "ENABLED" && g.runtime?.parity_state !== "QA_VERIFIED"
+                                  ? "ENABLED (needs QA VERIFIED)"
+                                  : a}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </TableCell>
                   )}
                   <TableCell>
