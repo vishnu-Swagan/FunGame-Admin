@@ -673,8 +673,36 @@ async function handlePlayerLogin(req: Request): Promise<Response> {
     expires_at: sessionData.session.expires_at || null,
     user: player,
     profile: player,
-    balance,
+    ...playerBalanceEnvelope(balance),
   });
+}
+
+/**
+ * Shape a player balance for the sign-in and session responses.
+ *
+ * `balance` MUST be a number here. The Unity client parses these two responses
+ * with JsonUtility into a type that declares `public double balance`, and
+ * JsonUtility throws on a type mismatch rather than ignoring the field. Sending
+ * the detail object under `balance` therefore failed the whole parse, and the
+ * client surfaced it as "The sign-in response was invalid." on a correct
+ * password.
+ *
+ * The detail object is preserved under `balance_detail`, and the flat aliases
+ * are repeated at the top level because the client reads the point total from
+ * whichever of those it finds first. `/player/balance` already returns the flat
+ * shape and is unaffected.
+ */
+function playerBalanceEnvelope(
+  balance: Awaited<ReturnType<typeof authoritativePlayerBalance>>,
+): Json {
+  return {
+    balance: balance.play_points,
+    play_points: balance.play_points,
+    point_balance: balance.point_balance,
+    points_balance: balance.points_balance,
+    chip_balance: balance.chip_balance,
+    balance_detail: balance,
+  };
 }
 
 async function handlePlayerSession(req: Request): Promise<Response> {
@@ -705,7 +733,7 @@ async function handlePlayerSession(req: Request): Promise<Response> {
   return json(req, {
     profile,
     user: profile,
-    balance,
+    ...playerBalanceEnvelope(balance),
     games: playableGames,
   });
 }
