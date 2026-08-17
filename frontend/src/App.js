@@ -57,6 +57,7 @@ import AdminCompliance from "@/pages/admin/AdminCompliance";
 // host while it is being retired. Lazy imports ensure the Supabase-backed
 // dedicated console never fetches or renders them.
 const AdminDistributors = lazy(() => import("@/pages/admin/AdminDistributors"));
+const FloorPage = lazy(() => import("@/pages/play/floor/FloorPage"));
 const AdminCommission = lazy(() => import("@/pages/admin/AdminCommission"));
 const AdminPayouts = lazy(() => import("@/pages/admin/AdminPayouts"));
 
@@ -136,6 +137,18 @@ function PlayerApp() {
           <Route path="/onboarding/profile" element={<OnboardingRoute><OnboardingProfile /></OnboardingRoute>} />
           <Route path="/onboarding/review" element={<OnboardingRoute><OnboardingReview /></OnboardingRoute>} />
           <Route path="/onboarding/pending" element={<OnboardingRoute><OnboardingPending /></OnboardingRoute>} />
+
+          {/* 3D casino floor — fullscreen, outside the app shell chrome */}
+          <Route
+            path="/floor"
+            element={
+              <RequireActive>
+                <Suspense fallback={<LoadingScreen />}>
+                  <FloorPage />
+                </Suspense>
+              </RequireActive>
+            }
+          />
 
           {/* Player app (ACTIVE only) */}
           <Route element={<RequireActive><AppShell /></RequireActive>}>
