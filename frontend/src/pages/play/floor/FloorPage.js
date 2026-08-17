@@ -34,7 +34,7 @@ function Joystick({ onMove }) {
     <div
       ref={baseRef}
       data-testid="floor-joystick"
-      className="absolute bottom-6 left-6 w-28 h-28 rounded-full border border-white/20 bg-white/5 backdrop-blur-sm touch-none select-none md:hidden"
+      className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-6 w-28 h-28 rounded-full border border-white/20 bg-white/5 backdrop-blur-sm touch-none select-none md:hidden"
       onPointerDown={(e) => { active.current = true; baseRef.current.setPointerCapture(e.pointerId); handle(e); }}
       onPointerMove={(e) => active.current && handle(e)}
       onPointerUp={() => { active.current = false; setKnob([0, 0]); onMove(0, 0); }}
@@ -101,12 +101,12 @@ export default function FloorPage() {
   };
 
   return (
-    <div className="fixed inset-0 bg-[#05060a] text-white overflow-hidden" data-testid="floor-page">
+    <div className="fixed inset-x-0 top-0 h-dvh bg-[#05060a] text-white overflow-hidden" data-testid="floor-page">
       <canvas ref={canvasRef} className="w-full h-full block" style={{ touchAction: "none" }} />
 
       {/* top HUD */}
       {entered && (
-        <div className="absolute top-0 inset-x-0 flex items-center justify-between p-4 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
+        <div className="absolute top-0 inset-x-0 flex items-center justify-between p-4 pt-[calc(1rem+env(safe-area-inset-top))] bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
           <button
             data-testid="floor-exit"
             onClick={() => navigate("/games")}
@@ -133,7 +133,7 @@ export default function FloorPage() {
       {entered && focused && (
         <div
           data-testid="floor-station-card"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[min(92vw,380px)] rounded-2xl border border-amber-300/25 bg-black/70 backdrop-blur-md p-4 shadow-[0_0_40px_rgba(255,200,80,0.15)]"
+          className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-[min(92vw,380px)] rounded-2xl border border-amber-300/25 bg-black/70 backdrop-blur-md p-4 shadow-[0_0_40px_rgba(255,200,80,0.15)]"
         >
           <div className="text-[10px] font-semibold tracking-[0.25em] text-amber-300/80 uppercase">{focused.category || "Game"}</div>
           <div className="text-xl font-black mt-0.5">{focused.name}</div>
@@ -153,7 +153,7 @@ export default function FloorPage() {
 
       {/* desktop hint */}
       {entered && (
-        <div className="absolute bottom-4 right-4 hidden md:block text-[11px] text-white/40">
+        <div className="absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 hidden md:block text-[11px] text-white/40">
           WASD / arrows to walk · drag to look · tap a table to approach · Enter to play
         </div>
       )}
