@@ -14,7 +14,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from db import client, db
-from seed import run_seed
+from seed import enable_all_games_for_launch, run_seed
 import crm
 import revenue
 import commission
@@ -137,6 +137,8 @@ async def lifespan(app: FastAPI):
 
     if cfg and not cfg.get('gameplay_v1_migrated'):
         await step('migrate:gameplay_v1', _migrate_gameplay_v1())
+    if cfg and not cfg.get('all_games_live_v2'):
+        await step('migrate:all_games_live_v2', enable_all_games_for_launch())
     if cfg and not cfg.get('nocash_wording_stripped'):
         await step('migrate:nocash_wording', _migrate_nocash_wording())
 

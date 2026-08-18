@@ -85,9 +85,42 @@ GAMES = [
      "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
 ]
 
+
+async def enable_all_games_for_launch():
+    """One-time launch migration for the complete implemented game set.
+
+    Every slug in ``GAMES`` has a corresponding frontend play component and
+    backend game route.  Scoping the update to that reviewed set avoids
+    accidentally reviving retired or incomplete database records.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    slugs = [game['slug'] for game in GAMES]
+    result = await db.games.update_many(
+        {'slug': {'$in': slugs}, 'status': {'$ne': 'ENABLED'}},
+        {'$set': {'status': 'ENABLED', 'updated_at': now}},
+    )
+    await db.system_config.update_one(
+        {'key': 'main'},
+        {'$set': {'all_games_live_v2': True, 'updated_at': now}},
+        upsert=True,
+    )
+    await db.announcements.update_one(
+        {'title': 'Welcome to Chakri.Casino!'},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 20 live games.'}},
+    )
+    await db.announcements.update_one(
+        {'title': '18 games are on the way'},
+        {'$set': {
+            'title': 'All 20 games are live',
+            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+        }},
+    )
+    logger.info('All implemented games enabled for launch: %s updated', result.modified_count)
+    return result.modified_count
+
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore the lobby of 18 upcoming games.", "pinned": True},
-    {"title": "18 games are on the way", "body": "Aviator, Teen Patti, Fun Roulette, Giant Jackpot and 14 more original games are in production. Watch this space — statuses update in real time from the server.", "pinned": False},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 20 live games.", "pinned": True},
+    {"title": "All 20 games are live", "body": "The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
