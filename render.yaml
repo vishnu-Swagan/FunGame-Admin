@@ -86,7 +86,10 @@ services:
         value: nosniff
       - path: /*
         name: X-Frame-Options
-        value: DENY
+        # Aviator is served by this same static site and mounted in the player
+        # shell as an iframe. SAMEORIGIN keeps third-party framing blocked while
+        # allowing that first-party game surface to render.
+        value: SAMEORIGIN
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
