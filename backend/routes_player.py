@@ -1,8 +1,10 @@
 """Player routes: onboarding, games, chips, announcements, notifications, settings, system config."""
+import os
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Response
 from db import db, serialize_doc
 from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
@@ -13,6 +15,11 @@ import ledger
 
 logger = logging.getLogger('player')
 router = APIRouter(tags=['player'])
+
+PUBLIC_GAME_STATUSES = ('ENABLED', 'COMING_SOON', 'MAINTENANCE', 'UPDATE_REQUIRED')
+GAME_ART_BASE_URL = os.environ.get(
+    'GAME_ART_BASE_URL', 'https://fungame-web.onrender.com/game-art'
+).rstrip('/')
 
 
 def _now():
@@ -88,6 +95,66 @@ async def onboarding_status(user: dict = Depends(get_current_user)):
 
 
 # ---------- Games ----------
+@router.get('/catalog/games')
+async def public_game_catalog(response: Response):
+    """Read-only public projection of the CRM-managed game catalogue.
+
+    The marketing site needs current publication state and artwork references,
+    not a player session and never an admin or database credential.  Keeping the
+    projection here makes that boundary explicit and ensures private game,
+    account, wallet, round, and CRM fields cannot leak through serialization.
+    """
+    response.headers['Cache-Control'] = 'public, max-age=30, s-maxage=60, stale-while-revalidate=300'
+    games = await db.games.find(
+        {'status': {'$in': list(PUBLIC_GAME_STATUSES)}},
+        {
+            '_id': 0,
+            'slug': 1,
+            'name': 1,
+            'category': 1,
+            'tagline': 1,
+            'description': 1,
+            'status': 1,
+            'featured': 1,
+            'order': 1,
+            'updated_at': 1,
+        },
+    ).sort('order', 1).to_list(100)
+
+    public_games = []
+    for game in games:
+        slug = str(game.get('slug', '')).strip().lower()
+        name = str(game.get('name', '')).strip()
+        if not re.fullmatch(r'[a-z0-9-]{1,100}', slug) or not name:
+            continue
+        try:
+            display_order = int(game.get('order', 0))
+        except (TypeError, ValueError):
+            display_order = 0
+        public_games.append({
+            'slug': slug,
+            'name': name,
+            'category': str(game.get('category') or 'Games'),
+            'tagline': str(game.get('tagline') or ''),
+            'description': str(game.get('description') or ''),
+            'status': game.get('status'),
+            'featured': bool(game.get('featured', False)),
+            'order': display_order,
+            # Blackjack currently has no published thumbnail in the player
+            # application.  Null is honest and lets clients use their branded
+            # text fallback instead of repeatedly requesting a known 404.
+            'artwork_url': None if slug == 'blackjack' else f'{GAME_ART_BASE_URL}/{slug}.png',
+            'updated_at': game.get('updated_at'),
+        })
+
+    return {
+        'source': 'Chakri CRM game database',
+        'games': public_games,
+        'count': len(public_games),
+        'retrieved_at': _now(),
+    }
+
+
 @router.get('/games')
 async def list_games(user: dict = Depends(require_active_player)):
     games = await db.games.find({}, {'_id': 0}).sort('order', 1).to_list(100)
