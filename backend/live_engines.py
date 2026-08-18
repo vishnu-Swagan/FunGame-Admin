@@ -156,12 +156,12 @@ def paytable_for(slug, picks=None):
 
 
 # The stake limits each machine is held to. The reference cabinets print these
-# on the message rail and size their chip rail from them — 7Up7Down takes 5 to
-# 1,000 and carries a 1/5/50/100/500/1000 rail — so they are per-table rather
+# on the message rail and size their chip rail from them — 7Up7Down takes 10 to
+# 200 in the supplied cabinet reference — so they are per-table rather
 # than one global pair. A table whose rail offered a chip this map refuses would
 # be advertising a bet the server rejects.
 TABLE_LIMITS = {
-    "seven-up-down": (1, 1000),
+    "seven-up-down": (10, 200),
     "fun-target": (1, 5000),
     "andar-bahar": (10, 10000),
     "triple-fun": (5, 5000),

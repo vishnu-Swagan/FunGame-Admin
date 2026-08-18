@@ -34,6 +34,7 @@ import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
 import Support from "@/pages/app/Support";
 import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
 import GamePlay from "@/pages/play/GamePlay";
+import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
 
 // System
 import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScreens";
@@ -110,6 +111,9 @@ function PlayerApp() {
       <AuthProvider>
         <Toaster position="top-center" theme="dark" richColors closeButton />
         <Routes>
+          {process.env.NODE_ENV === "development" && (
+            <Route path="/__preview/seven-up-down" element={<main className="mx-auto max-w-6xl p-2"><SevenUpDownCabinet game={{ slug: "seven-up-down", name: "7up7down" }} /></main>} />
+          )}
           {/* Public / auth */}
           <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
           <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />

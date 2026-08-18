@@ -607,18 +607,23 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
     if phase != 'BETTING':
         outcome = await _live_outcome(slug, rn)
 
+    # 7Up7Down prints rolling percentages calculated from the last 100 shared
+    # rounds. Other cabinets only need their compact ten-result strip.
+    history_limit = 100 if slug == 'seven-up-down' else 10
+    history_floor = history_limit
     prev = await db.live_outcomes.find(
         {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
-    ).sort('round_number', -1).to_list(10)
-    if len(prev) < 10:
+    ).sort('round_number', -1).to_list(history_limit)
+    if len(prev) < history_floor:
         have = {p['round_number'] for p in prev}
-        for i in range(1, 11):
-            past = rn - i
-            if past >= 0 and past not in have:
-                await _live_outcome(slug, past)
+        missing = [rn - i for i in range(1, history_floor + 1) if rn - i >= 0 and rn - i not in have]
+        # Seed the empty roadmap in one bounded concurrent window. Each result
+        # is still created by the same atomic outcome path used by live rounds.
+        for start in range(0, len(missing), 20):
+            await asyncio.gather(*(_live_outcome(slug, past) for past in missing[start:start + 20]))
         prev = await db.live_outcomes.find(
             {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
-        ).sort('round_number', -1).to_list(10)
+        ).sort('round_number', -1).to_list(history_limit)
 
     my_bets, balance, win_rows = await asyncio.gather(
         db.live_bets.find(
@@ -732,3 +737,41 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
         await credit_chips(user['id'], refunded, f'Live bets refunded ({slug} round {rn})', ref=str(rn), kind=ledger.REFUND, game=slug)
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
+
+
+@router.post('/live/{slug}/bets/undo')
+async def live_undo_bet(slug: str, user: dict = Depends(require_active_player)):
+    """Refund only the most recently placed chip in the open betting window."""
+    if slug not in LIVE_GAMES:
+        raise HTTPException(status_code=404, detail='No live table for this game')
+    rn, phase, ends_in, _ = _live_clock(slug)
+    if phase != 'BETTING' or ends_in < 0.4:
+        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+
+    bet = await db.live_bets.find_one(
+        {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
+        sort=[('created_at', -1)],
+    )
+    refunded = 0
+    if bet:
+        res = await db.live_bets.update_one(
+            {'id': bet['id'], 'status': 'OPEN'},
+            {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},
+        )
+        if res.modified_count:
+            refunded = bet['amount']
+            await credit_chips(
+                user['id'], refunded, f'Live bet undone ({slug} round {rn})',
+                ref=bet['id'], kind=ledger.REFUND, game=slug,
+            )
+
+    my_bets = await db.live_bets.find(
+        {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
+        {'_id': 0, 'user_id': 0},
+    ).sort('created_at', 1).to_list(50)
+    balance = await _fresh_balance(user['id'])
+    return {
+        'message': 'Last bet undone' if refunded else 'No open bet to undo',
+        'refunded': refunded, 'my_bets': my_bets,
+        'my_total': sum(b['amount'] for b in my_bets), 'balance': balance,
+    }

@@ -158,6 +158,19 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     }
   }, [slug]);
 
+  const undoBet = useCallback(async () => {
+    try {
+      const { data } = await api.post(`/live/${slug}/bets/undo`);
+      setBalance(data.balance);
+      setState((s) => (s ? { ...s, my_bets: data.my_bets || [], my_total: data.my_total || 0 } : s));
+      if (data.refunded > 0) sfx.chip();
+      return data;
+    } catch (e) {
+      toast.error(errMsg(e));
+      return null;
+    }
+  }, [slug]);
+
   const phase = state?.phase;
   const revealSecs = state?.timings?.reveal || 4;
   /* Monotonic reveal clock: within one round's REVEAL phase this value can
@@ -188,6 +201,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     loadHistory,
     placeBet,
     clearBets,
+    undoBet,
     phase,
     betting: phase === "BETTING",
     outcome: state?.outcome ?? null,

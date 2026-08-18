@@ -1,278 +1,273 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { useLiveRound } from "@/lib/useLiveRound";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Settings, RotateCcw, Undo2, X, ChevronDown, ChevronUp, Map } from "lucide-react";
+import { PlayShell } from "@/components/play/PlayShell";
 import { formatChips } from "@/components/common";
-import { Cabinet, CAB_W } from "@/components/play/arcade/Cabinet";
-import { at, atMid } from "@/components/play/arcade/parts";
-import { Scroll, TitleWing, CARD_BACK } from "./sudArt";
+import { useLiveRound } from "@/lib/useLiveRound";
+import { sfx } from "@/lib/sound";
 import "./sevenUpDown.css";
 
-/**
- * 7Up 7Down, matched to the machine.
- *
- * The screen has two states and they are laid out differently, which is the
- * detail that makes it feel like the original:
- *
- * WHILE BETS ARE OPEN the two sides are large pills lying across the middle of
- * the card positions, Cancel Bet sits on the dealt strip, and Take is alone
- * under the board.
- *
- * ONCE THE ROUND CLOSES they collapse to the compact row beneath the board —
- * 7 up, Take, 7 down — the chips green over, and the last position turns face
- * up. Between rounds the table dims behind the "next round starts in" notice
- * rather than leaving a live-looking board that refuses every press.
- */
-
-const CHIPS = [1, 5, 50, 100, 500, 1000];
-
-/* The machine's price list, at one chip. Both panels scale with the bet. */
-const LEFT_ROWS = [
-  ["Super FunGame", 2000], ["FunGame", 1000], ["Royal Flush(DOUBLE)", 1000],
-  ["Royal Flush", 500], ["Straight Flush (DOUBLE)", 450], ["Four of a Kind (DOUBLE)", 300],
-  ["5 of a Kind", 200], ["Straight Flush", 150], ["4 of a Kind", 100],
-  ["5 Jacks or Better", 100], ["Full House (10 CARDS)", 50], ["5 Pairs", 50],
-  ["3 of a Kind(TRIPLE)", 30], ["4 Jacks or Better", 30],
+const CHIP_VALUES = [10, 20, 50, 100, 200];
+const TOTALS = [
+  { total: 2, odds: "1:26" },
+  { total: 3, odds: "1:12" },
+  { total: 4, odds: "1:8" },
+  { total: 5, odds: "1:6" },
+  { total: 6, odds: "1:5" },
+  { total: 8, odds: "1:5" },
+  { total: 9, odds: "1:6" },
+  { total: 10, odds: "1:8" },
+  { total: 11, odds: "1:12" },
+  { total: 12, odds: "1:26" },
 ];
-
-const RIGHT_ROWS = [
-  ["Flush (10 CARDS)", 25], ["Straight (10 CARDS)", 15], ["Straight (DOUBLE)", 15],
-  ["Flush 2 (5 CARDS)", 15], ["4 Pair", 15], ["3 of a Kind(DOUBLE)", 10],
-  ["3 Jacks or Better", 10], ["Flush (5 CARDS)", 7], ["Straight (5 CARDS)", 5],
-  ["3 Pair", 5], ["3 of a Kind (Single)", 3], ["2 Jacks or Better", 3],
-  ["2 Pair", 2], ["Jacks or Better", 1],
-];
-
-const SUITS = { s: ["♠", "#101018"], c: ["♣", "#101018"], h: ["♥", "#c8102e"], d: ["♦", "#c8102e"] };
-const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
-
-const StripCard = ({ rank, suit }) => {
-  const [glyph, colour] = SUITS[suit] || SUITS.s;
-  return (
-    <div className="sud-strip-card">
-      <span className="sud-strip-tl" style={{ color: colour }}>{rank}<i>{glyph}</i></span>
-      <span className="sud-strip-br" style={{ color: colour }}>{rank}<i>{glyph}</i></span>
-    </div>
-  );
+const PIPS = {
+  1: [4],
+  2: [0, 8],
+  3: [0, 4, 8],
+  4: [0, 2, 6, 8],
+  5: [0, 2, 4, 6, 8],
+  6: [0, 2, 3, 5, 6, 8],
 };
 
-const FaceDown = () => (
-  <div className="sud-back" style={{ backgroundImage: `url("data:image/svg+xml,${CARD_BACK}")` }} />
-);
-
-const FaceUp = ({ rank, suit }) => {
-  const [glyph, colour] = SUITS[suit] || SUITS.s;
+function Die({ value = 1, red = false, small = false, rolling = false }) {
   return (
-    <div className="sud-face">
-      <span className="sud-face-tl" style={{ color: colour }}>{rank}</span>
-      <span className="sud-face-pip" style={{ color: colour }}>{glyph}</span>
-      <span className="sud-face-br" style={{ color: colour }}>{rank}</span>
-    </div>
-  );
-};
-
-export default function SevenUpDownCabinet({ game }) {
-  const navigate = useNavigate();
-  const { state, countdown, balance, betting, phase, outcome, result,
-          placeBet, clearBets, myBets, myTotal, lastResults } =
-    useLiveRound(game.slug, {
-      formatResult: (s) => ({
-        title: s.payout > 0 ? "You won!" : "Not this time",
-        subtitle: `${s.outcome.dice[0]} + ${s.outcome.dice[1]} = ${s.outcome.total}`,
-      }),
-    });
-
-  const minBet = state?.min_bet ?? 1;
-  const maxBet = state?.max_bet ?? 1000;
-  const chips = useMemo(() => CHIPS.filter((c) => c >= minBet && c <= maxBet), [minBet, maxBet]);
-  const [chip, setChip] = useState(null);
-  useEffect(() => { if (chips.length && (chip == null || !chips.includes(chip))) setChip(chips[0]); }, [chips, chip]);
-
-  const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
-  const staked = {};
-  myBets.forEach((b) => { staked[b.selection] = (staked[b.selection] || 0) + b.amount; });
-
-  const strip = useMemo(() => {
-    const suits = ["c", "s", "d", "c", "s", "h", "h", "h", "d", "h"];
-    return (lastResults || []).slice(0, 10).map((r, i) => ({
-      rank: RANKS[Math.max(0, Math.min(RANKS.length - 1, (r.total ?? 7) - 2))],
-      suit: suits[i % suits.length],
-    }));
-  }, [lastResults]);
-
-  const revealed = showFinal && outcome
-    ? { rank: RANKS[Math.max(0, Math.min(RANKS.length - 1, outcome.total - 2))],
-        suit: outcome.total > 7 ? "s" : "h" }
-    : null;
-
-  const stake = myTotal || chip || 1;
-  const won = showFinal && result && result.payout > 0;
-  const winner = showFinal && outcome
-    ? (outcome.total > 7 ? "up" : outcome.total < 7 ? "down" : null)
-    : null;
-
-  const message = (() => {
-    if (phase === "REVEAL") return "Please wait... Round is in progress";
-    if (phase === "RESULT" && outcome) {
-      return won
-        ? "Please take your winning amount or Press '7Up' or '7Down' Button"
-        : "You Lost! Try Again - Please wait... Round is in progress";
-    }
-    if (myTotal) return `Your Bet on '${staked.up ? "7Up" : "7Down"}' has been Accepted.`;
-    return `Please Bet to Start Game. Minimum Bet = ${formatChips(minBet)} and Maximum Bet = ${formatChips(maxBet)}`;
-  })();
-
-  const lay = (sel) => { if (betting && chip) placeBet(sel, chip); };
-
-  const Panel = ({ rows }) => (
-    <div className="sud-panel">
-      {rows.map(([label, value], i) => (
-        <div key={label} className={`sud-row ${i % 2 ? "sud-row-b" : "sud-row-a"}`}>
-          <span>{label}</span>
-          <span>{formatChips(value * stake)}</span>
-        </div>
+    <span className={`j7-die ${small ? "is-small" : ""} ${rolling ? "is-rolling" : ""}`} aria-label={`${value} on die`}>
+      {Array.from({ length: 9 }, (_, index) => (
+        <i key={index} className={`${PIPS[value]?.includes(index) ? "is-on" : ""} ${red ? "is-red" : ""}`} />
       ))}
-    </div>
+    </span>
   );
+}
 
-  /* A side button. Big pills over the board while bets are open, the compact
-     row underneath once they are not. */
-  const Side = ({ sel, label, big }) => (
-    <button type="button" onClick={() => lay(sel)} disabled={!betting}
-      data-testid={`cab-side-${sel}`}
-      className={`sud-btn ${winner === sel ? "won" : staked[sel] ? "armed" : ""}`}
-      style={{ height: "100%", width: "100%", fontSize: big ? 34 : 27 }}>
-      {label}{staked[sel] ? <em>{formatChips(staked[sel])}</em> : null}
+function BetChip({ amount, selected = false }) {
+  if (!amount) return null;
+  return <span className={`j7-stake-chip ${selected ? "is-selected" : ""}`}>{formatChips(amount)}</span>;
+}
+
+function HistoryCell({ item, latest = false }) {
+  const dice = item?.dice || [1, 1];
+  const winner = item?.winner || (item?.total === 7 ? "seven" : item?.total > 7 ? "up" : "down");
+  return (
+    <span className={`j7-history-cell ${winner} ${latest ? "is-latest" : ""}`}>
+      <b>{item?.total ?? "–"}</b>
+      <span className="j7-mini-dice"><Die value={dice[0]} small /><Die value={dice[1]} red small /></span>
+    </span>
+  );
+}
+
+function ToolButton({ icon, label, onClick, disabled = false, danger = false }) {
+  return (
+    <button className={`j7-tool ${danger ? "is-danger" : ""}`} type="button" onClick={onClick} disabled={disabled}>
+      <span>{icon}</span><small>{label}</small>
     </button>
   );
+}
+
+export default function SevenUpDownCabinet({ game }) {
+  const {
+    state, countdown, balance, placing, phase, betting, outcome, myBets, myTotal,
+    lastResults, revealProgress, placeBet, clearBets, undoBet,
+  } = useLiveRound(game.slug, {
+    pollMs: 900,
+    revealSound: "dice",
+    formatResult: (settled) => ({
+      title: settled.payout > 0 ? `WIN ${formatChips(settled.payout)}` : "BETTER LUCK NEXT ROUND",
+      subtitle: `${settled.outcome?.dice?.[0] ?? "–"} + ${settled.outcome?.dice?.[1] ?? "–"} = ${settled.outcome?.total ?? "–"}`,
+    }),
+  });
+  const [chip, setChip] = useState(10);
+  const [chipMenu, setChipMenu] = useState(false);
+  const [multiple, setMultiple] = useState(true);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const repeatRef = useRef([]);
+  const landedRef = useRef("");
+
+  useEffect(() => {
+    if (myBets.length) repeatRef.current = myBets.map(({ selection, amount }) => ({ selection, amount }));
+  }, [myBets]);
+
+  useEffect(() => {
+    const key = `${state?.round_number}:${phase}`;
+    if (phase === "REVEAL" && revealProgress >= 0.63 && landedRef.current !== key) {
+      landedRef.current = key;
+      sfx.diceLand();
+    }
+  }, [phase, revealProgress, state?.round_number]);
+
+  const stakes = useMemo(() => myBets.reduce((map, bet) => {
+    map[bet.selection] = (map[bet.selection] || 0) + bet.amount;
+    return map;
+  }, {}), [myBets]);
+
+  const history = useMemo(() => lastResults.slice(0, 12).reverse(), [lastResults]);
+  const stats = useMemo(() => {
+    const sample = lastResults.slice(0, 100);
+    const size = sample.length || 1;
+    const count = (winner) => sample.filter((round) => round.winner === winner).length;
+    return {
+      size: sample.length,
+      down: Math.round((count("down") / size) * 100),
+      seven: Math.round((count("seven") / size) * 100),
+      up: Math.round((count("up") / size) * 100),
+    };
+  }, [lastResults]);
+
+  const shownOutcome = phase === "RESULT" || (phase === "REVEAL" && revealProgress >= 0.63);
+  const rolling = phase === "REVEAL" && !shownOutcome;
+  const fallbackDice = history.length ? history[history.length - 1]?.dice : [3, 4];
+  const dice = shownOutcome && outcome?.dice ? outcome.dice : (fallbackDice || [3, 4]);
+  const minBet = state?.min_bet ?? 10;
+  const maxBet = state?.max_bet ?? 200;
+  const bettingLength = state?.timings?.bet || 60;
+  const timerProgress = betting ? Math.min(1, countdown / bettingLength) : Math.max(0, 1 - revealProgress);
+
+  useEffect(() => {
+    if (!CHIP_VALUES.includes(chip) || chip < minBet || chip > maxBet) {
+      setChip(CHIP_VALUES.find((value) => value >= minBet && value <= maxBet) || minBet);
+    }
+  }, [chip, minBet, maxBet]);
+
+  const lay = useCallback(async (selection) => {
+    if (!betting || placing || busy) return;
+    if (!multiple && myBets.length) await clearBets();
+    await placeBet(selection, chip);
+  }, [betting, placing, busy, multiple, myBets.length, clearBets, placeBet, chip]);
+
+  const replay = useCallback(async (mode) => {
+    if (!betting || placing || busy || !repeatRef.current.length) return;
+    setBusy(true);
+    try {
+      if (mode === "again" && myBets.length) await clearBets();
+      for (const bet of repeatRef.current) {
+        const amount = Math.min(maxBet, Math.max(minBet, bet.amount));
+        await placeBet(bet.selection, amount);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [betting, placing, busy, myBets.length, clearBets, maxBet, minBet, placeBet]);
+
+  const realWinners = state?.winners?.slice(0, 3) || [];
 
   return (
-    <Cabinet ground="#0a0418" exitTo={`/games/${game.slug}`} testId="cab-seven-up-down" className="sud">
-      <div className="sud-ground" aria-hidden="true" />
-      <div className="sud-sparkle" aria-hidden="true" />
+    <PlayShell game={game} balance={balance} compact>
+      <div className="j7-stage" data-testid="seven-up-down-table">
+        <section className="j7-table">
+          <header className="j7-roadmap">
+            <div className="j7-stats">
+              <b><em>2~6</em> {stats.down}%</b>
+              <b><em>8~12</em> {stats.up}%</b>
+              <b><em>7</em> {stats.seven}%</b>
+              <span>Calculated from last {stats.size || 0} rounds.</span>
+            </div>
+            <div className="j7-history" aria-label="Previous rounds">
+              {history.length ? history.map((item, index) => (
+                <HistoryCell key={item.round_number || index} item={item} latest={index === history.length - 1} />
+              )) : Array.from({ length: 12 }, (_, index) => <HistoryCell key={index} />)}
+            </div>
+          </header>
 
-      {/* ---- title, with its wings, and the X in its box ----------------- */}
-      <div className="sud-titlebar" style={atMid(CAB_W, 760, 4)}>
-        <TitleWing w={116} />
-        <div className="sud-title"><span>7Up 7Down</span></div>
-        <TitleWing w={116} flip />
-      </div>
+          <div className="j7-dome-zone">
+            <div className="j7-winners" aria-label="Recent winners">
+              <span className="j7-high-win">HIGH WIN<br />RATE</span>
+              {realWinners.length ? realWinners.map((winner, index) => (
+                <div className="j7-winner" key={winner.id || index}>
+                  <span>{String(winner.name || "P").replaceAll("*", "").slice(0, 1).toUpperCase()}</span>
+                  <small>{winner.name}<b>◉ {formatChips(winner.payout)}</b></small>
+                </div>
+              )) : <span className="j7-live-badge">LIVE<br />TABLE</span>}
+            </div>
 
-      <button type="button" onClick={() => navigate(`/games/${game.slug}`)} data-testid="cab-exit-x"
-        className="sud-x" style={at(CAB_W - 96, 14, 52, 52)} aria-label="Leave the table">×</button>
+            <div className="j7-dome" aria-live="polite">
+              <div className="j7-glass"><i /><i /></div>
+              <div className={`j7-dice-tray ${rolling ? "is-rolling" : ""}`}>
+                <Die value={dice[0]} rolling={rolling} />
+                <Die value={dice[1]} red rolling={rolling} />
+              </div>
+              {shownOutcome && outcome && (
+                <div className={`j7-result ${outcome.winner}`}>
+                  <b>{outcome.total}</b><span>{outcome.winner === "seven" ? "LUCKY SEVEN" : outcome.winner.toUpperCase()}</span>
+                </div>
+              )}
+            </div>
 
-      {/* ---- score and winner ------------------------------------------- */}
-      <div className="sud-plaque-wrap" style={at(78, 40, 330)} data-testid="cab-score">
-        <span className="sud-label">Score</span>
-        <div className="sud-plaque-row">
-          <Scroll w={44} flip />
-          <div className="sud-plaque"><span>{balance === null ? "…" : formatChips(balance)}</span></div>
-          <Scroll w={44} />
-        </div>
-      </div>
+            <div className="j7-countdown" style={{ "--timer": `${timerProgress * 360}deg` }}>
+              <span>{betting ? Math.max(0, Math.ceil(countdown)) : phase === "REVEAL" ? "GO" : outcome?.total ?? "–"}</span>
+            </div>
+          </div>
 
-      <div className="sud-plaque-wrap" style={at(CAB_W - 78 - 330, 40, 330)} data-testid="cab-winner">
-        <span className="sud-label">Winner</span>
-        <div className="sud-plaque-row">
-          <Scroll w={44} flip />
-          <div className="sud-plaque"><span>{formatChips(result?.payout || 0)}</span></div>
-          <Scroll w={44} />
-        </div>
-      </div>
+          <div className="j7-brass-strip">
+            <button type="button" onClick={() => setRulesOpen(true)} aria-label="Game settings"><Settings size={17} /></button>
+            <span>♦ {state?.round_number ?? "–"}</span>
+            <button type="button" onClick={() => setRoadmapOpen(true)}><Map size={14} /> Roadmap <ChevronDown size={13} /></button>
+            <button type="button" className={multiple ? "is-on" : ""} onClick={() => setMultiple((value) => !value)}>Multiple Mode</button>
+            <span><ChevronUp size={13} /> Min <b>{minBet}</b></span>
+            <span>Max <b>{maxBet}</b></span>
+          </div>
 
-      {/* ---- bet and the dial -------------------------------------------- */}
-      <div className="sud-plaque-wrap" style={atMid(CAB_W, 190, 96)} data-testid="cab-bet">
-        <span className="sud-label sud-label-sm">Bet</span>
-        <div className="sud-plaque-row">
-          <div className="sud-plaque sud-plaque-sm"><span>{formatChips(myTotal || 0)}</span></div>
-        </div>
-      </div>
-
-      {/* The dial sits above the rail, and the rail passes behind it. */}
-      <div className="sud-dial" style={{ ...atMid(CAB_W, 96, 168, 96), zIndex: 3 }} data-testid="cab-dial">
-        {String(Math.max(0, Math.ceil(betting ? countdown : 0))).padStart(2, "0")}
-      </div>
-
-      {/* ---- the arced chip rail ----------------------------------------- */}
-      <div className={`sud-chiprail ${!betting ? "lit" : ""}`}
-           style={{ ...atMid(CAB_W, 880, 196, 150), zIndex: 2 }}>
-        <div className="sud-chiprail-track" />
-        <div className="sud-chips">
-          {chips.map((c) => (
-            <button key={c} type="button" onClick={() => setChip(c)} aria-pressed={chip === c}
-              data-testid={`cab-chip-${c}`} className={`sud-chip ${chip === c ? "on" : ""}`}>
-              {c}
+          <div className="j7-main-bets">
+            <button type="button" className="j7-bet down" onClick={() => lay("down")} disabled={!betting || busy}>
+              <span>2 - 6</span><small>1:1</small><strong>DOWN</strong><BetChip amount={stakes.down} />
             </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ---- price panels ------------------------------------------------ */}
-      <div style={at(26, 130, 400)}><Panel rows={LEFT_ROWS} /></div>
-      <div style={at(CAB_W - 26 - 400, 130, 400)}><Panel rows={RIGHT_ROWS} /></div>
-
-      {/* ---- the dealt strip, with Cancel Bet across it while betting ----- */}
-      <div className="sud-strip" style={{ ...atMid(CAB_W, 720, 350, 76), zIndex: 1 }} data-testid="cab-strip">
-        <Scroll w={52} flip />
-        <div className="sud-strip-inner">
-          {(strip.length ? strip : Array.from({ length: 10 }, () => ({ rank: "—", suit: "s" })))
-            .map((c, i) => <StripCard key={i} rank={c.rank} suit={c.suit} />)}
-        </div>
-        <Scroll w={52} />
-      </div>
-
-      {betting && (
-        <button type="button" onClick={clearBets} disabled={!myTotal} data-testid="cab-clear"
-          className="sud-cancel" style={{ ...atMid(CAB_W, 230, 348, 36), zIndex: 4 }}>
-          Cancel Bet
-        </button>
-      )}
-
-      {/* ---- the ten positions -------------------------------------------- */}
-      <div className="sud-board" style={at(44, 440, CAB_W - 88, 176)} data-testid="cab-board">
-        {Array.from({ length: 10 }, (_, i) =>
-          i === 9 && revealed
-            ? <FaceUp key={i} rank={revealed.rank} suit={revealed.suit} />
-            : <FaceDown key={i} />)}
-      </div>
-
-      {/* ---- the sides: over the board while betting, under it after ------ */}
-      {betting ? (
-        <>
-          <div style={{ ...at(410, 500, 320, 62), zIndex: 5 }}><Side sel="up" label="7 up" big /></div>
-          <div style={{ ...at(CAB_W - 410 - 320, 500, 320, 62), zIndex: 5 }}><Side sel="down" label="7 down" big /></div>
-          <div className="sud-takewrap" style={atMid(CAB_W, 420, 632, 52)}>
-            <Scroll w={44} flip />
-            <button type="button" onClick={clearBets} disabled={!myTotal} data-testid="cab-take"
-              className="sud-take" style={{ flex: 1, height: 52, fontSize: 28 }}>Take</button>
-            <Scroll w={44} />
+            <button type="button" className="j7-bet seven" onClick={() => lay("seven")} disabled={!betting || busy}>
+              <span>7</span><small>1:4</small><BetChip amount={stakes.seven} />
+            </button>
+            <button type="button" className="j7-bet up" onClick={() => lay("up")} disabled={!betting || busy}>
+              <span>8 - 12</span><small>1:1</small><strong>UP</strong><BetChip amount={stakes.up} />
+            </button>
           </div>
-        </>
-      ) : (
-        <div style={{ ...at(44, 628, CAB_W - 88, 56), display: "flex", gap: 40 }}>
-          <div style={{ flex: 1 }}><Side sel="up" label="7 up" /></div>
-          <div style={{ flex: 1 }}>
-            <button type="button" onClick={clearBets} disabled={!myTotal} data-testid="cab-take"
-              className="sud-take" style={{ height: "100%", width: "100%", fontSize: 27 }}>Take</button>
-          </div>
-          <div style={{ flex: 1 }}><Side sel="down" label="7 down" /></div>
-        </div>
-      )}
 
-      <div className="sud-marquee" style={at(120, 692, CAB_W - 240, 38)} data-testid="cab-marquee">
-        {message}
+          <div className="j7-total-grid">
+            {TOTALS.map(({ total, odds }) => (
+              <button type="button" key={total} onClick={() => lay(`t${total}`)} disabled={!betting || busy}>
+                <b>{total}</b><small>{odds}</small><BetChip amount={stakes[`t${total}`]} />
+              </button>
+            ))}
+          </div>
+
+          <div className="j7-money-line">
+            <span>Balance <b>◉ {balance === null ? "…" : formatChips(balance)}</b></span>
+            <span>Your Bet <b>◉ {formatChips(myTotal)}</b></span>
+          </div>
+
+          <footer className="j7-tools">
+            <ToolButton label="again" icon={<RotateCcw />} onClick={() => replay("again")} disabled={!betting || busy || !repeatRef.current.length} />
+            <div className="j7-chip-picker">
+              {chipMenu && <div className="j7-chip-menu">
+                {CHIP_VALUES.filter((value) => value >= minBet && value <= maxBet).map((value) => (
+                  <button type="button" key={value} className={value === chip ? "is-active" : ""} onClick={() => { setChip(value); setChipMenu(false); }}>{value}</button>
+                ))}
+              </div>}
+              <button type="button" className="j7-bank-chip" onClick={() => setChipMenu((value) => !value)} aria-label={`Selected chip ${chip}`}>
+                <i /><b>{chip}</b>
+              </button>
+            </div>
+            <ToolButton label="double" icon={<b>×2</b>} onClick={() => replay("double")} disabled={!betting || busy || !myBets.length} />
+            <ToolButton label="undo" icon={<Undo2 />} onClick={undoBet} disabled={!betting || busy || !myBets.length} />
+            <ToolButton label="clear" icon={<X />} onClick={clearBets} disabled={!betting || busy || !myBets.length} danger />
+          </footer>
+
+          {!betting && <div className="j7-bets-closed">{phase === "REVEAL" ? "DICE ROLLING" : "PLACE YOUR BETS"}</div>}
+
+          {(roadmapOpen || rulesOpen) && (
+            <div className="j7-modal" role="dialog" aria-modal="true">
+              <div>
+                <button type="button" className="j7-modal-close" onClick={() => { setRoadmapOpen(false); setRulesOpen(false); }}><X /></button>
+                {roadmapOpen ? <>
+                  <h2>Roadmap</h2>
+                  <p>The latest shared live results. Every player sees the same two-dice outcome.</p>
+                  <div className="j7-modal-history">{lastResults.slice(0, 30).reverse().map((item, index) => <HistoryCell key={item.round_number || index} item={item} latest={index === Math.min(29, lastResults.length - 1)} />)}</div>
+                </> : <>
+                  <h2>How to play</h2>
+                  <p><b>DOWN</b> wins when the dice total 2–6. <b>UP</b> wins on 8–12. A total of <b>7</b> wins only the blue Lucky Seven bet. Exact-total bets pay the odds printed on the felt.</p>
+                  <p>Minimum stake: {minBet}. Maximum stake per chip: {maxBet}. Results are generated and settled by the shared server round.</p>
+                </>}
+              </div>
+            </div>
+          )}
+        </section>
       </div>
-
-      {/* ---- between rounds ------------------------------------------------ */}
-      {phase === "REVEAL" && (
-        <div className="sud-gate" data-testid="cab-gate">
-          <div className="sud-gate-box">
-            <span className="sud-gate-spin" />
-            {/* "Game Over" reads as the session ending. The round is simply
-                closed to bets, so that is what it says. */}
-            <span>NO MORE BETTING</span>
-          </div>
-        </div>
-      )}
-    </Cabinet>
+    </PlayShell>
   );
 }

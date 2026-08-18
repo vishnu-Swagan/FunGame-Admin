@@ -1,482 +1,578 @@
-/* 7Up 7Down — the machine's own surfaces, matched to the reference.
-
-   Its own sheet rather than the shared cabinet CSS: the hex-woven nebula, the
-   chained panel borders, the arced chip rail and the red-and-gold card frame
-   belong to this machine, and folding them into the shared kit would drag the
-   other fourteen screens toward them. */
-
-.sud-ground {
-    position: absolute;
-    inset: 0;
-    background:
-        /* the honeycomb the reference weaves under everything */
-        repeating-conic-gradient(from 30deg at 50% 50%, rgba(190, 170, 255, 0.045) 0deg 60deg, transparent 60deg 120deg),
-        radial-gradient(38% 46% at 78% 30%, rgba(150, 120, 255, 0.4) 0%, transparent 70%),
-        radial-gradient(46% 56% at 22% 26%, rgba(110, 60, 200, 0.42) 0%, transparent 70%),
-        radial-gradient(60% 70% at 50% 52%, rgba(60, 30, 120, 0.5) 0%, transparent 76%),
-        linear-gradient(180deg, #3d1a63 0%, #2a1149 30%, #170a2e 62%, #0a0418 100%);
-    background-size: 54px 54px, auto, auto, auto, auto;
+.j7-stage {
+  --felt: #007348;
+  --felt-dark: #003e2a;
+  --gold: #f4c44c;
+  position: relative;
+  display: grid;
+  place-items: start center;
+  min-height: min(900px, calc(100vh - 76px));
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 58%, rgba(0, 112, 65, .75) 0 24%, transparent 56%),
+    linear-gradient(180deg, #24031e 0 29%, #402108 37%, #003e28 55%, #002c20 100%);
+  box-shadow: inset 0 0 90px rgba(0, 0, 0, .72);
+  font-family: "Trebuchet MS", Arial, sans-serif;
+  user-select: none;
 }
 
-/* The scattered sparkle the reference has across the top half. */
-.sud-sparkle {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-        radial-gradient(1.6px 1.6px at 12% 18%, rgba(255, 255, 255, 0.85), transparent),
-        radial-gradient(1.4px 1.4px at 31% 9%, rgba(220, 200, 255, 0.7), transparent),
-        radial-gradient(1.8px 1.8px at 68% 14%, rgba(255, 255, 255, 0.8), transparent),
-        radial-gradient(1.3px 1.3px at 84% 26%, rgba(210, 190, 255, 0.65), transparent),
-        radial-gradient(1.5px 1.5px at 55% 33%, rgba(255, 255, 255, 0.6), transparent),
-        radial-gradient(1.4px 1.4px at 44% 62%, rgba(230, 215, 255, 0.5), transparent),
-        radial-gradient(1.7px 1.7px at 90% 58%, rgba(255, 255, 255, 0.55), transparent),
-        radial-gradient(1.3px 1.3px at 8% 66%, rgba(220, 200, 255, 0.5), transparent);
+.j7-table {
+  position: relative;
+  width: min(100%, 500px);
+  min-height: 794px;
+  overflow: hidden;
+  color: #fff6cf;
+  border-inline: 1px solid rgba(255, 216, 118, .24);
+  background:
+    radial-gradient(ellipse at 50% 32%, rgba(26, 179, 109, .3), transparent 43%),
+    repeating-linear-gradient(21deg, rgba(255,255,255,.018) 0 1px, transparent 1px 5px),
+    linear-gradient(165deg, #008555, var(--felt) 53%, #00663f 100%);
+  box-shadow: 0 0 50px rgba(0,0,0,.8), inset 0 0 35px rgba(0, 34, 19, .55);
 }
 
-/* ------------------------------------------------------------------ title */
-
-.sud-titlebar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
+.j7-roadmap {
+  position: relative;
+  z-index: 5;
+  height: 112px;
+  padding: 4px 9px 8px 76px;
+  overflow: hidden;
+  border-bottom: 5px solid #6a2608;
+  background:
+    repeating-linear-gradient(30deg, rgba(246, 146, 52, .05) 0 1px, transparent 1px 10px),
+    radial-gradient(ellipse at center, #6b260e 0, #311006 73%);
+  box-shadow: 0 7px 10px rgba(0,0,0,.55), inset 0 -6px 10px rgba(22,3,0,.65);
 }
 
-.sud-title {
-    text-align: center;
-    padding: 6px 44px 8px;
-    border-radius: 999px / 58px;
-    background: linear-gradient(180deg, #241238 0%, #0c0518 52%, #1c0f30 100%);
-    border: 3px solid transparent;
-    border-image: linear-gradient(120deg, #7a5411, #ffeaa0 20%, #d9a83c 44%, #8a5f14 66%, #ffeaa0 88%, #a9781f 100%) 1;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), 0 6px 22px rgba(0, 0, 0, 0.65), inset 0 0 26px rgba(0, 0, 0, 0.7);
+.j7-stats {
+  height: 23px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #f8e1ae;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.sud-title span {
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-size: 42px;
-    line-height: 1.06;
-    background-image: linear-gradient(180deg, #fffbe6 0%, #ffe08a 30%, #e0ae40 54%, #8a5f14 82%, #f6d98a 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 18px rgba(255, 200, 90, 0.3));
+.j7-stats b { color: #fff4d3; }
+.j7-stats b:nth-child(1) em { color: #ffdb3f; }
+.j7-stats b:nth-child(2) em { color: #ffb63f; }
+.j7-stats b:nth-child(3) em { color: #f24e3f; }
+.j7-stats em { font-size: 14px; font-style: normal; text-shadow: 0 1px #321; }
+.j7-stats span { opacity: .8; font-size: 9px; }
+
+.j7-history {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(22px, 1fr));
+  gap: 3px;
+  height: 71px;
+  align-items: stretch;
 }
 
-/* The X sits in its own gold box in the corner, as the machine has it. */
-.sud-x {
-    display: grid;
-    place-items: center;
-    border-radius: 6px;
-    border: 3px solid #b8862a;
-    background: linear-gradient(180deg, rgba(20, 10, 38, 0.8), rgba(6, 3, 14, 0.9));
-    color: #ffffff;
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-size: 38px;
-    font-weight: 300;
-    line-height: 1;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+.j7-history-cell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #faf5e8;
+  box-shadow: 0 1px 2px rgba(0,0,0,.55);
 }
 
-.sud-x:active { transform: scale(0.94); }
-
-/* ---------------------------------------------------------------- plaques */
-
-.sud-plaque-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+.j7-history-cell > b {
+  display: grid;
+  place-items: center;
+  height: 21px;
+  color: white;
+  background: #148c57;
+  font-size: 12px;
+  line-height: 1;
 }
 
-.sud-label {
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-style: italic;
-    font-size: 29px;
-    color: #f4ecd8;
-    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.75), 0 0 16px rgba(255, 220, 140, 0.2);
-    line-height: 1.05;
+.j7-history-cell.up > b { background: #ae3227; }
+.j7-history-cell.seven > b { background: #187c98; }
+.j7-history-cell.is-latest { outline: 2px solid #ffd444; outline-offset: 1px; }
+
+.j7-mini-dice {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 1px;
 }
 
-.sud-label-sm { font-size: 24px; }
-
-/* The plaque and its two scrolls travel together. */
-.sud-plaque-row {
-    display: flex;
-    align-items: center;
-    width: 100%;
+.j7-dome-zone {
+  position: relative;
+  height: 236px;
+  background:
+    linear-gradient(171deg, transparent 0 72%, rgba(0,0,0,.14) 72.4% 100%),
+    radial-gradient(ellipse at 50% 82%, rgba(0,0,0,.32), transparent 62%);
 }
 
-.sud-plaque {
-    flex: 1;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    border-radius: 999px;
-    background: linear-gradient(180deg, #0a0520 0%, #171034 48%, #07031a 100%);
-    border: 2px solid #c2a54a;
-    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(0, 0, 0, 0.6);
+.j7-dome-zone::before {
+  content: "7UP 7DOWN";
+  position: absolute;
+  inset: 83px 0 auto;
+  color: rgba(3, 66, 39, .34);
+  font: 900 44px/1 Georgia, serif;
+  text-align: center;
+  letter-spacing: -4px;
+  transform: skewY(-4deg);
 }
 
-.sud-plaque span {
-    font-family: ui-serif, Georgia, serif;
-    font-size: 23px;
-    color: #f6efdc;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
+.j7-dome-zone::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: -7%;
+  right: -7%;
+  top: -5px;
+  height: 30px;
+  border-radius: 50%;
+  border-bottom: 9px solid #7d3a16;
+  box-shadow: 0 5px 0 #301107, 0 9px 12px rgba(0,0,0,.65), inset 0 -2px #c36a29;
+  pointer-events: none;
 }
 
-.sud-plaque-sm { height: 30px; }
-.sud-plaque-sm span { font-size: 19px; font-style: italic; }
-
-/* ------------------------------------------------------------------- dial */
-
-.sud-dial-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.j7-winners {
+  position: absolute;
+  z-index: 8;
+  left: 8px;
+  top: -5px;
+  width: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
-.sud-dial {
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    background: radial-gradient(circle at 50% 34%, #1a1434, #05030c 76%);
-    border: 3px solid #c2a54a;
-    box-shadow: inset 0 3px 16px rgba(0, 0, 0, 0.95), 0 0 0 5px rgba(217, 168, 60, 0.12),
-                0 0 26px rgba(180, 140, 255, 0.25);
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
-    font-size: 44px;
-    color: #ffffff;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.05em;
-    text-shadow: 0 0 14px rgba(200, 230, 255, 0.75);
+.j7-high-win {
+  color: #ffe761;
+  font: 800 10px/1 "Arial Narrow", sans-serif;
+  text-align: center;
+  text-shadow: 0 1px 1px #321;
 }
 
-/* -------------------------------------------------------------- chip rail */
+.j7-winner { display: flex; align-items: center; width: 100%; gap: 3px; }
+.j7-winner > span {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  color: #1c372f;
+  border: 3px solid #c7b77d;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f7dcc0, #98715b);
+  box-shadow: 0 2px 4px #001b11;
+  font-weight: 900;
+}
+.j7-winner small { color: #f8e1a1; font-size: 7px; overflow: hidden; }
+.j7-winner small b { display: block; color: #ffd344; font-size: 8px; white-space: nowrap; }
+.j7-live-badge { margin-top: 7px; color: rgba(255,238,165,.72); font-size: 9px; font-weight: 900; text-align: center; }
 
-/* The rail is an arc, not a bar: it sweeps up at both ends and passes behind
-   the dial, which is what makes the chips read as sitting ON the machine. */
-.sud-chiprail { position: relative; }
-
-.sud-chiprail-track {
-    position: absolute;
-    inset: 0;
-    border: 3px solid #c2a54a;
-    border-top-color: rgba(194, 165, 74, 0.3);
-    border-radius: 50% / 46%;
-    background: linear-gradient(180deg, rgba(46, 26, 82, 0.22), rgba(10, 5, 24, 0.45));
-    box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.4);
+.j7-dome {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 17px;
+  width: 225px;
+  height: 206px;
+  transform: translateX(-50%);
 }
 
-.sud-chips {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 8px;
+.j7-glass {
+  position: absolute;
+  left: 27px;
+  top: 0;
+  width: 171px;
+  height: 175px;
+  border: 3px solid rgba(204, 228, 206, .26);
+  border-bottom-color: rgba(255,255,255,.08);
+  border-radius: 50% 50% 42% 42% / 55% 55% 44% 44%;
+  background:
+    linear-gradient(100deg, transparent 29%, rgba(255,255,255,.18) 35%, transparent 42%),
+    radial-gradient(ellipse at 50% 42%, rgba(162,255,199,.3), rgba(10,51,38,.28) 62%, rgba(0,0,0,.18) 81%);
+  box-shadow: inset 16px 7px 23px rgba(214,255,227,.13), inset -15px 3px 25px rgba(0,0,0,.34), 0 4px 8px rgba(0,0,0,.45);
+  filter: drop-shadow(0 3px 3px rgba(0,0,0,.45));
+}
+.j7-glass::after {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  bottom: -14px;
+  height: 35px;
+  border: 8px solid #111514;
+  border-radius: 50%;
+  box-shadow: 0 8px 0 #272329, 0 12px 10px rgba(0,0,0,.7), inset 0 2px 3px #555;
+}
+.j7-glass i:first-child { position: absolute; left: 29px; top: 21px; width: 17px; height: 82px; border-radius: 50%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.27), transparent); transform: rotate(12deg); }
+.j7-glass i:last-child { position: absolute; right: 27px; top: 16px; width: 8px; height: 73px; border-radius: 50%; background: rgba(255,255,255,.12); transform: rotate(-13deg); }
+
+.j7-dice-tray {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: 105px;
+  width: 150px;
+  height: 59px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, #45975c 0 34%, #162d25 62%, #090b0c 68% 100%);
+  box-shadow: inset 0 6px 7px #050606, 0 7px 7px rgba(0,0,0,.56);
+  transform: translateX(-50%);
 }
 
-/* Each chip carries the reference's double gold ring. */
-.sud-chip {
-    height: 66px;
-    width: 66px;
-    border-radius: 50%;
-    font-family: ui-serif, Georgia, serif;
-    font-size: 25px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: #f2f6f4;
-    background:
-        radial-gradient(circle at 38% 30%, #1d2246 0%, #090b1e 70%) padding-box,
-        linear-gradient(160deg, #ffeaa0, #a9781f 40%, #ffe08a 70%, #8a5f14) border-box;
-    border: 5px solid transparent;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 2px 8px rgba(255, 255, 255, 0.12),
-                0 5px 12px rgba(0, 0, 0, 0.6);
-    transition: transform 110ms ease, box-shadow 110ms ease;
+.j7-die {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  width: 51px;
+  height: 51px;
+  padding: 8px;
+  border: 1px solid rgba(57,55,50,.24);
+  border-radius: 10px;
+  background: linear-gradient(145deg, #fff 6%, #f4f1e9 68%, #bfbdb7 100%);
+  box-shadow: inset 3px 4px 5px rgba(255,255,255,.95), inset -3px -4px 6px rgba(57,54,48,.28), 4px 5px 3px rgba(0,0,0,.38);
+  transform: rotate(-8deg);
+}
+.j7-die + .j7-die { transform: rotate(10deg); }
+.j7-die i { display: grid; place-items: center; }
+.j7-die i::after { content: ""; display: block; width: 7px; height: 7px; border-radius: 50%; transform: scale(0); background: #1d211e; box-shadow: inset 1px 1px 2px #000; }
+.j7-die i.is-on::after { transform: scale(1); }
+.j7-die i.is-red::after { background: #dc2419; box-shadow: inset 1px 1px 2px #72110d; }
+.j7-die.is-small { width: 16px; height: 24px; padding: 2px; border-radius: 2px; box-shadow: inset -1px -1px 1px #bbb; transform: none; }
+.j7-die.is-small i::after { width: 2.5px; height: 2.5px; box-shadow: none; }
+.j7-die.is-rolling:first-child { animation: j7-roll-a .58s linear infinite; }
+.j7-die.is-rolling:last-child { animation: j7-roll-b .51s linear infinite reverse; }
+
+@keyframes j7-roll-a {
+  0% { transform: translate(-25px,-19px) rotate(0) scale(.88); }
+  35% { transform: translate(18px,-31px) rotate(170deg) scale(1.06); }
+  70% { transform: translate(24px,4px) rotate(290deg) scale(.93); }
+  100% { transform: translate(-25px,-19px) rotate(360deg) scale(.88); }
+}
+@keyframes j7-roll-b {
+  0% { transform: translate(22px,-12px) rotate(6deg) scale(.95); }
+  45% { transform: translate(-25px,-27px) rotate(170deg) scale(1.08); }
+  78% { transform: translate(-15px,8px) rotate(270deg) scale(.9); }
+  100% { transform: translate(22px,-12px) rotate(366deg) scale(.95); }
 }
 
-.sud-chip.on {
-    background:
-        radial-gradient(circle at 38% 30%, #4e8f76 0%, #14332a 72%) padding-box,
-        linear-gradient(160deg, #fffbe0, #d9a83c 40%, #fff3c8 70%, #a9781f) border-box;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 2px 10px rgba(255, 255, 255, 0.28),
-                0 0 26px rgba(255, 214, 110, 0.8);
+.j7-result {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: 72px;
+  min-width: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255,255,255,.45);
+  border-radius: 12px;
+  background: rgba(2, 57, 37, .88);
+  box-shadow: 0 2px 6px #00150d;
+  transform: translateX(-50%);
+  animation: j7-result-in .25s ease-out both;
+}
+.j7-result b { color: #ffea76; font-size: 16px; }
+.j7-result span { font-size: 8px; font-weight: 900; letter-spacing: .04em; }
+.j7-result.up { background: rgba(141,34,25,.9); }
+.j7-result.seven { background: rgba(12,105,140,.91); }
+@keyframes j7-result-in { from { opacity: 0; transform: translate(-50%, 9px) scale(.8); } }
+
+.j7-countdown {
+  position: absolute;
+  z-index: 8;
+  right: 16px;
+  top: 49px;
+  width: 63px;
+  height: 63px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(#ffd840 var(--timer), #9c2018 0);
+  box-shadow: 0 3px 6px rgba(0,0,0,.55);
+}
+.j7-countdown::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #735112, #12361f 64%, #061c12); box-shadow: inset 0 0 5px #000; }
+.j7-countdown span { position: relative; color: #ffe55d; font: 900 29px/1 Georgia, serif; text-shadow: 0 2px 2px #000; }
+
+.j7-brass-strip {
+  position: relative;
+  z-index: 11;
+  height: 31px;
+  display: grid;
+  grid-template-columns: 30px 34px 1.15fr 1fr .72fr .7fr;
+  align-items: stretch;
+  color: #f1d39b;
+  border-block: 2px solid #8c491d;
+  background: linear-gradient(#713313, #421704 53%, #6c2d0e);
+  box-shadow: 0 2px 5px rgba(0,0,0,.55), inset 0 1px rgba(255,204,109,.25);
+  font-size: 10px;
+}
+.j7-brass-strip > * { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 2px; border-right: 1px solid rgba(31,8,1,.5); white-space: nowrap; }
+.j7-brass-strip button { color: inherit; background: transparent; }
+.j7-brass-strip button.is-on { color: #ffdd5c; box-shadow: inset 0 -2px #e7a91d; }
+.j7-brass-strip b { color: #ff3a2c; }
+
+.j7-main-bets {
+  height: 164px;
+  display: grid;
+  grid-template-columns: 37% 26% 37%;
+  gap: 4px;
+  padding: 8px 6px 4px;
+}
+.j7-bet {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 13px;
+  color: #f8e9b0;
+  border: 2px solid rgba(255,246,193,.75);
+  border-radius: 2px;
+  text-shadow: 0 2px 1px rgba(0,0,0,.42);
+  box-shadow: inset 0 0 20px rgba(255,255,255,.08), 0 1px 2px rgba(0,0,0,.5);
+}
+.j7-bet::before { content: ""; position: absolute; inset: 0; opacity: .3; background: repeating-linear-gradient(-23deg, transparent 0 4px, rgba(255,255,255,.08) 5px); }
+.j7-bet.down { background: linear-gradient(135deg, #25ac4e, #07903c); }
+.j7-bet.seven { background: linear-gradient(135deg, #23a9cd, #137aaf); }
+.j7-bet.up { background: linear-gradient(135deg, #e8493b, #cd2e2b); }
+.j7-bet span { position: relative; font: 900 clamp(29px, 7vw, 41px)/1 Georgia, serif; letter-spacing: -2px; }
+.j7-bet small { position: relative; margin-top: 4px; color: rgba(56,37,18,.67); font: 800 16px/1.1 Arial, sans-serif; }
+.j7-bet strong { position: absolute; bottom: 17px; color: rgba(236,243,194,.3); font: 900 clamp(38px, 10vw, 54px)/1 Georgia, serif; }
+.j7-bet:disabled, .j7-total-grid button:disabled { cursor: not-allowed; filter: saturate(.82) brightness(.86); }
+.j7-bet:not(:disabled):active, .j7-total-grid button:not(:disabled):active { transform: translateY(1px); filter: brightness(1.12); }
+
+.j7-stake-chip {
+  position: absolute !important;
+  z-index: 5;
+  left: 50%;
+  bottom: 38px;
+  min-width: 38px;
+  height: 38px;
+  display: grid !important;
+  place-items: center;
+  padding: 0 5px;
+  color: #31312e !important;
+  border: 4px dashed #81817e;
+  border-radius: 50%;
+  background: #dddcd4;
+  box-shadow: 0 2px 3px rgba(0,0,0,.5), inset 0 0 0 2px white;
+  font: 900 10px/1 Arial, sans-serif !important;
+  letter-spacing: 0 !important;
+  text-shadow: none !important;
+  transform: translateX(-50%);
+  animation: j7-chip-in .18s ease-out both;
+}
+@keyframes j7-chip-in { from { opacity: 0; transform: translate(-50%,-30px) scale(.4) rotate(-30deg); } }
+
+.j7-total-grid {
+  height: 203px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  padding: 4px 6px 0;
+}
+.j7-total-grid button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #003c2c;
+  border: 1px solid rgba(244,239,184,.86);
+  background: rgba(0, 151, 91, .27);
+  text-shadow: 0 1px rgba(255,255,255,.08);
+}
+.j7-total-grid button:nth-child(odd) { background: rgba(0, 123, 75, .35); }
+.j7-total-grid b { font: 900 clamp(24px, 6.4vw, 34px)/1 Arial, sans-serif; }
+.j7-total-grid small { margin-top: 6px; font-size: 16px; }
+.j7-total-grid .j7-stake-chip { bottom: 28px; }
+
+.j7-money-line {
+  height: 33px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 70px;
+  color: #eff1d2;
+  border-bottom: 1px solid rgba(231,226,165,.25);
+  font-size: 13px;
+}
+.j7-money-line b { color: #ffd62d; }
+
+.j7-tools {
+  position: relative;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 1px 8px 4px 83px;
+  background: linear-gradient(rgba(0,91,58,.2), rgba(0,56,39,.3));
+}
+.j7-tools::before {
+  content: "PLAYER";
+  position: absolute;
+  left: 9px;
+  bottom: 7px;
+  display: grid;
+  place-items: end center;
+  width: 62px;
+  height: 62px;
+  padding-bottom: 4px;
+  color: rgba(255,255,255,.88);
+  border: 3px solid #c0aa73;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 33%, #ffd1ad 0 19%, #6f442f 20% 35%, #12382c 36%);
+  box-shadow: 0 2px 4px #001e14;
+  font: 800 8px/1 Arial, sans-serif;
+}
+.j7-tool {
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #f6f2da;
+  text-shadow: 0 1px 2px #001b12;
+}
+.j7-tool > span {
+  width: 43px;
+  height: 43px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #9f9b82;
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 34%, #1d7556, #0d3c2e 68%, #071d17);
+  box-shadow: inset 0 1px 4px rgba(255,255,255,.25), 0 2px 4px rgba(0,0,0,.6);
+}
+.j7-tool svg { width: 27px; height: 27px; stroke-width: 3; }
+.j7-tool span > b { font-size: 25px; }
+.j7-tool small { margin-top: 1px; font-size: 10px; }
+.j7-tool.is-danger > span { background: radial-gradient(circle at 42% 34%, #e2372d, #861810 70%); }
+.j7-tool:disabled { opacity: .38; }
+
+.j7-chip-picker { position: relative; width: 60px; height: 67px; display: grid; place-items: center; }
+.j7-bank-chip {
+  position: relative;
+  z-index: 2;
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  color: #222;
+  border: 6px dashed white;
+  border-radius: 50%;
+  background: #f6f1d9;
+  box-shadow: 0 0 0 5px #118b4f, 0 0 0 7px #ceac47, inset 0 0 0 3px #b9b6a8, 0 3px 5px #001f14;
+}
+.j7-bank-chip::before { content: ""; position: absolute; inset: 7px; border: 1px solid #777; border-radius: 50%; }
+.j7-bank-chip b { position: relative; font-size: 22px; }
+.j7-chip-menu {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: 70px;
+  display: flex;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #d9ba54;
+  border-radius: 28px;
+  background: rgba(4,34,25,.96);
+  box-shadow: 0 6px 14px rgba(0,0,0,.55);
+  transform: translateX(-50%);
+}
+.j7-chip-menu button { width: 40px; height: 40px; color: #18251e; border: 4px dashed #6b736f; border-radius: 50%; background: #eee9d7; font-size: 10px; font-weight: 900; }
+.j7-chip-menu button.is-active { border-color: #ffcd39; box-shadow: 0 0 0 2px #ffcd39; }
+
+.j7-bets-closed {
+  position: absolute;
+  z-index: 18;
+  left: 50%;
+  top: 467px;
+  padding: 7px 24px;
+  color: #fff0a4;
+  border: 1px solid rgba(255,226,95,.7);
+  border-radius: 20px;
+  background: rgba(41,16,5,.9);
+  box-shadow: 0 3px 8px rgba(0,0,0,.5);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  transform: translateX(-50%);
 }
 
-/* Once a round is running the machine greens the whole rail. */
-.sud-chiprail.lit .sud-chip {
-    background:
-        radial-gradient(circle at 38% 30%, #3f7a64 0%, #10291f 72%) padding-box,
-        linear-gradient(160deg, #ffeaa0, #a9781f 40%, #ffe08a 70%, #8a5f14) border-box;
+.j7-modal {
+  position: absolute;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0,18,12,.78);
+  backdrop-filter: blur(4px);
 }
+.j7-modal > div { position: relative; width: min(100%, 410px); padding: 24px; color: #f8efd2; border: 1px solid #bc8d3e; border-radius: 13px; background: linear-gradient(155deg, #123d2c, #071b14); box-shadow: 0 18px 50px #00110c; }
+.j7-modal h2 { margin: 0 0 8px; color: #ffd254; font: 900 24px/1 Georgia, serif; }
+.j7-modal p { margin: 8px 0; font-size: 13px; line-height: 1.5; }
+.j7-modal-close { position: absolute; right: 9px; top: 9px; width: 31px; height: 31px; display: grid; place-items: center; color: white; border-radius: 50%; background: #8b2019; }
+.j7-modal-close svg { width: 18px; }
+.j7-modal-history { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; max-height: 235px; padding: 5px; overflow: auto; }
+.j7-modal-history .j7-history-cell { min-height: 58px; }
 
-/* ------------------------------------------------------------ cancel bet */
-
-.sud-cancel {
-    display: grid;
-    place-items: center;
-    border-radius: 999px;
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-size: 25px;
-    color: #ffeede;
-    background: linear-gradient(180deg, #a8172c 0%, #6d0d1c 55%, #8f1425 100%);
-    border: 2px solid #c2a54a;
-    box-shadow: inset 0 1px 0 rgba(255, 220, 190, 0.35), 0 4px 14px rgba(0, 0, 0, 0.6);
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.7);
+@media (max-width: 560px) {
+  .j7-stage { min-height: auto; margin-inline: -4px; border-radius: 11px; }
+  .j7-table { width: 100%; min-height: 735px; }
+  .j7-roadmap { height: 100px; padding-left: 56px; }
+  .j7-stats { gap: 4px; font-size: 9px; }
+  .j7-stats em { font-size: 11px; }
+  .j7-stats span { font-size: 7px; }
+  .j7-history { height: 63px; gap: 2px; }
+  .j7-history-cell > b { height: 18px; font-size: 10px; }
+  .j7-mini-dice { gap: 0; padding-inline: 0; }
+  .j7-die.is-small { width: 13px; height: 21px; }
+  .j7-winners { left: 4px; width: 54px; }
+  .j7-winner > span { width: 30px; height: 30px; }
+  .j7-dome-zone { height: 220px; }
+  .j7-dome { transform: translateX(-50%) scale(.92); transform-origin: top center; }
+  .j7-countdown { right: 9px; width: 54px; height: 54px; }
+  .j7-countdown span { font-size: 25px; }
+  .j7-brass-strip { grid-template-columns: 29px 29px 1.15fr 1fr .8fr .72fr; font-size: 8px; }
+  .j7-main-bets { height: 145px; padding-inline: 4px; }
+  .j7-bet { padding-top: 11px; }
+  .j7-bet small { font-size: 14px; }
+  .j7-bet strong { bottom: 14px; }
+  .j7-stake-chip { bottom: 31px; min-width: 34px; height: 34px; }
+  .j7-total-grid { height: 183px; padding-inline: 4px; }
+  .j7-total-grid small { font-size: 13px; }
+  .j7-total-grid .j7-stake-chip { bottom: 24px; }
+  .j7-money-line { padding-inline: 54px; font-size: 11px; }
+  .j7-tools { gap: 4px; padding-left: 69px; }
+  .j7-tools::before { left: 5px; width: 55px; height: 55px; }
+  .j7-tool { width: 43px; }
+  .j7-tool > span { width: 39px; height: 39px; }
+  .j7-tool svg { width: 23px; height: 23px; }
+  .j7-bank-chip { width: 55px; height: 55px; }
+  .j7-chip-picker { width: 54px; }
+  .j7-bank-chip b { font-size: 19px; }
+  .j7-bets-closed { top: 438px; }
 }
-
-.sud-cancel:disabled { opacity: 0.45; }
-
-/* ----------------------------------------------------------- price panels */
-
-/* The reference frames both panels in a fine gold chain over near-black. */
-.sud-panel {
-    padding: 5px 12px;
-    border-radius: 4px;
-    background: linear-gradient(180deg, rgba(9, 6, 24, 0.9), rgba(4, 2, 12, 0.95));
-    border: 4px solid transparent;
-    border-image: repeating-linear-gradient(48deg,
-        #6d4a10 0 5px, #ffeaa0 5px 8px, #a9781f 8px 13px, #ffd76a 13px 16px) 1;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), inset 0 0 44px rgba(0, 0, 0, 0.72);
-}
-
-.sud-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 14px;
-    font-family: ui-serif, Georgia, 'Times New Roman', serif;
-    font-size: 15px;
-    line-height: 1.32;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-.sud-row-a { color: #f3efe4; }
-.sud-row-b { color: #c79bff; font-style: italic; }
-
-/* ------------------------------------------------------------ dealt strip */
-
-.sud-strip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.sud-strip-inner {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 12px;
-    border-radius: 999px / 40px;
-    border: 3px solid #c2a54a;
-    background: linear-gradient(180deg, rgba(30, 18, 54, 0.72), rgba(8, 4, 18, 0.88));
-    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.7);
-}
-
-.sud-strip-card {
-    position: relative;
-    width: 52px;
-    height: 62px;
-    border-radius: 3px;
-    background: linear-gradient(180deg, #ffffff, #eef0f4);
-    border: 1px solid #9aa0ad;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-
-.sud-strip-tl,
-.sud-strip-br {
-    position: absolute;
-    font-family: ui-serif, Georgia, serif;
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1px;
-}
-
-.sud-strip-tl { top: 3px; left: 4px; }
-.sud-strip-br { bottom: 3px; right: 4px; transform: rotate(180deg); }
-.sud-strip-tl i,
-.sud-strip-br i { font-style: normal; font-size: 15px; }
-
-/* --------------------------------------------------------- the ten places */
-
-/* The red-and-gold chain the machine draws around the positions. */
-.sud-board {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 9px 13px;
-    border-radius: 4px;
-    border: 4px solid transparent;
-    border-image: repeating-linear-gradient(48deg,
-        #8a1122 0 6px, #ffd76a 6px 9px, #a9781f 9px 15px, #c8102e 15px 18px) 1;
-    background: rgba(6, 3, 16, 0.3);
-}
-
-.sud-back {
-    flex: 1;
-    height: 100%;
-    border-radius: 5px;
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
-}
-
-.sud-face {
-    flex: 1;
-    height: 100%;
-    position: relative;
-    border-radius: 5px;
-    background: linear-gradient(180deg, #ffffff, #f0f1f5);
-    border: 1px solid #b9b9c6;
-    display: grid;
-    place-items: center;
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.65);
-}
-
-.sud-face-tl,
-.sud-face-br {
-    position: absolute;
-    font-family: ui-serif, Georgia, serif;
-    font-size: 28px;
-    font-weight: 700;
-    line-height: 1;
-}
-
-.sud-face-tl { top: 6px; left: 9px; }
-.sud-face-br { bottom: 6px; right: 9px; transform: rotate(180deg); }
-.sud-face-pip { font-size: 56px; line-height: 1; }
-
-/* ---------------------------------------------------------------- buttons */
-
-/* While bets are open the two sides are large pills laid over the positions,
-   which is where the machine puts them; once the round closes they drop to the
-   compact row under the board with Take between them. */
-.sud-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    border-radius: 999px;
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    color: #f0e7d2;
-    background: linear-gradient(180deg, #1d1638 0%, #0a0618 56%, #191233 100%);
-    border: 3px solid #c2a54a;
-    box-shadow: inset 0 0 0 3px rgba(10, 6, 24, 0.9), inset 0 1px 0 rgba(255, 235, 170, 0.22),
-                0 5px 16px rgba(0, 0, 0, 0.65);
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.75);
-    transition: filter 120ms ease;
-}
-
-.sud-btn em {
-    font-style: normal;
-    font-size: 18px;
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 999px;
-    padding: 2px 12px;
-}
-
-.sud-btn:disabled { opacity: 0.5; }
-
-/* The side you have money on goes magenta while bets are open. */
-.sud-btn.armed {
-    background: linear-gradient(180deg, #ff7de0 0%, #d51ba4 52%, #8e0a6c 100%);
-    color: #ffffff;
-    box-shadow: inset 0 0 0 3px rgba(255, 235, 170, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.5),
-                0 0 30px rgba(255, 90, 210, 0.55);
-}
-
-/* And green once it has come in. */
-.sud-btn.won {
-    background: linear-gradient(180deg, #b7f56a 0%, #57c02a 52%, #2f8016 100%);
-    color: #0a2a06;
-    box-shadow: inset 0 0 0 3px rgba(255, 235, 170, 0.85), 0 0 30px rgba(120, 235, 70, 0.5);
-}
-
-.sud-take {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    color: #f0e7d2;
-    background: linear-gradient(180deg, #1d1638 0%, #0a0618 56%, #191233 100%);
-    border: 2px solid #c2a54a;
-    box-shadow: inset 0 1px 0 rgba(255, 235, 170, 0.2), 0 5px 16px rgba(0, 0, 0, 0.6);
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.75);
-}
-
-.sud-take:disabled { opacity: 0.55; }
-
-.sud-takewrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-/* ---------------------------------------------------------------- marquee */
-
-.sud-marquee {
-    display: grid;
-    place-items: center;
-    border-radius: 999px / 40px;
-    border: 2px solid #c2a54a;
-    background: linear-gradient(180deg, rgba(14, 7, 30, 0.94), rgba(5, 2, 14, 0.97));
-    font-family: ui-serif, Georgia, serif;
-    font-size: 23px;
-    color: #f6efdc;
-    text-align: center;
-    box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.82);
-}
-
-/* ------------------------------------------------------------- round gate */
-
-/* Between rounds the machine dims the table and says when the next one starts,
-   rather than leaving a live-looking board that refuses every press. */
-.sud-gate {
-    position: absolute;
-    inset: 0;
-    z-index: 30;
-    display: grid;
-    place-items: center;
-    background: rgba(3, 1, 10, 0.62);
-}
-
-.sud-gate-box {
-    display: flex;
-    align-items: center;
-    gap: 26px;
-    padding: 20px 44px;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #1a2a6e, #0d1740);
-    border: 3px solid #ffd76a;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
-    font-family: 'Gloock', ui-serif, Georgia, serif;
-    font-size: 44px;
-    letter-spacing: 0.06em;
-    line-height: 1.2;
-    color: #ffffff;
-}
-
-.sud-gate-spin {
-    height: 38px;
-    width: 38px;
-    border-radius: 50%;
-    border: 6px dotted #ffc93a;
-    animation: sud-spin 1.4s linear infinite;
-}
-
-@keyframes sud-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-    .sud-chip { transition: none; }
-    .sud-btn { transition: none; }
-    .sud-gate-spin { animation: none; }
+  .j7-die.is-rolling { animation-duration: 1.2s; }
+  .j7-result, .j7-stake-chip { animation: none; }
 }
