@@ -30,6 +30,7 @@ export default function AppShell() {
      number board needed. Every table leaves the same way, by the back button in
      the game's own header. */
   const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
+  const isAviatorPlay = location.pathname === "/games/aviator/play";
 
   const loadInbox = useCallback(async () => {
     try {
@@ -97,6 +98,14 @@ export default function AppShell() {
       window.removeEventListener("offline", off);
     };
   }, []);
+
+  if (isAviatorPlay) {
+    return (
+      <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#08090b" }}>
+        <Outlet />
+      </div>
+    );
+  }
 
   return (
     <div className="App fg-noise relative min-h-dvh bg-background">

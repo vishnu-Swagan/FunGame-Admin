@@ -130,6 +130,13 @@ function PlayerApp() {
           <Route element={<RequireActive><AppShell /></RequireActive>}>
             <Route path="/home" element={<Home />} />
             <Route path="/games" element={<Games />} />
+            {/* Direct launch URL requested by the operator. caseSensitive keeps
+                the normal lowercase /games/aviator detail page intact. */}
+            <Route
+              path="/games/Aviator"
+              caseSensitive
+              element={<Navigate to="/games/aviator/play" replace />}
+            />
             <Route path="/games/:slug" element={<GameDetail />} />
             <Route path="/games/:slug/play" element={<GamePlay />} />
             <Route path="/search" element={<SearchPage />} />

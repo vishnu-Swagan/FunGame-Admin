@@ -1,4 +1,3 @@
-import { Cabinet } from "@/components/play/arcade/Cabinet";
 import AviatorGame from "@/pages/play/AviatorGame";
 
 /**
@@ -13,11 +12,4 @@ import AviatorGame from "@/pages/play/AviatorGame";
  * cabinet units instead, which removes the second scale altogether and matches
  * the reference felt exactly — see RouletteCabinet.
  */
-export const AviatorCabinet = ({ game }) => (
-  <Cabinet fluid ground="radial-gradient(120% 100% at 50% 100%, #0d2a1c 0%, #061410 50%, #020506 100%)"
-           exitTo={`/games/${game.slug}`} testId="cab-aviator">
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-      <AviatorGame game={game} />
-    </div>
-  </Cabinet>
-);
+export const AviatorCabinet = () => <AviatorGame />;

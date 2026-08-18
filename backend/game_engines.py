@@ -7,6 +7,7 @@ All payouts are integer play chips. PLAY CHIPS ONLY.
 import secrets
 import math
 import os
+import hashlib
 from fastapi import HTTPException
 
 RNG = secrets.SystemRandom()
@@ -880,7 +881,11 @@ def play_no_hold(bet, payload):
 
 
 # ---------------- Aviator helpers ----------------
-AVIATOR_GROWTH = 0.12  # m(t) = e^(0.12 * t)
+# The flight curve is shared verbatim with the Unity-backed reference client.
+# It deliberately remains separate from the private probability configuration:
+# the curve controls animation time, while the secret server setting controls
+# the distribution of immutable crash points.
+AVIATOR_GROWTH = 0.06
 
 
 def aviator_return_factor():
@@ -894,19 +899,47 @@ def aviator_return_factor():
     return return_factor
 
 
-def aviator_crash_point():
-    return_factor = aviator_return_factor()
-    u = RNG.random()
+def aviator_uniform_from_seed(server_seed):
+    digest = hashlib.sha256(f'aviator-crash-v1:{server_seed}'.encode()).hexdigest()
+    return int(digest[:13], 16) / (2 ** 52)
+
+
+def aviator_crash_point(server_seed=None, return_factor=None):
+    return_factor = aviator_return_factor() if return_factor is None else return_factor
+    u = aviator_uniform_from_seed(server_seed) if server_seed is not None else RNG.random()
     crash = max(1.0, return_factor / max(1e-9, 1 - u))
-    return round(min(crash, 200.0), 2)
+    # The displayed crash is the last fully reached cent. Rounding upward would
+    # pay an auto-cashout target that the underlying flight never reached and
+    # would therefore shift the configured return.
+    return min(1_000_000.0, math.floor(crash * 100) / 100)
 
 
 def aviator_multiplier(elapsed_seconds):
-    return round(math.exp(AVIATOR_GROWTH * max(0.0, elapsed_seconds)), 2)
+    seconds = max(0.0, elapsed_seconds)
+    value = (
+        1
+        + 0.06 * seconds
+        + (0.06 * seconds) ** 2
+        - (0.04 * seconds) ** 3
+        + (0.04 * seconds) ** 4
+    )
+    return max(1.0, math.floor(value * 100) / 100)
 
 
 def aviator_time_for(mult):
-    return math.log(max(1.0, mult)) / AVIATOR_GROWTH
+    target = max(1.0, mult)
+    low, high = 0.0, 20.0
+    while aviator_multiplier(high) < target and high < 10_000:
+        high *= 2
+    for _ in range(70):
+        middle = (low + high) / 2
+        if aviator_multiplier(middle) < target:
+            low = middle
+        else:
+            high = middle
+    # Step a few nanoseconds onto the reached-cent side of the floating-point
+    # boundary so multiplier(time_for(x)) is always exactly x, never x-0.01.
+    return high + 1e-7
 
 
 # ---------------- Engine registry (instant games) ----------------

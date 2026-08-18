@@ -22,7 +22,6 @@ import JokerBonusGame from "@/pages/play/slots/JokerBonusGame";
 import Lucky8LineGame from "@/pages/play/slots/Lucky8LineGame";
 import GiantJackpotGame from "@/pages/play/slots/GiantJackpotGame";
 import FeverJokerGame from "@/pages/play/slots/FeverJokerGame";
-import AviatorGame from "@/pages/play/AviatorGame";
 import CheckerGame from "@/pages/play/CheckerGame";
 import IceFishingGame from "@/pages/play/IceFishingGame";
 import BlackjackGame from "@/pages/play/BlackjackGame";

@@ -1,0 +1,168 @@
+.navigation-switcher-wrapper {
+    min-height: 42px;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: center;
+    font-size: 11px;
+    border-bottom: 1px solid var(--line-soft);
+
+    .navigation-switcher {
+        width: 300px;
+        height: 30px;
+        padding: 2px 0;
+        display: flex;
+        background: var(--panel-deep);
+        border: 1px solid #202328;
+        border-radius: 5px;
+        position: relative;
+        overflow: hidden;
+
+        .slider {
+            width: 100px;
+            height: 24px;
+            position: absolute;
+            top: 2px;
+            left: 0;
+            border-radius: 3px;
+            transition: transform .25s cubic-bezier(.2, .8, .2, 1);
+            background: #2a2d31;
+            box-shadow: inset 0 1px rgba(255, 255, 255, .045);
+
+            &::after {
+                content: "";
+                position: absolute;
+                left: 22px;
+                right: 22px;
+                bottom: 0;
+                height: 2px;
+                border-radius: 2px;
+                background: var(--brand-lime);
+            }
+        }
+
+        .tab {
+            width: 100px;
+            height: 24px;
+            position: relative;
+            text-align: center;
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: #858b92;
+            padding: 0;
+            font-weight: 600;
+            transition: color .2s ease, transform .2s ease;
+
+            &:hover { color: var(--text-strong); }
+            &:active { transform: scale(.98); }
+
+            &.active {
+                color: var(--text-strong);
+                cursor: default;
+            }
+        }
+    }
+}
+
+.top-list-wrapper {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+
+    .top-items-list {
+        height: 100%;
+        padding: 3px 5px 8px;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        position: relative;
+
+        > .bet-item {
+            min-height: 82px;
+            margin-top: 4px;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            background: #111315;
+            color: #8f959b;
+            font-size: 10px;
+            transition: border-color .18s ease, background-color .18s ease, transform .18s ease;
+
+            &:hover {
+                border-color: #2b2f34;
+                background: #181b1e;
+                transform: translateX(1px);
+            }
+
+            .main {
+                min-height: 80px;
+                padding: 9px 10px;
+                position: relative;
+                align-items: center;
+                display: flex;
+                width: 100%;
+
+                .score {
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    width: 100%;
+                    gap: 5px;
+                    font-variant-numeric: tabular-nums;
+
+                    > .flex {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    }
+                }
+
+                .icon {
+                    min-width: 55px;
+                    margin-right: 12px;
+                    text-align: center;
+
+                    .avatar {
+                        width: 31px;
+                        height: 31px;
+                        vertical-align: middle;
+                        border: 0;
+                        border-radius: 7px;
+                        object-fit: cover;
+                        background: #25282d;
+                    }
+
+                    .username {
+                        margin-top: 4px;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        color: #9da3a9;
+                        font-size: 10px;
+                        white-space: nowrap;
+                    }
+                }
+
+                .amount {
+                    color: var(--text-strong);
+                    font-size: 12px;
+                    font-weight: 650;
+                }
+
+                .cashout {
+                    padding: 3px 6px;
+                    border-radius: 4px;
+                    background: rgba(184, 244, 27, .08);
+                    color: var(--brand-lime-strong);
+                }
+            }
+        }
+    }
+}
+
+.d-flex { display: flex; }
+.align-items-center { align-items: center; }
+.justify-content-center { justify-content: center; }
+.justify-content-end { justify-content: flex-end; }
+.ml-3 { margin-left: 20px; }
+.w-100 { width: 100%; }
+.w-50 { width: 50%; }

@@ -297,4 +297,19 @@ async def game_history(slug: str, user: dict = Depends(require_active_player)):
     rounds = await db.game_rounds.find(
         {'user_id': user['id'], 'slug': slug, 'status': 'SETTLED'}, {'_id': 0, 'crash_point': 0, 'deck': 0, 'cards': 0}
     ).sort('created_at', -1).to_list(15)
+    if slug == 'aviator' and rounds:
+        round_numbers = [r.get('round_number') for r in rounds if r.get('round_number') is not None]
+        proof_docs = []
+        if round_numbers:
+            proof_docs = await db.aviator_rounds.find(
+                {
+                    'round_number': {'$in': round_numbers},
+                    'status': 'SETTLED',
+                    'server_seed': {'$exists': True, '$ne': ''},
+                },
+                {'_id': 0, 'round_number': 1},
+            ).to_list(len(round_numbers))
+        proof_rounds = {r['round_number'] for r in proof_docs}
+        for round_doc in rounds:
+            round_doc['proof_available'] = round_doc.get('round_number') in proof_rounds
     return {'rounds': serialize_doc(rounds)}

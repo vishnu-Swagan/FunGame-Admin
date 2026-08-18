@@ -11,7 +11,9 @@ import uuid
 import time
 import asyncio
 import logging
-from datetime import datetime, timezone
+import secrets
+import hashlib
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -22,7 +24,7 @@ from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
     MIN_BET, MAX_BET, AVIATOR_GROWTH,
-    aviator_crash_point, aviator_multiplier, aviator_time_for,
+    aviator_crash_point, aviator_multiplier, aviator_return_factor, aviator_time_for,
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
@@ -56,13 +58,13 @@ def _mask(name: str):
 # reference-game cadence. The value is returned by /state, so every client draws
 # the same countdown from the server rather than maintaining its own schedule.
 AV_BETTING = 5.0   # seconds bets are open before takeoff
-AV_RESULT = 4.0    # seconds the crash result stays on screen
+AV_RESULT = 2.5    # reference game crash-result cadence
 
 
 class AviatorBet(BaseModel):
     amount: int = Field(ge=1, le=100_000)
     panel: int = Field(default=1, ge=1, le=2)
-    auto_cashout: Optional[float] = Field(default=None, ge=1.01, le=200)
+    auto_cashout: Optional[float] = Field(default=None, ge=1.01, le=1000)
 
 
 class BetRef(BaseModel):
@@ -70,13 +72,20 @@ class BetRef(BaseModel):
 
 
 async def _av_create_round(round_number: int, start_ts: float):
-    crash = aviator_crash_point()
+    server_seed = secrets.token_hex(32)
+    server_seed_hash = hashlib.sha256(server_seed.encode()).hexdigest()
+    verification_factor = aviator_return_factor()
+    crash = aviator_crash_point(server_seed, verification_factor)
     fly_start = start_ts + AV_BETTING
     crash_at = fly_start + aviator_time_for(crash)
     doc = {
         'round_number': round_number, 'betting_start': start_ts, 'fly_start': fly_start,
         'crash_point': crash, 'crash_at': crash_at, 'ends_at': crash_at + AV_RESULT,
         'status': 'OPEN', 'created_at': _now_iso(),
+        # Never serialized by /state. It is revealed only after settlement by
+        # the authenticated fairness endpoint below.
+        'server_seed': server_seed, 'server_seed_hash': server_seed_hash,
+        'verification_factor': verification_factor,
     }
     try:
         await db.aviator_rounds.insert_one(dict(doc))
@@ -89,7 +98,8 @@ async def _av_create_round(round_number: int, start_ts: float):
 async def _av_history_doc(bet, payout, outcome, session=None):
     await db.game_rounds.insert_one({
         'id': str(uuid.uuid4()), 'user_id': bet['user_id'], 'slug': 'aviator', 'game_name': 'Aviator',
-        'bet': bet['amount'], 'payout': payout, 'status': 'SETTLED', 'outcome': outcome,
+        'round_number': bet['round_number'], 'bet': bet['amount'], 'payout': payout,
+        'status': 'SETTLED', 'outcome': outcome,
         'created_at': _now_iso(), 'settled_at': _now_iso(),
     }, session=session)
 
@@ -231,39 +241,61 @@ async def aviator_state(user: dict = Depends(require_active_player)):
     phase, t = _av_phase(r, now)
     rn = r['round_number']
 
-    # Independent reads run concurrently (one DB round-trip window instead of four).
-    my, feed_raw, hist, balance = await asyncio.gather(
+    # Independent reads run concurrently (one DB round-trip window instead of six).
+    my, feed_raw, previous_raw, hist, balance = await asyncio.gather(
         db.aviator_bets.find(
-            {'user_id': user['id'], 'round_number': {'$in': [rn, rn + 1]}},
+            {'user_id': user['id'], 'round_number': {'$in': [rn - 1, rn, rn + 1]}},
             {'_id': 0, 'user_id': 0},
         ).sort('created_at', 1).to_list(20),
         db.aviator_bets.find(
             {'round_number': rn, 'status': {'$in': ['OPEN', 'CASHED', 'LOST']}}, {'_id': 0}
         ).sort('amount', -1).to_list(40),
+        db.aviator_bets.find(
+            {'round_number': rn - 1, 'status': {'$in': ['CASHED', 'LOST']}}, {'_id': 0}
+        ).sort('amount', -1).to_list(40),
         db.aviator_rounds.find(
-            {'status': 'SETTLED'}, {'_id': 0, 'round_number': 1, 'crash_point': 1}
+            {'status': 'SETTLED'},
+            {'_id': 0, 'round_number': 1, 'crash_point': 1, 'server_seed': 1},
         ).sort('round_number', -1).to_list(20),
         _fresh_balance(user['id']),
     )
+    proof_rounds = {h['round_number'] for h in hist if h.get('server_seed')}
     for b in my:
         b['queued'] = b['round_number'] > rn
+        b['proof_available'] = b['round_number'] in proof_rounds or (
+            b['round_number'] == rn and bool(r.get('server_seed'))
+        )
 
-    ids = list({b['user_id'] for b in feed_raw})
+    ids = list({b['user_id'] for b in [*feed_raw, *previous_raw]})
     names = {}
     if ids:
-        users = await db.users.find({'id': {'$in': ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}).to_list(60)
+        users = await db.users.find(
+            {'id': {'$in': ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}
+        ).to_list(len(ids))
         names = {u['id']: (u.get('display_name') or u.get('email', 'Player').split('@')[0]) for u in users}
-    feed = [{
-        'name': _mask(names.get(b['user_id'], 'Player')), 'amount': b['amount'],
-        'status': b['status'], 'multiplier': b.get('multiplier'), 'payout': b.get('payout', 0),
-    } for b in feed_raw]
+    def public_bet(b):
+        return {
+            'name': _mask(names.get(b['user_id'], 'Player')), 'amount': b['amount'],
+            'status': b['status'], 'multiplier': b.get('multiplier'),
+            'payout': b.get('payout', 0),
+        }
+    feed = [public_bet(b) for b in feed_raw]
+    previous_feed = [public_bet(b) for b in previous_raw]
     resp = {
         'round_number': rn, 'phase': phase, 'server_now': now,
+        # This commitment is public while betting is open; the seed itself is
+        # revealed only after settlement by the fairness endpoint.
+        'server_seed_hash': r.get('server_seed_hash', ''),
         'betting_seconds': AV_BETTING, 'result_seconds': AV_RESULT, 'growth': AVIATOR_GROWTH,
         'my_bets': my, 'all_bets': feed, 'players': len(feed_raw),
+        'previous_bets': previous_feed,
         'total_staked': sum(b['amount'] for b in feed_raw),
-        'history': [{'round_number': h['round_number'], 'crash_point': h['crash_point']} for h in hist],
+        'history': [{
+            'round_number': h['round_number'], 'crash_point': h['crash_point'],
+            'proof_available': bool(h.get('server_seed')),
+        } for h in hist],
         'balance': balance,
+        'min_bet': limits_for('aviator')[0], 'max_bet': limits_for('aviator')[1],
     }
     if phase == 'BETTING':
         resp['phase_ends_in'] = round(t, 2)
@@ -273,7 +305,60 @@ async def aviator_state(user: dict = Depends(require_active_player)):
     else:
         resp['phase_ends_in'] = round(t, 2)
         resp['crash_point'] = r['crash_point']
+        resp['flight_seconds'] = round(max(0, r['crash_at'] - r['fly_start']), 3)
     return resp
+
+
+@router.get('/live/aviator/rounds/{round_number}/fairness')
+async def aviator_round_fairness(round_number: int, user: dict = Depends(require_active_player)):
+    r = await db.aviator_rounds.find_one({'round_number': round_number}, {'_id': 0})
+    if not r:
+        raise HTTPException(status_code=404, detail='Round not found')
+    if r.get('status') != 'SETTLED' or not r.get('server_seed'):
+        raise HTTPException(status_code=409, detail='The server seed is revealed after the round settles')
+    result_hash = hashlib.sha256(f"aviator-crash-v1:{r['server_seed']}".encode()).hexdigest()
+    return {
+        'createdAt': r.get('created_at'),
+        'serverSeed': r['server_seed'],
+        'serverSeedHash': r.get('server_seed_hash', ''),
+        'resultHash': result_hash,
+        'seedOfUsers': [],
+        'flyDetailID': round_number,
+        'crashPoint': r['crash_point'],
+        'target': r['crash_point'],
+        # Returned only after settlement so the client can independently derive
+        # and verify the published crash point. It is not shown in the game UI.
+        'verificationFactor': r['verification_factor'],
+    }
+
+
+@router.get('/live/aviator/top')
+async def aviator_top(period: str = 'day', user: dict = Depends(require_active_player)):
+    windows = {'day': timedelta(days=1), 'month': timedelta(days=31), 'year': timedelta(days=366)}
+    if period not in windows:
+        raise HTTPException(status_code=400, detail='Period must be day, month, or year')
+    cutoff = (datetime.now(timezone.utc) - windows[period]).isoformat()
+    rows = await db.game_rounds.find(
+        {'slug': 'aviator', 'status': 'SETTLED', 'payout': {'$gt': 0}, 'created_at': {'$gte': cutoff}},
+        {'_id': 0, 'user_id': 1, 'bet': 1, 'payout': 1, 'outcome': 1, 'created_at': 1},
+    ).sort('payout', -1).to_list(50)
+    user_ids = list({row['user_id'] for row in rows})
+    names = {}
+    if user_ids:
+        users = await db.users.find(
+            {'id': {'$in': user_ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}
+        ).to_list(60)
+        names = {
+            item['id']: (item.get('display_name') or item.get('email', 'Player').split('@')[0])
+            for item in users
+        }
+    return {'data': [{
+        'betAmount': float(row.get('bet', 0)),
+        'cashOut': float(row.get('payout', 0)),
+        'cashoutAt': float((row.get('outcome') or {}).get('multiplier', 0)),
+        'createdAt': row.get('created_at'),
+        'userinfo': [{'userName': _mask(names.get(row['user_id'], 'Player')), 'avatar': ''}],
+    } for row in rows]}
 
 
 @router.post('/live/aviator/bets')
