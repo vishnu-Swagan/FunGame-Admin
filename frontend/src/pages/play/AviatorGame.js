@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { CalendarDays, History, Minus, Plus, Trophy, UserRound, Users, X } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { flight } from "@/lib/sound";
 import { GameStage } from "@/components/play/GameStage";
 import { Input } from "@/components/ui/input";
@@ -605,6 +606,7 @@ function BetFeed({ st, history }) {
 
 /* ---------------- Main page ---------------- */
 export default function AviatorGame({ game }) {
+  const { setUser } = useAuth();
   const [st, setSt] = useState(null);
   const [balance, setBalance] = useState(null);
   const [mult, setMult] = useState(1.0);
@@ -619,6 +621,19 @@ export default function AviatorGame({ game }) {
   const requestSequenceRef = useRef(0);
   const appliedSequenceRef = useRef(0);
   const busy = busyCount > 0;
+
+  const applyBalance = useCallback((nextBalance) => {
+    if (typeof nextBalance !== "number") return;
+    setBalance(nextBalance);
+    // The cabinet and the global header share the same authoritative value.
+    // Preserve the rest of the authenticated user rather than forcing a second
+    // profile request every time the live round poll observes a wallet change.
+    setUser((current) =>
+      current && current.chip_balance !== nextBalance
+        ? { ...current, chip_balance: nextBalance }
+        : current
+    );
+  }, [setUser]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -640,7 +655,7 @@ export default function AviatorGame({ game }) {
       const prev = stRef.current;
       stRef.current = data;
       setSt(data);
-      setBalance(data.balance);
+      applyBalance(data.balance);
       growthRef.current = data.growth || 0.12;
       if (data.phase === "FLYING") {
         flyStartRef.current = Date.now() - data.fly_elapsed * 1000;
@@ -666,7 +681,7 @@ export default function AviatorGame({ game }) {
     } finally {
       pollBusyRef.current = false;
     }
-  }, [loadHistory]);
+  }, [applyBalance, loadHistory]);
 
   useEffect(() => {
     poll();
@@ -697,7 +712,7 @@ export default function AviatorGame({ game }) {
       if (auto) body.auto_cashout = parseFloat(auto);
       const { data } = await api.post("/live/aviator/bets", body);
       appliedSequenceRef.current = ++requestSequenceRef.current;
-      setBalance(data.balance);
+      applyBalance(data.balance);
       if (!options.automatic) toast.success(data.queued ? "Bet queued for the next round" : "Bet placed — good luck!");
       await poll();
       return true;
@@ -714,7 +729,7 @@ export default function AviatorGame({ game }) {
     try {
       const { data } = await api.post("/live/aviator/bets/cancel", { bet_id: betId });
       appliedSequenceRef.current = ++requestSequenceRef.current;
-      setBalance(data.balance);
+      applyBalance(data.balance);
       toast.success(`Bet cancelled — ${formatChips(data.refunded)} refunded`);
       await poll();
     } catch (e) {
@@ -729,7 +744,7 @@ export default function AviatorGame({ game }) {
     try {
       const { data } = await api.post("/live/aviator/cashout", { bet_id: betId });
       appliedSequenceRef.current = ++requestSequenceRef.current;
-      setBalance(data.balance);
+      applyBalance(data.balance);
       if (data.result === "cashed_out") {
         toast.success(`Cashed out at ${data.multiplier}x — +${formatChips(data.payout)} chips`);
         publishWins("aviator", [{ id: `me-av-${betId}`, mine: true, payout: data.payout, bet: 0 }]);
