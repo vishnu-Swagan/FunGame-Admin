@@ -1,7 +1,7 @@
-"""Gameplay routes: live Fun Roulette + shared round history.
+"""Gameplay routes: live American Roulette + shared round history.
 
 ALL 18 games now run as universal server-synchronized live rounds:
-- Fun Roulette keeps its dedicated endpoints below (30s loop).
+- American Roulette keeps its dedicated endpoints below (synchronized loop).
 - Aviator + the 16 fixed-cycle games are served by routes_live.py.
 - The legacy instant-play endpoint is gated with LIVE_ROUNDS.
 """
@@ -60,7 +60,7 @@ async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_a
     })
 
 
-# ---------------- Live Fun Roulette (universal synchronized rounds) ----------------
+# ---------------- Live American Roulette (universal synchronized rounds) ----------------
 # Rounds are derived from universal epoch time: every player worldwide sees the
 # same round number, the same countdown and the same winning number.
 BETTING_SECONDS = 60   # 0-60s: bets open — a full minute, as the machine gives
@@ -159,9 +159,9 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
         if total_bet == 0:
             continue
         if total_payout > 0:
-            await credit_chips(user_id, total_payout, f'Fun Roulette win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette')
+            await credit_chips(user_id, total_payout, f'American Roulette win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette')
         round_doc = {
-            'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette', 'game_name': 'Fun Roulette',
+            'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette', 'game_name': 'American Roulette',
             'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
             'outcome': {'round_number': rn, 'winning_number': winning, 'color': roulette_color(winning), 'bets': bet_details},
             'created_at': _now_iso(), 'settled_at': _now_iso(),
@@ -197,6 +197,11 @@ async def roulette_state(user: dict = Depends(require_active_player)):
         'betting_seconds': BETTING_SECONDS,
         'spin_seconds': SPIN_SECONDS,
         'round_seconds': ROUND_SECONDS,
+        'limits': {
+            'minimum': MIN_BET,
+            'even_money_position_max': EVEN_MONEY_MAX,
+            'position_max': POSITION_MAX,
+        },
         'winning_number': winning_number,
         'winning_color': roulette_color(winning_number) if winning_number is not None else None,
         'my_bets': my_bets,
@@ -234,7 +239,7 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
         })
     bet_id = str(uuid.uuid4())
     try:
-        await debit_chips(user['id'], body.amount, f'Fun Roulette bet (round {round_number})', ref=bet_id, kind=ledger.STAKE, game='fun-roulette')
+        await debit_chips(user['id'], body.amount, f'American Roulette bet (round {round_number})', ref=bet_id, kind=ledger.STAKE, game='fun-roulette')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     await db.roulette_bets.insert_one({
@@ -262,7 +267,7 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
         if res.modified_count:
             refunded += b['amount']
     if refunded > 0:
-        await credit_chips(user['id'], refunded, f'Fun Roulette bets refunded (round {round_number})', ref=str(round_number), kind=ledger.REFUND, game='fun-roulette')
+        await credit_chips(user['id'], refunded, f'American Roulette bets refunded (round {round_number})', ref=str(round_number), kind=ledger.REFUND, game='fun-roulette')
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
 
@@ -282,7 +287,7 @@ async def roulette_undo_bet(user: dict = Depends(require_active_player)):
         res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
         if res.modified_count:
             refunded = b['amount']
-            await credit_chips(user['id'], refunded, f'Fun Roulette undo (round {round_number})', ref=b['id'], kind=ledger.REFUND, game='fun-roulette')
+            await credit_chips(user['id'], refunded, f'American Roulette undo (round {round_number})', ref=b['id'], kind=ledger.REFUND, game='fun-roulette')
     my_bets = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},

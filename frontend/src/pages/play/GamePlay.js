@@ -34,7 +34,6 @@ import AndarBaharCabinet from "@/pages/play/cabinet/AndarBaharCabinet";
 import FunTargetCabinet from "@/pages/play/cabinet/FunTargetCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
 import CheckerCabinet from "@/pages/play/cabinet/CheckerCabinet";
-import RouletteCabinet from "@/pages/play/cabinet/RouletteCabinet";
 import { AviatorCabinet } from "@/pages/play/cabinet/FluidCabinets";
 import {
   NoHoldCabinet, ChampionPokerCabinet, FeverJokerCabinet, GiantJackpotCabinet,
@@ -44,7 +43,7 @@ import {
 const COMPONENTS = {
   "seven-up-down": SevenUpDownCabinet,
   "fun-target": FunTargetCabinet,
-  "fun-roulette": RouletteCabinet,
+  "fun-roulette": RouletteGame,
   keno: KenoCabinet,
   bingo: BingoCabinet,
   "super-golden-wheel": GoldenWheelCabinet,

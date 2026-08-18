@@ -1,4 +1,4 @@
-# Fun Roulette — the table engine
+# American Roulette — the table engine
 
 `engine.js` is the game itself: the rectified overhead wheel, the ball physics,
 the layout, the racetrack, statistics, favourites, autoplay and the spoken call.

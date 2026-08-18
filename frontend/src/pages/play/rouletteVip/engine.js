@@ -27,6 +27,10 @@ export function mountRoulette(root, opts) {
   // through DOMParser keeps the innerHTML idiom out of the app entirely
   const parsed = new DOMParser().parseFromString('<div>' + MARKUP + '</div>', 'text/html');
   root.replaceChildren(...parsed.body.firstChild.childNodes);
+  const tableName = root.querySelector('.tablename');
+  if (tableName && tableName.firstChild) {
+    tableName.firstChild.textContent = 'Chakri.Casino American Roulette ';
+  }
   const onPlaceBet = opts.onPlaceBet || (() => {});
   const onUndo = opts.onUndo || (() => {});
   const onClear = opts.onClear || (() => {});
@@ -47,6 +51,8 @@ export function mountRoulette(root, opts) {
   const EURO = POCKETS;               // the wheel-order sequence, whatever the wheel
   const SEG  = 360 / NP;
   const CHIPS = [10, 50, 100, 500, 1000];
+  let timing = { bettingSeconds: 60, spinSeconds: 10, resultSeconds: 5 };
+  let tableLimits = { minimum: 10, even_money_position_max: 2000, position_max: 10000 };
 
   /* ---- calibrated projective model of the photographed wheel ----
      A circle photographed in perspective does NOT map equal wheel angles onto
@@ -609,7 +615,12 @@ export function mountRoulette(root, opts) {
   else LAND_MQ.addListener(onOrient);
 
   /* ---------- money / bets ---------- */
-  const fmt = n => n.toLocaleString('en-IN');
+  const fmt = n => Number(n || 0).toLocaleString('en-IN');
+  const syncTableLimits = () => {
+    const range = tableName && tableName.querySelector('b');
+    if (range) range.textContent = `${fmt(tableLimits.minimum)} – ${fmt(tableLimits.position_max)}`;
+  };
+  syncTableLimits();
 
   function toast(msg) {
     toastEl.textContent = msg;
@@ -1478,7 +1489,7 @@ export function mountRoulette(root, opts) {
       });
       body.appendChild(el('p', 'sthint',
         'Zero came up ' + zeros + ' time' + (zeros === 1 ? '' : 's') + ' in ' + n +
-        ' spins and is excluded from the even-money chances, which is where the house edge lives.'));
+        ' spins. Zero and double zero are excluded from the even-money groups above.'));
       return;
     }
 
@@ -1969,16 +1980,15 @@ export function mountRoulette(root, opts) {
       t.appendChild(tb);
       body.appendChild(t);
       const kv = el('div');
-      [['Table minimum', fmt(CHIPS[0]) + ' chips'], ['Table maximum', fmt(500000) + ' chips'],
-       ['Wheel', 'Double zero, 38 pockets'], ['House edge', '5.26% on every bet']].forEach(([k, v]) => {
+      [['Table minimum', fmt(tableLimits.minimum) + ' chips'],
+       ['Position maximum', fmt(tableLimits.position_max) + ' chips'],
+       ['Even-money maximum', fmt(tableLimits.even_money_position_max) + ' chips'],
+       ['Wheel', 'American double zero, 38 pockets']].forEach(([k, v]) => {
         const d = el('div', 'kv'); d.append(el('span', null, k), el('b', null, v)); kv.appendChild(d);
       });
       body.appendChild(kv);
       body.appendChild(el('p', 'sthint',
-        'Every bet carries the same 5.26% edge because the wheel has 38 pockets — ' +
-        '0 and 00 — but pays as though it had 36. That is roughly twice the edge of ' +
-        'a single-zero wheel. Chips have no cash value; sector returns are rounded ' +
-        'to whole chips.'));
+        'Payouts are shown before a bet is placed. Play-chip returns are rounded to whole chips.'));
       body.appendChild(backRow());
       return;
     }
@@ -2179,8 +2189,6 @@ export function mountRoulette(root, opts) {
      and the winning pocket are all decided once on the server and handed to every
      player, which is what makes the spin universal. Everything below reacts to
      that state; nothing here decides anything. */
-  const BET_MS = 20000, SPIN_MS = 10000, RESULT_MS = 5000;   // mirrors the server clock
-
   function winFlash(amount) {
     const f = $('winflash');
     f.replaceChildren(document.createTextNode('+' + fmt(amount) + ' CHIPS'));
@@ -2215,6 +2223,11 @@ export function mountRoulette(root, opts) {
     if (!st) return;
     balance = st.balance != null ? st.balance : balance;
     if (st.chipValues) CHIPS.splice(0, CHIPS.length, ...st.chipValues);
+    if (st.timing) timing = { ...timing, ...st.timing };
+    if (st.limits) {
+      tableLimits = { ...tableLimits, ...st.limits };
+      syncTableLimits();
+    }
 
     /* --- the chips on the felt are the server's record of them, not ours ---
        null is not an empty felt. It means the caller has a bet in flight and the
@@ -2287,12 +2300,12 @@ export function mountRoulette(root, opts) {
       const timer = $('bettimer'), tsec = $('btsec'), tval = $('btval');
       const T_CIRC = 2 * Math.PI * 28;
       tsec.textContent = left;
-      tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, st.secondsLeft / (BET_MS / 1000)))).toFixed(1);
+      tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, st.secondsLeft / timing.bettingSeconds))).toFixed(1);
       /* The second countdown ring rode on the table's own back button, which the
          app's header already provides. With that gone this is simply absent, and
          the ring in the wheel stage above is the only clock. */
       if (ringval) {
-        ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, st.secondsLeft / (BET_MS / 1000)))).toFixed(1);
+        ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, st.secondsLeft / timing.bettingSeconds))).toFixed(1);
       }
       timer.dataset.state = left <= 3 ? 'urgent' : left <= 6 ? 'warn' : '';
       if (left >= 1 && left <= 3 && left !== lastAlarm) { lastAlarm = left; Sound.alarm(left); }

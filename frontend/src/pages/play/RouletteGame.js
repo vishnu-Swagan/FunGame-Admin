@@ -8,7 +8,7 @@ import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import "@/pages/play/rouletteVip/styles.css";
 
 /**
- * Fun Roulette — the American double-zero table.
+ * American Roulette — the synchronized double-zero table.
  *
  * The visuals, physics, racetrack, statistics and panels live in the engine,
  * which is imperative DOM code mounted into the div below. This component does
@@ -102,6 +102,12 @@ export default function RouletteGame({ game }) {
           phase: data.phase,
           roundNumber: data.round_number,
           secondsLeft: data.phase_ends_in,
+          timing: {
+            bettingSeconds: data.betting_seconds,
+            spinSeconds: data.spin_seconds,
+            resultSeconds: Math.max(0, data.round_seconds - data.betting_seconds - data.spin_seconds),
+          },
+          limits: data.limits,
           winningNumber: data.winning_number,
           // a bet still in flight would be missing from the server's list and the
           // chip would flicker off the felt, so hold the optimistic view until it lands
@@ -182,7 +188,7 @@ export default function RouletteGame({ game }) {
   }, []);
 
   return (
-    <PlayShell game={game} title="Fun Roulette" compact>
+    <PlayShell game={game} title="American Roulette" compact>
       {fatal ? (
         <div className="p-6 text-center text-sm text-white/70" data-testid="roulette-error">
           The table could not be loaded. {fatal}

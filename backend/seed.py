@@ -44,9 +44,9 @@ GAMES = [
     {"slug": "fever-joker-bonus", "name": "Fever Joker Bonus", "category": "Slots", "tagline": "Feverish spins, joker wilds", "featured": False,
      "description": "A hot three-reel slot where the Joker substitutes everything and triggers fever bonus rounds.",
      "art": {"from": "#33091c", "to": "#c2185b", "accent": "#ff4f9a", "icon": "flame", "glyph": "JKR"}},
-    {"slug": "fun-roulette", "name": "Fun Roulette", "category": "Wheel", "tagline": "Spin the wheel of fortune", "featured": True,
-     "description": "European-style roulette with play chips. Straight, split, corner and colour bets.",
-     "art": {"from": "#101f12", "to": "#1f7a33", "accent": "#4ade80", "icon": "circle-dot", "glyph": "17"}},
+    {"slug": "fun-roulette", "name": "American Roulette", "category": "Wheel", "tagline": "Double zero, one synchronized table", "featured": True,
+     "description": "American double-zero roulette with live synchronized rounds, neighbour bets, inside bets and classic outside chances.",
+     "art": {"from": "#101f12", "to": "#1f7a33", "accent": "#4ade80", "icon": "circle-dot", "glyph": "00"}},
     {"slug": "fun-target", "name": "Fun Target", "category": "Numbers", "tagline": "Hit the target number", "featured": False,
      "description": "Pick a number from 0 to 9 and watch the wheel. Direct hits pay big in play chips.",
      "art": {"from": "#2b0d0d", "to": "#b23b3b", "accent": "#ff7b7b", "icon": "target", "glyph": "9"}},
@@ -173,6 +173,19 @@ async def run_seed():
                 }},
                 upsert=True,
             )
+
+    # Upgrade the original catalogue title without overwriting an operator's
+    # later custom name. The slug stays stable because live bets, history and
+    # admin reporting already use it as their durable game identifier.
+    await db.games.update_one(
+        {'slug': 'fun-roulette', 'name': 'Fun Roulette'},
+        {'$set': {
+            'name': 'American Roulette',
+            'tagline': 'Double zero, one synchronized table',
+            'description': 'American double-zero roulette with live synchronized rounds, neighbour bets, inside bets and classic outside chances.',
+            'art.glyph': '00',
+        }},
+    )
 
     # Announcements
     if await db.announcements.count_documents({}) == 0:
