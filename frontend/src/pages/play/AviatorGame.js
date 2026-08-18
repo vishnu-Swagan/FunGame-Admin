@@ -32,10 +32,12 @@ export default function AviatorGame() {
   }, [navigate, setUser]);
 
   return (
+    // Version the document URL so browsers that cached Render's former
+    // X-Frame-Options: DENY response do not keep showing a blocked frame.
     <iframe
       data-testid="aviator-reference-game"
       title="Aviator live game"
-      src="/aviator-live/index.html"
+      src="/aviator-live/index.html?v=20260818-frame-policy"
       allow="autoplay; fullscreen"
       style={{
         position: "fixed",
