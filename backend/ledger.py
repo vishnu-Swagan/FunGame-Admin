@@ -107,7 +107,8 @@ def day_bounds_utc(day):
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
-async def _write(user_id, kind, direction, amount, balance_after, note, ref, game):
+async def _write(user_id, kind, direction, amount, balance_after, note, ref, game, session=None):
+    kwargs = {'session': session} if session is not None else {}
     await db.chip_transactions.insert_one({
         'id': str(uuid.uuid4()),
         'user_id': user_id,
@@ -120,34 +121,38 @@ async def _write(user_id, kind, direction, amount, balance_after, note, ref, gam
         'note': note,
         'ref': ref,
         'created_at': _now(),
-    })
+    }, **kwargs)
 
 
 async def credit_chips(user_id: str, amount: int, note: str, ref: str = None,
-                       kind: str = ADJUST, game: str = None):
+                       kind: str = ADJUST, game: str = None, session=None):
     amount = int(amount)
+    kwargs = {'session': session} if session is not None else {}
     result = await db.users.find_one_and_update(
         {'id': user_id}, {'$inc': {'chip_balance': amount}}, return_document=True,
+        **kwargs,
     )
     balance_after = result.get('chip_balance', 0) if result else 0
-    await _write(user_id, kind, 'CREDIT', amount, balance_after, note, ref, game)
+    await _write(user_id, kind, 'CREDIT', amount, balance_after, note, ref, game, session=session)
     return balance_after
 
 
 async def debit_chips(user_id: str, amount: int, note: str, ref: str = None,
-                      kind: str = ADJUST, game: str = None):
+                      kind: str = ADJUST, game: str = None, session=None):
     amount = int(amount)
     if kind == STAKE:
         # Before the balance moves, and before the caller has written a bet row.
         for guard in _stake_guards:
             await guard(user_id, amount)
+    kwargs = {'session': session} if session is not None else {}
     result = await db.users.find_one_and_update(
         {'id': user_id, 'chip_balance': {'$gte': amount}},
         {'$inc': {'chip_balance': -amount}},
         return_document=True,
+        **kwargs,
     )
     if result is None:
         raise InsufficientChips()
     balance_after = result.get('chip_balance', 0)
-    await _write(user_id, kind, 'DEBIT', amount, balance_after, note, ref, game)
+    await _write(user_id, kind, 'DEBIT', amount, balance_after, note, ref, game, session=session)
     return balance_after

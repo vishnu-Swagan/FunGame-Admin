@@ -8,7 +8,7 @@ import uuid
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -103,6 +103,12 @@ async def _core_indexes():
     await db.aviator_rounds.create_index('round_number', unique=True)
     await db.aviator_bets.create_index([('round_number', 1), ('status', 1)])
     await db.aviator_bets.create_index([('user_id', 1), ('round_number', 1)])
+    await db.aviator_bets.create_index(
+        [('user_id', 1), ('round_number', 1), ('panel', 1)],
+        unique=True,
+        partialFilterExpression={'active': True},
+        name='aviator_one_active_bet_per_panel',
+    )
 
 
 @asynccontextmanager
@@ -185,6 +191,15 @@ async def root():
 
 @api_router.get('/health')
 async def health():
+    # Keep the private probability setting on the server, but fail the health
+    # gate when it is missing or invalid so a bad release never receives traffic.
+    from game_engines import aviator_return_factor
+    try:
+        aviator_return_factor()
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail='Aviator configuration unavailable'
+        ) from exc
     return {'status': 'ok'}
 
 

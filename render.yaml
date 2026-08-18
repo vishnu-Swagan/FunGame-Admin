@@ -32,6 +32,8 @@ services:
         value: fungame
       - key: JWT_SECRET
         sync: false          # set in dashboard — long random string
+      - key: AVIATOR_RETURN_FACTOR
+        sync: false          # private server-side probability configuration
       - key: CORS_ORIGINS
         # Both origins during the rename: the old host keeps working until the
         # service is renamed in the dashboard, and the new one works the moment

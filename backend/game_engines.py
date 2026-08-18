@@ -6,6 +6,7 @@ All payouts are integer play chips. PLAY CHIPS ONLY.
 """
 import secrets
 import math
+import os
 from fastapi import HTTPException
 
 RNG = secrets.SystemRandom()
@@ -882,9 +883,21 @@ def play_no_hold(bet, payload):
 AVIATOR_GROWTH = 0.12  # m(t) = e^(0.12 * t)
 
 
+def aviator_return_factor():
+    """Load and validate the private Aviator probability configuration."""
+    raw_factor = os.environ.get('AVIATOR_RETURN_FACTOR', '').strip()
+    if not raw_factor:
+        raise RuntimeError('AVIATOR_RETURN_FACTOR is not configured')
+    return_factor = float(raw_factor)
+    if not 0 < return_factor < 1:
+        raise RuntimeError('AVIATOR_RETURN_FACTOR must be between 0 and 1')
+    return return_factor
+
+
 def aviator_crash_point():
+    return_factor = aviator_return_factor()
     u = RNG.random()
-    crash = max(1.0, 0.70 / max(1e-9, 1 - u))
+    crash = max(1.0, return_factor / max(1e-9, 1 - u))
     return round(min(crash, 200.0), 2)
 
 

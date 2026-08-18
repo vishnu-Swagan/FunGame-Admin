@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from db import db
+from pymongo.errors import DuplicateKeyError
+from db import client, db
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
@@ -51,11 +52,10 @@ def _mask(name: str):
 # ======================================================================
 # AVIATOR - Spribe-style crash game with universal live rounds
 # ======================================================================
-# Aviator's betting window matches every other table at a minute. It is a crash
-# game and its rounds used to be much shorter; one length across the app is what
-# the operator asked for, and a player moving between tables now finds the same
-# clock everywhere.
-AV_BETTING = 60.0  # seconds bets are open before takeoff
+# Aviator uses a short launch window so consecutive crash rounds keep their
+# reference-game cadence. The value is returned by /state, so every client draws
+# the same countdown from the server rather than maintaining its own schedule.
+AV_BETTING = 5.0   # seconds bets are open before takeoff
 AV_RESULT = 4.0    # seconds the crash result stays on screen
 
 
@@ -86,43 +86,93 @@ async def _av_create_round(round_number: int, start_ts: float):
         return await db.aviator_rounds.find_one({'round_number': round_number})
 
 
-async def _av_history_doc(bet, payout, outcome):
+async def _av_history_doc(bet, payout, outcome, session=None):
     await db.game_rounds.insert_one({
         'id': str(uuid.uuid4()), 'user_id': bet['user_id'], 'slug': 'aviator', 'game_name': 'Aviator',
         'bet': bet['amount'], 'payout': payout, 'status': 'SETTLED', 'outcome': outcome,
         'created_at': _now_iso(), 'settled_at': _now_iso(),
-    })
+    }, session=session)
 
 
-async def _av_cash_bet(bet, mult, crash_point=None, auto=False):
-    """Idempotently settle one OPEN bet as cashed out. Returns payout or None."""
-    payout = int(round(bet['amount'] * mult))
-    res = await db.aviator_bets.update_one(
-        {'id': bet['id'], 'status': 'OPEN'},
-        {'$set': {'status': 'CASHED', 'payout': payout, 'multiplier': mult, 'auto': auto, 'settled_at': _now_iso()}},
-    )
-    if res.modified_count == 0:
-        return None
-    await credit_chips(bet['user_id'], payout, f'Aviator cashout {mult}x', ref=bet['id'], kind=ledger.PAYOUT, game='aviator')
-    await _av_history_doc(bet, payout, {'result': 'cashed_out', 'multiplier': mult, 'crash_point': crash_point})
-    return payout
+async def _av_cash_bet(bet, mult, crash_point=None, auto=False, cashout_deadline=None):
+    """Atomically settle one OPEN bet and its wallet/history movements."""
+    async def settle(session):
+        if cashout_deadline is not None and time.time() >= cashout_deadline:
+            return None
+        current = await db.aviator_bets.find_one(
+            {'id': bet['id'], 'status': 'OPEN'}, session=session,
+        )
+        if not current:
+            return None
+        payout = int(round(current['amount'] * mult))
+        res = await db.aviator_bets.update_one(
+            {'id': current['id'], 'status': 'OPEN'},
+            {'$set': {
+                'status': 'CASHED', 'active': False, 'payout': payout,
+                'multiplier': mult, 'auto': auto, 'settled_at': _now_iso(),
+            }},
+            session=session,
+        )
+        if res.modified_count == 0:
+            return None
+        await credit_chips(
+            current['user_id'], payout, f'Aviator cashout {mult}x', ref=current['id'],
+            kind=ledger.PAYOUT, game='aviator', session=session,
+        )
+        await _av_history_doc(
+            current, payout,
+            {'result': 'cashed_out', 'multiplier': mult, 'crash_point': crash_point},
+            session=session,
+        )
+        return payout
+
+    async with await client.start_session() as session:
+        return await session.with_transaction(settle)
+
+
+async def _av_lose_bet(bet, crash_point):
+    """Atomically mark one bet lost and append its personal round history."""
+    async def settle(session):
+        current = await db.aviator_bets.find_one(
+            {'id': bet['id'], 'status': 'OPEN'}, session=session,
+        )
+        if not current:
+            return False
+        res = await db.aviator_bets.update_one(
+            {'id': current['id'], 'status': 'OPEN'},
+            {'$set': {
+                'status': 'LOST', 'active': False, 'payout': 0,
+                'settled_at': _now_iso(),
+            }},
+            session=session,
+        )
+        if res.modified_count == 0:
+            return False
+        await _av_history_doc(
+            current, 0, {'result': 'crashed', 'crash_point': crash_point},
+            session=session,
+        )
+        return True
+
+    async with await client.start_session() as session:
+        return await session.with_transaction(settle)
 
 
 async def _av_settle_round(r):
     """Settle every OPEN bet of a crashed round. Idempotent."""
     crash = r['crash_point']
-    bets = await db.aviator_bets.find({'round_number': r['round_number'], 'status': 'OPEN'}).to_list(500)
-    for b in bets:
-        auto = b.get('auto_cashout')
-        if auto and auto <= crash:
-            await _av_cash_bet(b, auto, crash_point=crash, auto=True)
-        else:
-            res = await db.aviator_bets.update_one(
-                {'id': b['id'], 'status': 'OPEN'},
-                {'$set': {'status': 'LOST', 'payout': 0, 'settled_at': _now_iso()}},
-            )
-            if res.modified_count:
-                await _av_history_doc(b, 0, {'result': 'crashed', 'crash_point': crash})
+    while True:
+        bets = await db.aviator_bets.find(
+            {'round_number': r['round_number'], 'status': 'OPEN'}
+        ).to_list(500)
+        if not bets:
+            break
+        for b in bets:
+            auto = b.get('auto_cashout')
+            if auto and auto <= crash:
+                await _av_cash_bet(b, auto, crash_point=crash, auto=True)
+            else:
+                await _av_lose_bet(b, crash)
     await db.aviator_rounds.update_one(
         {'round_number': r['round_number'], 'status': 'OPEN'}, {'$set': {'status': 'SETTLED'}}
     )
@@ -131,12 +181,22 @@ async def _av_settle_round(r):
 async def _av_auto_cash_flying(r, now):
     """Eagerly cash out auto-cashout bets whose target multiplier was reached."""
     mult = aviator_multiplier(now - r['fly_start'])
-    bets = await db.aviator_bets.find({
-        'round_number': r['round_number'], 'status': 'OPEN',
-        'auto_cashout': {'$ne': None, '$lte': mult},
-    }).to_list(200)
-    for b in bets:
-        await _av_cash_bet(b, b['auto_cashout'], crash_point=None, auto=True)
+    while True:
+        if time.time() >= r['crash_at']:
+            return
+        bets = await db.aviator_bets.find({
+            'round_number': r['round_number'], 'status': 'OPEN',
+            'auto_cashout': {'$ne': None, '$lte': mult},
+        }).to_list(200)
+        if not bets:
+            break
+        for b in bets:
+            payout = await _av_cash_bet(
+                b, b['auto_cashout'], crash_point=None, auto=True,
+                cashout_deadline=r['crash_at'],
+            )
+            if payout is None and time.time() >= r['crash_at']:
+                return
 
 
 async def advance_aviator():
@@ -231,21 +291,34 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
         target_rn = r['round_number']
     else:
         target_rn = r['round_number'] + 1
-    existing = await db.aviator_bets.find_one(
-        {'user_id': user['id'], 'round_number': target_rn, 'panel': body.panel, 'status': 'OPEN'})
-    if existing:
-        raise HTTPException(status_code=409, detail='You already have an active bet on this panel for that round')
     bet_id = str(uuid.uuid4())
+    auto = round(float(body.auto_cashout), 2) if body.auto_cashout else None
+    bet = {
+        'id': bet_id, 'user_id': user['id'], 'round_number': target_rn, 'panel': body.panel,
+        'amount': body.amount, 'auto_cashout': auto, 'status': 'OPEN', 'active': True,
+        'payout': 0, 'multiplier': None, 'created_at': _now_iso(),
+    }
+
+    async def reserve_and_debit(session):
+        existing = await db.aviator_bets.find_one({
+            'user_id': user['id'], 'round_number': target_rn,
+            'panel': body.panel, 'status': 'OPEN',
+        }, session=session)
+        if existing:
+            raise DuplicateKeyError('active Aviator panel bet already exists')
+        await db.aviator_bets.insert_one(dict(bet), session=session)
+        await debit_chips(
+            user['id'], body.amount, f'Aviator bet (round {target_rn})', ref=bet_id,
+            kind=ledger.STAKE, game='aviator', session=session,
+        )
+
     try:
-        await debit_chips(user['id'], body.amount, f'Aviator bet (round {target_rn})', ref=bet_id, kind=ledger.STAKE, game='aviator')
+        async with await client.start_session() as session:
+            await session.with_transaction(reserve_and_debit)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail='You already have an active bet on this panel for that round')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
-    auto = round(float(body.auto_cashout), 2) if body.auto_cashout else None
-    await db.aviator_bets.insert_one({
-        'id': bet_id, 'user_id': user['id'], 'round_number': target_rn, 'panel': body.panel,
-        'amount': body.amount, 'auto_cashout': auto, 'status': 'OPEN', 'payout': 0,
-        'multiplier': None, 'created_at': _now_iso(),
-    })
     balance = await _fresh_balance(user['id'])
     return {
         'bet_id': bet_id, 'round_number': target_rn, 'panel': body.panel,
@@ -267,13 +340,28 @@ async def aviator_cancel_bet(body: BetRef, user: dict = Depends(require_active_p
         b['round_number'] == r['round_number'] and phase == 'BETTING' and t > 0.3)
     if not cancellable:
         raise HTTPException(status_code=400, detail='Too late to cancel - the plane is taking off')
-    res = await db.aviator_bets.update_one(
-        {'id': b['id'], 'status': 'OPEN'},
-        {'$set': {'status': 'CANCELLED', 'settled_at': _now_iso()}},
-    )
-    if res.modified_count == 0:
+    async def cancel_and_refund(session):
+        current = await db.aviator_bets.find_one(
+            {'id': b['id'], 'user_id': user['id'], 'status': 'OPEN'}, session=session,
+        )
+        if not current:
+            return None
+        res = await db.aviator_bets.update_one(
+            {'id': current['id'], 'status': 'OPEN'},
+            {'$set': {'status': 'CANCELLED', 'active': False, 'settled_at': _now_iso()}},
+            session=session,
+        )
+        if res.modified_count == 0:
+            return None
+        return await credit_chips(
+            user['id'], current['amount'], 'Aviator bet cancelled', ref=current['id'],
+            kind=ledger.REFUND, game='aviator', session=session,
+        )
+
+    async with await client.start_session() as session:
+        balance = await session.with_transaction(cancel_and_refund)
+    if balance is None:
         raise HTTPException(status_code=400, detail='Bet already settled')
-    balance = await credit_chips(user['id'], b['amount'], 'Aviator bet cancelled', ref=b['id'], kind=ledger.REFUND, game='aviator')
     return {'message': 'Bet cancelled', 'refunded': b['amount'], 'balance': balance}
 
 
@@ -296,8 +384,14 @@ async def aviator_cashout(body: BetRef, user: dict = Depends(require_active_play
         balance = await _fresh_balance(user['id'])
         return {'result': 'crashed', 'crash_point': r['crash_point'], 'payout': 0, 'balance': balance}
     mult = aviator_multiplier(now - r['fly_start'])
-    payout = await _av_cash_bet(b, mult)
+    payout = await _av_cash_bet(b, mult, cashout_deadline=r['crash_at'])
     if payout is None:
+        now = time.time()
+        if now >= r['crash_at']:
+            if r.get('status') == 'OPEN':
+                await _av_settle_round(r)
+            balance = await _fresh_balance(user['id'])
+            return {'result': 'crashed', 'crash_point': r['crash_point'], 'payout': 0, 'balance': balance}
         raise HTTPException(status_code=400, detail='Bet already settled')
     balance = await _fresh_balance(user['id'])
     return {'result': 'cashed_out', 'multiplier': mult, 'payout': payout, 'balance': balance}
