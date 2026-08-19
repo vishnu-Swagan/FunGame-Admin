@@ -50,7 +50,7 @@ export function mountRoulette(root, opts) {
   const hueOf = s => isZero(s) ? 'green' : (RED.has(+s) ? 'red' : 'black');
   const EURO = POCKETS;               // the wheel-order sequence, whatever the wheel
   const SEG  = 360 / NP;
-  const CHIPS = [10, 25, 50, 100, 500, 1000];
+  const CHIPS = [10, 50, 100, 500, 1000];
   let timing = { bettingSeconds: 60, spinSeconds: 10, resultSeconds: 5 };
   let tableLimits = { minimum: 10, even_money_position_max: 2000, position_max: 10000 };
 
@@ -525,7 +525,7 @@ export function mountRoulette(root, opts) {
      stacked rows in that space gives 16px cells that cannot be bet on reliably.
      Five rows in the same space gives about 45px. Same DOM, same keys, same
      settlement; only the grid placement differs. */
-  const LAND_MQ = window.matchMedia('(orientation: landscape) and (min-width: 720px)');
+  const LAND_MQ = window.matchMedia('(orientation: landscape) and (max-height: 620px)');
 
   const OUTSIDES_ROW = [
     { key: 'range:low',   label: '1-18'  },
@@ -551,7 +551,7 @@ export function mountRoulette(root, opts) {
     if (land) {
       /* Six half-rows for the numbers so the end column can be split in two:
          a number spans two of them, each zero spans three. */
-      [['00', '1 / span 3'], ['0', '4 / span 3']].forEach(([lab, row]) => {
+      [['0', '1 / span 3'], ['00', '4 / span 3']].forEach(([lab, row]) => {
         const z = mkCell('zero', 'straight:' + lab, null, { gridColumn: '1', gridRow: row });
         z.append(lab);
       });
@@ -1053,7 +1053,6 @@ export function mountRoulette(root, opts) {
      stake is one tap rather than cycling through the others to reach it. */
   const CHIP_LOOK = {
     10:   ['#b0201c', '#6d100e'],   // red
-    25:   ['#dd6a16', '#8b3608'],   // orange
     50:   ['#1f7a44', '#0d4425'],   // green
     100:  ['#26262b', '#0e0e11'],   // black
     500:  ['#6d2f8e', '#3c1550'],   // purple

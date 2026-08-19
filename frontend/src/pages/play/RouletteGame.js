@@ -7,8 +7,6 @@ import { mountRoulette } from "@/pages/play/rouletteVip/engine";
 import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import "@/pages/play/rouletteVip/styles.css";
 
-const DEMO_POCKETS = ["0", "28", "9", "26", "30", "11", "7", "20", "32", "17", "5", "22", "34", "15", "3", "24", "36", "13", "1", "00", "27", "10", "25", "29", "12", "8", "19", "31", "18", "6", "21", "33", "16", "4", "23", "35", "14", "2"];
-
 /**
  * American Roulette — the synchronized double-zero table.
  *
@@ -30,9 +28,6 @@ export default function RouletteGame({ game }) {
   const engineRef = useRef(null);
   const pollRef = useRef(null);
   const inFlightRef = useRef(0);
-  const demoBetsRef = useRef([]);
-  const demoBalanceRef = useRef(10000);
-  const demoRoundRef = useRef(null);
   const [fatal, setFatal] = useState(null);
 
   /** Server (bet_type, value) -> the engine's key, so chips land on the right spot. */
@@ -47,14 +42,6 @@ export default function RouletteGame({ game }) {
   };
 
   const placeBet = useCallback(async (bet_type, value, amount, key) => {
-    if (game.demo) {
-      if (amount > demoBalanceRef.current) return;
-      const current = demoBetsRef.current.find((bet) => bet.key === key);
-      if (current) current.amount += amount;
-      else demoBetsRef.current = [...demoBetsRef.current, { key, amount }];
-      demoBalanceRef.current -= amount;
-      return;
-    }
     inFlightRef.current += 1;
     try {
       await api.post("/games/fun-roulette/bets", { bet_type, value, amount });
@@ -68,31 +55,17 @@ export default function RouletteGame({ game }) {
     } finally {
       inFlightRef.current -= 1;
     }
-  }, [game.demo]);
+  }, []);
 
   const undoBet = useCallback(async () => {
-    if (game.demo) {
-      const bets = demoBetsRef.current;
-      const last = bets[bets.length - 1];
-      if (last) {
-        demoBalanceRef.current += last.amount;
-        demoBetsRef.current = bets.slice(0, -1);
-      }
-      return;
-    }
     try { await api.post("/games/fun-roulette/bets/undo"); }
     catch (e) { toast.error(errMsg(e)); }
-  }, [game.demo]);
+  }, []);
 
   const clearBets = useCallback(async () => {
-    if (game.demo) {
-      demoBalanceRef.current += demoBetsRef.current.reduce((sum, bet) => sum + bet.amount, 0);
-      demoBetsRef.current = [];
-      return;
-    }
     try { await api.post("/games/fun-roulette/bets/clear"); }
     catch (e) { toast.error(errMsg(e)); }
-  }, [game.demo]);
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -122,36 +95,6 @@ export default function RouletteGame({ game }) {
 
     const tick = async () => {
       if (!alive) return;
-      if (game.demo) {
-        const ROUND_SECONDS = 24;
-        const BETTING_SECONDS = 12;
-        const SPIN_SECONDS = 8;
-        const now = Date.now() / 1000;
-        const roundNumber = Math.floor(now / ROUND_SECONDS);
-        const elapsed = now % ROUND_SECONDS;
-        const phase = elapsed < BETTING_SECONDS ? "BETTING" : elapsed < BETTING_SECONDS + SPIN_SECONDS ? "SPINNING" : "RESULT";
-        const secondsLeft = phase === "BETTING"
-          ? BETTING_SECONDS - elapsed
-          : phase === "SPINNING"
-            ? BETTING_SECONDS + SPIN_SECONDS - elapsed
-            : ROUND_SECONDS - elapsed;
-        if (demoRoundRef.current !== null && demoRoundRef.current !== roundNumber) demoBetsRef.current = [];
-        demoRoundRef.current = roundNumber;
-        const winningNumber = DEMO_POCKETS[roundNumber % DEMO_POCKETS.length];
-        engine.applyState({
-          phase,
-          roundNumber,
-          secondsLeft,
-          timing: { bettingSeconds: BETTING_SECONDS, spinSeconds: SPIN_SECONDS, resultSeconds: 4 },
-          limits: { minimum: 10, position_max: 500000 },
-          winningNumber: phase === "BETTING" ? null : winningNumber,
-          myBets: demoBetsRef.current,
-          balance: demoBalanceRef.current,
-          settled: null,
-        });
-        engine.setHistory(Array.from({ length: 12 }, (_, index) => DEMO_POCKETS[(roundNumber - index - 1 + DEMO_POCKETS.length * 1000) % DEMO_POCKETS.length]));
-        return;
-      }
       try {
         const { data } = await api.get("/games/fun-roulette/state");
         if (!alive) return;
@@ -188,7 +131,7 @@ export default function RouletteGame({ game }) {
       try { engine && engine.destroy(); } catch (e) { /* already gone */ }
       engineRef.current = null;
     };
-  }, [placeBet, undoBet, clearBets, navigate, game.slug, game.demo]);
+  }, [placeBet, undoBet, clearBets, navigate, game.slug]);
 
   /* The other half of the shared mute: a press on the header's button has to
      reach the table, not just the app's own effects. */
