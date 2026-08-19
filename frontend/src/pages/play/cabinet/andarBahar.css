@@ -14,7 +14,9 @@
 }
 
 .ab-dealer-poster,
+.ab-dealer-foreground,
 .ab-dealer-video,
+.ab-table-cover,
 .ab-canvas {
   position: absolute;
   inset: 0;
@@ -23,14 +25,38 @@
 }
 
 .ab-dealer-poster,
+.ab-dealer-foreground,
 .ab-dealer-video {
   object-fit: cover;
   object-position: center;
   pointer-events: none;
+  /* The generated take used the left hand. Mirroring the complete dealer
+     plate puts the card shoe at her right hand without changing Canvas/UI. */
+  transform: scaleX(-1);
+  transform-origin: center;
 }
 
 .ab-dealer-poster { z-index: 0; }
-.ab-dealer-video { z-index: 1; }
+.ab-table-cover { z-index: 2; pointer-events: none; }
+.ab-dealer-foreground {
+  -webkit-mask-image: radial-gradient(ellipse 29% 68% at 50% 38%, #000 0 75%, rgba(0,0,0,.9) 84%, transparent 100%);
+  mask-image: radial-gradient(ellipse 29% 68% at 50% 38%, #000 0 75%, rgba(0,0,0,.9) 84%, transparent 100%);
+}
+.ab-dealer-video {
+  /* Keep the animated face, torso, reaching arm, and shoe action, then blend
+     back to the clean still before the generated footage's baked table cards.
+     All playable cards therefore come from the synchronized Canvas only. */
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0 54%, rgba(0,0,0,.94) 57%, transparent 62%),
+    radial-gradient(ellipse 23% 24% at 78% 61%, #000 0 68%, rgba(0,0,0,.9) 78%, transparent 100%);
+  mask-image:
+    linear-gradient(to bottom, #000 0 54%, rgba(0,0,0,.94) 57%, transparent 62%),
+    radial-gradient(ellipse 23% 24% at 78% 61%, #000 0 68%, rgba(0,0,0,.9) 78%, transparent 100%);
+}
+.ab-dealer-foreground { z-index: 3; }
+.ab-dealer-video { z-index: 4; transition: opacity 180ms ease; }
+.ab-dealer-video.is-idle { opacity: 0; }
+.ab-dealer-video.is-active { opacity: 1; }
 .ab-canvas { z-index: 10; pointer-events: none; }
 
 .ab-more-games {
@@ -168,6 +194,18 @@
 
 .ab-modal-roadmap .is-andar { background: #e3153b; }
 .ab-modal-roadmap .is-bahar { background: #2857a5; }
+
+.ab-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ab-dealer-video { display: none; }

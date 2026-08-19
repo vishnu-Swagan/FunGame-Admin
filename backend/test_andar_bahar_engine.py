@@ -1,10 +1,11 @@
 """Contract tests for the live Andar Bahar table and reference side bets."""
 
 import game_engines
-from live_engines import SIDE_OPTIONS, generate_outcome, settle_bet, summarize_outcome
+from live_engines import SIDE_OPTIONS, TABLE_LIMITS, generate_outcome, settle_bet, summarize_outcome
 
 
 def test_reference_side_and_card_count_prices():
+    assert TABLE_LIMITS["andar-bahar"] == (20, 1000)
     assert SIDE_OPTIONS["andar-bahar"] == {
         "andar": 2.0,
         "bahar": 1.9,

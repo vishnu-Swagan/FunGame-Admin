@@ -12,15 +12,27 @@ import "./andarBahar.css";
 const DESIGN_W = 1600;
 const DESIGN_H = 900;
 const PANEL_Y = 678;
-const REFERENCE_CHIPS = [50, 200, 500, 1000, 5000, 10000, 50000];
+const DEMO_REVEAL_SECONDS = 16;
+const DEAL_RELEASE_RATIO = 0.72;
+const DEAL_SOURCE_CADENCE = 1.55;
+const HAIR_GESTURE_INTERVAL_MS = 20 * 60 * 1000;
+const CHIP_RAIL_Y = 620;
+const ACTION_Y = 654;
+const MAIN_BET_Y = 710;
+const MAIN_BET_H = 140;
+const COUNT_BET_Y = 710;
+const COUNT_BET_H = 65;
+const COUNT_BET_ROW_GAP = 69;
+const CARD_RELEASE_X = 430;
+const CARD_RELEASE_Y = 520;
+const REFERENCE_CHIPS = [20, 50, 100, 200, 500, 1000];
 const CHIP_COLORS = {
+  20: ["#2663a8", "#12335e", "#eef7ff"],
   50: ["#e6d1a1", "#79562b", "#f7f2df"],
+  100: ["#4d9b53", "#1f562d", "#f1f8e7"],
   200: ["#d55e4d", "#7f211d", "#f4dfca"],
   500: ["#8b8a92", "#41414a", "#dedee3"],
   1000: ["#8c4b8e", "#441e50", "#e9d0ea"],
-  5000: ["#327c55", "#153d2b", "#e4e0ca"],
-  10000: ["#c9a73b", "#756013", "#f5e8bd"],
-  50000: ["#54565d", "#17191e", "#e8e7df"],
 };
 const DEFAULT_OPTIONS = {
   andar: 2,
@@ -105,7 +117,7 @@ function drawCard(ctx, card, x, y, width, height, alpha = 1, rotation = 0) {
 }
 
 function drawChip(ctx, value, x, y, size, selected = false, amount = null) {
-  const [face, deep, tick] = CHIP_COLORS[value] || CHIP_COLORS[50];
+  const [face, deep, tick] = CHIP_COLORS[value] || CHIP_COLORS[20];
   ctx.save();
   ctx.translate(x, y);
   ctx.shadowColor = selected ? "rgba(255,229,144,.9)" : "rgba(0,0,0,.42)";
@@ -193,7 +205,7 @@ function useDemoAndarBahar() {
   betsRef.current = myBets;
 
   useEffect(() => {
-    const duration = phase === "BETTING" ? 12 : phase === "REVEAL" ? 12 : 4;
+    const duration = phase === "BETTING" ? 12 : phase === "REVEAL" ? DEMO_REVEAL_SECONDS : 4;
     const deadline = Date.now() + duration * 1000;
     setCountdown(duration);
     const clock = window.setInterval(() => setCountdown(Math.max(0, (deadline - Date.now()) / 1000)), 80);
@@ -201,6 +213,7 @@ function useDemoAndarBahar() {
       if (phase === "BETTING") {
         setOutcome(makeDemoOutcome());
         setResult(null);
+        setCountdown(DEMO_REVEAL_SECONDS);
         setPhase("REVEAL");
         sfx.deal();
         return;
@@ -214,6 +227,7 @@ function useDemoAndarBahar() {
         if (final) setLastResults((rows) => [{ round_number: round, winner: final.winner, card_count: final.sequence.length }, ...rows].slice(0, 100));
         if (payout > totalBet) sfx.winCelebration();
         else if (totalBet) sfx.lose();
+        setCountdown(4);
         setPhase("RESULT");
         return;
       }
@@ -221,6 +235,7 @@ function useDemoAndarBahar() {
       setOutcome(null);
       setResult(null);
       setRound((value) => value + 1);
+      setCountdown(12);
       setPhase("BETTING");
     }, duration * 1000);
     return () => {
@@ -256,13 +271,15 @@ function useDemoAndarBahar() {
   }, [phase]);
 
   const myTotal = myBets.reduce((sum, bet) => sum + bet.amount, 0);
-  const revealElapsed = phase === "RESULT" ? 12 : phase === "REVEAL" ? 12 - countdown : 0;
+  const revealElapsed = phase === "RESULT"
+    ? DEMO_REVEAL_SECONDS
+    : phase === "REVEAL" ? DEMO_REVEAL_SECONDS - countdown : 0;
   const state = useMemo(() => ({
     round_number: round,
     phase,
-    min_bet: 50,
-    max_bet: 200000,
-    timings: { bet: 12, reveal: 12, result: 4 },
+    min_bet: 20,
+    max_bet: 1000,
+    timings: { bet: 12, reveal: DEMO_REVEAL_SECONDS, result: 4 },
     options: DEFAULT_OPTIONS,
   }), [phase, round]);
 
@@ -296,20 +313,25 @@ function AndarBaharTable({ game, live, demo = false }) {
   const navigate = useNavigate();
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
+  const idleVideoRef = useRef(null);
   const sceneRef = useRef(null);
   const lastDealCountRef = useRef(0);
+  const dealStoppedRoundRef = useRef(null);
   const previousBetsRef = useRef([]);
   const previousPhaseRef = useRef(live.phase);
-  const [chip, setChip] = useState(50);
+  const [chip, setChip] = useState(20);
   const [muted, setMuted] = useState(isMuted());
   const [modal, setModal] = useState(null);
+  const [lastWin, setLastWin] = useState(0);
+  const [announcement, setAnnouncement] = useState(null);
+  const [hairMoment, setHairMoment] = useState(false);
 
   const {
     state, countdown, balance, betting, phase, outcome, result,
     placeBet, clearBets, undoBet, myBets, myTotal, lastResults, revealElapsed,
   } = live;
-  const minBet = state?.min_bet ?? 50;
-  const maxBet = state?.max_bet ?? 200000;
+  const minBet = state?.min_bet ?? 20;
+  const maxBet = state?.max_bet ?? 1000;
   const options = { ...DEFAULT_OPTIONS, ...(state?.options || {}) };
   const chips = useMemo(() => REFERENCE_CHIPS.filter((value) => value >= minBet && value <= maxBet), [maxBet, minBet]);
   const totals = useMemo(() => selectionTotals(myBets), [myBets]);
@@ -317,6 +339,16 @@ function AndarBaharTable({ game, live, demo = false }) {
   const run = useMemo(() => (outcome?.sequence || []).map((row) => parseCard(row)).filter(Boolean), [outcome]);
 
   useEffect(() => onMuteChange(setMuted), []);
+  useEffect(() => {
+    if (Number(result?.payout || 0) > 0) setLastWin(Number(result.payout));
+  }, [result]);
+  useEffect(() => {
+    if (phase === "BETTING") setAnnouncement(null);
+  }, [phase]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setHairMoment(true), HAIR_GESTURE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (chips.length && !chips.includes(chip)) setChip(chips[0]);
   }, [chip, chips]);
@@ -328,21 +360,26 @@ function AndarBaharTable({ game, live, demo = false }) {
   }, [myBets, phase]);
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    const idleVideo = idleVideoRef.current;
+    if (!video || !idleVideo) return;
     try {
       if (phase === "REVEAL") {
+        idleVideo.pause();
         video.currentTime = 0;
         video.play().catch(() => {});
-      } else if (phase === "BETTING") {
+      } else if (phase === "BETTING" && hairMoment) {
         video.pause();
         video.currentTime = 0;
+        if (idleVideo.paused) idleVideo.play().catch(() => {});
       } else {
         video.pause();
+        idleVideo.pause();
+        idleVideo.currentTime = 0;
       }
     } catch (_error) {
       /* poster remains visible */
     }
-  }, [phase]);
+  }, [hairMoment, phase]);
 
   const bet = useCallback((selection) => {
     if (betting && chip) placeBet(selection, chip);
@@ -360,7 +397,7 @@ function AndarBaharTable({ game, live, demo = false }) {
   sceneRef.current = {
     state, countdown, balance, betting, phase, outcome, result, myTotal,
     lastResults: lastResults || [], totals, options, chip, chips, joker, run,
-    revealElapsed: Number(revealElapsed || 0),
+    revealElapsed: Number(revealElapsed || 0), lastWin,
     capturedAt: performance.now(),
     revealDuration: Number(state?.timings?.reveal || 12),
     demo,
@@ -386,10 +423,38 @@ function AndarBaharTable({ game, live, demo = false }) {
       const elapsed = scene.phase === "REVEAL"
         ? Math.min(scene.revealDuration, scene.revealElapsed + (now - scene.capturedAt) / 1000)
         : scene.phase === "RESULT" ? scene.revealDuration : 0;
-      const step = scene.run.length ? Math.max(0.26, Math.min(0.78, (scene.revealDuration - 1.2) / scene.run.length)) : 0.65;
+      // A single clock controls the generated dealer gesture and Canvas cards.
+      // The reveal is deliberately slower than the previous 0.24s minimum,
+      // while still fitting even a rare 49-card round inside the live window.
+      const step = scene.run.length ? Math.max(0.32, Math.min(1.05, (scene.revealDuration - 0.8) / scene.run.length)) : 0.8;
+      const firstReleaseAt = step * DEAL_RELEASE_RATIO;
       const visibleCount = scene.phase === "RESULT"
         ? scene.run.length
-        : scene.phase === "REVEAL" ? Math.max(0, Math.min(scene.run.length, Math.floor(Math.max(0, elapsed - 0.7) / step) + 1)) : 0;
+        : scene.phase === "REVEAL" && elapsed >= firstReleaseAt
+          ? Math.max(0, Math.min(scene.run.length, Math.floor((elapsed - firstReleaseAt) / step) + 1))
+          : 0;
+
+      if (scene.phase === "REVEAL" && videoRef.current) {
+        const dealer = videoRef.current;
+        const targetRate = Math.max(0.35, Math.min(5, DEAL_SOURCE_CADENCE / step));
+        if (Math.abs(dealer.playbackRate - targetRate) > 0.02) dealer.playbackRate = targetRate;
+        if (scene.run.length && visibleCount >= scene.run.length) {
+          if (!dealer.paused) dealer.pause();
+          const roundKey = scene.state?.round_number || `${scene.outcome?.winner}-${scene.run.length}`;
+          if (dealStoppedRoundRef.current !== roundKey) {
+            dealStoppedRoundRef.current = roundKey;
+            const winningCard = scene.run[scene.run.length - 1];
+            setAnnouncement({
+              key: roundKey,
+              winner: scene.outcome?.winner,
+              card: `${winningCard?.rank || ""} ${SUIT[winningCard?.suit]?.[0] || ""}`.trim(),
+              count: scene.run.length,
+            });
+          }
+        } else if (dealer.paused && scene.run.length) {
+          dealer.play().catch(() => {});
+        }
+      }
 
       if (scene.phase === "REVEAL" && visibleCount > lastDealCountRef.current) {
         lastDealCountRef.current = visibleCount;
@@ -397,27 +462,6 @@ function AndarBaharTable({ game, live, demo = false }) {
       } else if (scene.phase !== "REVEAL") {
         lastDealCountRef.current = scene.phase === "RESULT" ? scene.run.length : 0;
       }
-
-      /* The generated dealer plate intentionally supplies the person, lights,
-         and table volume only. Repaint the playable table cloth so generated
-         lettering can never compete with server-rendered cards or controls. */
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(154, PANEL_Y);
-      ctx.lineTo(196, 548);
-      ctx.quadraticCurveTo(800, 468, 1404, 548);
-      ctx.lineTo(1446, PANEL_Y);
-      ctx.closePath();
-      const tableCloth = ctx.createLinearGradient(0, 490, 0, PANEL_Y);
-      tableCloth.addColorStop(0, "rgba(205,174,105,.94)");
-      tableCloth.addColorStop(.48, "rgba(176,142,75,.97)");
-      tableCloth.addColorStop(1, "rgba(121,91,43,.99)");
-      ctx.fillStyle = tableCloth;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(242,215,146,.82)";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.restore();
 
       label(ctx, "ANDAR", 500, 560, 22, "rgba(255,250,235,.86)", "left", 700);
       label(ctx, "BAHAR", 500, 632, 22, "rgba(255,250,235,.86)", "left", 700);
@@ -435,30 +479,36 @@ function AndarBaharTable({ game, live, demo = false }) {
         rows.slice(-8).forEach(({ card, index }, laneIndex) => {
           const targetX = 990 - laneIndex * 54;
           const targetY = side === "andar" ? 535 : 604;
-          const appearedAt = 0.7 + index * step;
-          const progress = Math.max(0, Math.min(1, (elapsed - appearedAt) / 0.32));
+          // Release the rendered card at the same point in every dealer hand
+          // cycle, then animate its short flight from the shoe to the lane.
+          const appearedAt = firstReleaseAt + index * step;
+          const progress = Math.max(0, Math.min(1, (elapsed - appearedAt) / Math.max(.14, Math.min(.32, step * .72))));
           const eased = 1 - Math.pow(1 - progress, 3);
-          const x = 1218 + (targetX - 1218) * eased;
-          const y = 520 + (targetY - 520) * eased - Math.sin(progress * Math.PI) * 24;
+          const x = CARD_RELEASE_X + (targetX - CARD_RELEASE_X) * eased;
+          const y = CARD_RELEASE_Y + (targetY - CARD_RELEASE_Y) * eased - Math.sin(progress * Math.PI) * 24;
           drawCard(ctx, card, x, y, 46, 64, progress, (side === "andar" ? -0.025 : 0.025) * eased);
         });
       });
 
       const railWidth = scene.chips.length * 54 + Math.max(0, scene.chips.length - 1) * 14;
       const railStart = (DESIGN_W - railWidth) / 2 + 27;
-      scene.chips.forEach((value, index) => drawChip(ctx, value, railStart + index * 68, 332, scene.chip === value ? 58 : 52, scene.chip === value));
+      if (scene.betting) {
+        scene.chips.forEach((value, index) => drawChip(ctx, value, railStart + index * 68, CHIP_RAIL_Y, scene.chip === value ? 58 : 52, scene.chip === value));
+      }
 
       const action = (x, width, textValue, active) => {
-        rounded(ctx, x, 377, width, 42, 7);
+        rounded(ctx, x, ACTION_Y, width, 38, 7);
         ctx.fillStyle = active ? "rgba(24,105,88,.84)" : "rgba(22,28,54,.58)";
         ctx.fill();
         ctx.strokeStyle = "rgba(255,255,255,.12)";
         ctx.stroke();
-        label(ctx, textValue, x + width / 2, 398, 13, active ? "#f8f1df" : "rgba(248,241,223,.48)", "center", 800);
+        label(ctx, textValue, x + width / 2, ACTION_Y + 19, 13, active ? "#f8f1df" : "rgba(248,241,223,.48)", "center", 800);
       };
-      action(602, 154, "↻  REBET", scene.betting && previousBetsRef.current.length > 0);
-      action(770, 50, "⌫", scene.betting && scene.myTotal > 0);
-      action(834, 154, "↶  UNDO", scene.betting && scene.myTotal > 0);
+      if (scene.betting) {
+        action(602, 154, "↻  REBET", previousBetsRef.current.length > 0);
+        action(770, 50, "⌫", scene.myTotal > 0);
+        action(834, 154, "↶  UNDO", scene.myTotal > 0);
+      }
 
       ctx.fillStyle = "#11162f";
       ctx.fillRect(0, PANEL_Y, DESIGN_W, DESIGN_H - PANEL_Y);
@@ -470,31 +520,32 @@ function AndarBaharTable({ game, live, demo = false }) {
         ? `${Math.ceil(scene.countdown) <= 4 ? `${Math.ceil(scene.countdown)} LAST BETS` : `PLACE YOUR BETS  ${Math.ceil(scene.countdown)}`}`
         : scene.phase === "REVEAL" ? "NO MORE BETS"
           : `${String(scene.outcome?.winner || "").toUpperCase()} WON`;
-      rounded(ctx, 730, 663, 140, 34, 5);
+      const phaseY = scene.betting ? 570 : 663;
+      rounded(ctx, 730, phaseY, 140, 34, 5);
       ctx.fillStyle = scene.phase === "RESULT" ? (scene.outcome?.winner === "andar" ? "#e3153b" : "#2857a5") : "rgba(20,24,49,.9)";
       ctx.fill();
-      label(ctx, phaseText, 800, 680, phaseText.length > 18 ? 11 : 13, "#f8f1df", "center", 900);
+      label(ctx, phaseText, 800, phaseY + 17, phaseText.length > 18 ? 11 : 13, "#f8f1df", "center", 900);
       label(ctx, "BET HOW MANY CARDS WILL BE DEALT", 1328, 696, 13, "#f8f1df", "center", 800);
 
-      const history = scene.lastResults.slice(0, 90).reverse();
+      const history = scene.lastResults.slice(0, 72).reverse();
       history.forEach((row, index) => {
         const column = index % 18;
         const gridRow = Math.floor(index / 18);
-        const x = 14 + column * 20;
-        const y = 735 + gridRow * 20;
-        ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+        const x = 18 + column * 24;
+        const y = 733 + gridRow * 24;
+        ctx.beginPath(); ctx.arc(x, y, 9.5, 0, Math.PI * 2);
         ctx.fillStyle = row.winner === "andar" ? "#e3153b" : "#2364bf";
         ctx.fill();
-        label(ctx, row.winner === "andar" ? "A" : "B", x, y + .5, 8, "#fff", "center", 900);
+        label(ctx, row.winner === "andar" ? "A" : "B", x, y + .5, 10, "#fff", "center", 900);
       });
       const recentCounts = scene.lastResults.slice(0, 7).reverse();
       recentCounts.forEach((row, index) => {
         const x = 305 + index * 32;
-        ctx.beginPath(); ctx.arc(x, 818, 12, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(x, 833, 12, 0, Math.PI * 2);
         ctx.strokeStyle = row.winner === "andar" ? "#e3153b" : "#4385de";
         ctx.lineWidth = 2;
         ctx.stroke();
-        label(ctx, String(row.card_count || "–"), x, 818, 10, "#f8f1df", "center", 800);
+        label(ctx, String(row.card_count || "–"), x, 833, 10, "#f8f1df", "center", 800);
       });
       const totalRows = Math.max(1, scene.lastResults.length);
       const andarPct = Math.round(scene.lastResults.filter((row) => row.winner === "andar").length * 100 / totalRows);
@@ -503,7 +554,7 @@ function AndarBaharTable({ game, live, demo = false }) {
       ctx.fillStyle = "#2857a5"; ctx.fillRect(310 + 95 * andarPct / 100, 845, 95 * (100 - andarPct) / 100, 14);
       label(ctx, `${100 - andarPct}%`, 412, 852, 12, "#f8f1df", "left", 800);
 
-      const mainX = 512; const mainY = 724; const mainW = 570; const mainH = 104;
+      const mainX = 497; const mainY = MAIN_BET_Y; const mainW = 600; const mainH = MAIN_BET_H;
       rounded(ctx, mainX, mainY, mainW, mainH, 7);
       ctx.fillStyle = "#e3153b"; ctx.fill();
       ctx.save(); rounded(ctx, mainX, mainY, mainW, mainH, 7); ctx.clip(); ctx.fillStyle = "#2857a5"; ctx.fillRect(mainX + mainW / 2, mainY, mainW / 2, mainH); ctx.restore();
@@ -531,26 +582,34 @@ function AndarBaharTable({ game, live, demo = false }) {
         const column = index % 4;
         const row = Math.floor(index / 4);
         const x = 1094 + column * 124;
-        const y = 726 + row * 51;
-        rounded(ctx, x, y, 118, 46, 5);
+        const y = COUNT_BET_Y + row * COUNT_BET_ROW_GAP;
+        rounded(ctx, x, y, 118, COUNT_BET_H, 5);
         const winning = scene.phase === "RESULT" && scene.run.length >= Number(selection.split("_")[1]) && scene.run.length <= Number(selection.split("_")[2]);
-        const gradient = ctx.createLinearGradient(0, y, 0, y + 46);
-        gradient.addColorStop(0, winning ? "#dfc373" : "#24231d");
-        gradient.addColorStop(.52, winning ? "#8c681e" : "#080b11");
-        gradient.addColorStop(1, "#05070c");
+        const gradient = ctx.createLinearGradient(0, y, 0, y + COUNT_BET_H);
+        gradient.addColorStop(0, winning ? "#dfc373" : "#3b3627");
+        gradient.addColorStop(.52, winning ? "#8c681e" : "#151720");
+        gradient.addColorStop(1, winning ? "#3a2b0e" : "#080a11");
         ctx.fillStyle = gradient; ctx.fill();
-        ctx.strokeStyle = winning ? "#fff0a7" : "#c2ad75"; ctx.lineWidth = 1.4; ctx.stroke();
-        label(ctx, range, x + 59, y + 17, 16, winning ? "#fff8dc" : "#dbc48a", "center", 900);
-        label(ctx, `${Math.max(0, Number(scene.options[selection] || 1) - 1).toFixed(1)}:1`, x + 59, y + 34, 11, "#968862", "center", 700);
-        if (scene.totals[selection]) drawChip(ctx, scene.chip, x + 100, y + 23, 28, true, scene.totals[selection]);
+        ctx.strokeStyle = winning ? "#fff0a7" : "#d8c384"; ctx.lineWidth = 2; ctx.stroke();
+        label(ctx, range, x + 59, y + 23, 18, winning ? "#fff8dc" : "#f2ddb0", "center", 900);
+        label(ctx, `${Math.max(0, Number(scene.options[selection] || 1) - 1).toFixed(1)}:1`, x + 59, y + 47, 13, "#c7b078", "center", 800);
+        if (scene.totals[selection]) drawChip(ctx, scene.chip, x + 100, y + 32, 30, true, scene.totals[selection]);
       });
 
       ctx.fillStyle = "#0c1024"; ctx.fillRect(0, 866, DESIGN_W, 34);
       label(ctx, `Andar Bahar ₹${money(minBet)} – ₹${money(maxBet)}`, 12, 884, 13, "#a8b0cc", "left", 700);
       label(ctx, `Balance ₹${money(scene.balance)}`, 420, 884, 13, "#a8b0cc", "center", 700);
       label(ctx, `Bet ₹${money(scene.myTotal)}`, 790, 884, 13, "#a8b0cc", "center", 700);
-      label(ctx, `Last Win ₹${money(scene.result?.payout || 0)}`, 1112, 884, 13, "#a8b0cc", "center", 700);
+      label(ctx, `LAST WIN ₹${money(scene.lastWin)}`, 1112, 884, 14, "#f3d37e", "center", 900);
       label(ctx, `LIVE MODE · #${scene.state?.round_number || "—"}`, 1585, 884, 12, "#a8b0cc", "right", 800);
+
+      rounded(ctx, 652, 14, 296, 44, 7);
+      ctx.fillStyle = "rgba(12,16,36,.9)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(228,192,107,.88)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      label(ctx, `LAST WIN  ₹${money(scene.lastWin)}`, 800, 37, 15, "#f3d37e", "center", 900);
 
       if (scene.phase === "RESULT" && scene.outcome) {
         rounded(ctx, 646, 590, 308, 58, 8);
@@ -578,18 +637,46 @@ function AndarBaharTable({ game, live, demo = false }) {
       systemControls={false}
     >
       <img className="ab-dealer-poster" src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
+      <svg className="ab-table-cover" viewBox={`0 0 ${DESIGN_W} ${DESIGN_H}`} aria-hidden="true">
+        <defs>
+          <linearGradient id="ab-table-cloth" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#cdae69" />
+            <stop offset="0.5" stopColor="#af8d4c" />
+            <stop offset="1" stopColor="#785a2b" />
+          </linearGradient>
+        </defs>
+        <path d={`M430 ${PANEL_Y} L470 548 Q800 505 1130 548 L1170 ${PANEL_Y} Z`} fill="url(#ab-table-cloth)" stroke="#efd68f" strokeWidth="3" />
+      </svg>
+      <img className="ab-dealer-foreground" src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
       <video
-        ref={videoRef}
-        className="ab-dealer-video"
-        src="/game-art/andar-bahar/dealer-loop.mp4"
+        ref={idleVideoRef}
+        className={`ab-dealer-video ab-idle-video ${phase === "BETTING" && hairMoment ? "is-active" : "is-idle"}`}
+        src="/game-art/andar-bahar/dealer-idle.mp4"
         poster="/game-art/andar-bahar/dealer-stage.jpg"
         muted
         playsInline
         preload="auto"
-        aria-label="Animated live Andar Bahar dealer"
+        aria-label="Animated live Andar Bahar dealer waiting at the card shoe"
+        onEnded={() => setHairMoment(false)}
         onError={(event) => { event.currentTarget.style.display = "none"; }}
       />
-      <canvas ref={canvasRef} className="ab-canvas" width={DESIGN_W} height={DESIGN_H} data-testid="andar-bahar-canvas" />
+      <video
+        ref={videoRef}
+        className={`ab-dealer-video ${phase === "REVEAL" && !announcement ? "is-active" : "is-idle"}`}
+        src="/game-art/andar-bahar/dealer-loop.mp4"
+        poster="/game-art/andar-bahar/dealer-stage.jpg"
+        muted
+        loop
+        playsInline
+        preload="auto"
+        aria-label="Animated live Andar Bahar dealer drawing each card from the shoe with her right hand"
+        onError={(event) => { event.currentTarget.style.display = "none"; }}
+      />
+      <canvas ref={canvasRef} className="ab-canvas" width={DESIGN_W} height={DESIGN_H}
+        data-testid="andar-bahar-canvas" data-phase={phase} data-round={state?.round_number || ""} data-card-count={run.length} />
+      <div className="ab-announcer" aria-live="off">
+        {announcement ? `${announcement.winner} wins, ${announcement.card}, ${announcement.count} cards dealt` : ""}
+      </div>
 
       <button type="button" className="ab-more-games" onClick={() => navigate(`/games/${game.slug}`)}><span>CHAKRI</span> More Games</button>
       <div className="ab-top-actions">
@@ -602,23 +689,24 @@ function AndarBaharTable({ game, live, demo = false }) {
 
       {chips.map((value, index) => (
         <button key={value} type="button" className="ab-hit ab-chip-hit" aria-label={`Select ${value} chip`} aria-pressed={chip === value}
-          style={{ left: chipStart + index * 68, top: 303, width: 58, height: 58 }} onClick={() => { setChip(value); sfx.chip(); }} />
+          disabled={!betting}
+          style={{ left: chipStart + index * 68, top: CHIP_RAIL_Y - 29, width: 58, height: 58 }} onClick={() => { setChip(value); sfx.chip(); }} />
       ))}
       <button type="button" className="ab-hit" aria-label="Bet on Andar" data-testid="cab-andar"
-        disabled={!betting} style={{ left: 512, top: 724, width: 235, height: 104 }} onClick={() => bet("andar")} />
+        disabled={!betting} style={{ left: 497, top: MAIN_BET_Y, width: 239, height: MAIN_BET_H }} onClick={() => bet("andar")} />
       <button type="button" className="ab-hit" aria-label="Bet on Bahar" data-testid="cab-bahar"
-        disabled={!betting} style={{ left: 847, top: 724, width: 235, height: 104 }} onClick={() => bet("bahar")} />
+        disabled={!betting} style={{ left: 858, top: MAIN_BET_Y, width: 239, height: MAIN_BET_H }} onClick={() => bet("bahar")} />
       {COUNT_BETS.map(([selection, range], index) => (
         <button key={selection} type="button" className="ab-hit" aria-label={`Bet on ${range} cards`} disabled={!betting}
-          data-testid={`cab-${selection}`} style={{ left: 1094 + (index % 4) * 124, top: 726 + Math.floor(index / 4) * 51, width: 118, height: 46 }}
+          data-testid={`cab-${selection}`} style={{ left: 1094 + (index % 4) * 124, top: COUNT_BET_Y + Math.floor(index / 4) * COUNT_BET_ROW_GAP, width: 118, height: COUNT_BET_H }}
           onClick={() => bet(selection)} />
       ))}
       <button type="button" className="ab-hit" aria-label="Repeat previous bets" disabled={!betting || !previousBetsRef.current.length}
-        style={{ left: 602, top: 377, width: 154, height: 42 }} onClick={rebet}><RotateCcw /></button>
+        style={{ left: 602, top: ACTION_Y, width: 154, height: 38 }} onClick={rebet}><RotateCcw /></button>
       <button type="button" className="ab-hit" aria-label="Clear bets" disabled={!betting || !myTotal}
-        style={{ left: 770, top: 377, width: 50, height: 42 }} onClick={clearBets}><X /></button>
+        style={{ left: 770, top: ACTION_Y, width: 50, height: 38 }} onClick={clearBets}><X /></button>
       <button type="button" className="ab-hit" aria-label="Undo last bet" disabled={!betting || !myTotal}
-        style={{ left: 834, top: 377, width: 154, height: 42 }} onClick={undoBet}><Undo2 /></button>
+        style={{ left: 834, top: ACTION_Y, width: 154, height: 38 }} onClick={undoBet}><Undo2 /></button>
 
       {modal && (
         <div className="ab-modal" role="dialog" aria-modal="true" aria-labelledby="ab-modal-title">

@@ -171,7 +171,7 @@ def paytable_for(slug, picks=None):
 TABLE_LIMITS = {
     "seven-up-down": (10, 200),
     "fun-target": (1, 5000),
-    "andar-bahar": (50, 200000),
+    "andar-bahar": (20, 1000),
     "triple-fun": (5, 5000),
     "checker": (5, 1000),
     "keno": (10, 1000),
