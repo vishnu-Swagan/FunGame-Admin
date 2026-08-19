@@ -3,31 +3,32 @@
    namespaced, so nothing here can reach the rest of the app. */
 
   .rvip {
-    /* Higgsfield art direction: jewel-green baize, dark walnut and warm brass.
-       These are material colours rather than UI colours, so the cabinet reads
-       as a photographed roulette table while every bet remains real DOM. */
-    --felt-warm: #0b4a34;
-    --felt-mid:  #063423;
-    --felt-deep: #021d13;
-    --void:      #010b08;
-    --burgundy:  #35110d;
-    --mid:       #1a0806;
-    --red-idle:  #7d1d18;
-    --red-live:  #a72a22;
-    --ink:       #0c1010;
-    --ink-live:  #020505;
-    --side-bg:   #073326;
-    --zero-bg:   #0b694d;
-    --rule:      rgba(218,181,102,.95);
-    --rule-soft: rgba(205,166,87,.7);
-    --brass-ln:  rgba(218,181,102,.95);
-    --brass-hi:  rgba(255,224,151,.98);
+    /* Felt sampled straight out of the wheel photograph: #520d09 where the
+       cabinet sits, falling to #100001 at the edges. Using the photo's own
+       colours is what lets the layout and the wheel read as one table. */
+    --felt-warm: #52100b;
+    --felt-mid:  #330907;
+    --felt-deep: #180404;
+    --void:      #0d0202;
+    --burgundy:  #3d0a08;
+    --mid:       #220605;
+    /* printed layout: deep casino red and near-black on the felt */
+    --red-idle:  #47100f;
+    --red-live:  #5a1513;
+    --ink:       #030001;
+    --ink-live:  #010000;
+    --side-bg:   #0f0007;   /* the near-black panels down the left */
+    --zero-bg:   #0f2620;   /* desaturated teal of the zero */
+    --rule:      rgba(168,139,145,.9);   /* light warm grey rules, not brass */
+    --rule-soft: rgba(168,139,145,.55);
+    --brass-ln:  rgba(168,139,145,.9);
+    --brass-hi:  rgba(214,196,199,.95);
     --teal:      #0e6b5e;
     --teal-live: #16988a;
     --cyan:      #00e5cc;
     --gold:      #f5c518;
     --brass:     #c9a02c;
-    --cream:     #fff5df;
+    --cream:     #f2ede4;
     --hair:      rgba(255,255,255,.85);
 
     --num: "Optima", "Candara", "Gill Sans", "Gill Sans MT", "Trebuchet MS", sans-serif;
@@ -49,8 +50,7 @@
 
   .rvip {
     margin: 0;
-    background:
-      radial-gradient(90% 80% at 50% 15%, #1c120b 0%, #080706 55%, #010302 100%);
+    background: #000;
     font-family: var(--ui);
     color: var(--cream);
     -webkit-font-smoothing: antialiased;
@@ -79,10 +79,9 @@
        edges, with the woven texture over the top. The photo's own dark surround
        lands on the same colour, so its edges disappear into the table. */
     background:
-      linear-gradient(112deg, transparent 8%, rgba(255,224,158,.07) 31%, transparent 47%),
       url("./felt.webp") 0 0 / 108px 108px repeat,
-      radial-gradient(128% 72% at 50% 10%, var(--felt-warm) 0%, var(--felt-mid) 45%, var(--felt-deep) 77%, var(--void) 100%);
-    background-blend-mode: screen, soft-light, normal;
+      radial-gradient(128% 62% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 44%, var(--felt-deep) 74%, var(--void) 100%);
+    background-blend-mode: soft-light, normal;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -249,7 +248,6 @@
     z-index: 5;
     opacity: .34;
     transition: opacity .5s ease;
-    transform-style: preserve-3d;
   }
   .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { z-index: 20; opacity: 1; }
 
@@ -268,10 +266,7 @@
       #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
     mask-image: radial-gradient(circle closest-side at 50% 50%,
       #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
-    filter:
-      saturate(1.18) contrast(1.08)
-      drop-shadow(0 18px 32px rgba(0,0,0,.88))
-      drop-shadow(0 2px 2px rgba(255,213,126,.16));
+    filter: drop-shadow(0 12px 30px rgba(0,0,0,.8));
   }
   .rvip /* the head is rotated from script; will-change keeps it on its own layer so a
      13-second spin does not repaint the bowl underneath it every frame */
@@ -362,7 +357,7 @@
     font-size: clamp(22px, 3.8vh, 31px);
     color: #fff;
     box-shadow: 0 0 20px rgba(245,197,24,.6);
-    animation: rvip-pocketIn .5s cubic-bezier(.22,1,.36,1) both;
+    animation: rvip-pocketIn .5s cubic-bezier(.2,1.4,.4,1) both;
   }
   @keyframes rvip-pocketIn { from { transform: scale(.55); opacity: 0 } to { transform: scale(1); opacity: 1 } }
 
@@ -516,12 +511,10 @@
     position: absolute;
     inset: 0;
     border: 1px solid var(--rule);
-    border-radius: 9px;
+    border-radius: 2px;
     box-shadow:
-      inset 0 0 0 3px rgba(0,0,0,.34),
-      inset 0 2px 0 rgba(255,232,177,.12),
-      inset 0 18px 44px rgba(0,0,0,.28),
-      0 16px 34px rgba(0,0,0,.32);
+      inset 0 0 0 3px rgba(0,0,0,.3),
+      inset 0 14px 40px rgba(0,0,0,.3);
     pointer-events: none;
   }
 
@@ -847,11 +840,10 @@
       radial-gradient(circle at 38% 30%, var(--c) 0%, var(--c-dk) 96%);
     box-shadow:
       0 0 0 1px rgba(0,0,0,.55),
-      0 5px 0 var(--c-dk),
-      0 9px 12px rgba(0,0,0,.62),
+      0 3px 6px rgba(0,0,0,.6),
       inset 0 2px 3px rgba(255,255,255,.3),
       inset 0 -3px 5px rgba(0,0,0,.45);
-    transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease;
+    transition: transform .16s cubic-bezier(.2,1.3,.4,1), box-shadow .16s ease;
   }
   .rvip /* recessed inlay */
   .chip::before {
@@ -880,11 +872,9 @@
     box-shadow:
       0 0 0 2px var(--gold),
       0 0 12px 3px rgba(245,197,24,.5),
-      0 6px 0 var(--c-dk),
-      0 11px 14px rgba(0,0,0,.65),
+      0 3px 6px rgba(0,0,0,.6),
       inset 0 2px 3px rgba(255,255,255,.35),
       inset 0 -3px 5px rgba(0,0,0,.45);
-    transform: translateY(-3px);
   }
   .rvip .chip:active { transform: scale(.94); }
   .rvip .chip:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
@@ -1400,7 +1390,7 @@
     text-align: center;
     box-shadow: 0 20px 60px rgba(0,0,0,.8);
     transform: scale(.9);
-    transition: transform .28s cubic-bezier(.22,1,.36,1);
+    transition: transform .28s cubic-bezier(.2,1.3,.4,1);
   }
   .rvip .scrim.on .modal { transform: none; }
   .rvip .modal h3 { margin: 0 0 12px; color: var(--cyan); font-size: 15px; letter-spacing: .1em; font-weight: 600; }
@@ -1430,7 +1420,7 @@
     z-index: 70;
     opacity: 0;
     pointer-events: none;
-    transition: opacity .3s ease, transform .3s cubic-bezier(.22,1,.36,1);
+    transition: opacity .3s ease, transform .3s cubic-bezier(.2,1.4,.4,1);
   }
   .rvip .winflash.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
   .rvip .winflash.hide { opacity: 0; }
@@ -1558,196 +1548,6 @@
     .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { opacity: 1; }
     .rvip .phone[data-mode="spin"] .tablewrap, .rvip .phone[data-mode="result"] .tablewrap { opacity: .34; filter: saturate(.7) brightness(.85); }
 
-  }
-
-  /* ================= cinematic desktop =================
-     The live game is no longer framed as a portrait phone on laptops.  The
-     wheel and the American board share one wide table, matching the Higgsfield
-     three-quarter art direction while keeping the wheel labels and every bet
-     target generated from the exact production data. */
-  @media (orientation: landscape) and (min-width: 900px) and (min-height: 621px) {
-    .rvip .stage {
-      min-height: min(780px, calc(100dvh - 62px));
-      padding: clamp(6px, 1vw, 16px);
-      background:
-        radial-gradient(52% 72% at 22% 42%, rgba(111,64,24,.24), transparent 68%),
-        radial-gradient(58% 80% at 76% 42%, rgba(3,83,57,.22), transparent 72%),
-        #020504;
-    }
-
-    .rvip .phone {
-      width: min(100%, 1460px);
-      max-width: 1460px;
-      height: min(780px, calc(100dvh - 62px));
-      min-height: 650px;
-      max-height: none;
-      border: 1px solid rgba(224,185,104,.42);
-      border-radius: 28px;
-      grid-template-columns: minmax(430px, .88fr) minmax(650px, 1.42fr);
-      grid-template-rows: 34px minmax(0, 1fr) 92px 46px;
-      grid-template-areas:
-        "hist  hist"
-        "wheel board"
-        "wheel tray"
-        "wheel money";
-      box-shadow:
-        inset 0 1px 0 rgba(255,231,177,.18),
-        inset 0 -1px 0 rgba(0,0,0,.8),
-        0 28px 76px rgba(0,0,0,.82),
-        0 0 46px rgba(166,104,36,.1);
-    }
-
-    .rvip .history {
-      height: 34px;
-      border-bottom: 1px solid rgba(224,185,104,.35);
-      background: linear-gradient(180deg, rgba(21,13,8,.98), rgba(4,7,5,.96));
-      box-shadow: 0 5px 16px rgba(0,0,0,.45);
-    }
-    .rvip .history .latest {
-      width: 78px;
-      background: linear-gradient(145deg, #d0a754, #6f4216);
-      color: #fff7e3;
-      text-shadow: 0 1px 2px rgba(0,0,0,.7);
-    }
-
-    .rvip .wheelstage {
-      --wheelsz: min(640px, 47vw, 70vh);
-      width: 100%;
-      height: auto;
-      align-self: stretch;
-      isolation: isolate;
-    }
-    .rvip .wheelstage::after {
-      content: "";
-      position: absolute;
-      z-index: 0;
-      left: 7%; right: 3%; bottom: 5%;
-      height: 25%;
-      border-radius: 50%;
-      background: radial-gradient(ellipse, rgba(0,0,0,.78), transparent 72%);
-      filter: blur(18px);
-      pointer-events: none;
-    }
-    .rvip .topwrap {
-      top: 50%;
-      left: 50%;
-      opacity: .72;
-      transform: translate(-50%, -49%) perspective(1100px) rotateX(29deg) rotateZ(-1.5deg);
-      transform-origin: 50% 53%;
-      filter: saturate(1.08) contrast(1.04);
-    }
-    .rvip .phone[data-mode="spin"] .topwrap,
-    .rvip .phone[data-mode="result"] .topwrap {
-      opacity: 1;
-      filter: saturate(1.18) contrast(1.08) brightness(1.04);
-    }
-    .rvip .spotlight {
-      inset: -2% -8% -9%;
-      background:
-        radial-gradient(58% 56% at 48% 7%, rgba(255,224,157,.25), rgba(255,208,118,.06) 48%, transparent 72%),
-        radial-gradient(58% 28% at 51% 82%, rgba(0,0,0,.82), rgba(0,0,0,.3) 55%, transparent 78%);
-    }
-    .rvip .bettimer { top: 14%; left: 72%; }
-    .rvip .readout { bottom: -5px; }
-
-    .rvip .tablewrap {
-      width: calc(100% - 74px);
-      max-width: 880px;
-      margin: 28px 62px 20px 12px;
-      padding: clamp(16px, 1.4vw, 24px);
-      align-self: center;
-      justify-content: center;
-      overflow: visible;
-      border-radius: 22px;
-      background:
-        linear-gradient(120deg, rgba(255,234,184,.05), transparent 28%, rgba(0,0,0,.18) 78%),
-        url("./felt.webp") 0 0 / 108px 108px repeat,
-        radial-gradient(120% 100% at 50% 0%, rgba(24,129,92,.9), rgba(5,66,47,.96) 62%, rgba(1,31,22,.99));
-      background-blend-mode: screen, soft-light, normal;
-      box-shadow:
-        0 0 0 1px rgba(255,218,139,.72),
-        0 0 0 9px rgba(45,21,10,.82),
-        0 0 0 11px rgba(192,136,55,.38),
-        0 24px 42px rgba(0,0,0,.56),
-        inset 0 2px 0 rgba(255,241,204,.1),
-        inset 0 -18px 42px rgba(0,0,0,.22);
-    }
-    .rvip .tablewrap::before {
-      inset: 8px;
-      border-color: rgba(230,194,116,.82);
-      border-radius: 14px;
-      box-shadow: inset 0 0 0 2px rgba(0,0,0,.28), inset 0 12px 34px rgba(0,0,0,.16);
-    }
-    .rvip .board.land {
-      flex: none;
-      width: 100%;
-      height: min(350px, 50vh);
-      min-height: 310px;
-      max-height: 350px;
-      grid-template-columns: repeat(14, minmax(0, 1fr));
-      grid-template-rows: repeat(6, minmax(0, 1fr)) minmax(48px, 56px) minmax(52px, 62px);
-    }
-    .rvip .pennant { display: none; }
-    .rvip .board.land .cell {
-      color: #fff6df;
-      border-color: rgba(238,199,118,.88);
-      font-size: clamp(17px, 1.28vw, 25px);
-      font-weight: 600;
-      text-shadow: 0 2px 3px rgba(0,0,0,.88), 0 0 8px rgba(0,0,0,.42);
-      box-shadow: inset 0 1px 0 rgba(255,232,180,.08), inset 0 -6px 12px rgba(0,0,0,.2);
-    }
-    .rvip .board.land .cell.red { background-color: #a22920; }
-    .rvip .board.land .cell.black { background-color: #101716; }
-    .rvip .board.land .cell.zero { background-color: #087c59; }
-    .rvip .board.land .cell.dozen,
-    .rvip .board.land .cell.outside,
-    .rvip .board.land .cell.col21 {
-      font-size: clamp(12px, 1vw, 17px);
-      background-color: rgba(3,54,39,.9);
-    }
-
-    .rvip .chiptray {
-      margin: 0 62px 0 12px;
-      padding: 10px 18px 13px;
-      border: 1px solid rgba(217,173,87,.5);
-      border-radius: 20px 20px 5px 5px;
-      background:
-        linear-gradient(180deg, rgba(255,219,143,.1), transparent 24%),
-        linear-gradient(180deg, #3a1b0f 0%, #1b0c07 48%, #080503 100%);
-      box-shadow:
-        inset 0 1px 0 rgba(255,235,191,.2),
-        inset 0 -8px 15px rgba(0,0,0,.5),
-        0 12px 22px rgba(0,0,0,.48);
-    }
-    .rvip .chipslot { gap: clamp(18px, 2.2vw, 34px); }
-    .rvip .chip {
-      width: clamp(44px, 3.5vw, 58px);
-    }
-    .rvip .chip span { font-size: clamp(10px, .82vw, 13px); }
-    .rvip .traybtn {
-      width: 46px;
-      height: 46px;
-      border-color: rgba(231,192,113,.76);
-      background: radial-gradient(circle at 38% 28%, #63351f, #1c0b07 76%);
-      box-shadow: 0 5px 0 #100503, 0 9px 14px rgba(0,0,0,.55), inset 0 2px 2px rgba(255,232,179,.2);
-    }
-    .rvip .trayside { min-width: 108px; }
-
-    .rvip .moneybar {
-      margin: 0 62px 0 12px;
-      padding: 6px 12px 8px;
-      border-top: 1px solid rgba(228,187,103,.3);
-      background: linear-gradient(180deg, rgba(4,17,12,.2), rgba(0,5,3,.72));
-      font-size: 13px;
-    }
-    .rvip .rail { right: 10px; top: 50%; transform: translateY(-50%); height: auto; flex-direction: column; }
-    .rvip .winboard { left: 14px; bottom: 14px; width: min(360px, 36vw); }
-
-    .rvip .phone[data-mode="spin"] .tablewrap,
-    .rvip .phone[data-mode="result"] .tablewrap {
-      opacity: .48;
-      filter: saturate(.78) brightness(.78);
-    }
   }
 
   /* very short landscape — older or smaller handsets */
