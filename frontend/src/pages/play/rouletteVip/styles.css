@@ -3,24 +3,23 @@
    namespaced, so nothing here can reach the rest of the app. */
 
   .rvip {
-    /* Felt sampled straight out of the wheel photograph: #520d09 where the
-       cabinet sits, falling to #100001 at the edges. Using the photo's own
-       colours is what lets the layout and the wheel read as one table. */
-    --felt-warm: #218f59;
-    --felt-mid:  #116f45;
-    --felt-deep: #074f32;
-    --void:      #032d1d;
+    /* Casino-baize palette: a brighter nap under the table light, graduating
+       into deep green at the edges so the royal wheel and layout share one room. */
+    --felt-warm: #168a55;
+    --felt-mid:  #087044;
+    --felt-deep: #045532;
+    --void:      #023b25;
     --burgundy:  #3d0a08;
     --mid:       #220605;
     /* printed layout: deep casino red and near-black on the felt */
-    --red-idle:  #47100f;
-    --red-live:  #5a1513;
-    --ink:       #030001;
-    --ink-live:  #010000;
-    --side-bg:   #09452e;
-    --zero-bg:   #0c7552;
-    --rule:      rgba(232,224,188,.92);
-    --rule-soft: rgba(220,216,184,.66);
+    --red-idle:  #8f1520;
+    --red-live:  #a91925;
+    --ink:       #111416;
+    --ink-live:  #090b0c;
+    --side-bg:   #08613b;
+    --zero-bg:   #128450;
+    --rule:      rgba(245,235,194,.94);
+    --rule-soft: rgba(238,228,190,.78);
     --brass-ln:  rgba(226,206,139,.92);
     --brass-hi:  rgba(248,230,168,.96);
     --teal:      #0e6b5e;
@@ -51,7 +50,7 @@
     width: 100%;
     height: 100dvh;
     overflow: hidden;
-    background: #032d1d;
+    background: #023b25;
   }
   .roulette-fullscreen > .rvip,
   .roulette-fullscreen > .rvip > .stage {
@@ -101,16 +100,17 @@
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
     grid-template-areas: "top" "hist" "wheel" "board" "tray" "money";
-    /* One continuous felt: warm where the cabinet stands, falling away at the
-       edges, with the woven texture over the top. The photo's own dark surround
-       lands on the same colour, so its edges disappear into the table. */
+    /* One continuous casino baize. The asymmetric light and dark pools make the
+       nap change direction across the table, while the photographed fibres keep
+       it tactile at both desktop and handset scale. */
     background:
-      radial-gradient(78% 52% at 50% 11%, rgba(132,231,164,.18), rgba(132,231,164,0) 66%),
-      repeating-linear-gradient(7deg, rgba(255,255,255,.014) 0 1px, rgba(0,46,24,.018) 1px 3px),
-      repeating-linear-gradient(97deg, rgba(255,255,255,.01) 0 1px, rgba(0,35,19,.014) 1px 4px),
-      url("./felt.webp") 0 0 / 108px 108px repeat,
-      radial-gradient(128% 82% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 48%, var(--felt-deep) 78%, var(--void) 100%);
-    background-blend-mode: screen, overlay, overlay, soft-light, normal;
+      radial-gradient(86% 58% at 48% 4%, rgba(189,255,205,.2), transparent 65%),
+      radial-gradient(68% 76% at 8% 54%, rgba(0,34,18,.25), transparent 72%),
+      radial-gradient(74% 70% at 94% 48%, rgba(0,28,15,.28), transparent 70%),
+      linear-gradient(112deg, rgba(255,255,255,.035), rgba(0,0,0,.08) 56%, rgba(255,255,255,.018)),
+      url("./felt-premium.jpg") center / cover no-repeat,
+      radial-gradient(138% 98% at 50% 8%, var(--felt-warm) 0%, var(--felt-mid) 47%, var(--felt-deep) 79%, var(--void) 100%);
+    background-blend-mode: screen, multiply, multiply, soft-light, soft-light, normal;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -429,7 +429,7 @@
     font-size: clamp(22px, 3.8vh, 31px);
     color: #fff;
     box-shadow: 0 0 20px rgba(245,197,24,.6);
-    animation: rvip-pocketIn .5s cubic-bezier(.2,1.4,.4,1) both;
+    animation: rvip-pocketIn .5s cubic-bezier(.22,1,.36,1) both;
   }
   @keyframes rvip-pocketIn { from { transform: scale(.55); opacity: 0 } to { transform: scale(1); opacity: 1 } }
 
@@ -574,7 +574,9 @@
     flex-direction: column;
     justify-content: flex-end;
     z-index: 10;
-    background: transparent;
+    background:
+      radial-gradient(90% 72% at 50% 20%, rgba(186,255,204,.035), transparent 72%),
+      linear-gradient(180deg, rgba(255,255,255,.015), rgba(0,34,18,.09));
     overflow: hidden;
   }
   .rvip /* the brass rule bounding the printed area */
@@ -585,8 +587,9 @@
     border: 1px solid var(--rule);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 3px rgba(0,0,0,.3),
-      inset 0 14px 40px rgba(0,0,0,.3);
+      inset 0 0 0 2px rgba(0,28,15,.34),
+      inset 0 2px 0 rgba(255,255,255,.08),
+      inset 0 10px 28px rgba(0,31,17,.2);
     pointer-events: none;
   }
 
@@ -631,10 +634,13 @@
     inset: 1px;
     background-color: var(--zero-bg);
     background-image:
-      url("./felt.webp"),
-      linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.32));
-    background-size: 108px 108px, auto;
-    background-blend-mode: soft-light, normal;
+      radial-gradient(110% 90% at 26% 0%, rgba(220,255,227,.11), transparent 44%),
+      url("./felt-premium.jpg"),
+      linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,28,15,.24));
+    background-size: auto, cover, auto;
+    background-position: center, center, center;
+    background-blend-mode: screen, soft-light, multiply;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -2px 3px rgba(0,0,0,.28);
     -webkit-clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
     clip-path: polygon(0 26%, 50% 0, 100% 26%, 100% 100%, 0 100%);
   }
@@ -660,9 +666,9 @@
     max-height: 900px;
   }
 
-  .rvip /* Every box is felt with paint on it: the woven texture rides over the colour
-     via soft-light, .rvip the rules are brass rather than white, .rvip and the numerals are
-     pressed in with a shadow instead of floating on top. */
+  .rvip /* Every box is pigment printed into the baize, not a flat UI tile. The
+     fibre layer remains visible through the red and black inks; shallow inset
+     lighting gives the inked areas the compressed nap of a real betting mat. */
   .cell {
     position: relative;
     border: 1px solid var(--rule-soft);
@@ -675,19 +681,33 @@
     place-items: center;
     cursor: pointer;
     padding: 0;
-    transition: background .35s ease, filter .12s ease;
+    transition: background-color .2s ease, filter .12s ease, box-shadow .2s ease;
     font-variant-numeric: tabular-nums;
     overflow: hidden;
-    text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 0 6px rgba(0,0,0,.35);
+    text-shadow: 0 1px 1px rgba(0,0,0,.92), 0 2px 3px rgba(0,0,0,.5);
   }
-  .rvip .cell:active { filter: brightness(1.5); }
+  .rvip .cell:active {
+    filter: brightness(.86) saturate(1.08);
+    box-shadow: inset 0 3px 6px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .rvip .cell:hover { filter: brightness(1.08) saturate(1.05); }
+  }
 
   .rvip .cell.red, .rvip .cell.black {
     background-image:
-      url("./felt.webp"),
-      linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.34));
-    background-size: 108px 108px, auto;
-    background-blend-mode: soft-light, normal;
+      radial-gradient(120% 92% at 26% 4%, rgba(255,255,255,.105), transparent 37%),
+      linear-gradient(104deg, rgba(255,255,255,.025), rgba(0,0,0,.16) 62%, rgba(255,255,255,.015)),
+      url("./felt-premium.jpg"),
+      linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.18));
+    background-size: auto, auto, cover, auto;
+    background-position: center, center, center, center;
+    background-blend-mode: screen, soft-light, soft-light, multiply;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.14),
+      inset 0 -2px 3px rgba(0,0,0,.35),
+      inset 1px 0 0 rgba(255,255,255,.035),
+      inset -1px 0 0 rgba(0,0,0,.2);
   }
   .rvip .cell.red { background-color: var(--red-idle); }
   .rvip .cell.black { background-color: var(--ink); }
@@ -698,10 +718,13 @@
   .cell.outside, .rvip .cell.dozen, .rvip .cell.col21 {
     background-color: var(--side-bg);
     background-image:
-      url("./felt.webp"),
-      linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.3));
-    background-size: 108px 108px, auto;
-    background-blend-mode: soft-light, normal;
+      radial-gradient(110% 90% at 28% 0%, rgba(210,255,221,.07), transparent 45%),
+      url("./felt-premium.jpg"),
+      linear-gradient(180deg, rgba(255,255,255,.015), rgba(0,27,14,.2));
+    background-size: auto, cover, auto;
+    background-position: center, center, center;
+    background-blend-mode: screen, soft-light, multiply;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 2px rgba(0,0,0,.2);
   }
 
   .rvip /* rotated labels are longer than their cell is tall on short screens —
@@ -915,7 +938,7 @@
       0 3px 6px rgba(0,0,0,.6),
       inset 0 2px 3px rgba(255,255,255,.3),
       inset 0 -3px 5px rgba(0,0,0,.45);
-    transition: transform .16s cubic-bezier(.2,1.3,.4,1), box-shadow .16s ease;
+    transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease;
   }
   .rvip /* recessed inlay */
   .chip::before {
@@ -1462,7 +1485,7 @@
     text-align: center;
     box-shadow: 0 20px 60px rgba(0,0,0,.8);
     transform: scale(.9);
-    transition: transform .28s cubic-bezier(.2,1.3,.4,1);
+    transition: transform .28s cubic-bezier(.22,1,.36,1);
   }
   .rvip .scrim.on .modal { transform: none; }
   .rvip .modal h3 { margin: 0 0 12px; color: var(--cyan); font-size: 15px; letter-spacing: .1em; font-weight: 600; }
@@ -1492,7 +1515,7 @@
     z-index: 70;
     opacity: 0;
     pointer-events: none;
-    transition: opacity .3s ease, transform .3s cubic-bezier(.2,1.4,.4,1);
+    transition: opacity .3s ease, transform .3s cubic-bezier(.22,1,.36,1);
   }
   .rvip .winflash.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
   .rvip .winflash.hide { opacity: 0; }
@@ -1536,7 +1559,7 @@
 
      Gated on height as well as orientation, so a desktop window — which is also
      "landscape" but tall — keeps the portrait phone frame. */
-  @media (orientation: landscape) and (min-width: 720px) {
+  @media (orientation: landscape) and (min-width: 560px) {
     .rvip .stage { padding: 0; }
     .rvip .phone {
       max-width: none;
@@ -1567,8 +1590,14 @@
       top: 50%;
       transform: translate(-50%, -50%);
     }
-    .rvip /* the classic layout wants width, .rvip so it takes the column it is given */
-    .tablewrap { width: 100%; max-width: none; margin: 0 auto; padding: 6px 12px 8px; }
+    .rvip /* the classic layout wants width, so the betting targets expand until
+       either the viewport or a cinematic table-width cap is reached. */
+    .roulette-fullscreen .rvip .tablewrap {
+      width: min(1280px, calc(100% - 72px));
+      max-width: none;
+      margin: 0 auto;
+      padding: clamp(6px, 1vw, 14px);
+    }
 
     .rvip /* the rail belongs beside the layout now, .rvip not over the wheel's band */
     .rail {
@@ -1606,10 +1635,13 @@
     .rvip .board.land .cell.zero {
       background-color: var(--zero-bg);
       background-image:
-        url("./felt.webp"),
-        linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.3));
-      background-size: 108px 108px, auto;
-      background-blend-mode: soft-light, normal;
+        radial-gradient(115% 90% at 26% 0%, rgba(220,255,227,.11), transparent 42%),
+        url("./felt-premium.jpg"),
+        linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,28,15,.24));
+      background-size: auto, cover, auto;
+      background-position: center, center, center;
+      background-blend-mode: screen, soft-light, multiply;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 -2px 3px rgba(0,0,0,.28);
       font-size: clamp(13px, 3.6dvh, 22px);
     }
 
@@ -1622,6 +1654,25 @@
     .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { opacity: 1; }
     .rvip .phone[data-mode="spin"] .tablewrap, .rvip .phone[data-mode="result"] .tablewrap { opacity: .34; filter: saturate(.7) brightness(.85); }
 
+  }
+
+  /* Sideways phones and compact tablets keep the wide topology, but surrender
+     decorative margin to protect every split and corner target. */
+  @media (orientation: landscape) and (min-width: 560px) and (max-width: 840px) {
+    .roulette-fullscreen .rvip .tablewrap {
+      width: calc(100% - 42px);
+      padding: 4px 6px 5px;
+    }
+    .rvip .board.land .cell { font-size: clamp(10px, 3.2dvh, 16px); }
+    .rvip .chiptray { padding-top: 1px; }
+  }
+
+  /* Portrait tablets use their extra width instead of retaining a phone-sized
+     board; phones still flow through the 430px fitted composition below. */
+  @media (orientation: portrait) and (min-width: 600px) {
+    .roulette-fullscreen .rvip .tablewrap {
+      width: min(720px, calc(100% - 32px));
+    }
   }
 
   /* very short landscape — older or smaller handsets */

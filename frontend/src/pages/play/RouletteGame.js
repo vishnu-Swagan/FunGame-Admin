@@ -74,9 +74,11 @@ export default function RouletteGame({ game }) {
     let engine;
     try {
       engine = mountRoulette(host, {
-        onPlaceBet: placeBet,
-        onUndo: undoBet,
-        onClear: clearBets,
+        /* Preview bets stay local so designers can verify exact chip landing
+           points without authentication. Live play always posts to the server. */
+        onPlaceBet: game.demo ? () => {} : placeBet,
+        onUndo: game.demo ? () => {} : undoBet,
+        onClear: game.demo ? () => {} : clearBets,
         /* One mute, two buttons. The table has its own in the rail and the shell
            has one in the header; before this they were separate flags, so
            silencing from one left the other playing. The shell owns the answer —
@@ -90,6 +92,28 @@ export default function RouletteGame({ game }) {
     } catch (e) {
       setFatal(String(e && e.message ? e.message : e));
       return undefined;
+    }
+
+    /* The development-only preview route is deliberately independent of login
+       and server timing, so visual work always opens on the unobstructed betting
+       surface. Production games never receive `demo` and continue to use the
+       synchronized state endpoint below. */
+    if (game.demo) {
+      engine.applyState({
+        phase: "BETTING",
+        roundNumber: "PREVIEW",
+        secondsLeft: 12,
+        timing: { bettingSeconds: 15, spinSeconds: 9, resultSeconds: 5 },
+        limits: { minimum: 10, even_money_position_max: 2000, position_max: 10000 },
+        myBets: [],
+        balance: 12500,
+        settled: null,
+      });
+      engine.setHistory(["17", "00", "32", "5", "21", "0", "14", "29", "8", "35"]);
+      return () => {
+        try { engine.destroy(); } catch (e) { /* already gone */ }
+        engineRef.current = null;
+      };
     }
 
     const tick = async () => {
@@ -130,7 +154,7 @@ export default function RouletteGame({ game }) {
       try { engine && engine.destroy(); } catch (e) { /* already gone */ }
       engineRef.current = null;
     };
-  }, [placeBet, undoBet, clearBets, navigate, game.slug]);
+  }, [placeBet, undoBet, clearBets, navigate, game.slug, game.demo]);
 
   /* The other half of the shared mute: a press on the header's button has to
      reach the table, not just the app's own effects. */
