@@ -166,7 +166,7 @@ TABLE_LIMITS = {
     "andar-bahar": (10, 10000),
     "triple-fun": (5, 5000),
     "checker": (5, 1000),
-    "keno": (5, 1000),
+    "keno": (10, 1000),
     "bingo": (5, 1000),
     "super-golden-wheel": (5, 1000),
     "no-hold": (5, 1000),
@@ -269,7 +269,10 @@ def generate_outcome(slug):
         o, _ = play_andar_bahar(1, {"side": "andar"})
         return {"joker": o["joker"], "sequence": o["sequence"], "winner": o["winner"]}
     if slug == "keno":
-        return {"drawn": sorted(RNG.sample(range(1, 37), 10))}
+        # Preserve draw order so every client reveals the same balls in the
+        # same live sequence. Settlement is set-based, so order does not alter
+        # the result.
+        return {"drawn": RNG.sample(range(1, 37), 10)}
     if slug == "bingo":
         return {"drawn": sorted(RNG.sample(range(1, 76), 30))}
     raise ValueError(f"No live outcome generator for {slug}")
@@ -380,7 +383,7 @@ def summarize_outcome(slug, outcome):
     if slug in ("teen-patti", "poker", "checker", "andar-bahar"):
         return {"winner": outcome["winner"]}
     if slug == "keno":
-        return {"drawn": outcome["drawn"][:5]}
+        return {"drawn": outcome["drawn"]}
     if slug == "bingo":
         return {"balls": len(outcome["drawn"])}
     if slug == "giant-jackpot":

@@ -32,6 +32,7 @@ export default function AppShell() {
   const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
   const isAviatorPlay = location.pathname === "/games/aviator/play";
   const isSevenUpDownPlay = location.pathname === "/games/seven-up-down/play";
+  const isKenoPlay = location.pathname === "/games/keno/play";
 
   const loadInbox = useCallback(async () => {
     try {
@@ -100,7 +101,7 @@ export default function AppShell() {
     };
   }, []);
 
-  if (isAviatorPlay || isSevenUpDownPlay) {
+  if (isAviatorPlay || isSevenUpDownPlay || isKenoPlay) {
     return (
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#08090b" }}>
         <Outlet />

@@ -1,129 +1,483 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ChevronDown, CircleHelp, Coins, History, Menu, Minus, Play, Plus,
+  RefreshCw, Volume2, VolumeX, X,
+} from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
-import { formatChips } from "@/components/common";
-import { Cabinet, CAB_W, CAB_H } from "@/components/play/arcade/Cabinet";
-import { at, atMid, Plaque, TitleBoard, CabButton, ChipRail, Dial, Marquee, Paytable } from "@/components/play/arcade/parts";
-import { NumberGrid } from "@/components/play/arcade/pieces";
-import { DENOMINATIONS } from "@/pages/play/cabinet/StakeCabinet";
+import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import "./keno.css";
 
-/**
- * Keno — the number board and the ball bowl.
- *
- * The reference draws eighty numbers; ours draws from thirty-six, because that
- * is the pool the engine samples and the paytable is priced against. Printing
- * eighty cells over a thirty-six-ball draw would put forty-four numbers on the
- * board that can never come up.
- *
- * The price list changes with how many numbers are marked — that is how keno
- * works, and the panel re-reads as each pick is made rather than showing one
- * fixed column.
- */
-const GROUND = "radial-gradient(120% 100% at 50% 0%, #5a5a2a 0%, #2e2e12 45%, #0e0e04 100%)";
-const POOL = Array.from({ length: 36 }, (_, i) => i + 1);
-const MAX_PICKS = 10;
+const NUMBERS = Array.from({ length: 36 }, (_, index) => index + 1);
+const AUTO_ROUNDS = [3, 10, 25, 100, 200, 500];
+const PRESETS = [10, 20, 50, 100, 200, 500, 1000];
 
-/* The engine's table, indexed by how many numbers are marked. Sent by the
-   server for the current column; this mirrors its shape so the panel can
-   re-price as the player picks without a round trip per tap. */
-export default function KenoCabinet({ game }) {
-  const { state, countdown, balance, betting, phase, outcome, result,
-          placeBet, clearBets, myBets, myTotal } =
-    useLiveRound(game.slug, {
-      formatResult: (s) => ({
-        title: s.payout > 0 ? "You won!" : "Not this time",
-        subtitle: `${(s.detail?.matches || []).length} matches`,
-      }),
-    });
+// Transparent return multipliers mirrored by the server. The 10-pick column
+// matches the reference cabinet's exact 0.00x-to-100.00x win ladder.
+const KENO_PAYTABLE = {
+  1: { 1: 2.51 },
+  2: { 1: 1.08, 2: 3.54 },
+  3: { 1: 0.72, 2: 1.66, 3: 5.9 },
+  4: { 1: 0.36, 2: 1.31, 3: 3.02, 4: 15.12 },
+  5: { 1: 0, 2: 0.79, 3: 2.7, 4: 10.8, 5: 25.2 },
+  6: { 1: 0, 2: 0.36, 3: 2.09, 4: 5.47, 5: 12.96, 6: 39.6 },
+  7: { 1: 0, 2: 0.18, 3: 1.66, 4: 2.95, 5: 7.2, 6: 22.32, 7: 43.2 },
+  8: { 1: 0, 2: 0, 3: 1.01, 4: 2.02, 5: 8.21, 6: 20.16, 7: 28.8, 8: 50.4 },
+  9: { 1: 0, 2: 0, 3: 0.72, 4: 1.58, 5: 4.39, 6: 12.24, 7: 18, 8: 39.6, 9: 61.2 },
+  10: { 1: 0, 2: 0, 3: 1, 4: 1.5, 5: 3.3, 6: 10.2, 7: 25, 8: 40, 9: 75, 10: 100 },
+};
 
+const money = (value) => new Intl.NumberFormat("en-IN", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}).format(Number(value || 0));
+
+const multiplier = (value) => `${Number(value || 0).toFixed(2)}x`;
+
+function shuffledDraw() {
+  const pool = [...NUMBERS];
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[swap]] = [pool[swap], pool[index]];
+  }
+  return pool.slice(0, 10);
+}
+
+function useDemoKeno() {
+  const [phase, setPhase] = useState("BETTING");
+  const [roundNumber, setRoundNumber] = useState(2418);
+  const [balance, setBalance] = useState(10000);
+  const [outcome, setOutcome] = useState(null);
+  const [myBets, setMyBets] = useState([]);
+  const [result, setResult] = useState(null);
+  const [revealProgress, setRevealProgress] = useState(0);
+  const [lastResults, setLastResults] = useState([]);
+  const betRef = useRef(null);
+
+  const placeBet = useCallback(async (selection, amount) => {
+    if (phase !== "BETTING" || betRef.current || amount > balance) return null;
+    const bet = { id: `demo-${Date.now()}`, selection: [...selection], amount };
+    const nextOutcome = { drawn: shuffledDraw() };
+    betRef.current = bet;
+    setBalance((value) => value - amount);
+    setMyBets([bet]);
+    setOutcome(nextOutcome);
+    setResult(null);
+    setRevealProgress(0);
+    setPhase("REVEAL");
+    sfx.chip();
+    return { balance: balance - amount, my_bets: [bet], my_total: amount };
+  }, [balance, phase]);
+
+  const clearBets = useCallback(async () => {
+    if (phase !== "BETTING" || !betRef.current) return null;
+    const refund = betRef.current.amount;
+    betRef.current = null;
+    setBalance((value) => value + refund);
+    setMyBets([]);
+    return { refunded: refund };
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "REVEAL") return undefined;
+    const started = performance.now();
+    const revealMs = 4400;
+    const interval = window.setInterval(() => {
+      setRevealProgress(Math.min(1, (performance.now() - started) / revealMs));
+    }, 70);
+    const finish = window.setTimeout(() => {
+      const bet = betRef.current;
+      if (!bet || !outcome) return;
+      const matches = bet.selection.filter((number) => outcome.drawn.includes(number)).sort((a, b) => a - b);
+      const mult = KENO_PAYTABLE[bet.selection.length]?.[matches.length] || 0;
+      const payout = Math.round(bet.amount * mult * 100) / 100;
+      const netWin = payout > bet.amount;
+      setRevealProgress(1);
+      setBalance((value) => value + payout);
+      setResult({
+        key: `demo-${roundNumber}`,
+        payout,
+        total_bet: bet.amount,
+        win: netWin,
+        bets: [{ ...bet, matches, multiplier: mult, payout }],
+      });
+      setLastResults((rows) => [{ round_number: roundNumber, drawn: outcome.drawn }, ...rows].slice(0, 10));
+      setPhase("RESULT");
+      if (netWin) sfx.winCelebration();
+      else sfx.lose();
+    }, revealMs);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(finish);
+    };
+  }, [outcome, phase, roundNumber]);
+
+  useEffect(() => {
+    if (phase !== "RESULT") return undefined;
+    const timer = window.setTimeout(() => {
+      betRef.current = null;
+      setMyBets([]);
+      setOutcome(null);
+      setResult(null);
+      setRevealProgress(0);
+      setRoundNumber((value) => value + 1);
+      setPhase("BETTING");
+    }, 3200);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+
+  const state = useMemo(() => ({
+    round_number: roundNumber,
+    phase,
+    min_bet: 10,
+    max_bet: 1000,
+    timings: { bet: 0, reveal: 4.4, result: 3.2 },
+    game_config: { pool: 36, draw_count: 10, max_picks: 10, paytable: KENO_PAYTABLE },
+  }), [phase, roundNumber]);
+
+  return {
+    state,
+    countdown: 0,
+    balance,
+    placing: false,
+    result,
+    phase,
+    betting: phase === "BETTING",
+    outcome,
+    myBets,
+    myTotal: myBets.reduce((sum, bet) => sum + bet.amount, 0),
+    lastResults,
+    revealProgress,
+    placeBet,
+    clearBets,
+  };
+}
+
+function useSoundState() {
+  const [muted, setMuted] = useState(isMuted());
+  useEffect(() => onMuteChange(setMuted), []);
+  return muted;
+}
+
+function Paytable({ picks, table, hits, active }) {
+  return (
+    <aside className="keno-paytable" aria-label="Payout table" data-testid="keno-paytable">
+      {picks === 0 ? (
+        <div className="keno-paytable-empty">SELECT<br />NUMBERS</div>
+      ) : Array.from({ length: picks }, (_, index) => picks - index).map((count) => (
+        <div key={count} className={`keno-payrow ${active && count === hits ? "is-active" : ""}`}>
+          <span>{count}</span>
+          <b>{multiplier(table?.[count] || 0)}</b>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+function NumberBall({ number, picked, drawn, drawing, latest, onClick, disabled }) {
+  const hit = picked && drawn;
+  const className = [
+    "keno-number",
+    picked && !drawing ? "is-picked" : "",
+    drawing && picked && !drawn ? "is-missed" : "",
+    drawn && !picked ? "is-drawn" : "",
+    hit ? "is-hit" : "",
+    latest ? "is-latest" : "",
+  ].filter(Boolean).join(" ");
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={onClick}
+      disabled={disabled}
+      data-testid={`keno-number-${number}`}
+      aria-pressed={picked}
+    >
+      <span>{number}</span>
+    </button>
+  );
+}
+
+function Modal({ title, children, onClose, className = "" }) {
+  return (
+    <div className="keno-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className={`keno-modal ${className}`} role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+        <header><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Close"><X /></button></header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function KenoTable({ game, live, demo = false }) {
+  const navigate = useNavigate();
+  const muted = useSoundState();
+  const {
+    state, countdown, balance, placing, result, phase, betting, outcome,
+    myBets, myTotal, lastResults, revealProgress, placeBet, clearBets,
+  } = live;
   const minBet = state?.min_bet ?? 10;
-  const maxBet = state?.max_bet ?? 100000;
-  const chips = useMemo(() => DENOMINATIONS.filter((c) => c >= minBet && c <= maxBet), [minBet, maxBet]);
-  const [chip, setChip] = useState(null);
-  useEffect(() => { if (chips.length && (chip == null || !chips.includes(chip))) setChip(chips[0]); }, [chips, chip]);
-
+  const maxBet = state?.max_bet ?? 1000;
+  const configPaytable = state?.game_config?.paytable || KENO_PAYTABLE;
   const [picks, setPicks] = useState([]);
-  const showFinal = !!outcome && (phase === "RESULT" || (phase === "REVEAL" && countdown < 1.2));
-  const drawn = showFinal ? (outcome?.drawn || []) : [];
+  const [amount, setAmount] = useState("10.00");
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [autoChoice, setAutoChoice] = useState(3);
+  const [autoRemaining, setAutoRemaining] = useState(0);
+  const [stopLoss, setStopLoss] = useState(0);
+  const [stopWin, setStopWin] = useState(0);
+  const autoStartBalance = useRef(null);
+  const autoRoundRef = useRef(null);
+  const shownRef = useRef(0);
+  const matchesRef = useRef(0);
 
-  /* A new round is a clean card. Keeping the marks across rounds looks like a
-     standing bet, which this table does not take. */
-  useEffect(() => { if (phase === "BETTING") setPicks([]); }, [state?.round_number]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setAmount((value) => Math.min(maxBet, Math.max(minBet, Number(value) || minBet)).toFixed(2));
+  }, [maxBet, minBet]);
 
-  const toggle = (n) => {
-    if (!betting) return;
-    setPicks((p) => p.includes(n) ? p.filter((x) => x !== n) : (p.length >= MAX_PICKS ? p : [...p, n]));
+  const lockedBet = myBets[0] || null;
+  const locked = !!lockedBet;
+  const activePicks = locked ? (lockedBet.selection || []) : picks;
+  const pickCount = activePicks.length;
+  const table = configPaytable?.[pickCount] || configPaytable?.[String(pickCount)] || KENO_PAYTABLE[pickCount] || {};
+  const allDrawn = outcome?.drawn || [];
+  const shownCount = phase === "RESULT" ? allDrawn.length : phase === "REVEAL" ? Math.min(allDrawn.length, Math.floor(revealProgress * allDrawn.length)) : 0;
+  const shown = allDrawn.slice(0, shownCount);
+  const shownSet = useMemo(() => new Set(shown), [shown]);
+  const hits = activePicks.filter((number) => shownSet.has(number)).length;
+  const drawing = phase === "REVEAL" || phase === "RESULT";
+  const latest = shown[shown.length - 1];
+  const betAmount = lockedBet?.amount || amount;
+  const computedPayout = Math.round(betAmount * Number(table[hits] || 0) * 100) / 100;
+  const payout = result?.payout ?? state?.settled?.payout ?? (phase === "RESULT" ? computedPayout : 0);
+
+  useEffect(() => {
+    if (phase !== "REVEAL") {
+      shownRef.current = 0;
+      matchesRef.current = 0;
+      return;
+    }
+    if (shownCount > shownRef.current) {
+      if (hits > matchesRef.current) sfx.slotBell();
+      else sfx.chip();
+    }
+    shownRef.current = shownCount;
+    matchesRef.current = hits;
+  }, [hits, phase, shownCount]);
+
+  const togglePick = (number) => {
+    if (!betting || locked || placing) return;
+    setPicks((values) => values.includes(number)
+      ? values.filter((value) => value !== number)
+      : values.length < 10 ? [...values, number].sort((a, b) => a - b) : values);
+    sfx.chip();
   };
 
-  const bet = () => { if (betting && chip && picks.length) placeBet(picks, chip); };
+  const randomize = () => {
+    if (!betting || locked || placing) return;
+    const count = picks.length || 10;
+    setPicks(shuffledDraw().slice(0, count).sort((a, b) => a - b));
+    sfx.chip();
+  };
 
-  const laid = myBets.length > 0;
-  const message = (() => {
-    if (phase === "REVEAL") return "Drawing…";
-    if (phase === "RESULT" && outcome) {
-      const won = result && result.payout > 0;
-      return `Drawn: ${(outcome.drawn || []).join(" ")} — ${won ? `You won ${formatChips(result.payout)}` : "No win this time"}`;
+  const adjustAmount = (delta) => {
+    setAmount((value) => Math.min(maxBet, Math.max(minBet, Math.round((Number(value) + delta) * 100) / 100)).toFixed(2));
+    sfx.chip();
+  };
+
+  const cyclePreset = () => {
+    const available = PRESETS.filter((value) => value >= minBet && value <= maxBet);
+    const index = available.findIndex((value) => value >= amount);
+    setAmount(Number(available[(index + 1 + available.length) % available.length] || minBet).toFixed(2));
+    sfx.chip();
+  };
+
+  const placeCurrent = useCallback(async () => {
+    if (!betting || placing || locked || picks.length === 0) return null;
+    const stake = Math.min(maxBet, Math.max(minBet, Number(amount) || minBet));
+    return placeBet(picks, stake);
+  }, [amount, betting, locked, maxBet, minBet, picks, placeBet, placing]);
+
+  const startAuto = () => {
+    if (!picks.length || locked) return;
+    autoStartBalance.current = Number(balance || 0);
+    autoRoundRef.current = null;
+    setAutoRemaining(autoChoice);
+    setAutoOpen(false);
+  };
+
+  useEffect(() => {
+    if (!autoRemaining || !betting || locked || placing || !picks.length) return;
+    const round = state?.round_number;
+    if (round == null || autoRoundRef.current === round) return;
+    const start = Number(autoStartBalance.current ?? balance ?? 0);
+    const current = Number(balance || 0);
+    if (stopLoss > 0 && start - current >= stopLoss) {
+      setAutoRemaining(0);
+      return;
     }
-    if (!picks.length) return `Select up to ${MAX_PICKS} numbers, then press Bet. Minimum Bet = ${formatChips(minBet)}`;
-    if (!laid) return `${picks.length} number${picks.length === 1 ? "" : "s"} marked — press Bet to play them.`;
-    return `Your bet of ${formatChips(myTotal)} on ${picks.length} numbers has been accepted.`;
+    autoRoundRef.current = round;
+    placeCurrent().then((response) => {
+      if (response) setAutoRemaining((value) => Math.max(0, value - 1));
+      else autoRoundRef.current = null;
+    });
+  }, [autoRemaining, balance, betting, locked, picks.length, placeCurrent, placing, state?.round_number, stopLoss]);
+
+  useEffect(() => {
+    const latestPayout = Number(result?.payout ?? state?.settled?.payout ?? 0);
+    if (autoRemaining > 0 && stopWin > 0 && latestPayout >= stopWin) setAutoRemaining(0);
+  }, [autoRemaining, result?.payout, state?.settled?.payout, stopWin]);
+
+  const status = (() => {
+    if (phase === "REVEAL") return `LIVE DRAW • ${shownCount}/10`;
+    if (phase === "RESULT") {
+      return `${hits} HIT${hits === 1 ? "" : "S"} • WIN ₹${money(payout)}`;
+    }
+    if (locked) return `LIVE BET ACCEPTED • DRAW IN ${Math.max(0, Math.ceil(countdown))}s`;
+    if (picks.length) return `${picks.length} NUMBER${picks.length === 1 ? "" : "S"} PICKED`;
+    return "PICK NUMBERS FOR START";
   })();
 
+  const recent = lastResults.slice(0, 6);
+
   return (
-    <Cabinet ground={GROUND} exitTo={`/games/${game.slug}`} testId="cab-keno">
-      <Plaque label="Score" value={balance === null ? "…" : formatChips(balance)}
-              width={280} height={46} style={at(44, 24)} testId="cab-score" />
-      <TitleBoard size={52} style={atMid(CAB_W, 400, 18)}>Keno</TitleBoard>
-      <Plaque label="Winner" value={formatChips(result?.payout || 0)}
-              width={280} height={46} style={at(CAB_W - 280 - 124, 24)} testId="cab-winner" />
+    <div className="keno-shell" data-phase={phase || "LOADING"} data-demo={demo ? "true" : "false"} data-testid="keno-live-cabinet">
+      <div className="keno-cabinet">
+        <header className="keno-header">
+          <button type="button" className="keno-game-button" onClick={() => navigate(`/games/${game.slug}`)}>
+            <span>KENO</span><ChevronDown />
+          </button>
+          <button type="button" className="keno-help-button" onClick={() => setRulesOpen(true)}>
+            <CircleHelp /><span>How to Play?</span>
+          </button>
+          <div className="keno-live-mode">LIVE MODE</div>
+          <div className="keno-balance" data-testid="keno-balance">₹{balance == null ? "…" : money(balance)} <span>INR</span></div>
+          <button type="button" className="keno-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open game menu"><Menu /></button>
+        </header>
 
-      <Plaque label="Bet" value={formatChips(myTotal || 0)} width={200} height={40}
-              labelSize={22} valueSize={20} style={at(44, 132)} testId="cab-bet" />
-      <Dial seconds={betting ? countdown : 0} size={86} style={at(102, 218)} />
+        <main className="keno-playfield">
+          <div className="keno-status" aria-live="polite">{status}</div>
+          <div className="keno-content">
+            <section className="keno-grid" aria-label="Keno number board" data-testid="keno-board">
+              {NUMBERS.map((number) => (
+                <NumberBall
+                  key={number}
+                  number={number}
+                  picked={activePicks.includes(number)}
+                  drawn={shownSet.has(number)}
+                  drawing={drawing}
+                  latest={number === latest && phase === "REVEAL"}
+                  disabled={!betting || locked || placing}
+                  onClick={() => togglePick(number)}
+                />
+              ))}
+            </section>
+            <Paytable picks={pickCount} table={table} hits={hits} active={phase === "RESULT"} />
+          </div>
 
-      <Paytable rows={(state?.paytable || []).slice(0, 11)} multiplier={chip || minBet} rowSize={18}
-                style={{ ...at(40, 330, 380) }} testId="cab-paytable" />
+          <div className="keno-selection-actions">
+            <button type="button" onClick={randomize} disabled={!betting || locked || placing} data-testid="keno-random">RANDOM</button>
+            <button type="button" onClick={() => setPicks([])} disabled={!betting || locked || placing || !picks.length} data-testid="keno-clear">CLEAR</button>
+          </div>
+        </main>
 
-      {/* the board: six rows of six, which is the pool the engine draws from */}
-      <NumberGrid
-        numbers={POOL} cols={6} cell={78} gap={8} picked={picks}
-        disabled={!betting}
-        onPick={toggle}
-        style={{ ...at(CAB_W / 2 - (6 * 78 + 5 * 8) / 2 + 130, 120) }}
-        testPrefix="cab-keno" />
+        <footer className="keno-betbar">
+          <div className="keno-stake-control">
+            <div className="keno-stake-amount">
+              <label htmlFor="keno-stake">Bet INR</label>
+              <input id="keno-stake" value={amount} inputMode="decimal" onChange={(event) => setAmount(event.target.value)} onBlur={() => setAmount(Math.min(maxBet, Math.max(minBet, Number(amount) || minBet)).toFixed(2))} disabled={locked || placing} aria-label="Bet amount in INR" />
+            </div>
+            <button type="button" onClick={() => adjustAmount(-minBet)} disabled={locked || placing} aria-label="Decrease bet"><Minus strokeWidth={3.4} /></button>
+            <button type="button" onClick={cyclePreset} disabled={locked || placing} aria-label="Select bet preset"><Coins strokeWidth={2.8} /></button>
+            <button type="button" onClick={() => adjustAmount(minBet)} disabled={locked || placing} aria-label="Increase bet"><Plus strokeWidth={3.4} /></button>
+          </div>
 
-      {/* the drawn balls */}
-      <div style={{ ...at(CAB_W - 400, 132, 360), display: "flex", flexWrap: "wrap", gap: 8, alignContent: "flex-start" }}
-           data-testid="cab-drawn">
-        <span className="cab-script" style={{ fontSize: 22, width: "100%" }}>Drawn</span>
-        {(drawn.length ? drawn : Array.from({ length: 10 }, () => null)).map((n, i) => (
-          <span key={i} style={{
-            height: 58, width: 58, borderRadius: "50%", display: "grid", placeItems: "center",
-            fontFamily: "ui-serif, Georgia, serif", fontWeight: 700, fontSize: 22,
-            fontVariantNumeric: "tabular-nums",
-            color: n ? (picks.includes(n) ? "#08202f" : "#2a1a02") : "rgba(255,255,255,.16)",
-            background: n
-              ? (picks.includes(n) ? "linear-gradient(180deg,#9fd8ff,#2f7fb8)" : "radial-gradient(circle at 36% 28%, #ffe9a0, #d9a83c)")
-              : "rgba(255,255,255,.05)",
-            border: "2px solid rgba(217,168,60,.5)",
-          }}>{n || ""}</span>
-        ))}
+          <button
+            type="button"
+            className={`keno-auto-button ${autoRemaining ? "is-active" : ""}`}
+            onClick={() => autoRemaining ? setAutoRemaining(0) : setAutoOpen(true)}
+            disabled={placing}
+            aria-label={autoRemaining ? "Stop auto play" : "Configure auto play"}
+            data-testid="keno-auto"
+          >
+            <RefreshCw strokeWidth={3.2} />{autoRemaining > 0 && <b>{autoRemaining}</b>}
+          </button>
+
+          <button type="button" className="keno-bet-button" onClick={placeCurrent} disabled={!betting || locked || placing || !picks.length} data-testid="keno-bet">
+            <Play /><span>{placing ? "PLACING…" : locked ? "BET PLACED" : "BET"}</span>
+          </button>
+        </footer>
       </div>
 
-      <ChipRail chips={chips} value={chip} onPick={setChip} size={56} gap={18}
-                style={{ ...at(40, CAB_H - 176, 400) }} />
+      {rulesOpen && (
+        <Modal title="HOW TO PLAY" onClose={() => setRulesOpen(false)}>
+          <div className="keno-rules">
+            <p>Pick from 1 to 10 numbers on the 36-number board, set your stake in INR, then press <b>BET</b>.</p>
+            <p>Every live round draws 10 numbers. Your payout is your stake multiplied by the value shown beside the number of hits.</p>
+            <ol><li>Pink numbers were drawn.</li><li>Gold numbers are winning hits.</li><li>A yellow ring marks one of your picks.</li></ol>
+            <p className="keno-live-note">LIVE MODE means the round and result are synchronized by the server for every connected player.</p>
+          </div>
+        </Modal>
+      )}
 
-      <div style={{ ...at(40, CAB_H - 104, CAB_W - 80), display: "flex", gap: 22 }}>
-        <CabButton onClick={() => setPicks([])} disabled={!betting || !picks.length} size={21}
-                   style={{ height: 58, flex: 1 }} data-testid="cab-select">Clear Picks</CabButton>
-        <CabButton onClick={clearBets} disabled={!betting || !myTotal} size={21}
-                   style={{ height: 58, flex: 1 }} data-testid="cab-clear">Cancel Bet</CabButton>
-        <CabButton onClick={bet} disabled={!betting || !chip || !picks.length} tone="armed" size={24}
-                   style={{ height: 58, flex: 2 }} data-testid="cab-bet-button">
-          Bet {chip ? formatChips(chip) : ""} on {picks.length}
-        </CabButton>
-      </div>
+      {autoOpen && (
+        <Modal title="AUTO PLAY" onClose={() => setAutoOpen(false)} className="keno-auto-modal">
+          <div className="keno-auto-body">
+            <p>Number of rounds</p>
+            <div className="keno-auto-rounds">
+              {AUTO_ROUNDS.map((rounds) => <button type="button" key={rounds} className={autoChoice === rounds ? "is-selected" : ""} onClick={() => setAutoChoice(rounds)}>{rounds}</button>)}
+            </div>
+            <label>Stop if cash decreases by<input type="number" min="0" value={stopLoss || ""} onChange={(event) => setStopLoss(Number(event.target.value) || 0)} placeholder="0.00" /></label>
+            <label>Stop if single win exceeds<input type="number" min="0" value={stopWin || ""} onChange={(event) => setStopWin(Number(event.target.value) || 0)} placeholder="0.00" /></label>
+            <button type="button" className="keno-start-auto" onClick={startAuto} disabled={!picks.length || locked}>START AUTO</button>
+          </div>
+        </Modal>
+      )}
 
-      <Marquee style={{ ...at(40, CAB_H - 40, CAB_W - 80, 32) }} size={19}>{message}</Marquee>
-    </Cabinet>
+      {menuOpen && (
+        <Modal title="KENO MENU" onClose={() => setMenuOpen(false)} className="keno-menu-modal">
+          <div className="keno-menu-body">
+            <div className="keno-menu-live"><span>LIVE MODE</span><b>ROUND #{state?.round_number ?? "—"}</b></div>
+            <button type="button" onClick={toggleMuted}>{muted ? <VolumeX /> : <Volume2 />}<span>{muted ? "Sound off" : "Sound on"}</span></button>
+            <button type="button" onClick={() => { setMenuOpen(false); setAutoOpen(true); }}><RefreshCw /><span>Auto Play</span></button>
+            {locked && betting && <button type="button" onClick={() => { clearBets(); setMenuOpen(false); }}><X /><span>Cancel current bet ₹{money(myTotal)}</span></button>}
+            <div className="keno-recent"><h3><History /> Recent live draws</h3>{recent.length ? recent.map((row) => <div key={row.round_number}><b>#{row.round_number}</b><span>{(row.drawn || []).join(" · ")}</span></div>) : <p>No completed rounds yet.</p>}</div>
+            <button type="button" onClick={() => navigate(`/games/${game.slug}`)}><ChevronDown /><span>Exit game</span></button>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
+}
+
+function LiveKeno({ game }) {
+  const live = useLiveRound(game.slug, {
+    pollMs: 800,
+    revealSound: "draw",
+    formatResult: (settled) => {
+      const bet = settled.bets?.[0] || {};
+      const hits = bet.matches?.length || 0;
+      const netWin = settled.payout > settled.total_bet;
+      return {
+        win: netWin,
+        big: netWin && settled.payout >= settled.total_bet * 5,
+        title: `${hits} hit${hits === 1 ? "" : "s"}`,
+        subtitle: netWin
+          ? `Won ₹${money(settled.payout)}`
+          : settled.payout > 0 ? `Returned ₹${money(settled.payout)}` : "No payout this round",
+      };
+    },
+  });
+  return <KenoTable game={game} live={live} />;
+}
+
+function DemoKeno({ game }) {
+  const demo = useDemoKeno();
+  return <KenoTable game={game} live={demo} demo />;
+}
+
+export default function KenoCabinet({ game }) {
+  return game.demo ? <DemoKeno game={game} /> : <LiveKeno game={game} />;
 }

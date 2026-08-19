@@ -57,8 +57,8 @@ GAMES = [
      "description": "Classic fruit-style reels where collecting jokers unlocks the bonus wheel.",
      "art": {"from": "#1f0a33", "to": "#7b2fbe", "accent": "#c084fc", "icon": "sparkles", "glyph": "J"}},
     {"slug": "keno", "name": "Keno", "category": "Numbers", "tagline": "Pick your lucky numbers", "featured": False,
-     "description": "Choose up to 10 numbers from 80. The more you match, the more play chips you win.",
-     "art": {"from": "#0a1e2e", "to": "#20639b", "accent": "#5ab9ea", "icon": "hash", "glyph": "80"}},
+     "description": "Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.",
+     "art": {"from": "#52001f", "to": "#be0045", "accent": "#ff9a1e", "icon": "hash", "glyph": "36"}},
     {"slug": "lucky-8-line", "name": "Lucky 8 Line", "category": "Slots", "tagline": "Eight lines of fortune", "featured": False,
      "description": "A retro 8-line slot with lucky red eights and golden ingots across three reels.",
      "art": {"from": "#330b0b", "to": "#c0392b", "accent": "#ffb347", "icon": "infinity", "glyph": "8"}},
@@ -184,6 +184,22 @@ async def run_seed():
             'tagline': 'Double zero, one synchronized table',
             'description': 'American double-zero roulette with live synchronized rounds, neighbour bets, inside bets and classic outside chances.',
             'art.glyph': '00',
+        }},
+    )
+
+    # Migrate the original 80-ball catalogue copy to the live 36-ball cabinet.
+    # The narrow predicate preserves any later operator-authored description.
+    await db.games.update_one(
+        {
+            'slug': 'keno',
+            'description': 'Choose up to 10 numbers from 80. The more you match, the more play chips you win.',
+        },
+        {'$set': {
+            'description': 'Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.',
+            'art.from': '#52001f',
+            'art.to': '#be0045',
+            'art.accent': '#ff9a1e',
+            'art.glyph': '36',
         }},
     )
 

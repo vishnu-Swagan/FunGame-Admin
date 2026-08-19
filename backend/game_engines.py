@@ -735,22 +735,22 @@ def play_fun_roulette(bet, payload):
     return {"number": n, "color": roulette_color(n), "bet_type": btype, "value": value, "won": mult > 0}, payout
 
 
-# Spribe-style Keno: 36-ball pool, 10 drawn, pick up to 10. Paytable keyed by
-# number of picks -> {hits: multiplier}. Designed by exact hypergeometric
-# enumeration to ~88% RTP for EVERY pick count, with rare "dream" jackpot tops
-# (10/10 = 10,000x) that cost almost nothing in RTP because they are so rare.
+# 36-ball Keno: 10 balls are drawn and the player may mark up to ten. These are
+# transparent return multipliers (stake included). The ten-pick column mirrors
+# the reference cabinet's visible 0.00x-to-100.00x win ladder; the draw itself
+# remains a uniform 10-of-36 sample and is never changed by a player's picks.
 KENO_POOL, KENO_DRAW = 36, 10
 KENO_PAYTABLE = {
-    1:  {1: 3.17},
-    2:  {1: 1.35, 2: 4.51},
-    3:  {2: 1.27, 3: 40},
-    4:  {2: 1.28, 3: 2.55, 4: 120},
-    5:  {2: 0.64, 3: 3.18, 4: 8.27, 5: 350},
-    6:  {3: 2.94, 4: 7.65, 5: 19.5, 6: 700},
-    7:  {3: 1.44, 4: 5.78, 5: 15, 6: 34.5, 7: 1500},
-    8:  {4: 5.07, 5: 12.5, 6: 30.5, 7: 67.5, 8: 3000},
-    9:  {4: 2.34, 5: 9.38, 6: 23.5, 7: 54.5, 8: 125, 9: 6000},
-    10: {4: 1.95, 5: 4.87, 6: 12, 7: 29, 8: 68, 9: 800, 10: 10000},
+    1:  {1: 2.51},
+    2:  {1: 1.08, 2: 3.54},
+    3:  {1: 0.72, 2: 1.66, 3: 5.90},
+    4:  {1: 0.36, 2: 1.31, 3: 3.02, 4: 15.12},
+    5:  {1: 0.00, 2: 0.79, 3: 2.70, 4: 10.80, 5: 25.20},
+    6:  {1: 0.00, 2: 0.36, 3: 2.09, 4: 5.47, 5: 12.96, 6: 39.60},
+    7:  {1: 0.00, 2: 0.18, 3: 1.66, 4: 2.95, 5: 7.20, 6: 22.32, 7: 43.20},
+    8:  {1: 0.00, 2: 0.00, 3: 1.01, 4: 2.02, 5: 8.21, 6: 20.16, 7: 28.80, 8: 50.40},
+    9:  {1: 0.00, 2: 0.00, 3: 0.72, 4: 1.58, 5: 4.39, 6: 12.24, 7: 18.00, 8: 39.60, 9: 61.20},
+    10: {1: 0.00, 2: 0.00, 3: 1.00, 4: 1.50, 5: 3.30, 6: 10.20, 7: 25.00, 8: 40.00, 9: 75.00, 10: 100.00},
 }
 
 

@@ -23,7 +23,7 @@ from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
-    MIN_BET, MAX_BET, AVIATOR_GROWTH,
+    MIN_BET, MAX_BET, AVIATOR_GROWTH, KENO_PAYTABLE,
     aviator_crash_point, aviator_multiplier, aviator_return_factor, aviator_time_for,
 )
 from live_engines import (
@@ -671,6 +671,12 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         # The engine's own price list, so the felt cannot quote an offer
         # settlement would not honour.
         'paytable': paytable_for(slug),
+        'game_config': ({
+            'pool': 36,
+            'draw_count': 10,
+            'max_picks': 10,
+            'paytable': KENO_PAYTABLE,
+        } if slug == 'keno' else None),
         'outcome': outcome, 'my_bets': my_bets,
         'my_total': sum(b['amount'] for b in my_bets),
         'last_results': [{'round_number': p['round_number'], **(p.get('summary') or {})} for p in prev],

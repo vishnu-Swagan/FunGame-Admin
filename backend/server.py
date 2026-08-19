@@ -181,11 +181,18 @@ async def root():
     is the cheapest honest signal: 38 means the American changeover is live, 37
     means it is not.
     """
-    from game_engines import ROULETTE_POCKETS
+    from game_engines import KENO_DRAW, KENO_POOL, ROULETTE_POCKETS
     return {
         'message': 'Chakri.Casino API',
         'disclaimer': 'PLAY CHIPS ONLY',
-        'build': {'roulette_pockets': len(ROULETTE_POCKETS)},
+        'build': {
+            'roulette_pockets': len(ROULETTE_POCKETS),
+            # Public release fingerprint only. The private Keno price profile
+            # remains server-side; these two values simply prove the matching
+            # 36-ball/10-draw build reached Render.
+            'keno_pool': KENO_POOL,
+            'keno_draw': KENO_DRAW,
+        },
     }
 
 
