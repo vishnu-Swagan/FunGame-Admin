@@ -714,25 +714,47 @@
   .rvip .phone[data-mode="bet"] .cell.red { background-color: var(--red-live); }
   .rvip .phone[data-mode="bet"] .cell.black { background-color: var(--ink-live); }
 
-  .rvip /* the left columns and the 2-to-1 row are near-black printed panels */
+  .rvip /* Royal emerald inlays for the outside bets. These keep the same felt
+     vocabulary as the number field, but the brass edge, deeper nap and heavier
+     lettering give the strategic bets a clear premium tier. */
   .cell.outside, .rvip .cell.dozen, .rvip .cell.col21 {
     background-color: var(--side-bg);
     background-image:
-      radial-gradient(110% 90% at 28% 0%, rgba(210,255,221,.07), transparent 45%),
+      radial-gradient(110% 90% at 28% 0%, rgba(248,230,168,.13), transparent 43%),
+      linear-gradient(112deg, rgba(201,160,44,.09), transparent 38%, rgba(0,24,13,.15)),
       url("./felt-premium.jpg"),
-      linear-gradient(180deg, rgba(255,255,255,.015), rgba(0,27,14,.2));
-    background-size: auto, cover, auto;
-    background-position: center, center, center;
-    background-blend-mode: screen, soft-light, multiply;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 2px rgba(0,0,0,.2);
+      linear-gradient(180deg, rgba(9,116,69,.22), rgba(0,25,13,.34));
+    background-size: auto, auto, cover, auto;
+    background-position: center, center, center, center;
+    background-blend-mode: screen, soft-light, soft-light, multiply;
+    border-color: var(--brass-ln);
+    color: #fffaf0;
+    font-weight: 700;
+    text-shadow: 0 1px 1px rgba(0,0,0,.95), 0 0 5px rgba(226,206,139,.24);
+    box-shadow:
+      inset 0 1px 0 rgba(248,230,168,.24),
+      inset 0 -3px 4px rgba(0,18,9,.38),
+      inset 0 0 0 1px rgba(201,160,44,.12);
+  }
+  .rvip .cell.outside::after, .rvip .cell.dozen::after, .rvip .cell.col21::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid rgba(248,230,168,.18);
+    box-shadow: inset 0 1px 2px rgba(255,255,255,.045);
+    pointer-events: none;
+  }
+  .rvip .cell.outside > :not(.placed), .rvip .cell.dozen > :not(.placed), .rvip .cell.col21 > :not(.placed) {
+    position: relative;
+    z-index: 1;
   }
 
   .rvip /* rotated labels are longer than their cell is tall on short screens —
      let them scale down and never clip */
   /* wider columns give the rotated labels room for a larger face */
   .cell.outside, .rvip .cell.dozen {
-    font-size: clamp(9px, 2vh, 18px);
-    letter-spacing: .08em;
+    font-size: clamp(11px, 2.15vh, 19px);
+    letter-spacing: .075em;
   }
   .rvip /* :not(.placed) matters — a staked chip is also a span, .rvip and without this it
      inherits the vertical writing mode and its value comes out sideways */
@@ -741,20 +763,27 @@
     transform: rotate(180deg);
     white-space: nowrap;
   }
-  .rvip .cell.dozen sup { font-size: .58em; letter-spacing: 0; }
+  .rvip .cell.dozen sup {
+    color: var(--brass-hi);
+    font-size: .58em;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
 
   .rvip .cell.col21 {
-    font-size: clamp(10px, 1.9vh, 15px);
-    letter-spacing: .04em;
+    font-size: clamp(11px, 2vh, 16px);
+    letter-spacing: .065em;
     white-space: nowrap;
     line-height: 1;
   }
-  .rvip .cell.col21 .c21 { white-space: nowrap; }
+  .rvip .cell.col21 .c21 { font-weight: 800; white-space: nowrap; }
   .rvip .cell.col21 .to {
-    font-size: .62em;
+    color: var(--brass-hi);
+    font-size: .58em;
+    font-weight: 800;
     vertical-align: baseline;
-    margin: 0 .12em;
-    opacity: .85;
+    margin: 0 .18em;
+    opacity: 1;
   }
 
   .rvip /* clip-path crops a border, .rvip so the outline is drawn as a filled backplate
@@ -1627,9 +1656,9 @@
       writing-mode: horizontal-tb;
       transform: none;
     }
-    .rvip .board.land .cell.dozen, .rvip .board.land .cell.outside { font-size: clamp(9px, 2.6dvh, 14px); }
+    .rvip .board.land .cell.dozen, .rvip .board.land .cell.outside { font-size: clamp(12px, 2.8dvh, 17px); }
     .rvip .board.land .cell { font-size: clamp(11px, 3.4dvh, 20px); }
-    .rvip .board.land .cell.col21 { font-size: clamp(8px, 2.2dvh, 12px); }
+    .rvip .board.land .cell.col21 { font-size: clamp(12px, 2.8dvh, 16px); }
     .rvip /* the arc belongs to the portrait layout; landscape has the zero in the grid */
     .pennant { display: none; }
     .rvip .board.land .cell.zero {
