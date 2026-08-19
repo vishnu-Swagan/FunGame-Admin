@@ -53,6 +53,10 @@
     linear-gradient(to bottom, #000 0 54%, rgba(0,0,0,.94) 57%, transparent 62%),
     radial-gradient(ellipse 23% 24% at 78% 61%, #000 0 68%, rgba(0,0,0,.9) 78%, transparent 100%);
 }
+.ab-dealer-video.ab-ambient-video {
+  -webkit-mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
+  mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
+}
 .ab-dealer-foreground { z-index: 3; transition: opacity 120ms linear; }
 .ab-dealer-foreground.is-hidden { opacity: 0; }
 .ab-dealer-video { z-index: 4; transition: opacity 180ms ease; }

@@ -314,6 +314,7 @@ function AndarBaharTable({ game, live, demo = false }) {
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
   const idleVideoRef = useRef(null);
+  const ambientVideoRef = useRef(null);
   const sceneRef = useRef(null);
   const lastDealCountRef = useRef(0);
   const dealStoppedRoundRef = useRef(null);
@@ -361,20 +362,31 @@ function AndarBaharTable({ game, live, demo = false }) {
   useEffect(() => {
     const video = videoRef.current;
     const idleVideo = idleVideoRef.current;
-    if (!video || !idleVideo) return;
+    const ambientVideo = ambientVideoRef.current;
+    if (!video || !idleVideo || !ambientVideo) return;
     try {
       if (phase === "REVEAL") {
         idleVideo.pause();
+        ambientVideo.pause();
         video.currentTime = 0;
         video.play().catch(() => {});
       } else if (phase === "BETTING" && hairMoment) {
         video.pause();
         video.currentTime = 0;
+        ambientVideo.pause();
         if (idleVideo.paused) idleVideo.play().catch(() => {});
+      } else if (phase === "BETTING") {
+        video.pause();
+        video.currentTime = 0;
+        idleVideo.pause();
+        idleVideo.currentTime = 0;
+        if (ambientVideo.paused) ambientVideo.play().catch(() => {});
       } else {
         video.pause();
         idleVideo.pause();
+        ambientVideo.pause();
         idleVideo.currentTime = 0;
+        ambientVideo.currentTime = 0;
       }
     } catch (_error) {
       /* poster remains visible */
@@ -539,20 +551,21 @@ function AndarBaharTable({ game, live, demo = false }) {
         label(ctx, row.winner === "andar" ? "A" : "B", x, y + .5, 10, "#fff", "center", 900);
       });
       const recentCounts = scene.lastResults.slice(0, 7).reverse();
+      label(ctx, "LAST 7 COUNTS", 56, 821, 10, "#c7b078", "left", 800);
       recentCounts.forEach((row, index) => {
-        const x = 305 + index * 32;
-        ctx.beginPath(); ctx.arc(x, 833, 12, 0, Math.PI * 2);
+        const x = 56 + index * 40;
+        ctx.beginPath(); ctx.arc(x, 842, 12, 0, Math.PI * 2);
         ctx.strokeStyle = row.winner === "andar" ? "#e3153b" : "#4385de";
         ctx.lineWidth = 2;
         ctx.stroke();
-        label(ctx, String(row.card_count || "–"), x, 833, 10, "#f8f1df", "center", 800);
+        label(ctx, String(row.card_count || "–"), x, 842, 10, "#f8f1df", "center", 800);
       });
       const totalRows = Math.max(1, scene.lastResults.length);
       const andarPct = Math.round(scene.lastResults.filter((row) => row.winner === "andar").length * 100 / totalRows);
-      label(ctx, `${andarPct}%`, 303, 852, 12, "#f8f1df", "right", 800);
-      ctx.fillStyle = "#e3153b"; ctx.fillRect(310, 845, 95 * andarPct / 100, 14);
-      ctx.fillStyle = "#2857a5"; ctx.fillRect(310 + 95 * andarPct / 100, 845, 95 * (100 - andarPct) / 100, 14);
-      label(ctx, `${100 - andarPct}%`, 412, 852, 12, "#f8f1df", "left", 800);
+      label(ctx, `A ${andarPct}%`, 325, 833, 11, "#f06a82", "left", 800);
+      label(ctx, `B ${100 - andarPct}%`, 438, 833, 11, "#6fa8ef", "right", 800);
+      ctx.fillStyle = "#e3153b"; ctx.fillRect(325, 847, 113 * andarPct / 100, 10);
+      ctx.fillStyle = "#2857a5"; ctx.fillRect(325 + 113 * andarPct / 100, 847, 113 * (100 - andarPct) / 100, 10);
 
       const mainX = 497; const mainY = MAIN_BET_Y; const mainW = 600; const mainH = MAIN_BET_H;
       rounded(ctx, mainX, mainY, mainW, mainH, 7);
@@ -649,6 +662,18 @@ function AndarBaharTable({ game, live, demo = false }) {
       </svg>
       <img className={`ab-dealer-foreground ${phase === "REVEAL" ? "is-hidden" : ""}`}
         src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
+      <video
+        ref={ambientVideoRef}
+        className={`ab-dealer-video ab-ambient-video ${phase === "BETTING" && !hairMoment ? "is-active" : "is-idle"}`}
+        src="/game-art/andar-bahar/dealer-ambient.mp4"
+        poster="/game-art/andar-bahar/dealer-stage.jpg"
+        muted
+        loop
+        playsInline
+        preload="auto"
+        aria-label="Animated live Andar Bahar dealer blinking and making calm two-hand betting gestures"
+        onError={(event) => { event.currentTarget.style.display = "none"; }}
+      />
       <video
         ref={idleVideoRef}
         className={`ab-dealer-video ab-idle-video ${phase === "BETTING" && hairMoment ? "is-active" : "is-idle"}`}
