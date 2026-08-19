@@ -46,6 +46,32 @@
     --top-h: 0px;
   }
 
+  .roulette-fullscreen {
+    position: relative;
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    background: #032d1d;
+  }
+  .roulette-fullscreen > .rvip,
+  .roulette-fullscreen > .rvip > .stage {
+    width: 100%;
+    height: 100%;
+    min-height: 100dvh;
+  }
+  .roulette-fullscreen .rvip .stage { padding: 0; }
+  .roulette-fullscreen .rvip .phone {
+    width: 100dvw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .roulette-fullscreen .rvip .tablewrap {
+    width: min(760px, calc(100% - 16px));
+  }
+
   .rvip * { box-sizing: border-box; }
 
   .rvip {
@@ -80,9 +106,11 @@
        lands on the same colour, so its edges disappear into the table. */
     background:
       radial-gradient(78% 52% at 50% 11%, rgba(132,231,164,.18), rgba(132,231,164,0) 66%),
+      repeating-linear-gradient(7deg, rgba(255,255,255,.014) 0 1px, rgba(0,46,24,.018) 1px 3px),
+      repeating-linear-gradient(97deg, rgba(255,255,255,.01) 0 1px, rgba(0,35,19,.014) 1px 4px),
       url("./felt.webp") 0 0 / 108px 108px repeat,
       radial-gradient(128% 82% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 48%, var(--felt-deep) 78%, var(--void) 100%);
-    background-blend-mode: screen, soft-light, normal;
+    background-blend-mode: screen, overlay, overlay, soft-light, normal;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -251,7 +279,15 @@
     isolation: isolate;
     transition: opacity .5s ease;
   }
-  .rvip .phone[data-mode="bet"] .topwrap { opacity: .7; }
+  .rvip .phone[data-mode="bet"] .wheelstage {
+    height: 0;
+    overflow: hidden;
+  }
+  .rvip .phone[data-mode="bet"] .topwrap,
+  .rvip .phone[data-mode="bet"] .spotlight {
+    opacity: 0;
+    visibility: hidden;
+  }
   .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { z-index: 20; opacity: 1; }
 
   /* Royal cabinet: a carved mahogany outer bezel with restrained brass
@@ -1500,7 +1536,7 @@
 
      Gated on height as well as orientation, so a desktop window — which is also
      "landscape" but tall — keeps the portrait phone frame. */
-  @media (orientation: landscape) and (max-height: 620px) {
+  @media (orientation: landscape) and (min-width: 720px) {
     .rvip .stage { padding: 0; }
     .rvip .phone {
       max-width: none;
@@ -1518,6 +1554,7 @@
         "wheel tray"
         "wheel money";
     }
+    .rvip .phone[data-mode="bet"] { grid-template-columns: 0 minmax(0, 1fr); }
     .rvip /* the wheel owns a column of its own and centres in it */
     .wheelstage {
       --wheelsz: min(86dvh, 44dvw);
@@ -1525,12 +1562,13 @@
       height: auto;
       align-self: stretch;
     }
+    .rvip .phone[data-mode="bet"] .wheelstage { width: 0; }
     .rvip .topwrap {
       top: 50%;
       transform: translate(-50%, -50%);
     }
     .rvip /* the classic layout wants width, .rvip so it takes the column it is given */
-    .tablewrap { width: 100%; margin: 0 auto; padding: 4px 6px 6px; }
+    .tablewrap { width: 100%; max-width: none; margin: 0 auto; padding: 6px 12px 8px; }
 
     .rvip /* the rail belongs beside the layout now, .rvip not over the wheel's band */
     .rail {

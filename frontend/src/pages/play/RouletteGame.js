@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
-import { PlayShell } from "@/components/play/PlayShell";
 import { mountRoulette } from "@/pages/play/rouletteVip/engine";
 import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import "@/pages/play/rouletteVip/styles.css";
@@ -188,13 +187,13 @@ export default function RouletteGame({ game }) {
   }, []);
 
   return (
-    <PlayShell game={game} title="American Roulette" compact>
+    <div className="roulette-fullscreen" data-testid="game-play-page">
       {fatal ? (
         <div className="p-6 text-center text-sm text-white/70" data-testid="roulette-error">
           The table could not be loaded. {fatal}
         </div>
       ) : null}
       <div ref={hostRef} data-testid="roulette-table" />
-    </PlayShell>
+    </div>
   );
 }

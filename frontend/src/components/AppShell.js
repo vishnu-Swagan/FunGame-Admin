@@ -22,17 +22,14 @@ export default function AppShell() {
   const [unread, setUnread] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const headerRef = useRef(null);
-  // Roulette is exempt (PlayShell landscape/scroll page) — it keeps the bottom nav + safe-area padding.
-  /* A table in play gets the screen to itself: no bottom navigation, no padding
-     reserved for it. Roulette used to be excluded from that and was the only
-     game paying for the nav bar twice over — 72px of fixed chrome across the
-     felt and 96px of padding underneath it — which is precisely the room its
-     number board needed. Every table leaves the same way, by the back button in
-     the game's own header. */
+  /* Cabinet games own the viewport. Their own controls provide sound and exit,
+     so the app wordmark, balance header, navigation and safe-area padding must
+     not consume playable table space. */
   const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
   const isAviatorPlay = location.pathname === "/games/aviator/play";
   const isSevenUpDownPlay = location.pathname === "/games/seven-up-down/play";
   const isKenoPlay = location.pathname === "/games/keno/play";
+  const isRoulettePlay = location.pathname === "/games/fun-roulette/play";
 
   const loadInbox = useCallback(async () => {
     try {
@@ -101,7 +98,7 @@ export default function AppShell() {
     };
   }, []);
 
-  if (isAviatorPlay || isSevenUpDownPlay || isKenoPlay) {
+  if (isAviatorPlay || isSevenUpDownPlay || isKenoPlay || isRoulettePlay) {
     return (
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#08090b" }}>
         <Outlet />

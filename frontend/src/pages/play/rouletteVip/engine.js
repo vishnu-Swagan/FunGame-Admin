@@ -525,7 +525,7 @@ export function mountRoulette(root, opts) {
      stacked rows in that space gives 16px cells that cannot be bet on reliably.
      Five rows in the same space gives about 45px. Same DOM, same keys, same
      settlement; only the grid placement differs. */
-  const LAND_MQ = window.matchMedia('(orientation: landscape) and (max-height: 620px)');
+  const LAND_MQ = window.matchMedia('(orientation: landscape) and (min-width: 720px)');
 
   const OUTSIDES_ROW = [
     { key: 'range:low',   label: '1-18'  },
