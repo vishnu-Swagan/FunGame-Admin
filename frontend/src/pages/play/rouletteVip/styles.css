@@ -6,10 +6,10 @@
     /* Felt sampled straight out of the wheel photograph: #520d09 where the
        cabinet sits, falling to #100001 at the edges. Using the photo's own
        colours is what lets the layout and the wheel read as one table. */
-    --felt-warm: #52100b;
-    --felt-mid:  #330907;
-    --felt-deep: #180404;
-    --void:      #0d0202;
+    --felt-warm: #218f59;
+    --felt-mid:  #116f45;
+    --felt-deep: #074f32;
+    --void:      #032d1d;
     --burgundy:  #3d0a08;
     --mid:       #220605;
     /* printed layout: deep casino red and near-black on the felt */
@@ -17,12 +17,12 @@
     --red-live:  #5a1513;
     --ink:       #030001;
     --ink-live:  #010000;
-    --side-bg:   #0f0007;   /* the near-black panels down the left */
-    --zero-bg:   #0f2620;   /* desaturated teal of the zero */
-    --rule:      rgba(168,139,145,.9);   /* light warm grey rules, not brass */
-    --rule-soft: rgba(168,139,145,.55);
-    --brass-ln:  rgba(168,139,145,.9);
-    --brass-hi:  rgba(214,196,199,.95);
+    --side-bg:   #09452e;
+    --zero-bg:   #0c7552;
+    --rule:      rgba(232,224,188,.92);
+    --rule-soft: rgba(220,216,184,.66);
+    --brass-ln:  rgba(226,206,139,.92);
+    --brass-hi:  rgba(248,230,168,.96);
     --teal:      #0e6b5e;
     --teal-live: #16988a;
     --cyan:      #00e5cc;
@@ -79,9 +79,10 @@
        edges, with the woven texture over the top. The photo's own dark surround
        lands on the same colour, so its edges disappear into the table. */
     background:
+      radial-gradient(78% 52% at 50% 11%, rgba(132,231,164,.18), rgba(132,231,164,0) 66%),
       url("./felt.webp") 0 0 / 108px 108px repeat,
-      radial-gradient(128% 62% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 44%, var(--felt-deep) 74%, var(--void) 100%);
-    background-blend-mode: soft-light, normal;
+      radial-gradient(128% 82% at 50% 12%, var(--felt-warm) 0%, var(--felt-mid) 48%, var(--felt-deep) 78%, var(--void) 100%);
+    background-blend-mode: screen, soft-light, normal;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -247,9 +248,40 @@
        trade places, so no geometry moves and nothing has to be re-measured. */
     z-index: 5;
     opacity: .34;
+    isolation: isolate;
     transition: opacity .5s ease;
   }
+  .rvip .phone[data-mode="bet"] .topwrap { opacity: .7; }
   .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { z-index: 20; opacity: 1; }
+
+  /* Royal cabinet: a carved mahogany outer bezel with restrained brass
+     detailing. The centre is masked away, leaving the ball track and all 38
+     American pockets untouched. */
+  .rvip .topwrap::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: -7%;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 35% 23%, rgba(255,235,183,.34), rgba(255,235,183,0) 27%),
+      repeating-conic-gradient(from 4deg,
+        rgba(255,224,150,.13) 0deg 3deg,
+        rgba(63,17,7,.13) 3deg 7deg,
+        rgba(255,224,150,.045) 7deg 11deg),
+      radial-gradient(circle at 48% 42%, #b76429 0%, #7c3518 46%, #4b1a0d 73%, #210906 100%);
+    -webkit-mask: radial-gradient(circle closest-side, transparent 0 83%, #000 83.5% 100%);
+    mask: radial-gradient(circle closest-side, transparent 0 83%, #000 83.5% 100%);
+    border: 2px solid rgba(239,199,112,.78);
+    box-shadow:
+      0 0 0 5px #351006,
+      0 0 0 7px rgba(220,165,73,.78),
+      0 0 0 12px #210906,
+      0 24px 34px rgba(0,0,0,.58),
+      inset 0 0 0 3px rgba(255,228,164,.34),
+      inset 0 0 18px rgba(0,0,0,.72);
+    pointer-events: none;
+  }
 
   .rvip /* The rectified image is square, .rvip so its dark corners would draw a hard box over
      the felt. Masking it to its own circle dissolves that edge, .rvip and the shadow
@@ -261,12 +293,16 @@
      of the way in and shave the whole number ring off. */
   .topimg {
     position: absolute; inset: 0;
+    z-index: 1;
     display: block; width: 100%; height: auto;
     -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%,
       #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
     mask-image: radial-gradient(circle closest-side at 50% 50%,
       #000 0 91%, rgba(0,0,0,.6) 96%, transparent 100%);
-    filter: drop-shadow(0 12px 30px rgba(0,0,0,.8));
+    filter:
+      saturate(1.14) contrast(1.08)
+      drop-shadow(0 12px 30px rgba(0,0,0,.8))
+      drop-shadow(0 2px 2px rgba(244,200,105,.18));
   }
   .rvip /* the head is rotated from script; will-change keeps it on its own layer so a
      13-second spin does not repaint the bowl underneath it every frame */
