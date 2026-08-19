@@ -71,6 +71,10 @@ const CABINET = new Set([
   "fever-joker-bonus", "giant-jackpot", "lucky-8-line", "triple-fun",
 ]);
 
+/* These four fullscreen tables already carry dense, game-native result/history
+   chrome. Keep the shared winner receipt off them so it never covers play. */
+const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down"]);
+
 export default function GamePlay() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -120,7 +124,7 @@ export default function GamePlay() {
           intro plays on top for ~4s, so it dissolves straight onto the round
           that is already in progress. */}
       <Component game={game} />
-      <LastWinnerRotator slug={game.slug} />
+      {!NO_WINNER_ROTATOR.has(game.slug) && <LastWinnerRotator slug={game.slug} />}
       {/* The cabinet is its own fullscreen machine and opens straight onto the
           round in progress; the portrait tables keep the cinematic intro. */}
       {!CABINET.has(game.slug) && <GameIntro game={game} />}
