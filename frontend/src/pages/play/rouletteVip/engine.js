@@ -30,8 +30,6 @@ export function mountRoulette(root, opts) {
   const tableName = root.querySelector('.tablename');
   if (tableName && tableName.firstChild) {
     tableName.firstChild.textContent = 'Chakri.Casino American Roulette ';
-    const tableRange = tableName.querySelector('b');
-    if (tableRange) tableRange.textContent = '10 – 1,000';
   }
   const onPlaceBet = opts.onPlaceBet || (() => {});
   const onUndo = opts.onUndo || (() => {});
@@ -620,7 +618,7 @@ export function mountRoulette(root, opts) {
   const fmt = n => Number(n || 0).toLocaleString('en-IN');
   const syncTableLimits = () => {
     const range = tableName && tableName.querySelector('b');
-    if (range) range.textContent = '10 – 1,000';
+    if (range) range.textContent = `${fmt(tableLimits.minimum)} – ${fmt(tableLimits.position_max)}`;
   };
   syncTableLimits();
 
