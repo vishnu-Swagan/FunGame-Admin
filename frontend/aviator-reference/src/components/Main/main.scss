@@ -1919,15 +1919,15 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
       min-width: 0;
       max-width: none;
       height: auto;
-      min-height: 174px;
+      min-height: 150px;
       margin: 0;
       border-radius: 11px;
 
       &::before {
         content: attr(data-panel);
         position: absolute;
-        top: 13px;
-        left: 14px;
+        top: 10px;
+        left: 12px;
         z-index: 3;
         color: #6f727a;
         font-size: 9px;
@@ -1938,21 +1938,21 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
       }
 
       > .controls {
-        min-height: 174px;
-        padding: 8px 12px 10px;
+        min-height: 150px;
+        padding: 6px 10px 7px;
         border: 1px solid #303239;
         border-radius: 11px;
         background: #202126;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 28px rgba(0, 0, 0, 0.2);
 
         .navigation {
-          height: 28px;
-          margin: 0 0 10px;
+          height: 24px;
+          margin: 0 0 6px;
 
           .navigation-switcher {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            width: 158px;
+            width: 148px;
             border: 1px solid #141519;
             border-radius: 8px;
             background: #141519;
@@ -1962,7 +1962,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
               width: auto;
               border-radius: 7px;
               color: #7f828a;
-              font-size: 11px;
+              font-size: 10px;
               font-weight: 700;
               transition: background-color 160ms ease, color 160ms ease;
 
@@ -1989,18 +1989,18 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
           align-items: stretch;
           width: 100%;
           max-width: none;
-          min-height: 86px;
+          min-height: 72px;
           margin: 0;
         }
 
         .bet-block {
-          width: min(40%, 192px);
-          min-width: 148px;
+          width: min(39%, 180px);
+          min-width: 136px;
 
           .bet-spinner {
             width: 100%;
-            height: 42px;
-            font-size: 19px;
+            height: 33px;
+            font-size: 17px;
 
             .spinner {
               border: 1px solid #090a0c;
@@ -2027,7 +2027,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
               }
 
               .input input {
-                font-size: 19px;
+                font-size: 17px;
                 font-variant-numeric: tabular-nums;
               }
             }
@@ -2036,18 +2036,18 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
           .bet-opt-list {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 4px;
-            margin-top: 5px;
+            gap: 2px;
+            margin-top: 2px;
 
             .bet-opt {
               width: auto;
-              height: 22px;
+              height: 17px;
               margin: 0 !important;
               border: 1px solid #303239;
               border-radius: 6px;
               background: #292b31;
               color: #a1a4ab;
-              font-size: 11px;
+              font-size: 10px;
               font-variant-numeric: tabular-nums;
               transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 100ms ease;
 
@@ -2077,18 +2077,18 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
           width: auto;
           flex: 1 1 auto;
           min-width: 0;
-          margin-left: 8px;
+          margin-left: 7px;
 
           .btn-tooltip {
-            margin-bottom: 4px;
+            margin-bottom: 2px;
             color: #8f9299;
             font-size: 10px;
           }
 
           button {
-            min-height: 78px;
+            min-height: 66px;
             border-radius: 9px;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 800;
             letter-spacing: 0.015em;
             transition: filter 160ms ease, transform 100ms ease, box-shadow 160ms ease;
@@ -2110,8 +2110,8 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
               font-weight: 800;
 
               &.amount {
-                margin-top: 5px;
-                font-size: 20px;
+                margin-top: 3px;
+                font-size: 18px;
                 font-variant-numeric: tabular-nums;
 
                 .currency {
@@ -2127,22 +2127,22 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
 
         .border-line {
           height: 1px;
-          margin: 8px -12px 0;
+          margin: 4px -10px 0;
           background: #15161a;
-          width: calc(100% + 24px) !important;
+          width: calc(100% + 20px) !important;
         }
 
         .second-row {
           width: 100%;
           max-width: none;
-          height: 42px;
+          height: 30px;
           justify-content: space-between;
 
           .auto-bet-wrapper {
             margin-left: 0;
 
             .auto-bet .auto-play-btn {
-              height: 28px;
+              height: 26px;
               border-radius: 7px;
               font-size: 10px;
               font-weight: 700;
@@ -2153,7 +2153,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
             margin-right: 0;
 
             .cashout-snipper-wrapper .cashout-snipper {
-              height: 30px;
+              height: 27px;
 
               .snipper {
                 border: 1px solid #0a0b0d;
@@ -2168,11 +2168,11 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
   }
 
   .sec-hand-btn {
-    top: 11px;
-    right: 12px;
+    top: 8px;
+    right: 10px;
     z-index: 4;
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     border: 1px solid rgba(255, 255, 255, 0.11);
     border-radius: 7px;
     background-color: #303239;
@@ -2271,7 +2271,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
     }
 
     .bet-controls .bet-control {
-      min-height: 174px;
+      min-height: 150px;
 
       &:first-child {
         margin-bottom: 0;
@@ -2294,14 +2294,26 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
 
     .bet-controls > .controls {
       grid-template-columns: 1fr;
+      gap: 6px;
     }
 
     .bet-controls .bet-control > .controls {
-      padding-inline: 12px;
+      min-height: 146px;
+      padding-inline: 10px;
 
       .bet-block {
-        min-width: 150px;
+        min-width: 138px;
       }
+    }
+
+    .bet-controls .bet-control {
+      min-height: 146px;
+    }
+
+    .stage-board {
+      flex-basis: clamp(220px, calc(100dvh - 432px), 300px);
+      height: clamp(220px, calc(100dvh - 432px), 300px) !important;
+      min-height: 220px !important;
     }
   }
 }
@@ -2323,9 +2335,9 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
     }
 
     .stage-board {
-      flex-basis: 300px;
-      height: 300px !important;
-      min-height: 250px !important;
+      flex-basis: clamp(220px, calc(100dvh - 418px), 300px);
+      height: clamp(220px, calc(100dvh - 418px), 300px) !important;
+      min-height: 220px !important;
     }
 
     .bet-controls .bet-control {
@@ -2337,7 +2349,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
         padding-inline: 8px;
 
         .first-row {
-          min-height: 82px;
+          min-height: 70px;
         }
 
         .bet-block {
@@ -2349,7 +2361,7 @@ $btn-color: linear-gradient (90deg, rgb(43, 35, 87) 0%, rgb(43, 35, 87) 100%);
           margin-left: 5px;
 
           button {
-            min-height: 74px;
+            min-height: 66px;
           }
         }
 
