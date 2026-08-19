@@ -1,32 +1,193 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Settings, RotateCcw, Undo2, X, ChevronDown, ChevronUp, Map } from "lucide-react";
-import { PlayShell } from "@/components/play/PlayShell";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowLeft, Settings, RotateCcw, Undo2, X, ChevronDown, ChevronUp,
+  Map, Volume2, VolumeX,
+} from "lucide-react";
 import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
-import { sfx } from "@/lib/sound";
+import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import playerAvatar from "./sevenUpDownPlayer.png";
 import "./sevenUpDown.css";
 
 const CHIP_VALUES = [10, 20, 50, 100, 200];
 const TOTALS = [
-  { total: 2, odds: "1:26" },
-  { total: 3, odds: "1:12" },
-  { total: 4, odds: "1:8" },
-  { total: 5, odds: "1:6" },
-  { total: 6, odds: "1:5" },
-  { total: 8, odds: "1:5" },
-  { total: 9, odds: "1:6" },
-  { total: 10, odds: "1:8" },
-  { total: 11, odds: "1:12" },
-  { total: 12, odds: "1:26" },
+  { total: 2, odds: "1:26" }, { total: 3, odds: "1:12" },
+  { total: 4, odds: "1:8" }, { total: 5, odds: "1:6" },
+  { total: 6, odds: "1:5" }, { total: 8, odds: "1:5" },
+  { total: 9, odds: "1:6" }, { total: 10, odds: "1:8" },
+  { total: 11, odds: "1:12" }, { total: 12, odds: "1:26" },
 ];
-const PIPS = {
-  1: [4],
-  2: [0, 8],
-  3: [0, 4, 8],
-  4: [0, 2, 6, 8],
-  5: [0, 2, 4, 6, 8],
-  6: [0, 2, 3, 5, 6, 8],
+const PAYOUTS = {
+  down: 2, seven: 5, up: 2,
+  t2: 27, t3: 13, t4: 9, t5: 7, t6: 6,
+  t8: 6, t9: 7, t10: 9, t11: 13, t12: 27,
 };
+const PIPS = {
+  1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8],
+  5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
+};
+const DOWN_DICE = [[1, 1], [1, 2], [1, 3], [2, 2], [1, 4], [2, 3], [1, 5], [2, 4], [3, 3]];
+const UP_DICE = [[2, 6], [3, 5], [4, 4], [3, 6], [4, 5], [4, 6], [5, 5], [5, 6], [6, 6]];
+const SEVEN_DICE = [[1, 6], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1]];
+const DEMO_BET_SECONDS = 15;
+
+function resultFromDice(dice, roundNumber) {
+  const total = dice[0] + dice[1];
+  return {
+    round_number: roundNumber,
+    dice,
+    total,
+    winner: total === 7 ? "seven" : total > 7 ? "up" : "down",
+  };
+}
+
+function seededDemoHistory() {
+  return Array.from({ length: 100 }, (_, index) => {
+    const selector = (index * 37) % 100;
+    const pool = selector < 51 ? DOWN_DICE : selector < 84 ? UP_DICE : SEVEN_DICE;
+    return resultFromDice(pool[index % pool.length], 1200 - index);
+  });
+}
+
+function useDemoRound() {
+  const [phase, setPhase] = useState("BETTING");
+  const [countdown, setCountdown] = useState(DEMO_BET_SECONDS);
+  const [round, setRound] = useState(12);
+  const [outcome, setOutcome] = useState(null);
+  const [balance, setBalance] = useState(10000);
+  const [myBets, setMyBets] = useState([]);
+  const [lastResults, setLastResults] = useState(seededDemoHistory);
+  const betsRef = useRef(myBets);
+  betsRef.current = myBets;
+
+  useEffect(() => {
+    const duration = phase === "BETTING" ? DEMO_BET_SECONDS : phase === "REVEAL" ? 3 : 2.4;
+    const deadline = Date.now() + duration * 1000;
+    setCountdown(duration);
+    const clock = setInterval(() => setCountdown(Math.max(0, (deadline - Date.now()) / 1000)), 80);
+    const next = setTimeout(() => {
+      if (phase === "BETTING") {
+        const d1 = 1 + Math.floor(Math.random() * 6);
+        const d2 = 1 + Math.floor(Math.random() * 6);
+        setOutcome(resultFromDice([d1, d2], round));
+        sfx.dice();
+        setPhase("REVEAL");
+        return;
+      }
+      if (phase === "REVEAL") {
+        const final = outcome;
+        const payout = betsRef.current.reduce((sum, bet) => {
+          const won = bet.selection.startsWith("t")
+            ? final?.total === Number(bet.selection.slice(1))
+            : final?.winner === bet.selection;
+          return sum + (won ? bet.amount * PAYOUTS[bet.selection] : 0);
+        }, 0);
+        if (payout > 0) {
+          setBalance((value) => value + payout);
+          sfx.winCelebration();
+        } else if (betsRef.current.length) {
+          sfx.lose();
+        }
+        if (final) setLastResults((items) => [final, ...items].slice(0, 100));
+        setPhase("RESULT");
+        return;
+      }
+      setMyBets([]);
+      setOutcome(null);
+      setRound((value) => value + 1);
+      setPhase("BETTING");
+    }, duration * 1000);
+    return () => {
+      clearInterval(clock);
+      clearTimeout(next);
+    };
+  }, [phase, outcome, round]);
+
+  const placeBet = useCallback(async (selection, amount) => {
+    if (phase !== "BETTING" || amount > balance) return null;
+    const bet = { id: `demo-${Date.now()}-${Math.random()}`, selection, amount };
+    setBalance((value) => value - amount);
+    setMyBets((items) => [...items, bet]);
+    sfx.chip();
+    return { balance: balance - amount };
+  }, [phase, balance]);
+
+  const clearBets = useCallback(async () => {
+    if (phase !== "BETTING") return null;
+    const refunded = betsRef.current.reduce((sum, bet) => sum + bet.amount, 0);
+    setBalance((value) => value + refunded);
+    setMyBets([]);
+    return { refunded };
+  }, [phase]);
+
+  const undoBet = useCallback(async () => {
+    if (phase !== "BETTING" || !betsRef.current.length) return null;
+    const latest = betsRef.current[betsRef.current.length - 1];
+    setMyBets((items) => items.slice(0, -1));
+    setBalance((value) => value + latest.amount);
+    sfx.chip();
+    return { refunded: latest.amount };
+  }, [phase]);
+
+  const revealProgress = phase === "RESULT" ? 1 : phase === "REVEAL" ? Math.max(0, 1 - countdown / 3) : 0;
+  const myTotal = myBets.reduce((sum, bet) => sum + bet.amount, 0);
+  const state = useMemo(() => ({
+    round_number: round,
+    phase,
+    min_bet: 10,
+    max_bet: 200,
+    timings: { bet: DEMO_BET_SECONDS, reveal: 3, result: 2.4 },
+    winners: [
+      { id: "d1", name: "r***a", payout: 9594 },
+      { id: "d2", name: "s***i", payout: 1710 },
+      { id: "d3", name: "a***n", payout: 5305 },
+    ],
+  }), [round, phase]);
+
+  return {
+    state, countdown, balance, placing: false, phase, betting: phase === "BETTING",
+    outcome, myBets, myTotal, lastResults, revealProgress, placeBet, clearBets, undoBet,
+  };
+}
+
+function useJiliSoundState() {
+  const [muted, setMuted] = useState(isMuted());
+  useEffect(() => onMuteChange(setMuted), []);
+  return muted;
+}
+
+function useCabinetScale() {
+  const measure = () => typeof window === "undefined" ? 1 : Math.min(1, window.innerWidth / 500);
+  const [scale, setScale] = useState(measure);
+  useEffect(() => {
+    const resize = () => setScale(measure());
+    window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
+    };
+  }, []);
+  return scale;
+}
+
+function CabinetShell({ game, children }) {
+  const navigate = useNavigate();
+  const muted = useJiliSoundState();
+  return (
+    <div className="j7-shell">
+      <header className="j7-titlebar">
+        <button type="button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back to game details"><ArrowLeft /></button>
+        <h1>{game.name}</h1>
+        <button type="button" onClick={toggleMuted} aria-label={muted ? "Unmute game sounds" : "Mute game sounds"}>
+          {muted ? <VolumeX /> : <Volume2 />}
+        </button>
+      </header>
+      {children}
+    </div>
+  );
+}
 
 function Die({ value = 1, red = false, small = false, rolling = false }) {
   return (
@@ -38,16 +199,17 @@ function Die({ value = 1, red = false, small = false, rolling = false }) {
   );
 }
 
-function BetChip({ amount, selected = false }) {
+function BetChip({ amount }) {
   if (!amount) return null;
-  return <span className={`j7-stake-chip ${selected ? "is-selected" : ""}`}>{formatChips(amount)}</span>;
+  return <span className="j7-stake-chip">{formatChips(amount)}</span>;
 }
 
 function HistoryCell({ item, latest = false }) {
   const dice = item?.dice || [1, 1];
-  const winner = item?.winner || (item?.total === 7 ? "seven" : item?.total > 7 ? "up" : "down");
+  const winner = item?.winner || "down";
   return (
     <span className={`j7-history-cell ${winner} ${latest ? "is-latest" : ""}`}>
+      <span className="j7-history-star">★</span>
       <b>{item?.total ?? "–"}</b>
       <span className="j7-mini-dice"><Die value={dice[0]} small /><Die value={dice[1]} red small /></span>
     </span>
@@ -62,24 +224,18 @@ function ToolButton({ icon, label, onClick, disabled = false, danger = false }) 
   );
 }
 
-export default function SevenUpDownCabinet({ game }) {
+function SevenUpDownTable({ game, live, demo = false }) {
   const {
     state, countdown, balance, placing, phase, betting, outcome, myBets, myTotal,
     lastResults, revealProgress, placeBet, clearBets, undoBet,
-  } = useLiveRound(game.slug, {
-    pollMs: 900,
-    revealSound: "dice",
-    formatResult: (settled) => ({
-      title: settled.payout > 0 ? `WIN ${formatChips(settled.payout)}` : "BETTER LUCK NEXT ROUND",
-      subtitle: `${settled.outcome?.dice?.[0] ?? "–"} + ${settled.outcome?.dice?.[1] ?? "–"} = ${settled.outcome?.total ?? "–"}`,
-    }),
-  });
+  } = live;
   const [chip, setChip] = useState(10);
   const [chipMenu, setChipMenu] = useState(false);
   const [multiple, setMultiple] = useState(true);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const cabinetScale = useCabinetScale();
   const repeatRef = useRef([]);
   const landedRef = useRef("");
 
@@ -99,7 +255,6 @@ export default function SevenUpDownCabinet({ game }) {
     map[bet.selection] = (map[bet.selection] || 0) + bet.amount;
     return map;
   }, {}), [myBets]);
-
   const history = useMemo(() => lastResults.slice(0, 12).reverse(), [lastResults]);
   const stats = useMemo(() => {
     const sample = lastResults.slice(0, 100);
@@ -138,21 +293,30 @@ export default function SevenUpDownCabinet({ game }) {
     if (!betting || placing || busy || !repeatRef.current.length) return;
     setBusy(true);
     try {
+      const layout = mode === "double"
+        ? myBets.map(({ selection, amount }) => ({ selection, amount }))
+        : repeatRef.current.map((bet) => ({ ...bet }));
       if (mode === "again" && myBets.length) await clearBets();
-      for (const bet of repeatRef.current) {
-        const amount = Math.min(maxBet, Math.max(minBet, bet.amount));
-        await placeBet(bet.selection, amount);
+      for (const bet of layout) {
+        await placeBet(bet.selection, Math.min(maxBet, Math.max(minBet, bet.amount)));
       }
     } finally {
       setBusy(false);
     }
-  }, [betting, placing, busy, myBets.length, clearBets, maxBet, minBet, placeBet]);
+  }, [betting, placing, busy, myBets, clearBets, maxBet, minBet, placeBet]);
 
   const realWinners = state?.winners?.slice(0, 3) || [];
+  const roundLabel = String(state?.round_number ?? "12").slice(-2).padStart(2, "0");
 
   return (
-    <PlayShell game={game} balance={balance} compact>
-      <div className="j7-stage" data-testid="seven-up-down-table">
+    <CabinetShell game={game}>
+      <div
+        className="j7-stage"
+        data-testid="seven-up-down-table"
+        data-demo={demo ? "true" : "false"}
+        data-phase={phase || "LOADING"}
+        style={{ "--j7-scale": cabinetScale, "--j7-height": `${884 * cabinetScale}px` }}
+      >
         <section className="j7-table">
           <header className="j7-roadmap">
             <div className="j7-stats">
@@ -162,21 +326,19 @@ export default function SevenUpDownCabinet({ game }) {
               <span>Calculated from last {stats.size || 0} rounds.</span>
             </div>
             <div className="j7-history" aria-label="Previous rounds">
-              {history.length ? history.map((item, index) => (
-                <HistoryCell key={item.round_number || index} item={item} latest={index === history.length - 1} />
-              )) : Array.from({ length: 12 }, (_, index) => <HistoryCell key={index} />)}
+              {history.map((item, index) => <HistoryCell key={item.round_number || index} item={item} latest={index === history.length - 1} />)}
             </div>
           </header>
 
           <div className="j7-dome-zone">
             <div className="j7-winners" aria-label="Recent winners">
               <span className="j7-high-win">HIGH WIN<br />RATE</span>
-              {realWinners.length ? realWinners.map((winner, index) => (
+              {realWinners.map((winner, index) => (
                 <div className="j7-winner" key={winner.id || index}>
                   <span>{String(winner.name || "P").replaceAll("*", "").slice(0, 1).toUpperCase()}</span>
-                  <small>{winner.name}<b>◉ {formatChips(winner.payout)}</b></small>
+                  <small>{winner.name}<b>₹ {formatChips(winner.payout)}</b></small>
                 </div>
-              )) : <span className="j7-live-badge">LIVE<br />TABLE</span>}
+              ))}
             </div>
 
             <div className="j7-dome" aria-live="polite">
@@ -185,21 +347,16 @@ export default function SevenUpDownCabinet({ game }) {
                 <Die value={dice[0]} rolling={rolling} />
                 <Die value={dice[1]} red rolling={rolling} />
               </div>
-              {shownOutcome && outcome && (
-                <div className={`j7-result ${outcome.winner}`}>
-                  <b>{outcome.total}</b><span>{outcome.winner === "seven" ? "LUCKY SEVEN" : outcome.winner.toUpperCase()}</span>
-                </div>
-              )}
             </div>
 
             <div className="j7-countdown" style={{ "--timer": `${timerProgress * 360}deg` }}>
-              <span>{betting ? Math.max(0, Math.ceil(countdown)) : phase === "REVEAL" ? "GO" : outcome?.total ?? "–"}</span>
+              <span>{betting ? Math.max(0, Math.ceil(countdown)) : phase === "REVEAL" ? "•" : outcome?.total ?? "–"}</span>
             </div>
           </div>
 
           <div className="j7-brass-strip">
             <button type="button" onClick={() => setRulesOpen(true)} aria-label="Game settings"><Settings size={17} /></button>
-            <span>♦ {state?.round_number ?? "–"}</span>
+            <span>{roundLabel}</span>
             <button type="button" onClick={() => setRoadmapOpen(true)}><Map size={14} /> Roadmap <ChevronDown size={13} /></button>
             <button type="button" className={multiple ? "is-on" : ""} onClick={() => setMultiple((value) => !value)}>Multiple Mode</button>
             <span><ChevronUp size={13} /> Min <b>{minBet}</b></span>
@@ -227,11 +384,12 @@ export default function SevenUpDownCabinet({ game }) {
           </div>
 
           <div className="j7-money-line">
-            <span>Balance <b>◉ {balance === null ? "…" : formatChips(balance)}</b></span>
-            <span>Your Bet <b>◉ {formatChips(myTotal)}</b></span>
+            <span>Balance <b>₹{balance === null ? "…" : formatChips(balance)}</b></span>
+            <span>Your Bet <b>₹{formatChips(myTotal)}</b></span>
           </div>
 
           <footer className="j7-tools">
+            <div className="j7-player-card"><img src={playerAvatar} alt="Player" /><small>{demo ? "3164954_erg_INR" : "PLAYER"}</small></div>
             <ToolButton label="again" icon={<RotateCcw />} onClick={() => replay("again")} disabled={!betting || busy || !repeatRef.current.length} />
             <div className="j7-chip-picker">
               {chipMenu && <div className="j7-chip-menu">
@@ -239,16 +397,12 @@ export default function SevenUpDownCabinet({ game }) {
                   <button type="button" key={value} className={value === chip ? "is-active" : ""} onClick={() => { setChip(value); setChipMenu(false); }}>{value}</button>
                 ))}
               </div>}
-              <button type="button" className="j7-bank-chip" onClick={() => setChipMenu((value) => !value)} aria-label={`Selected chip ${chip}`}>
-                <i /><b>{chip}</b>
-              </button>
+              <button type="button" className="j7-bank-chip" onClick={() => setChipMenu((value) => !value)} aria-label={`Selected chip ${chip}`}><i /><b>{chip}</b></button>
             </div>
             <ToolButton label="double" icon={<b>×2</b>} onClick={() => replay("double")} disabled={!betting || busy || !myBets.length} />
             <ToolButton label="undo" icon={<Undo2 />} onClick={undoBet} disabled={!betting || busy || !myBets.length} />
             <ToolButton label="clear" icon={<X />} onClick={clearBets} disabled={!betting || busy || !myBets.length} danger />
           </footer>
-
-          {!betting && <div className="j7-bets-closed">{phase === "REVEAL" ? "DICE ROLLING" : "PLACE YOUR BETS"}</div>}
 
           {(roadmapOpen || rulesOpen) && (
             <div className="j7-modal" role="dialog" aria-modal="true">
@@ -261,13 +415,34 @@ export default function SevenUpDownCabinet({ game }) {
                 </> : <>
                   <h2>How to play</h2>
                   <p><b>DOWN</b> wins when the dice total 2–6. <b>UP</b> wins on 8–12. A total of <b>7</b> wins only the blue Lucky Seven bet. Exact-total bets pay the odds printed on the felt.</p>
-                  <p>Minimum stake: {minBet}. Maximum stake per chip: {maxBet}. Results are generated and settled by the shared server round.</p>
+                  <p>Minimum stake: {minBet}. Maximum stake per chip: {maxBet}.</p>
                 </>}
               </div>
             </div>
           )}
         </section>
       </div>
-    </PlayShell>
+    </CabinetShell>
   );
+}
+
+function LiveSevenUpDown({ game }) {
+  const live = useLiveRound(game.slug, {
+    pollMs: 900,
+    revealSound: "dice",
+    formatResult: (settled) => ({
+      title: settled.payout > 0 ? `WIN ${formatChips(settled.payout)}` : "BETTER LUCK NEXT ROUND",
+      subtitle: `${settled.outcome?.dice?.[0] ?? "–"} + ${settled.outcome?.dice?.[1] ?? "–"} = ${settled.outcome?.total ?? "–"}`,
+    }),
+  });
+  return <SevenUpDownTable game={game} live={live} />;
+}
+
+function DemoSevenUpDown({ game }) {
+  const demo = useDemoRound();
+  return <SevenUpDownTable game={game} live={demo} demo />;
+}
+
+export default function SevenUpDownCabinet({ game }) {
+  return game.demo ? <DemoSevenUpDown game={game} /> : <LiveSevenUpDown game={game} />;
 }

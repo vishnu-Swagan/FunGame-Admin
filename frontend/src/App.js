@@ -112,7 +112,7 @@ function PlayerApp() {
         <Toaster position="top-center" theme="dark" richColors closeButton />
         <Routes>
           {process.env.NODE_ENV === "development" && (
-            <Route path="/__preview/seven-up-down" element={<main className="mx-auto max-w-6xl p-2"><SevenUpDownCabinet game={{ slug: "seven-up-down", name: "7up7down" }} /></main>} />
+            <Route path="/__preview/seven-up-down" element={<SevenUpDownCabinet game={{ slug: "seven-up-down", name: "7up7down", demo: true }} />} />
           )}
           {/* Public / auth */}
           <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
