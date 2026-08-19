@@ -609,7 +609,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
 
     # 7Up7Down prints rolling percentages calculated from the last 100 shared
     # rounds. Other cabinets only need their compact ten-result strip.
-    history_limit = 100 if slug == 'seven-up-down' else 10
+    history_limit = 100 if slug in ('seven-up-down', 'andar-bahar') else 10
     history_floor = history_limit
     prev = await db.live_outcomes.find(
         {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}

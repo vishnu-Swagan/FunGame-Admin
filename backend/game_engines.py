@@ -542,7 +542,9 @@ def play_andar_bahar(bet, payload):
     joker = draw_cards(1, deck)[0]
     sequence = []
     winner = None
-    turn = "andar"
+    # The reference table opens on Bahar. Keeping the universal engine in the
+    # same order makes its printed 1:1 / 0.9:1 side prices truthful.
+    turn = "bahar"
     while winner is None and deck:
         c = draw_cards(1, deck)[0]
         sequence.append({"card": card_str(c), "side": turn})
@@ -550,8 +552,11 @@ def play_andar_bahar(bet, payload):
             winner = turn
         turn = "bahar" if turn == "andar" else "andar"
     won = winner == side
-    payout = int(bet * 1.9) if won else 0
-    return {"joker": card_str(joker), "sequence": sequence[:40], "winner": winner, "side": side, "won": won}, payout
+    payout = int(bet * (2.0 if side == "andar" else 1.9)) if won else 0
+    # The first remaining matching rank can arrive as late as card 49. Preserve
+    # the complete sequence so 41–49 side bets and the shared roadmap settle on
+    # the exact same count shown to every client.
+    return {"joker": card_str(joker), "sequence": sequence, "winner": winner, "side": side, "won": won}, payout
 
 
 def play_fun_target(bet, payload):

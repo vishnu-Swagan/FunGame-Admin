@@ -1,0 +1,176 @@
+.ab-cabinet .cab-screen {
+  background: #080c1d;
+}
+
+.ab-cabinet {
+  background: #080c1d;
+}
+
+.ab-cabinet .cab-glass {
+  z-index: 18;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), transparent 32%),
+    radial-gradient(130% 110% at 50% 42%, transparent 65%, rgba(0,0,0,.32));
+}
+
+.ab-dealer-poster,
+.ab-dealer-video,
+.ab-canvas {
+  position: absolute;
+  inset: 0;
+  width: 1600px;
+  height: 900px;
+}
+
+.ab-dealer-poster,
+.ab-dealer-video {
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+}
+
+.ab-dealer-poster { z-index: 0; }
+.ab-dealer-video { z-index: 1; }
+.ab-canvas { z-index: 10; pointer-events: none; }
+
+.ab-more-games {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 24;
+  height: 54px;
+  min-width: 154px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 0 0 10px 0;
+  background: rgba(17,22,47,.94);
+  color: #f8f1df;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0,0,0,.24);
+}
+
+.ab-more-games span {
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.ab-top-actions {
+  position: absolute;
+  z-index: 24;
+  top: 10px;
+  right: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+.ab-top-actions button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  background: rgba(17,22,47,.88);
+  color: #d8deef;
+  box-shadow: 0 5px 15px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.08);
+}
+
+.ab-top-actions svg { width: 20px; height: 20px; }
+.ab-top-actions button:active { transform: scale(.94); }
+
+.ab-hit {
+  position: absolute;
+  z-index: 22;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ab-hit:disabled { cursor: not-allowed; }
+.ab-hit:focus-visible { outline: 3px solid #fff1ae; outline-offset: 2px; }
+.ab-hit svg { opacity: 0; }
+.ab-chip-hit { border-radius: 999px; }
+
+.ab-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(4,7,18,.72);
+  backdrop-filter: blur(8px);
+}
+
+.ab-modal-card {
+  position: relative;
+  width: min(620px, calc(100% - 80px));
+  padding: 34px 38px;
+  border: 1px solid rgba(228,192,107,.65);
+  border-radius: 12px;
+  background: linear-gradient(180deg,#1b2242,#0b1025);
+  color: #f8f1df;
+  box-shadow: 0 24px 70px rgba(0,0,0,.65), inset 0 1px rgba(255,255,255,.08);
+}
+
+.ab-modal-card h2 {
+  margin: 0 0 18px;
+  color: #e4c06b;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.ab-modal-card p {
+  margin: 10px 0;
+  color: #d2d8e9;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.ab-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 999px;
+  background: rgba(255,255,255,.07);
+  color: #fff;
+}
+
+.ab-modal-roadmap {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 7px;
+  margin-top: 20px;
+}
+
+.ab-modal-roadmap span {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ab-modal-roadmap .is-andar { background: #e3153b; }
+.ab-modal-roadmap .is-bahar { background: #2857a5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ab-dealer-video { display: none; }
+  .ab-top-actions button,
+  .ab-hit { transition: none !important; }
+}

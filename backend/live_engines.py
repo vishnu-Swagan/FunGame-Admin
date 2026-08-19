@@ -69,9 +69,17 @@ SIDE_OPTIONS = {
         "t8": 6.0, "t9": 7.0, "t10": 9.0, "t11": 13.0, "t12": 27.0,
     },
     "checker": {"gold": 1.4, "steel": 1.4},
-    # Real casino Andar Bahar: Andar is dealt first (wins ~51.5%) so it pays
-    # 0.9:1 (1.9x); Bahar pays 1:1 (2.0x). House edge ~2.15% Andar / 3% Bahar.
-    "andar-bahar": {"andar": 1.9, "bahar": 2.0},
+    # The supplied live-table reference deals Bahar first: Bahar therefore
+    # carries the 0.9:1 price and Andar the even-money 1:1 price.
+    "andar-bahar": {
+        "andar": 2.0, "bahar": 1.9,
+        # Reference card-count side bets. Values are total-return multipliers:
+        # the printed 2.5:1 price therefore settles at 3.5x including stake.
+        "count_1_5": 3.5, "count_6_10": 4.5,
+        "count_11_15": 5.5, "count_16_25": 4.5,
+        "count_26_30": 5.0, "count_31_35": 25.0,
+        "count_36_40": 50.0, "count_41_49": 120.0,
+    },
     # House-favorable ~70% RTP: Player/Dealer pay 1.40x, and a tie is a house
     # win for Player/Dealer bets (see settle_bet). Only the explicit Tie bet
     # wins on a tie.
@@ -163,7 +171,7 @@ def paytable_for(slug, picks=None):
 TABLE_LIMITS = {
     "seven-up-down": (10, 200),
     "fun-target": (1, 5000),
-    "andar-bahar": (10, 10000),
+    "andar-bahar": (50, 200000),
     "triple-fun": (5, 5000),
     "checker": (5, 1000),
     "keno": (10, 1000),
@@ -339,6 +347,12 @@ def settle_bet(slug, outcome, selection, amount, card=None):
     if kind == "sides":
         winner = outcome["winner"]
         mults = SIDE_OPTIONS[slug]
+        if slug == "andar-bahar" and isinstance(selection, str) and selection.startswith("count_"):
+            _prefix, low, high = selection.split("_")
+            card_count = len(outcome.get("sequence") or [])
+            won = int(low) <= card_count <= int(high)
+            payout = int(round(amount * mults[selection])) if won else 0
+            return payout, {"result": "win" if won else "lose", "card_count": card_count}
         # "t8" is a bet on the dice showing exactly 8, which is a different
         # question from which side won — 8 is an Up result, but Up pays 2x and
         # the exact total pays 6x, and only one of them should collect.
@@ -380,7 +394,9 @@ def summarize_outcome(slug, outcome):
         return {"result": outcome["result"]}
     if slug == "ice-fishing":
         return {"win_type": outcome["win_type"], "fish": outcome.get("fish_final")}
-    if slug in ("teen-patti", "poker", "checker", "andar-bahar"):
+    if slug == "andar-bahar":
+        return {"winner": outcome["winner"], "card_count": len(outcome.get("sequence") or [])}
+    if slug in ("teen-patti", "poker", "checker"):
         return {"winner": outcome["winner"]}
     if slug == "keno":
         return {"drawn": outcome["drawn"]}

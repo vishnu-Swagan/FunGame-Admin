@@ -36,6 +36,7 @@ import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
 import GamePlay from "@/pages/play/GamePlay";
 import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
+import AndarBaharCabinet from "@/pages/play/cabinet/AndarBaharCabinet";
 import RouletteGame from "@/pages/play/RouletteGame";
 
 // System
@@ -117,6 +118,7 @@ function PlayerApp() {
             <>
               <Route path="/__preview/seven-up-down" element={<SevenUpDownCabinet game={{ slug: "seven-up-down", name: "7up7down", demo: true }} />} />
               <Route path="/__preview/keno" element={<KenoCabinet game={{ slug: "keno", name: "Keno", demo: true }} />} />
+              <Route path="/__preview/andar-bahar" element={<AndarBaharCabinet game={{ slug: "andar-bahar", name: "Andar Bahar", demo: true }} />} />
               <Route path="/__preview/american-roulette" element={<RouletteGame game={{ slug: "fun-roulette", name: "American Roulette", demo: true }} />} />
             </>
           )}

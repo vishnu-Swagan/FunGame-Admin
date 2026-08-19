@@ -71,9 +71,9 @@ const CABINET = new Set([
   "fever-joker-bonus", "giant-jackpot", "lucky-8-line", "triple-fun",
 ]);
 
-/* These four fullscreen tables already carry dense, game-native result/history
+/* These fullscreen tables already carry dense, game-native result/history
    chrome. Keep the shared winner receipt off them so it never covers play. */
-const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down"]);
+const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down", "andar-bahar"]);
 
 export default function GamePlay() {
   const { slug } = useParams();

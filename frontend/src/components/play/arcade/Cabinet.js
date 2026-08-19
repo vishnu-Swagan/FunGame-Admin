@@ -16,7 +16,7 @@ import "./arcade.css";
  * thing, keeps every screen identical to the reference on every device and
  * makes each new game a layout problem rather than a responsive one.
  *
- * ORIENTATION. These layouts are 2.16:1. On a phone held upright there is no
+ * ORIENTATION. These layouts are landscape-first. On a phone held upright there is no
  * honest way to show one — shrunk to fit the width it is the height of a
  * postcard. So the cabinet asks for landscape, and when the browser will not
  * give it, rotates itself: the stage is laid out landscape and turned 90°, so
@@ -47,6 +47,9 @@ export const Cabinet = ({
   exitTo,
   className = "",
   testId = "cabinet",
+  designWidth = CAB_W,
+  designHeight = CAB_H,
+  systemControls = true,
   /**
    * `fluid` gives a game the landscape frame and the chrome, but not the fixed
    * canvas — the child lays itself out in real pixels.
@@ -81,8 +84,8 @@ export const Cabinet = ({
       /* Two candidate fits: as laid out, and turned 90°. Whichever draws the
          cabinet bigger wins, which picks rotation on a portrait phone and
          leaves a laptop alone without either being special-cased. */
-      const flat = Math.min(vw / CAB_W, vh / CAB_H);
-      const turned = Math.min(vh / CAB_W, vw / CAB_H);
+      const flat = Math.min(vw / designWidth, vh / designHeight);
+      const turned = Math.min(vh / designWidth, vw / designHeight);
       setFit(turned > flat ? { scale: turned, rotate: true } : { scale: flat, rotate: false });
     };
 
@@ -94,7 +97,7 @@ export const Cabinet = ({
       ro.disconnect();
       window.removeEventListener("orientationchange", measure);
     };
-  }, [fluid]);
+  }, [designHeight, designWidth, fluid]);
 
   const leave = () => (onExit ? onExit() : navigate(exitTo || -1));
 
@@ -105,8 +108,8 @@ export const Cabinet = ({
         style={fluid
           ? { position: "absolute", inset: 0, top: 0, left: 0, transform: "none", background: ground }
           : {
-              width: CAB_W,
-              height: CAB_H,
+              width: designWidth,
+              height: designHeight,
               background: ground,
               transform: `translate(-50%, -50%) rotate(${fit.rotate ? 90 : 0}deg) scale(${fit.scale})`,
             }}
@@ -116,16 +119,18 @@ export const Cabinet = ({
         <div className="cab-glass" aria-hidden="true" />
         {children}
 
-        <div className="cab-syscontrols">
-          <button type="button" onClick={toggleMuted} data-testid="cab-mute"
-            aria-label={muted ? "Unmute" : "Mute"} className="cab-sysbtn">
-            {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-          </button>
-          <button type="button" onClick={leave} data-testid="cab-exit"
-            aria-label="Leave the table" className="cab-sysbtn cab-sysbtn-exit">
-            <X className="h-6 w-6" />
-          </button>
-        </div>
+        {systemControls && (
+          <div className="cab-syscontrols">
+            <button type="button" onClick={toggleMuted} data-testid="cab-mute"
+              aria-label={muted ? "Unmute" : "Mute"} className="cab-sysbtn">
+              {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+            <button type="button" onClick={leave} data-testid="cab-exit"
+              aria-label="Leave the table" className="cab-sysbtn cab-sysbtn-exit">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
