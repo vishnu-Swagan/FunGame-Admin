@@ -32,8 +32,6 @@ const money = (value) => new Intl.NumberFormat("en-IN", {
   maximumFractionDigits: 2,
 }).format(Number(value || 0));
 
-const multiplier = (value) => `${Number(value || 0).toFixed(2)}x`;
-
 function shuffledDraw() {
   const pool = [...NUMBERS];
   for (let index = pool.length - 1; index > 0; index -= 1) {
@@ -160,16 +158,29 @@ function useSoundState() {
 }
 
 function Paytable({ picks, table, hits, active }) {
+  const rows = picks > 0 ? Array.from({ length: picks }, (_, index) => picks - index) : [];
+  const maxValue = Math.max(1, ...Object.values(table || {}).map(Number));
   return (
     <aside className="keno-paytable" aria-label="Payout table" data-testid="keno-paytable">
+      <div className="keno-paytable-head" aria-hidden="true"><span>HITS</span><span>PAYOUT</span></div>
       {picks === 0 ? (
-        <div className="keno-paytable-empty">SELECT<br />NUMBERS</div>
-      ) : Array.from({ length: picks }, (_, index) => picks - index).map((count) => (
-        <div key={count} className={`keno-payrow ${active && count === hits ? "is-active" : ""}`}>
-          <span>{count}</span>
-          <b>{multiplier(table?.[count] || 0)}</b>
-        </div>
-      ))}
+        <div className="keno-paytable-empty"><b>1–10</b><span>SELECT NUMBERS</span></div>
+      ) : rows.map((count) => {
+        const value = Number(table?.[count] || 0);
+        const tier = value > 0 ? Math.max(.08, Math.log10(value + 1) / Math.log10(maxValue + 1)) : 0;
+        const winning = active && count === hits;
+        return (
+          <div
+            key={count}
+            className={`keno-payrow ${winning ? "is-active" : ""} ${count === picks ? "is-peak" : ""}`}
+            style={{ "--payout-tier": tier }}
+            aria-current={winning ? "true" : undefined}
+          >
+            <span>{count}</span>
+            <b><strong>{value.toFixed(2)}</strong><em>x</em></b>
+          </div>
+        );
+      })}
     </aside>
   );
 }

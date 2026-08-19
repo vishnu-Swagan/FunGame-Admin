@@ -368,30 +368,82 @@
 @keyframes keno-pop { 0% { transform: scale(.25) rotate(-24deg); filter: brightness(1.8); } 65% { transform: scale(1.17) rotate(3deg); } 100% { transform: scale(1); } }
 
 .keno-paytable {
-  height: 94%;
-  align-self: end;
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  align-self: stretch;
   min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: clamp(2px, .48vh, 7px);
-  padding: clamp(10px, 1vw, 20px);
+  gap: clamp(2px, .36vh, 5px);
+  padding: clamp(7px, .72vw, 13px);
   overflow: hidden;
-  border: 2px solid rgba(255, 151, 190, .52);
+  border: 2px solid rgba(255, 132, 178, .68);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(173,0,60,.34), rgba(151,0,53,.16));
-  box-shadow: inset 0 0 26px rgba(86, 0, 32, .22);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.04), transparent 24%, transparent 76%, rgba(255,255,255,.025)),
+    linear-gradient(180deg, rgba(126,0,39,.88), rgba(72,0,23,.8));
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,.08),
+    inset 0 -7px 10px rgba(28,0,10,.32),
+    0 5px 0 rgba(55,0,19,.52),
+    0 8px 8px rgba(45,0,17,.24);
+}
+.keno-paytable::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 0%, rgba(255,137,59,.14), transparent 42%);
+  pointer-events: none;
+}
+.keno-paytable-head {
+  flex: 0 0 clamp(18px, 2.2vh, 28px);
+  display: grid;
+  grid-template-columns: clamp(30px, 2.5vw, 48px) 1fr;
+  align-items: center;
+  gap: clamp(5px, .7vw, 14px);
+  padding: 0 7px clamp(3px, .3vh, 5px);
+  color: rgba(255,213,226,.72);
+  border-bottom: 1px solid rgba(255,162,195,.2);
+  font-size: clamp(8px, .58vw, 11px);
+  font-weight: 900;
+  letter-spacing: .13em;
+  line-height: 1;
+}
+.keno-paytable-head span:last-child {
+  padding-right: 2px;
+  text-align: right;
 }
 
 .keno-paytable-empty {
-  color: rgba(255, 213, 229, .33);
-  font-size: clamp(12px, 1vw, 20px);
-  font-weight: 800;
-  line-height: 1.3;
+  flex: 1;
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  color: rgba(255, 213, 229, .5);
   text-align: center;
+}
+.keno-paytable-empty b {
+  color: #ffc64c;
+  font-size: clamp(25px, 2.2vw, 42px);
+  font-weight: 900;
+  letter-spacing: -.03em;
+  line-height: 1;
+  text-shadow: 0 2px 0 #6d2100;
+}
+.keno-paytable-empty span {
+  font-size: clamp(8px, .68vw, 13px);
+  font-weight: 900;
+  letter-spacing: .1em;
 }
 
 .keno-payrow {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-height: 0;
   flex: 0 1 48px;
   display: grid;
@@ -399,21 +451,95 @@
   align-items: center;
   gap: clamp(5px, .7vw, 14px);
   padding: 2px 7px;
-  border-radius: 8px;
-  transition: background .2s ease, transform .2s ease;
+  color: rgba(255,255,255,.9);
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(41,0,14,.22), rgba(41,0,14,.06));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+  transition: background .2s ease, color .2s ease, transform .2s var(--keno-ease-out), box-shadow .2s ease;
+}
+.keno-payrow::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255,173,11,.16), rgba(231,120,0,.08));
+  opacity: calc(.12 + var(--payout-tier) * .72);
+  transform: scaleX(var(--payout-tier));
+  transform-origin: left center;
+  transition: transform .24s var(--keno-ease-out), opacity .2s ease;
+}
+.keno-payrow:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: calc(clamp(30px, 2.5vw, 48px) / 2 + 7px);
+  top: 74%;
+  width: 2px;
+  height: calc(52% + clamp(2px, .36vh, 5px));
+  background: linear-gradient(#8d405c, #5f1a32);
+  transform: translateX(-50%);
 }
 .keno-payrow > span {
+  position: relative;
+  z-index: 2;
   aspect-ratio: 1;
   display: grid;
   place-items: center;
+  color: #fff8fa;
+  border: 2px solid #7d2447;
   border-radius: 50%;
-  background: rgba(124, 0, 43, .48);
+  background:
+    radial-gradient(circle at 35% 24%, rgba(255,255,255,.16), transparent 24%),
+    linear-gradient(145deg, #9f0b43, #650022 72%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), inset 0 -4px 5px rgba(45,0,15,.22), 0 2px 0 #380013;
   font-size: clamp(13px, 1.2vw, 22px);
   font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 1px rgba(52,0,18,.7);
 }
-.keno-payrow b { font-size: clamp(13px, 1.15vw, 22px); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.keno-payrow.is-active { color: #321500; background: linear-gradient(90deg, #ffad0b, #e77800); transform: scale(1.03); }
-.keno-payrow.is-active > span { background: #ffd428; }
+.keno-payrow b {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.keno-payrow b strong {
+  font-size: clamp(13px, 1.18vw, 23px);
+  font-weight: 900;
+  letter-spacing: -.025em;
+}
+.keno-payrow b em {
+  color: #ffc257;
+  font-size: .72em;
+  font-style: normal;
+  font-weight: 900;
+}
+.keno-payrow.is-peak:not(.is-active) b strong { color: #ffe09a; }
+.keno-payrow.is-active {
+  color: #2d1300;
+  background: linear-gradient(90deg, #ffc41a, #ed8200 72%, #cf5d00);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.42), inset 0 -4px 6px rgba(123,43,0,.2), 0 3px 0 #8e3300;
+  transform: scale(1.035);
+  animation: keno-paytable-win .44s var(--keno-ease-out) both;
+}
+.keno-payrow.is-active::before { opacity: 0; }
+.keno-payrow.is-active > span {
+  color: #331500;
+  border-color: #e77b00;
+  background: radial-gradient(circle at 35% 24%, #fff7a4, transparent 27%), linear-gradient(145deg, #ffe13a, #ffad00 72%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.62), inset 0 -4px 5px rgba(160,62,0,.16), 0 2px 0 #9a3d00;
+  text-shadow: 0 1px 0 rgba(255,255,255,.55);
+}
+.keno-payrow.is-active b em { color: #5b2500; }
+@keyframes keno-paytable-win {
+  from { filter: brightness(1.5); transform: scale(.96); }
+  to { filter: brightness(1); transform: scale(1.035); }
+}
 
 .keno-selection-actions {
   position: relative;
@@ -669,7 +795,7 @@
 .keno-rules, .keno-auto-body, .keno-menu-body { padding: 20px; }
 .keno-rules p { color: rgba(255,255,255,.84); line-height: 1.55; }
 .keno-rules ol { padding-left: 22px; color: #ffd4e3; line-height: 1.7; }
-.keno-rules .keno-live-note { padding: 12px 14px; color: #ffe4b0; border: 1px solid rgba(255,166,59,.3); border-left: 4px solid #ff9817; border-radius: 7px; background: linear-gradient(180deg, rgba(255,152,23,.15), rgba(255,152,23,.07)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+.keno-rules .keno-live-note { padding: 12px 14px; color: #ffe4b0; border: 2px solid rgba(255,152,23,.46); border-radius: 7px; background: linear-gradient(180deg, rgba(255,152,23,.15), rgba(255,152,23,.07)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
 
 .keno-auto-body > p { margin: 0 0 9px; color: rgba(255,255,255,.72); }
 .keno-auto-rounds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
@@ -716,17 +842,23 @@
   .keno-menu-button svg { width: 21px; }
   .keno-playfield { grid-template-rows: 36px minmax(0, 1fr) 48px; gap: 5px; padding: 5px 6px 3px; }
   .keno-status { width: 88%; padding: 6px 10px; font-size: 12px; }
-  .keno-content { width: 100%; max-width: 490px; grid-template-columns: minmax(0, 4.2fr) minmax(72px, 1fr); align-items: stretch; gap: 7px; }
+  .keno-content { width: 100%; max-width: 490px; grid-template-columns: minmax(0, 3.9fr) minmax(82px, 1.08fr); align-items: stretch; gap: 7px; }
   .keno-grid { grid-template-rows: repeat(6, minmax(0, 1fr)); align-self: stretch; gap: 6px; padding: 2px; align-content: center; }
   .keno-number { width: min(100%, 62px); align-self: center; font-size: clamp(14px, 5.4vw, 22px); border-width: 2px !important; box-shadow: inset 0 0 0 2px #7d5264, inset 0 0 0 5px #270815, 0 3px 5px rgba(51,0,17,.55); }
   .keno-number.is-drawn { box-shadow: inset 0 0 0 2px #ed82aa, inset 0 0 0 5px #ffd8e6, 0 3px 5px rgba(73,0,25,.45); }
   .keno-number.is-picked, .keno-number.is-missed { box-shadow: inset 0 0 0 2px #7d5264, inset 0 0 0 5px #270815, 0 0 0 1px #f2ff00; }
   .keno-number.is-hit { box-shadow: inset 0 0 0 2px #f07900, inset 0 0 0 5px #ffdd29, 0 0 0 1px #eaff00, 0 0 12px rgba(255,210,0,.6); }
   .keno-paytable { height: 100%; gap: 1px; padding: 4px; border-radius: 7px; }
+  .keno-paytable-head { flex-basis: 16px; grid-template-columns: 22px 1fr; gap: 3px; padding: 0 2px 2px; font-size: 6.5px; letter-spacing: .08em; }
   .keno-payrow { flex: 1 1 26px; grid-template-columns: 22px 1fr; gap: 3px; padding: 1px 2px; border-radius: 4px; }
+  .keno-payrow:not(:last-child)::after { left: 13px; }
   .keno-payrow > span { font-size: 10px; }
-  .keno-payrow b { font-size: 9px; }
-  .keno-paytable-empty { font-size: 9px; }
+  .keno-payrow b { gap: 1px; }
+  .keno-payrow b strong { font-size: 9px; }
+  .keno-payrow b em { font-size: 6.5px; }
+  .keno-paytable-empty { gap: 4px; }
+  .keno-paytable-empty b { font-size: 18px; }
+  .keno-paytable-empty span { font-size: 6px; }
   .keno-selection-actions { width: 100%; max-width: 490px; gap: 7px; }
   .keno-selection-actions button { font-size: 13px; }
   .keno-betbar { grid-template-columns: minmax(0, 1fr) 56px; grid-template-rows: 58px 54px; gap: 5px 8px; padding: 5px 7px 7px; }
@@ -743,4 +875,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .keno-number.is-latest { animation: none; }
+  .keno-payrow.is-active { animation: none; }
 }
