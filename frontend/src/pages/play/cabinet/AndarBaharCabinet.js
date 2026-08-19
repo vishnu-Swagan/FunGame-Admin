@@ -16,8 +16,8 @@ const DEMO_REVEAL_SECONDS = 16;
 const DEAL_RELEASE_RATIO = 0.72;
 const DEAL_SOURCE_CADENCE = 1.55;
 const HAIR_GESTURE_INTERVAL_MS = 20 * 60 * 1000;
-const CHIP_RAIL_Y = 620;
-const ACTION_Y = 654;
+const CHIP_RAIL_Y = 600;
+const ACTION_Y = 632;
 const MAIN_BET_Y = 710;
 const MAIN_BET_H = 140;
 const COUNT_BET_Y = 710;
@@ -520,7 +520,7 @@ function AndarBaharTable({ game, live, demo = false }) {
         ? `${Math.ceil(scene.countdown) <= 4 ? `${Math.ceil(scene.countdown)} LAST BETS` : `PLACE YOUR BETS  ${Math.ceil(scene.countdown)}`}`
         : scene.phase === "REVEAL" ? "NO MORE BETS"
           : `${String(scene.outcome?.winner || "").toUpperCase()} WON`;
-      const phaseY = scene.betting ? 570 : 663;
+      const phaseY = scene.betting ? 542 : 663;
       rounded(ctx, 730, phaseY, 140, 34, 5);
       ctx.fillStyle = scene.phase === "RESULT" ? (scene.outcome?.winner === "andar" ? "#e3153b" : "#2857a5") : "rgba(20,24,49,.9)";
       ctx.fill();
@@ -647,7 +647,8 @@ function AndarBaharTable({ game, live, demo = false }) {
         </defs>
         <path d={`M430 ${PANEL_Y} L470 548 Q800 505 1130 548 L1170 ${PANEL_Y} Z`} fill="url(#ab-table-cloth)" stroke="#efd68f" strokeWidth="3" />
       </svg>
-      <img className="ab-dealer-foreground" src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
+      <img className={`ab-dealer-foreground ${phase === "REVEAL" ? "is-hidden" : ""}`}
+        src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
       <video
         ref={idleVideoRef}
         className={`ab-dealer-video ab-idle-video ${phase === "BETTING" && hairMoment ? "is-active" : "is-idle"}`}
