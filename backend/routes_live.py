@@ -1,6 +1,6 @@
 """Universal 24/7 live-round routes - every player sees the SAME rounds.
 
-- Fixed-cycle games (16): rounds derived from epoch time; one outcome per
+- Fixed-cycle games (17): rounds derived from epoch time; one outcome per
   (slug, round_number) created atomically and shared by all players.
 - Aviator: DB-chained variable-length rounds (BETTING -> FLYING -> CRASHED)
   kept alive 24/7 by a background task in server.py.
@@ -29,6 +29,7 @@ from game_engines import (
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
     settle_bet, summarize_outcome, make_bingo_card, paytable_for, limits_for,
+    PICTURE_SYMBOLS, PICTURE_BASE_MULTIPLIER,
 )
 
 logger = logging.getLogger('live')
@@ -609,7 +610,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
 
     # 7Up7Down prints rolling percentages calculated from the last 100 shared
     # rounds. Other cabinets only need their compact ten-result strip.
-    history_limit = 100 if slug in ('seven-up-down', 'andar-bahar') else 10
+    history_limit = 100 if slug in ('seven-up-down', 'andar-bahar', 'pappu-pictures') else 10
     history_floor = history_limit
     prev = await db.live_outcomes.find(
         {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
@@ -676,7 +677,11 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
             'draw_count': 10,
             'max_picks': 10,
             'paytable': KENO_PAYTABLE,
-        } if slug == 'keno' else None),
+        } if slug == 'keno' else ({
+            'symbols': list(PICTURE_SYMBOLS),
+            'base_multiplier': PICTURE_BASE_MULTIPLIER,
+            'roadmap_size': 36,
+        } if slug == 'pappu-pictures' else None)),
         'outcome': outcome, 'my_bets': my_bets,
         'my_total': sum(b['amount'] for b in my_bets),
         'last_results': [{'round_number': p['round_number'], **(p.get('summary') or {})} for p in prev],

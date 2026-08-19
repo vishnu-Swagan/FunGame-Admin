@@ -42,6 +42,9 @@ LIVE_GAMES = {
     "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
     "andar-bahar":       {"bet": BET_SECONDS, "reveal": 16, "result": 5, "kind": "sides"},
     "keno":              {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "picks"},
+    # Picture Play follows the supplied fast portrait cabinet: a short betting
+    # window, one theatrical card reveal and one shared picture for everyone.
+    "pappu-pictures":    {"bet": 12, "reveal": 8, "result": 4, "kind": "symbols"},
     "bingo":             {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "stake"},
     "fever-joker-bonus": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
     "giant-jackpot":     {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
@@ -51,6 +54,16 @@ LIVE_GAMES = {
     # reveal = multiplier-drop (~4s) + wheel spin (~8s); result = leaf payout or the cinematic fish bonus
     "ice-fishing":       {"bet": BET_SECONDS, "reveal": 12, "result": 10, "kind": "spots"},
 }
+
+PICTURE_SYMBOLS = (
+    "umbrella", "football", "sun", "diya", "cow", "bucket",
+    "blanket", "top", "rose", "butterfly", "pigeon", "rabbit",
+)
+PICTURE_BASE_MULTIPLIER = 8
+# Extra Pay is a fixed, server-wide 35% event. Five independently selected
+# pictures receive boosts; the winning picture stays a uniform 1-in-12 draw and
+# receives the boost only when it is among those five promoted pictures.
+PICTURE_EXTRA_MULTIPLIERS = ((20, 65), (30, 22), (50, 9), (100, 3), (200, 1))
 
 SLOT_SLUGS = set()  # every slot now has its own weighted-reel engine
 
@@ -175,6 +188,7 @@ TABLE_LIMITS = {
     "triple-fun": (5, 5000),
     "checker": (5, 1000),
     "keno": (10, 1000),
+    "pappu-pictures": (10, 200),
     "bingo": (5, 1000),
     "super-golden-wheel": (5, 1000),
     "no-hold": (5, 1000),
@@ -281,6 +295,22 @@ def generate_outcome(slug):
         # same live sequence. Settlement is set-based, so order does not alter
         # the result.
         return {"drawn": RNG.sample(range(1, 37), 10)}
+    if slug == "pappu-pictures":
+        symbol = RNG.choice(PICTURE_SYMBOLS)
+        extra_pay = RNG.random() < 0.35
+        multiplier = PICTURE_BASE_MULTIPLIER
+        boosts = {}
+        if extra_pay:
+            boosted = RNG.sample(PICTURE_SYMBOLS, 5)
+            for item in boosted:
+                boosts[item] = weighted_choice(PICTURE_EXTRA_MULTIPLIERS)
+            multiplier = boosts.get(symbol, PICTURE_BASE_MULTIPLIER)
+        return {
+            "symbol": symbol,
+            "multiplier": multiplier,
+            "extra_pay": extra_pay,
+            "boosts": boosts,
+        }
     if slug == "bingo":
         return {"drawn": sorted(RNG.sample(range(1, 76), 30))}
     raise ValueError(f"No live outcome generator for {slug}")
@@ -307,6 +337,10 @@ def validate_selection(slug, selection):
         if len(set(selection)) != len(selection) or any(not isinstance(p, int) or p < 1 or p > 36 for p in selection):
             bad("Picks must be unique numbers 1-36")
         return sorted(selection)
+    if kind == "symbols":  # Picture Play
+        if selection not in PICTURE_SYMBOLS:
+            bad(f"Pick one of: {', '.join(PICTURE_SYMBOLS)}")
+        return selection
     return None  # stake-only
 
 
@@ -375,6 +409,15 @@ def settle_bet(slug, outcome, selection, amount, card=None):
         matches = sorted(set(selection) & set(outcome["drawn"]))
         mult = KENO_PAYTABLE[len(selection)].get(len(matches), 0)
         return int(round(amount * mult)), {"matches": matches, "multiplier": mult}
+    if kind == "symbols":
+        won = selection == outcome.get("symbol")
+        mult = outcome.get("multiplier", PICTURE_BASE_MULTIPLIER) if won else 0
+        return int(round(amount * mult)), {
+            "result": "win" if won else "lose",
+            "symbol": outcome.get("symbol"),
+            "multiplier": mult,
+            "extra_pay": bool(outcome.get("extra_pay")),
+        }
     # stake-only
     if slug == "bingo":
         lines = count_bingo_lines(card, outcome["drawn"])
@@ -400,6 +443,12 @@ def summarize_outcome(slug, outcome):
         return {"winner": outcome["winner"]}
     if slug == "keno":
         return {"drawn": outcome["drawn"]}
+    if slug == "pappu-pictures":
+        return {
+            "symbol": outcome["symbol"],
+            "multiplier": outcome["multiplier"],
+            "extra_pay": outcome["extra_pay"],
+        }
     if slug == "bingo":
         return {"balls": len(outcome["drawn"])}
     if slug == "giant-jackpot":

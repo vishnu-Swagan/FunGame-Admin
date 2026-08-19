@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI):
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
 
     keepalive = asyncio.create_task(_aviator_keepalive())
-    logger.info('Chakri.Casino ready - 20 games running universal 24/7 live rounds')
+    logger.info('Chakri.Casino ready - 21 games running universal 24/7 live rounds')
     yield
     keepalive.cancel()
     client.close()

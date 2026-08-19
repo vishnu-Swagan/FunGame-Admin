@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-# These are the fifteen Unity cabinets requested for the MyDGP launch.  A
+# These are the reviewed cabinets approved for the MyDGP settlement bridge. A
 # deployment must opt in to a subset explicitly; this static list prevents a
 # typo or a newly-added FastAPI game from becoming settlement-enabled without
 # a review of its server-side rules.
@@ -48,6 +48,7 @@ REVIEWED_GAME_SLUGS = frozenset({
     "fever-joker-bonus",
     "no-hold",
     "champion-poker",
+    "pappu-pictures",
 })
 
 ACTION_TO_KIND_AND_SIGN = {

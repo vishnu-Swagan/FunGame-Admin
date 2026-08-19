@@ -59,6 +59,9 @@ GAMES = [
     {"slug": "keno", "name": "Keno", "category": "Numbers", "tagline": "Pick your lucky numbers", "featured": False,
      "description": "Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.",
      "art": {"from": "#52001f", "to": "#be0045", "accent": "#ff9a1e", "icon": "hash", "glyph": "36"}},
+    {"slug": "pappu-pictures", "name": "Pappu Pictures", "category": "Pictures", "tagline": "Pick a picture, reveal the winner", "featured": True,
+     "description": "Choose from twelve colourful pictures and watch one shared live card reveal. Extra Pay rounds can boost the winning picture up to 200x.",
+     "art": {"from": "#004b31", "to": "#00a466", "accent": "#ffe34b", "icon": "images", "glyph": "12"}},
     {"slug": "lucky-8-line", "name": "Lucky 8 Line", "category": "Slots", "tagline": "Eight lines of fortune", "featured": False,
      "description": "A retro 8-line slot with lucky red eights and golden ingots across three reels.",
      "art": {"from": "#330b0b", "to": "#c0392b", "accent": "#ffb347", "icon": "infinity", "glyph": "8"}},
@@ -106,12 +109,19 @@ async def enable_all_games_for_launch():
     )
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!'},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 20 live games.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.'}},
     )
     await db.announcements.update_one(
         {'title': '18 games are on the way'},
         {'$set': {
-            'title': 'All 20 games are live',
+            'title': 'All 21 games are live',
+            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+        }},
+    )
+    await db.announcements.update_one(
+        {'title': 'All 20 games are live'},
+        {'$set': {
+            'title': 'All 21 games are live',
             'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
         }},
     )
@@ -119,8 +129,8 @@ async def enable_all_games_for_launch():
     return result.modified_count
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 20 live games.", "pinned": True},
-    {"title": "All 20 games are live", "body": "The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.", "pinned": False},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.", "pinned": True},
+    {"title": "All 21 games are live", "body": "The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
@@ -141,7 +151,7 @@ async def run_seed():
             'min_client_version': '1.0.0', 'updated_at': now,
         }))
 
-    # Games — exactly 18
+    # Games — the complete implemented catalogue
     await db.games.create_index('slug', unique=True)
     count = await db.games.count_documents({})
     if count == 0:
@@ -160,7 +170,7 @@ async def run_seed():
 
     # Games added after the initial seed — ensure they exist and are playable on
     # already-seeded databases (idempotent; won't clobber later edits).
-    for slug, order in (('ice-fishing', 99), ('blackjack', 100)):
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101)):
         gm = next((g for g in GAMES if g['slug'] == slug), None)
         if gm:
             await db.games.update_one(
@@ -215,6 +225,20 @@ async def run_seed():
             await db.announcements.insert_many(docs, ordered=False)
         except Exception as e:
             logger.info(f'announcements seed race (ok): {e}')
+
+    # Keep the live catalogue count accurate on databases whose launch
+    # migration already ran before Pappu Pictures was added.
+    await db.announcements.update_one(
+        {'title': 'All 20 games are live'},
+        {'$set': {
+            'title': 'All 21 games are live',
+            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+        }},
+    )
+    await db.announcements.update_one(
+        {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': '20 live games'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.'}},
+    )
 
     # Indexes (idempotent)
     await db.users.create_index('email', unique=True)

@@ -35,9 +35,9 @@ async def main():
     ).to_list(100)
     retired = await database.games.find_one({'slug': 'retired-experiment'})
     config = await database.system_config.find_one({'key': 'main'})
-    launch_notice = await database.announcements.find_one({'title': 'All 20 games are live'})
+    launch_notice = await database.announcements.find_one({'title': 'All 21 games are live'})
 
-    assert len(reviewed) == 20
+    assert len(reviewed) == 21
     assert updated == 10
     assert all(game['status'] == 'ENABLED' for game in reviewed)
     assert retired['status'] == 'RETIRED'

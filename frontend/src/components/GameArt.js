@@ -1,14 +1,14 @@
 import { useState } from "react";
 import {
   Plane, Dices, Layers, LayoutGrid, Crown, Trophy, Flame, CircleDot, Target, Gem,
-  Sparkles, Hash, Infinity as InfinityIcon, Zap, Sun, Boxes, Spade, Club,
+  Sparkles, Hash, Infinity as InfinityIcon, Zap, Sun, Boxes, Spade, Club, Images,
 } from "lucide-react";
 
 const ICONS = {
   plane: Plane, dices: Dices, layers: Layers, "grid-3x3": LayoutGrid, crown: Crown,
   trophy: Trophy, flame: Flame, "circle-dot": CircleDot, target: Target, gem: Gem,
   sparkles: Sparkles, hash: Hash, infinity: InfinityIcon, zap: Zap, sun: Sun,
-  boxes: Boxes, spade: Spade, club: Club,
+  boxes: Boxes, spade: Spade, club: Club, images: Images,
 };
 
 // Unique silhouette language per game (original CSS compositions)
@@ -25,6 +25,7 @@ const PATTERNS = {
   "giant-jackpot": "reels",
   "joker-bonus": "diamonds",
   keno: "scatter",
+  "pappu-pictures": "diamonds",
   "lucky-8-line": "lines",
   "no-hold": "streaks",
   "super-golden-wheel": "wheel",
