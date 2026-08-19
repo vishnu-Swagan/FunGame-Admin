@@ -128,7 +128,37 @@ export function mountRoulette(root, opts) {
       ctx = new AC();
       master = ctx.createGain();
       master.gain.value = on ? 0.9 : 0;
-      master.connect(ctx.destination);
+      /* A dry path retains precise ball/chip transients; a short stereo room
+         send gives the cabinet physical space. The compressor protects phone
+         speakers when the rolling voice, countdown and result sting overlap. */
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -14;
+      compressor.knee.value = 10;
+      compressor.ratio.value = 5;
+      compressor.attack.value = 0.004;
+      compressor.release.value = 0.22;
+      master.connect(compressor);
+      compressor.connect(ctx.destination);
+      try {
+        const length = Math.floor(ctx.sampleRate * 1.15);
+        const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+        for (let channel = 0; channel < 2; channel++) {
+          const data = impulse.getChannelData(channel);
+          for (let i = 0; i < length; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3.1);
+          }
+        }
+        const delay = ctx.createDelay();
+        delay.delayTime.value = 0.014;
+        const room = ctx.createConvolver();
+        room.buffer = impulse;
+        const wet = ctx.createGain();
+        wet.gain.value = 0.11;
+        master.connect(delay);
+        delay.connect(room);
+        room.connect(wet);
+        wet.connect(compressor);
+      } catch (e) { /* the dry mix remains complete on older browsers */ }
       bedGain = ctx.createGain();
       bedGain.gain.value = 0.0;
       bedGain.connect(master);
@@ -821,24 +851,35 @@ export function mountRoulette(root, opts) {
   /* ---------- chips ---------- */
   const chipEls = new Map();
 
-  function drawChip(key, amount) {
+  function drawChip(key, amount, animate) {
     const a = anchorFor(key);
     let c = chipEls.get(key);
+    const normalizedAmount = Number(amount) || 0;
+    const isNew = !c;
+    const previousAmount = c ? Number(c.dataset.amount) : null;
     if (!c) {
       c = document.createElement('span');
       c.className = 'placed' + (a && a.edge ? ' edge' : '');
       c.appendChild(document.createElement('b'));
+      c.addEventListener('animationend', () => c.classList.remove('drop'));
       $('betlayer').appendChild(c);
       chipEls.set(key, c);
     }
     if (a) { c.style.left = a.x + 'px'; c.style.top = a.y + 'px'; }
-    const [c1, c2] = CHIP_LOOK[denomFor(amount)];
+    const [c1, c2] = CHIP_LOOK[denomFor(normalizedAmount)];
     c.style.setProperty('--c', c1);
     c.style.setProperty('--c-dk', c2);
+    c.dataset.amount = String(normalizedAmount);
     c.querySelector('b').textContent =
-      amount >= 1000 ? (Math.round(amount / 100) / 10) + 'K' : String(amount);
-    // restart the drop so a top-up reads as a new chip landing
-    c.style.animation = 'none'; void c.offsetWidth; c.style.animation = '';
+      normalizedAmount >= 1000 ? (Math.round(normalizedAmount / 100) / 10) + 'K' : String(normalizedAmount);
+    /* Only a new stake/top-up should land. Responsive relayouts merely move the
+       existing element and must never restart its animation — doing so made
+       every chip flash whenever ResizeObserver reported the same board again. */
+    if (animate !== false && (isNew || previousAmount !== normalizedAmount)) {
+      c.classList.remove('drop');
+      void c.offsetWidth;
+      c.classList.add('drop');
+    }
   }
 
   function removeChip(key) {
@@ -866,7 +907,7 @@ export function mountRoulette(root, opts) {
     return true;
   }
 
-  const sfxPlace = () => {};
+  const sfxPlace = () => sfxTick();
 
   /* Called by the wrapper when the server refuses a stake. The optimistic chip
      has to come back off the felt immediately and the reason has to be visible
@@ -1022,7 +1063,7 @@ export function mountRoulette(root, opts) {
     const k = fitScale(wrapEl);
     const key = resolveTap((ev.clientX - wrap.left) / k, (ev.clientY - wrap.top) / k);
     if (!key) return;
-    if (place(key)) { toast(BET_NAME(key) + '  ·  ' + fmt(CHIPS[chipIdx])); sfxTick(); }
+    if (place(key)) toast(BET_NAME(key) + '  ·  ' + fmt(CHIPS[chipIdx]));
   }
 
   function sfxTick() {
@@ -1036,20 +1077,31 @@ export function mountRoulette(root, opts) {
      moves — a rotation, the wheel band collapsing, a webfont landing, anything.
      A resize listener is not enough (it never fires for a CSS-driven reflow), so
      the layout itself is observed and the anchors and chips are rebuilt with it. */
+  let relayoutFrame = 0;
+  let orientationTimer = 0;
+  let layoutObserver = null;
   const relayout = () => {
-    if (buildAnchors()) bets.forEach(b => drawChip(b.key, b.amount));
-    if ($('racetrack').classList.contains('on')) { buildRacetrack(); drawRtChips(); }
+    cancelAnimationFrame(relayoutFrame);
+    relayoutFrame = requestAnimationFrame(() => {
+      if (buildAnchors()) bets.forEach(b => drawChip(b.key, b.amount, false));
+      if ($('racetrack').classList.contains('on')) { buildRacetrack(); drawRtChips(); }
+    });
   };
   if (window.ResizeObserver) {
-    const ro = new ResizeObserver(relayout);
-    ro.observe(root.querySelector('.tablewrap'));
-    ro.observe(board);
+    layoutObserver = new ResizeObserver(relayout);
+    layoutObserver.observe(root.querySelector('.tablewrap'));
+    layoutObserver.observe(board);
   }
   window.addEventListener('resize', relayout);
   // the last frame of a height transition may never reach the observer, so take
   // the settled measurement explicitly
-  root.querySelector('.wheelstage').addEventListener('transitionend', relayout);
-  window.addEventListener('orientationchange', () => setTimeout(relayout, 120));
+  const wheelStage = root.querySelector('.wheelstage');
+  wheelStage.addEventListener('transitionend', relayout);
+  const onOrientationChange = () => {
+    clearTimeout(orientationTimer);
+    orientationTimer = setTimeout(relayout, 120);
+  };
+  window.addEventListener('orientationchange', onOrientationChange);
 
   /* ---------- chip tray ----------
      All five denominations are laid out at once and stay tappable, so picking a
@@ -1323,8 +1375,9 @@ export function mountRoulette(root, opts) {
     const cost = picks.length * CHIPS[chipIdx];
     if (cost > balance) { $('scrim').classList.add('on'); return; }
     let ok = 0;
-    picks.forEach(v => { if (place('straight:' + v)) ok++; });
+    picks.forEach(v => { if (place('straight:' + v, { silent: true })) ok++; });
     if (ok) {
+      sfxTick();
       toast(n + ' + ' + nbCount + ' neighbours  ·  ' + ok + ' bets  ·  ' + fmt(cost));
       drawRtChips();
     }
@@ -2244,11 +2297,11 @@ export function mountRoulette(root, opts) {
        poll — a second of blank table followed by the whole board flashing, once
        a second, for as long as anyone kept betting. */
     if (st.myBets != null) {
-      const want = new Map(st.myBets.map(b => [b.key, b.amount]));
+      const want = new Map(st.myBets.map(b => [b.key, Number(b.amount) || 0]));
       for (const key of Array.from(chipEls.keys())) {
         if (!want.has(key)) removeChip(key);
       }
-      const have = new Map(bets.map(b => [b.key, b.amount]));
+      const have = new Map(bets.map(b => [b.key, Number(b.amount) || 0]));
       const toDraw = [];
       want.forEach((amount, key) => {
         // a chip is only redrawn when it is new or its stake moved, so an
@@ -2398,6 +2451,14 @@ export function mountRoulette(root, opts) {
     },
     destroy() {
       cancelAnimationFrame(rafId);
+      cancelAnimationFrame(relayoutFrame);
+      clearTimeout(orientationTimer);
+      if (layoutObserver) layoutObserver.disconnect();
+      window.removeEventListener('resize', relayout);
+      window.removeEventListener('orientationchange', onOrientationChange);
+      window.removeEventListener('pointerdown', Sound.unlock, { capture: true });
+      window.removeEventListener('keydown', Sound.unlock, { capture: true });
+      wheelStage.removeEventListener('transitionend', relayout);
       try { Sound.rollStop(); } catch (e) {}
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     },

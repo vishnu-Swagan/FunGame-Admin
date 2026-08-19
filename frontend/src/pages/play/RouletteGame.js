@@ -6,6 +6,40 @@ import { mountRoulette } from "@/pages/play/rouletteVip/engine";
 import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import "@/pages/play/rouletteVip/styles.css";
 
+/** Server (bet_type, value) -> the engine's key, so chips land on the right spot. */
+function rouletteBetKey(bet) {
+  const type = bet.bet_type;
+  if (type === "sector") {
+    /* The engine represents wheel sectors by the exact ordered pockets they
+       cover. Preserve that canonical key when the server returns its compact
+       sector name; an object key here would be newly allocated every poll and
+       make the same sector chip look different forever. */
+    const sectors = {
+      zeroside: ["0", "28", "9", "26", "30", "11", "7", "20", "32", "17", "5", "22", "34", "15", "3", "24", "36", "13", "1"],
+      dzeroside: ["00", "27", "10", "25", "29", "12", "8", "19", "31", "18", "6", "21", "33", "16", "4", "23", "35", "14", "2"],
+      zeroneighbours: ["27", "10", "25", "1", "0", "00"],
+    };
+    const pockets = sectors[bet.value];
+    return pockets ? `grp:${pockets.join("-")}` : null;
+  }
+  if (["split", "street", "corner", "sixline", "basket"].includes(type)) return `grp:${bet.value}`;
+  return `${type}:${bet.value}`;
+}
+
+/* The API stores every chip as its own auditable bet record. The table displays
+   one stack per position, so combine records before reconciling the felt. This
+   also gives the engine stable numeric values instead of alternating between a
+   single record and the optimistic running total while a poll lands. */
+function aggregateRouletteBets(rows) {
+  const totals = new Map();
+  (rows || []).forEach((row) => {
+    const key = rouletteBetKey(row);
+    const amount = Number(row.amount) || 0;
+    if (key && amount > 0) totals.set(key, (totals.get(key) || 0) + amount);
+  });
+  return Array.from(totals, ([key, amount]) => ({ key, amount }));
+}
+
 /**
  * American Roulette — the synchronized double-zero table.
  *
@@ -28,17 +62,6 @@ export default function RouletteGame({ game }) {
   const pollRef = useRef(null);
   const inFlightRef = useRef(0);
   const [fatal, setFatal] = useState(null);
-
-  /** Server (bet_type, value) -> the engine's key, so chips land on the right spot. */
-  const toKey = (b) => {
-    const t = b.bet_type;
-    if (t === "sector") {
-      const back = { zeroside: "zeroside", dzeroside: "dzeroside", zeroneighbours: "zerofour" };
-      return { sector: back[b.value] || b.value };
-    }
-    if (["split", "street", "corner", "sixline", "basket"].includes(t)) return `grp:${b.value}`;
-    return `${t}:${b.value}`;
-  };
 
   const placeBet = useCallback(async (bet_type, value, amount, key) => {
     inFlightRef.current += 1;
@@ -134,7 +157,7 @@ export default function RouletteGame({ game }) {
           winningNumber: data.winning_number,
           // a bet still in flight would be missing from the server's list and the
           // chip would flicker off the felt, so hold the optimistic view until it lands
-          myBets: inFlightRef.current === 0 ? (data.my_bets || []).map((b) => ({ key: toKey(b), amount: b.amount })) : null,
+          myBets: inFlightRef.current === 0 ? aggregateRouletteBets(data.my_bets) : null,
           balance: inFlightRef.current === 0 ? data.balance : null,
           settled: data.settled,
         });

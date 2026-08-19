@@ -7,10 +7,17 @@ import {
 import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
-import playerAvatar from "./sevenUpDownPlayer.png";
+import playerAvatar from "./sevenUpDownMascot.png";
 import "./sevenUpDown.css";
 
 const CHIP_VALUES = [10, 20, 50, 100, 200];
+const CHIP_COLORS = {
+  10: { face: "#f4ecd2", deep: "#b9ad88", rim: "#168c50", ink: "#183126" },
+  20: { face: "#238bc3", deep: "#075682", rim: "#d7f2ff", ink: "#ffffff" },
+  50: { face: "#dc4439", deep: "#8e1615", rim: "#f6cf62", ink: "#ffffff" },
+  100: { face: "#252a30", deep: "#090b0e", rim: "#ece9d9", ink: "#ffffff" },
+  200: { face: "#84368f", deep: "#43164e", rim: "#f1c84b", ink: "#ffffff" },
+};
 const TOTALS = [
   { total: 2, odds: "1:26" }, { total: 3, odds: "1:12" },
   { total: 4, odds: "1:8" }, { total: 5, odds: "1:6" },
@@ -31,6 +38,14 @@ const DOWN_DICE = [[1, 1], [1, 2], [1, 3], [2, 2], [1, 4], [2, 3], [1, 5], [2, 4
 const UP_DICE = [[2, 6], [3, 5], [4, 4], [3, 6], [4, 5], [4, 6], [5, 5], [5, 6], [6, 6]];
 const SEVEN_DICE = [[1, 6], [2, 5], [3, 4], [4, 3], [5, 2], [6, 1]];
 const DEMO_BET_SECONDS = 15;
+
+function winnerAvatar(winner, index) {
+  const characterAvatars = [1, 3, 9, 10, 11, 12, 13, 14, 15, 16];
+  const key = String(winner?.id || winner?.name || index);
+  let hash = 0;
+  for (let cursor = 0; cursor < key.length; cursor += 1) hash = ((hash * 31) + key.charCodeAt(cursor)) >>> 0;
+  return `/aviator-live/avatars/av-${characterAvatars[hash % characterAvatars.length]}.png`;
+}
 
 function resultFromDice(dice, roundNumber) {
   const total = dice[0] + dice[1];
@@ -158,15 +173,22 @@ function useJiliSoundState() {
 }
 
 function useCabinetScale() {
-  const measure = () => typeof window === "undefined" ? 1 : Math.min(1, window.innerWidth / 500);
+  const measure = () => {
+    if (typeof window === "undefined") return 1;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const availableHeight = Math.max(360, viewportHeight - 58);
+    return Math.min(1, window.innerWidth / 500, availableHeight / 884);
+  };
   const [scale, setScale] = useState(measure);
   useEffect(() => {
     const resize = () => setScale(measure());
     window.addEventListener("resize", resize);
     window.addEventListener("orientationchange", resize);
+    window.visualViewport?.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
       window.removeEventListener("orientationchange", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
     };
   }, []);
   return scale;
@@ -189,9 +211,9 @@ function CabinetShell({ game, children }) {
   );
 }
 
-function Die({ value = 1, red = false, small = false, rolling = false }) {
+function DieFace({ value, red = false, side = "front" }) {
   return (
-    <span className={`j7-die ${small ? "is-small" : ""} ${rolling ? "is-rolling" : ""}`} aria-label={`${value} on die`}>
+    <span className={`j7-die-face is-${side}`}>
       {Array.from({ length: 9 }, (_, index) => (
         <i key={index} className={`${PIPS[value]?.includes(index) ? "is-on" : ""} ${red ? "is-red" : ""}`} />
       ))}
@@ -199,9 +221,49 @@ function Die({ value = 1, red = false, small = false, rolling = false }) {
   );
 }
 
+function Die({ value = 1, red = false, small = false, rolling = false, landed = false }) {
+  if (small) {
+    return (
+      <span className="j7-die is-small" aria-label={`${value} on die`}>
+        {Array.from({ length: 9 }, (_, index) => (
+          <i key={index} className={`${PIPS[value]?.includes(index) ? "is-on" : ""} ${red ? "is-red" : ""}`} />
+        ))}
+      </span>
+    );
+  }
+
+  /* Six real planes preserve the cube silhouette while it tumbles. The front
+     face is always the synchronized result; the other planes are visual depth. */
+  const opposite = 7 - value;
+  const top = value === 1 || value === 6 ? 2 : 1;
+  const right = [1, 2, 3, 4, 5, 6].find((face) => face !== value && face !== opposite && face !== top && face !== 7 - top) || 3;
+  return (
+    <span className={`j7-die ${rolling ? "is-rolling" : ""} ${landed ? "is-landed" : ""}`} aria-label={`${value} on die`}>
+      <span className="j7-die-cube">
+        <DieFace value={value} red={red} side="front" />
+        <DieFace value={opposite} red={red} side="back" />
+        <DieFace value={right} red={red} side="right" />
+        <DieFace value={7 - right} red={red} side="left" />
+        <DieFace value={top} red={red} side="top" />
+        <DieFace value={7 - top} red={red} side="bottom" />
+      </span>
+    </span>
+  );
+}
+
 function BetChip({ amount }) {
   if (!amount) return null;
-  return <span className="j7-stake-chip">{formatChips(amount)}</span>;
+  const denomination = [...CHIP_VALUES].reverse().find((value) => amount >= value) || CHIP_VALUES[0];
+  const color = CHIP_COLORS[denomination];
+  const label = amount >= 1000 ? `${Math.round(amount / 100) / 10}K` : formatChips(amount);
+  return (
+    <span
+      className="j7-stake-chip"
+      style={{ "--chip-face": color.face, "--chip-deep": color.deep, "--chip-rim": color.rim, "--chip-ink": color.ink }}
+    >
+      <b>{label}</b>
+    </span>
+  );
 }
 
 function HistoryCell({ item, latest = false }) {
@@ -256,6 +318,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
     return map;
   }, {}), [myBets]);
   const history = useMemo(() => lastResults.slice(0, 12).reverse(), [lastResults]);
+  const [rollingFaces, setRollingFaces] = useState([3, 4]);
   const stats = useMemo(() => {
     const sample = lastResults.slice(0, 100);
     const size = sample.length || 1;
@@ -271,11 +334,20 @@ function SevenUpDownTable({ game, live, demo = false }) {
   const shownOutcome = phase === "RESULT" || (phase === "REVEAL" && revealProgress >= 0.63);
   const rolling = phase === "REVEAL" && !shownOutcome;
   const fallbackDice = history.length ? history[history.length - 1]?.dice : [3, 4];
-  const dice = shownOutcome && outcome?.dice ? outcome.dice : (fallbackDice || [3, 4]);
+  const dice = shownOutcome && outcome?.dice ? outcome.dice : rolling ? rollingFaces : (fallbackDice || [3, 4]);
   const minBet = state?.min_bet ?? 10;
   const maxBet = state?.max_bet ?? 200;
   const bettingLength = state?.timings?.bet || 60;
   const timerProgress = betting ? Math.min(1, countdown / bettingLength) : Math.max(0, 1 - revealProgress);
+
+  /* The changing faces are visual theatre only; the final pair below always
+     switches to `outcome.dice`, which is the synchronized server result. */
+  useEffect(() => {
+    if (!rolling) return undefined;
+    const nextFace = () => 1 + Math.floor(Math.random() * 6);
+    const timer = window.setInterval(() => setRollingFaces([nextFace(), nextFace()]), 82);
+    return () => window.clearInterval(timer);
+  }, [rolling, state?.round_number]);
 
   useEffect(() => {
     if (!CHIP_VALUES.includes(chip) || chip < minBet || chip > maxBet) {
@@ -315,7 +387,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
         data-testid="seven-up-down-table"
         data-demo={demo ? "true" : "false"}
         data-phase={phase || "LOADING"}
-        style={{ "--j7-scale": cabinetScale, "--j7-height": `${884 * cabinetScale}px` }}
+        style={{ "--j7-scale": cabinetScale }}
       >
         <section className="j7-table">
           <header className="j7-roadmap">
@@ -335,7 +407,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
               <span className="j7-high-win">HIGH WIN<br />RATE</span>
               {realWinners.map((winner, index) => (
                 <div className="j7-winner" key={winner.id || index}>
-                  <span>{String(winner.name || "P").replaceAll("*", "").slice(0, 1).toUpperCase()}</span>
+                  <img src={winnerAvatar(winner, index)} alt="" aria-hidden="true" />
                   <small>{winner.name}<b>₹ {formatChips(winner.payout)}</b></small>
                 </div>
               ))}
@@ -343,14 +415,14 @@ function SevenUpDownTable({ game, live, demo = false }) {
 
             <div className="j7-dome" aria-live="polite">
               <div className="j7-glass"><i /><i /></div>
-              <div className={`j7-dice-tray ${rolling ? "is-rolling" : ""}`}>
-                <Die value={dice[0]} rolling={rolling} />
-                <Die value={dice[1]} red rolling={rolling} />
+              <div className={`j7-dice-tray ${rolling ? "is-rolling" : ""} ${shownOutcome ? "is-landed" : ""}`}>
+                <Die value={dice[0]} rolling={rolling} landed={shownOutcome} />
+                <Die value={dice[1]} red rolling={rolling} landed={shownOutcome} />
               </div>
             </div>
 
             <div className="j7-countdown" style={{ "--timer": `${timerProgress * 360}deg` }}>
-              <span>{betting ? Math.max(0, Math.ceil(countdown)) : phase === "REVEAL" ? "•" : outcome?.total ?? "–"}</span>
+              <span>{betting ? Math.max(0, Math.ceil(countdown)) : shownOutcome ? outcome?.total ?? "–" : "•"}</span>
             </div>
           </div>
 
@@ -394,10 +466,32 @@ function SevenUpDownTable({ game, live, demo = false }) {
             <div className="j7-chip-picker">
               {chipMenu && <div className="j7-chip-menu">
                 {CHIP_VALUES.filter((value) => value >= minBet && value <= maxBet).map((value) => (
-                  <button type="button" key={value} className={value === chip ? "is-active" : ""} onClick={() => { setChip(value); setChipMenu(false); }}>{value}</button>
+                  <button
+                    type="button"
+                    key={value}
+                    className={value === chip ? "is-active" : ""}
+                    style={{
+                      "--chip-face": CHIP_COLORS[value].face,
+                      "--chip-deep": CHIP_COLORS[value].deep,
+                      "--chip-rim": CHIP_COLORS[value].rim,
+                      "--chip-ink": CHIP_COLORS[value].ink,
+                    }}
+                    onClick={() => { setChip(value); setChipMenu(false); sfx.chip(); }}
+                  >{value}</button>
                 ))}
               </div>}
-              <button type="button" className="j7-bank-chip" onClick={() => setChipMenu((value) => !value)} aria-label={`Selected chip ${chip}`}><i /><b>{chip}</b></button>
+              <button
+                type="button"
+                className="j7-bank-chip"
+                style={{
+                  "--chip-face": CHIP_COLORS[chip]?.face,
+                  "--chip-deep": CHIP_COLORS[chip]?.deep,
+                  "--chip-rim": CHIP_COLORS[chip]?.rim,
+                  "--chip-ink": CHIP_COLORS[chip]?.ink,
+                }}
+                onClick={() => { setChipMenu((value) => !value); sfx.chip(); }}
+                aria-label={`Selected chip ${chip}`}
+              ><b>{chip}</b></button>
             </div>
             <ToolButton label="double" icon={<b>×2</b>} onClick={() => replay("double")} disabled={!betting || busy || !myBets.length} />
             <ToolButton label="undo" icon={<Undo2 />} onClick={undoBet} disabled={!betting || busy || !myBets.length} />

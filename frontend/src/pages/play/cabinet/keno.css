@@ -21,6 +21,8 @@
   text-rendering: optimizeLegibility;
 }
 
+.keno-shell button { touch-action: manipulation; }
+
 .keno-shell * { box-sizing: border-box; }
 .keno-shell button, .keno-shell input { font-family: inherit; }
 .keno-shell button { border: 0; cursor: pointer; }
@@ -402,7 +404,7 @@
 .keno-paytable-head {
   flex: 0 0 clamp(18px, 2.2vh, 28px);
   display: grid;
-  grid-template-columns: clamp(30px, 2.5vw, 48px) 1fr;
+  grid-template-columns: clamp(34px, 2.75vw, 52px) 1fr;
   align-items: center;
   gap: clamp(5px, .7vw, 14px);
   padding: 0 7px clamp(3px, .3vh, 5px);
@@ -447,7 +449,7 @@
   min-height: 0;
   flex: 0 1 48px;
   display: grid;
-  grid-template-columns: clamp(30px, 2.5vw, 48px) 1fr;
+  grid-template-columns: clamp(34px, 2.75vw, 52px) 1fr;
   align-items: center;
   gap: clamp(5px, .7vw, 14px);
   padding: 2px 7px;
@@ -473,7 +475,7 @@
   content: "";
   position: absolute;
   z-index: 0;
-  left: calc(clamp(30px, 2.5vw, 48px) / 2 + 7px);
+  left: calc(clamp(34px, 2.75vw, 52px) / 2 + 7px);
   top: 74%;
   width: 2px;
   height: calc(52% + clamp(2px, .36vh, 5px));
@@ -493,8 +495,8 @@
     radial-gradient(circle at 35% 24%, rgba(255,255,255,.16), transparent 24%),
     linear-gradient(145deg, #9f0b43, #650022 72%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.14), inset 0 -4px 5px rgba(45,0,15,.22), 0 2px 0 #380013;
-  font-size: clamp(13px, 1.2vw, 22px);
-  font-weight: 800;
+  font-size: clamp(15px, 1.38vw, 26px);
+  font-weight: 900;
   line-height: 1;
   text-shadow: 0 2px 1px rgba(52,0,18,.7);
 }
@@ -849,10 +851,10 @@
   .keno-number.is-picked, .keno-number.is-missed { box-shadow: inset 0 0 0 2px #7d5264, inset 0 0 0 5px #270815, 0 0 0 1px #f2ff00; }
   .keno-number.is-hit { box-shadow: inset 0 0 0 2px #f07900, inset 0 0 0 5px #ffdd29, 0 0 0 1px #eaff00, 0 0 12px rgba(255,210,0,.6); }
   .keno-paytable { height: 100%; gap: 1px; padding: 4px; border-radius: 7px; }
-  .keno-paytable-head { flex-basis: 16px; grid-template-columns: 22px 1fr; gap: 3px; padding: 0 2px 2px; font-size: 6.5px; letter-spacing: .08em; }
-  .keno-payrow { flex: 1 1 26px; grid-template-columns: 22px 1fr; gap: 3px; padding: 1px 2px; border-radius: 4px; }
-  .keno-payrow:not(:last-child)::after { left: 13px; }
-  .keno-payrow > span { font-size: 10px; }
+  .keno-paytable-head { flex-basis: 16px; grid-template-columns: 25px 1fr; gap: 3px; padding: 0 2px 2px; font-size: 6.5px; letter-spacing: .08em; }
+  .keno-payrow { flex: 1 1 26px; grid-template-columns: 25px 1fr; gap: 3px; padding: 1px 2px; border-radius: 4px; }
+  .keno-payrow:not(:last-child)::after { left: 14.5px; }
+  .keno-payrow > span { font-size: 12px; }
   .keno-payrow b { gap: 1px; }
   .keno-payrow b strong { font-size: 9px; }
   .keno-payrow b em { font-size: 6.5px; }

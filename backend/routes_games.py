@@ -30,6 +30,16 @@ def _now_iso():
     return _now().isoformat()
 
 
+def _masked_user_id(value: str):
+    """Return a display-safe fragment without exposing the stored user id."""
+    compact = ''.join(ch for ch in str(value or '') if ch.isalnum())
+    if not compact:
+        return 'P***R'
+    if len(compact) <= 4:
+        return f"{compact[0]}***{compact[-1]}"
+    return f"{compact[:2]}***{compact[-2:]}"
+
+
 class PlayRequest(BaseModel):
     bet: int = Field(ge=1, le=10_000_000)
     payload: dict = Field(default_factory=dict)
@@ -294,6 +304,37 @@ async def roulette_undo_bet(user: dict = Depends(require_active_player)):
     ).to_list(100)
     balance = await _fresh_balance(user['id'])
     return {'message': 'Last bet undone', 'refunded': refunded, 'my_bets': my_bets, 'my_total': sum(b['amount'] for b in my_bets), 'balance': balance}
+
+
+# ---------------- Shared live winner rotation ----------------
+@router.get('/games/{slug}/recent-winners')
+async def recent_game_winners(slug: str, user: dict = Depends(require_active_player)):
+    """Recent real payouts for the current table, safe for an in-game ticker.
+
+    Values come only from settled game-round records. Raw user identifiers are
+    intentionally never serialized; the frontend receives a masked fragment.
+    """
+    await _get_enabled_game(slug)
+    rows = await db.game_rounds.find(
+        {'slug': slug, 'status': 'SETTLED', 'payout': {'$gt': 0}},
+        {
+            '_id': 0, 'id': 1, 'user_id': 1, 'payout': 1, 'bet': 1,
+            'round_number': 1, 'outcome.round_number': 1, 'settled_at': 1,
+        },
+    ).sort('settled_at', -1).to_list(18)
+    return {
+        'winners': [
+            {
+                'id': row.get('id'),
+                'masked_id': _masked_user_id(row.get('user_id')),
+                'payout': row.get('payout', 0),
+                'bet': row.get('bet', 0),
+                'round_number': row.get('round_number') or (row.get('outcome') or {}).get('round_number'),
+                'settled_at': row.get('settled_at'),
+            }
+            for row in rows
+        ],
+    }
 
 
 # ---------------- Round history ----------------

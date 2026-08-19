@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { PageTransition } from "@/components/common";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GameIntro } from "@/components/play/GameIntro";
+import { LastWinnerRotator } from "@/components/play/LastWinnerRotator";
 
 import DiceGame from "@/pages/play/DiceGame";
 import TargetGame from "@/pages/play/TargetGame";
@@ -119,6 +120,7 @@ export default function GamePlay() {
           intro plays on top for ~4s, so it dissolves straight onto the round
           that is already in progress. */}
       <Component game={game} />
+      <LastWinnerRotator slug={game.slug} />
       {/* The cabinet is its own fullscreen machine and opens straight onto the
           round in progress; the portrait tables keep the cinematic intro. */}
       {!CABINET.has(game.slug) && <GameIntro game={game} />}

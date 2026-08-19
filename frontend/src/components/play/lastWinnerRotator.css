@@ -1,0 +1,79 @@
+.last-winner-rotator {
+  position: fixed;
+  z-index: 320;
+  top: max(66px, calc(env(safe-area-inset-top) + 58px));
+  left: 10px;
+  width: max-content;
+  max-width: min(292px, calc(100vw - 20px));
+  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px 4px 7px;
+  overflow: hidden;
+  pointer-events: none;
+  color: #f8f3e7;
+  border: 1px solid rgba(239, 196, 90, .5);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(30, 24, 18, .9), rgba(5, 7, 8, .82));
+  box-shadow: inset 0 1px rgba(255,255,255,.12), 0 5px 16px rgba(0,0,0,.3);
+  backdrop-filter: blur(8px) saturate(1.15);
+  -webkit-backdrop-filter: blur(8px) saturate(1.15);
+  font: 700 10px/1.1 "Manrope", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .02em;
+  user-select: none;
+}
+
+.last-winner-rotator > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #f5cb55;
+  filter: drop-shadow(0 1px 3px rgba(245, 203, 85, .35));
+}
+
+.last-winner-label {
+  flex: 0 0 auto;
+  color: #e8bd4c;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.last-winner-slide {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+  animation: last-winner-enter .32s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.last-winner-slide b { overflow: hidden; text-overflow: ellipsis; color: #fff; }
+.last-winner-slide > span { color: rgba(255,255,255,.58); font-weight: 650; }
+.last-winner-slide strong { color: #65ec8b; font-size: 12px; font-variant-numeric: tabular-nums; }
+.last-winner-slide small { color: rgba(255,255,255,.42); font-size: 8px; font-variant-numeric: tabular-nums; }
+
+@keyframes last-winner-enter {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 520px) {
+  .last-winner-rotator {
+    top: max(61px, calc(env(safe-area-inset-top) + 54px));
+    left: 6px;
+    height: 27px;
+    max-width: calc(100vw - 12px);
+    padding: 3px 7px 3px 6px;
+    opacity: .92;
+  }
+  .last-winner-rotator > svg { width: 13px; height: 13px; }
+  .last-winner-label { font-size: 7px; }
+  .last-winner-slide { gap: 3px; font-size: 9px; }
+  .last-winner-slide strong { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .last-winner-slide { animation: none; }
+}
