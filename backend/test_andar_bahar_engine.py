@@ -1,7 +1,31 @@
 """Contract tests for the live Andar Bahar table and reference side bets."""
 
 import game_engines
-from live_engines import SIDE_OPTIONS, TABLE_LIMITS, generate_outcome, settle_bet, summarize_outcome
+from live_engines import LIVE_GAMES, SIDE_OPTIONS, TABLE_LIMITS, cycle_seconds, fixed_cycle_clock, generate_outcome, settle_bet, summarize_outcome
+
+
+def test_round_is_one_minute_and_bets_close_after_thirty_seconds():
+    assert LIVE_GAMES["andar-bahar"] == {
+        "bet": 30,
+        "reveal": 24,
+        "result": 6,
+        "kind": "sides",
+    }
+    assert cycle_seconds("andar-bahar") == 60
+
+
+def test_andar_bahar_clock_exact_phase_boundaries():
+    cfg = LIVE_GAMES["andar-bahar"]
+
+    def clock(now):
+        return fixed_cycle_clock(now, cfg["bet"], cfg["reveal"], cfg["result"])
+
+    assert clock(29.99)[1:3] == ("BETTING", 0.01)
+    assert clock(30.00)[1:3] == ("REVEAL", 24.0)
+    assert clock(53.99)[1:3] == ("REVEAL", 0.01)
+    assert clock(54.00)[1:3] == ("RESULT", 6.0)
+    assert clock(59.99)[1:3] == ("RESULT", 0.01)
+    assert clock(60.00)[:3] == (1, "BETTING", 30.0)
 
 
 def test_reference_side_and_card_count_prices():
