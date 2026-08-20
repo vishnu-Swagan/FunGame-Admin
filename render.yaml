@@ -41,7 +41,7 @@ services:
         # The custom domain is the origin the browser actually sends once DNS is
         # cut over; the .onrender.com hosts stay listed so nothing breaks during
         # the changeover and so a direct Render URL still works for debugging.
-        value: "https://chakri.casino,https://www.chakri.casino,https://mydgp.casino,https://www.mydgp.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
+        value: "https://chakri.casino,https://www.chakri.casino,https://play.chakri.casino,https://mydgp.casino,https://www.mydgp.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
       - key: APP_ENV
         value: production                            # production requires live-only account flows
       - key: EMAIL_PROVIDER
@@ -71,6 +71,7 @@ services:
     domains:
       - chakri.casino
       - www.chakri.casino
+      - play.chakri.casino
     envVars:
       - key: REACT_APP_BACKEND_URL
         value: https://chakri-casino-api.onrender.com
@@ -81,6 +82,21 @@ services:
         source: /*
         destination: /index.html
     headers:
+      - path: /service-worker.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /manifest.json
+        name: Cache-Control
+        value: no-cache
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /aviator-live/static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
       - path: /*
         name: X-Content-Type-Options
         value: nosniff
