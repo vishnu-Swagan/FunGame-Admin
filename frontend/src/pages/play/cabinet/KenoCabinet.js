@@ -6,11 +6,14 @@ import {
 } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import { CLIENT_BETTING_GUARD_SECONDS } from "@/lib/serverClock";
+import { formatRoundClock, kenoPayoutLabel } from "./kenoResult";
 import "./keno.css";
 
 const NUMBERS = Array.from({ length: 36 }, (_, index) => index + 1);
 const AUTO_ROUNDS = [3, 10, 25, 100, 200, 500];
 const PRESETS = [10, 20, 50, 100, 200, 500, 1000];
+const KENO_ROUND_TIMING = { bet: 30, reveal: 20, result: 10, total: 60 };
 
 // Transparent return multipliers mirrored by the server. The 10-pick column
 // matches the reference cabinet's exact 0.00x-to-100.00x win ladder.
@@ -50,19 +53,16 @@ function useDemoKeno() {
   const [result, setResult] = useState(null);
   const [revealProgress, setRevealProgress] = useState(0);
   const [lastResults, setLastResults] = useState([]);
+  const [countdown, setCountdown] = useState(KENO_ROUND_TIMING.bet);
   const betRef = useRef(null);
 
   const placeBet = useCallback(async (selection, amount) => {
     if (phase !== "BETTING" || betRef.current || amount > balance) return null;
     const bet = { id: `demo-${Date.now()}`, selection: [...selection], amount };
-    const nextOutcome = { drawn: shuffledDraw() };
     betRef.current = bet;
     setBalance((value) => value - amount);
     setMyBets([bet]);
-    setOutcome(nextOutcome);
     setResult(null);
-    setRevealProgress(0);
-    setPhase("REVEAL");
     sfx.chip();
     return { balance: balance - amount, my_bets: [bet], my_total: amount };
   }, [balance, phase]);
@@ -76,33 +76,62 @@ function useDemoKeno() {
     return { refunded: refund };
   }, [phase]);
 
+  const bettingOpenNow = useCallback((guardSeconds = 0) => (
+    phase === "BETTING" && countdown >= Math.max(0, Number(guardSeconds) || 0)
+  ), [countdown, phase]);
+
+  useEffect(() => {
+    if (phase !== "BETTING") return undefined;
+    const started = performance.now();
+    setCountdown(KENO_ROUND_TIMING.bet);
+    const interval = window.setInterval(() => {
+      setCountdown(Math.max(0, KENO_ROUND_TIMING.bet - (performance.now() - started) / 1000));
+    }, 100);
+    const close = window.setTimeout(() => {
+      setCountdown(0);
+      setOutcome({ drawn: shuffledDraw() });
+      setRevealProgress(0);
+      setPhase("REVEAL");
+    }, KENO_ROUND_TIMING.bet * 1000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(close);
+    };
+  }, [phase, roundNumber]);
+
   useEffect(() => {
     if (phase !== "REVEAL") return undefined;
     const started = performance.now();
-    const revealMs = 4400;
+    const revealMs = KENO_ROUND_TIMING.reveal * 1000;
+    setCountdown(KENO_ROUND_TIMING.reveal);
     const interval = window.setInterval(() => {
-      setRevealProgress(Math.min(1, (performance.now() - started) / revealMs));
-    }, 70);
+      const elapsed = performance.now() - started;
+      setRevealProgress(Math.min(1, elapsed / revealMs));
+      setCountdown(Math.max(0, KENO_ROUND_TIMING.reveal - elapsed / 1000));
+    }, 100);
     const finish = window.setTimeout(() => {
       const bet = betRef.current;
-      if (!bet || !outcome) return;
-      const matches = bet.selection.filter((number) => outcome.drawn.includes(number)).sort((a, b) => a - b);
-      const mult = KENO_PAYTABLE[bet.selection.length]?.[matches.length] || 0;
-      const payout = Math.round(bet.amount * mult * 100) / 100;
-      const netWin = payout > bet.amount;
+      if (!outcome) return;
       setRevealProgress(1);
-      setBalance((value) => value + payout);
-      setResult({
-        key: `demo-${roundNumber}`,
-        payout,
-        total_bet: bet.amount,
-        win: netWin,
-        bets: [{ ...bet, matches, multiplier: mult, payout }],
-      });
       setLastResults((rows) => [{ round_number: roundNumber, drawn: outcome.drawn }, ...rows].slice(0, 10));
+      if (bet) {
+        const matches = bet.selection.filter((number) => outcome.drawn.includes(number)).sort((a, b) => a - b);
+        const mult = KENO_PAYTABLE[bet.selection.length]?.[matches.length] || 0;
+        const payout = Math.round(bet.amount * mult * 100) / 100;
+        const netWin = payout > bet.amount;
+        setBalance((value) => value + payout);
+        setResult({
+          key: `demo-${roundNumber}`,
+          payout,
+          total_bet: bet.amount,
+          win: netWin,
+          bets: [{ ...bet, matches, multiplier: mult, payout }],
+        });
+        if (netWin) sfx.winCelebration();
+        else sfx.lose();
+      }
+      setCountdown(0);
       setPhase("RESULT");
-      if (netWin) sfx.winCelebration();
-      else sfx.lose();
     }, revealMs);
     return () => {
       window.clearInterval(interval);
@@ -112,6 +141,11 @@ function useDemoKeno() {
 
   useEffect(() => {
     if (phase !== "RESULT") return undefined;
+    const started = performance.now();
+    setCountdown(KENO_ROUND_TIMING.result);
+    const interval = window.setInterval(() => {
+      setCountdown(Math.max(0, KENO_ROUND_TIMING.result - (performance.now() - started) / 1000));
+    }, 100);
     const timer = window.setTimeout(() => {
       betRef.current = null;
       setMyBets([]);
@@ -120,8 +154,11 @@ function useDemoKeno() {
       setRevealProgress(0);
       setRoundNumber((value) => value + 1);
       setPhase("BETTING");
-    }, 3200);
-    return () => window.clearTimeout(timer);
+    }, KENO_ROUND_TIMING.result * 1000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timer);
+    };
   }, [phase]);
 
   const state = useMemo(() => ({
@@ -129,13 +166,13 @@ function useDemoKeno() {
     phase,
     min_bet: 10,
     max_bet: 1000,
-    timings: { bet: 0, reveal: 4.4, result: 3.2 },
+    timings: KENO_ROUND_TIMING,
     game_config: { pool: 36, draw_count: 10, max_picks: 10, paytable: KENO_PAYTABLE },
   }), [phase, roundNumber]);
 
   return {
     state,
-    countdown: 0,
+    countdown,
     balance,
     placing: false,
     result,
@@ -148,6 +185,7 @@ function useDemoKeno() {
     revealProgress,
     placeBet,
     clearBets,
+    bettingOpenNow,
   };
 }
 
@@ -224,9 +262,10 @@ function KenoTable({ game, live, demo = false }) {
   const navigate = useNavigate();
   const muted = useSoundState();
   const {
-    state, countdown, balance, placing, result, phase, betting, outcome,
-    myBets, myTotal, lastResults, revealProgress, placeBet, clearBets,
+    state, countdown, balance, placing, result, phase, betting: phaseBetting, outcome,
+    myBets, myTotal, lastResults, revealProgress, placeBet, clearBets, bettingOpenNow,
   } = live;
+  const betting = phaseBetting && countdown >= CLIENT_BETTING_GUARD_SECONDS;
   const minBet = state?.min_bet ?? 10;
   const maxBet = state?.max_bet ?? 1000;
   const configPaytable = state?.game_config?.paytable || KENO_PAYTABLE;
@@ -262,7 +301,11 @@ function KenoTable({ game, live, demo = false }) {
   const latest = shown[shown.length - 1];
   const betAmount = lockedBet?.amount || amount;
   const computedPayout = Math.round(betAmount * Number(table[hits] || 0) * 100) / 100;
-  const payout = result?.payout ?? state?.settled?.payout ?? (phase === "RESULT" ? computedPayout : 0);
+  const payout = result?.payout ?? state?.settled?.payout ?? (phase === "RESULT" && locked ? computedPayout : 0);
+  const roundCountdown = Math.max(0,
+    countdown
+    + (phase === "BETTING" ? Number(state?.timings?.reveal || 0) + Number(state?.timings?.result || 0) : 0)
+    + (phase === "REVEAL" ? Number(state?.timings?.result || 0) : 0));
 
   useEffect(() => {
     if (phase !== "REVEAL") {
@@ -306,13 +349,13 @@ function KenoTable({ game, live, demo = false }) {
   };
 
   const placeCurrent = useCallback(async () => {
-    if (!betting || placing || locked || picks.length === 0) return null;
+    if (!bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS) || placing || locked || picks.length === 0) return null;
     const stake = Math.min(maxBet, Math.max(minBet, Number(amount) || minBet));
     return placeBet(picks, stake);
-  }, [amount, betting, locked, maxBet, minBet, picks, placeBet, placing]);
+  }, [amount, bettingOpenNow, locked, maxBet, minBet, picks, placeBet, placing]);
 
   const startAuto = () => {
-    if (!picks.length || locked) return;
+    if (!bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS) || !picks.length || locked) return;
     autoStartBalance.current = Number(balance || 0);
     autoRoundRef.current = null;
     setAutoRemaining(autoChoice);
@@ -342,13 +385,20 @@ function KenoTable({ game, live, demo = false }) {
   }, [autoRemaining, result?.payout, state?.settled?.payout, stopWin]);
 
   const status = (() => {
-    if (phase === "REVEAL") return `LIVE DRAW • ${shownCount}/10`;
+    const roundSeconds = Math.max(0, Math.ceil(roundCountdown));
+    const roundClock = formatRoundClock(roundSeconds);
+    const betSeconds = Math.max(0, Math.ceil(countdown));
+    if (phase === "REVEAL") return `LIVE DRAW • ${shownCount}/10 • ROUND ${roundClock}`;
     if (phase === "RESULT") {
-      return `${hits} HIT${hits === 1 ? "" : "S"} • WIN ₹${money(payout)}`;
+      if (!locked && !result && !state?.settled) return `ROUND RESULT • NEXT ${roundClock}`;
+      const stake = Number(lockedBet?.amount ?? result?.total_bet ?? state?.settled?.total_bet ?? 0);
+      const payoutLabel = kenoPayoutLabel(payout, stake, money);
+      return `${hits} HIT${hits === 1 ? "" : "S"} • ${payoutLabel} • NEXT ${roundClock}`;
     }
-    if (locked) return `LIVE BET ACCEPTED • DRAW IN ${Math.max(0, Math.ceil(countdown))}s`;
-    if (picks.length) return `${picks.length} NUMBER${picks.length === 1 ? "" : "S"} PICKED`;
-    return "PICK NUMBERS FOR START";
+    if (phase === "BETTING" && !betting) return `BETS LOCKED • ROUND ${roundClock}`;
+    if (locked) return `LIVE BET ACCEPTED • BETS CLOSE ${betSeconds}s • ROUND ${roundClock}`;
+    if (picks.length) return `${picks.length} NUMBER${picks.length === 1 ? "" : "S"} • BET ${betSeconds}s • ROUND ${roundClock}`;
+    return `PICK NUMBERS • BET ${betSeconds}s • ROUND ${roundClock}`;
   })();
 
   const recent = lastResults.slice(0, 6);
@@ -453,7 +503,10 @@ function KenoTable({ game, live, demo = false }) {
             <div className="keno-menu-live"><span>LIVE MODE</span><b>ROUND #{state?.round_number ?? "—"}</b></div>
             <button type="button" onClick={toggleMuted}>{muted ? <VolumeX /> : <Volume2 />}<span>{muted ? "Sound off" : "Sound on"}</span></button>
             <button type="button" onClick={() => { setMenuOpen(false); setAutoOpen(true); }}><RefreshCw /><span>Auto Play</span></button>
-            {locked && betting && <button type="button" onClick={() => { clearBets(); setMenuOpen(false); }}><X /><span>Cancel current bet ₹{money(myTotal)}</span></button>}
+            {locked && betting && <button type="button" onClick={() => {
+              if (bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS)) clearBets();
+              setMenuOpen(false);
+            }}><X /><span>Cancel current bet ₹{money(myTotal)}</span></button>}
             <div className="keno-recent"><h3><History /> Recent live draws</h3>{recent.length ? recent.map((row) => <div key={row.round_number}><b>#{row.round_number}</b><span>{(row.drawn || []).join(" · ")}</span></div>) : <p>No completed rounds yet.</p>}</div>
             <button type="button" onClick={() => navigate(`/games/${game.slug}`)}><ChevronDown /><span>Exit game</span></button>
           </div>

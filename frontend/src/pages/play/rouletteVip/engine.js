@@ -1,4 +1,5 @@
 import { MARKUP } from "./markup.js";
+import { CLIENT_BETTING_GUARD_SECONDS, secondsUntil } from "@/lib/serverClock";
 
 /**
  * The roulette table, mounted into a plain DOM node.
@@ -51,7 +52,7 @@ export function mountRoulette(root, opts) {
   const EURO = POCKETS;               // the wheel-order sequence, whatever the wheel
   const SEG  = 360 / NP;
   const CHIPS = [10, 50, 100, 500, 1000];
-  let timing = { bettingSeconds: 60, spinSeconds: 10, resultSeconds: 5 };
+  let timing = { bettingSeconds: 30, spinSeconds: 20, resultSeconds: 10, roundSeconds: 60 };
   let tableLimits = { minimum: 10, even_money_position_max: 2000, position_max: 10000 };
 
   /* ---- calibrated projective model of the photographed wheel ----
@@ -81,9 +82,16 @@ export function mountRoulette(root, opts) {
   const phone = $('phone'), board = $('board');
   const ball = $('ball'), bshadow = $('bshadow');
   const pastEl = $('past'), latestEl = $('latest'), ringval = $('ringval'), toastEl = $('toast');
+  const timerEl = $('bettimer');
+  // The wheel stage intentionally collapses while betting. Keep the clock in
+  // the fixed history strip: it remains visible in every phase/orientation and
+  // never covers a betting target (particularly the portrait outside column).
+  const historyStrip = root.querySelector('.history');
+  if (historyStrip && timerEl) historyStrip.appendChild(timerEl);
 
   let chipIdx = 0, balance = 12500;
   let bets = [], lastBets = [];
+  let acceptingBets = false;
   let history = [];
   let rafId = 0;
 
@@ -892,7 +900,7 @@ export function mountRoulette(root, opts) {
      server's own record of this round's bets on the next poll, so a refused bet
      (table limit, closed window, not enough chips) simply vanishes again. */
   function place(key, opts) {
-    if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return false; }
+    if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return false; }
     const amt = (opts && opts.amount) || CHIPS[chipIdx];
     if (amt > balance) { $('scrim').classList.add('on'); return false; }
     const mapped = toServerBet(key);
@@ -1140,6 +1148,7 @@ export function mountRoulette(root, opts) {
   }
 
   $('undo').addEventListener('click', () => {
+    if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return; }
     if (!bets.length) return;
     onUndo();                             // the server refunds; the poll redraws
   });
@@ -1149,7 +1158,7 @@ export function mountRoulette(root, opts) {
      was, the felt showed doubled chips for one second and the next poll put
      them back, because the server had never been told. */
   $('dbl').addEventListener('click', () => {
-    if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return; }
+    if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return; }
     if (!bets.length) { toast('Nothing on the table to double'); return; }
     const plan = bets.map(b => ({ key: b.key, amount: b.amount }));
     const cost = plan.reduce((t, b) => t + b.amount, 0);
@@ -1166,7 +1175,7 @@ export function mountRoulette(root, opts) {
      the server, so even once it had something to replay the next poll removed
      it. It now replays through place(), the same path a tapped bet takes. */
   $('rebet').addEventListener('click', async () => {
-    if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return; }
+    if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return; }
     if (!lastBets.length) { toast('No previous round to repeat'); return; }
     const plan = lastBets.map(b => ({ key: b.key, amount: b.amount }));
     const cost = plan.reduce((t, b) => t + b.amount, 0);
@@ -1635,7 +1644,7 @@ export function mountRoulette(root, opts) {
   function betCost(list) { return list.reduce((s, [, u]) => s + u * CHIPS[chipIdx], 0); }
 
   function placeMany(list, label) {
-    if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return false; }
+    if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return false; }
     const cost = betCost(list);
     if (cost > balance) { $('scrim').classList.add('on'); return false; }
     list.forEach(([key, units]) => place(key, { amount: units * CHIPS[chipIdx] }));
@@ -1740,7 +1749,7 @@ export function mountRoulette(root, opts) {
                silently changed size would be the worst kind of surprise */
             const list = sl.list.map(b => [b.key, b.amount]);
             const cost = list.reduce((s, [, a]) => s + a, 0);
-            if (phone.dataset.mode !== 'bet') { toast('No more bets — the wheel is in play'); return; }
+            if (!betsOpenNow()) { toast('No more bets — the wheel is in play'); return; }
             if (cost > balance) { $('scrim').classList.add('on'); return; }
             list.forEach(([key, amount]) => place(key, { amount }));
             if ($('rtlayer')) drawRtChips();
@@ -2272,6 +2281,59 @@ export function mountRoulette(root, opts) {
 
   let phase = null, roundNo = null, spunRound = null, shownRound = null;
   let winCells = [];
+  let clockPhase = null, phaseDeadlineMs = 0, roundDeadlineMs = 0;
+  let lastAlarm = null;
+
+  function betsOpenNow(nowMs = Date.now()) {
+    return clockPhase === 'BETTING'
+      && secondsUntil(phaseDeadlineMs, nowMs) >= CLIENT_BETTING_GUARD_SECONDS;
+  }
+
+  function renderRoundClock(nowMs = Date.now()) {
+    if (!timerEl || !clockPhase || !phaseDeadlineMs || !roundDeadlineMs) return;
+    const phaseLeftRaw = secondsUntil(phaseDeadlineMs, nowMs);
+    const roundLeftRaw = secondsUntil(roundDeadlineMs, nowMs);
+    const phaseLeft = Math.max(0, Math.ceil(phaseLeftRaw));
+    const roundLeft = Math.max(0, Math.ceil(roundLeftRaw));
+    acceptingBets = betsOpenNow(nowMs);
+    phone.dataset.betOpen = String(acceptingBets);
+
+    const tsec = $('btsec'), tval = $('btval'), label = timerEl.querySelector('em');
+    const T_CIRC = 2 * Math.PI * 28;
+    tsec.textContent = roundLeft;
+    if (label) {
+      label.textContent = clockPhase === 'BETTING'
+        ? (acceptingBets ? `BET ${phaseLeft}s` : 'BETS LOCKED')
+        : clockPhase === 'SPINNING' ? `SPIN ${phaseLeft}s` : `NEXT ${phaseLeft}s`;
+    }
+    const total = Math.max(1, Number(timing.roundSeconds) || 60);
+    tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, roundLeftRaw / total))).toFixed(1);
+    if (ringval) {
+      ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, roundLeftRaw / total))).toFixed(1);
+    }
+    timerEl.dataset.phase = clockPhase.toLowerCase();
+    timerEl.dataset.state = clockPhase === 'BETTING'
+      ? phaseLeft <= 3 ? 'urgent' : phaseLeft <= 6 ? 'warn' : ''
+      : '';
+    if (clockPhase === 'BETTING' && phaseLeft >= 1 && phaseLeft <= 3 && phaseLeft !== lastAlarm) {
+      lastAlarm = phaseLeft;
+      Sound.alarm(phaseLeft);
+    } else if (clockPhase !== 'BETTING' || phaseLeft > 3) {
+      lastAlarm = null;
+    }
+  }
+
+  function syncRoundClock(st) {
+    if (!st || st.secondsLeft == null) return;
+    const now = Date.now();
+    clockPhase = st.phase || phase;
+    phaseDeadlineMs = Number.isFinite(st.phaseDeadlineMs)
+      ? st.phaseDeadlineMs : now + Math.max(0, Number(st.secondsLeft) || 0) * 1000;
+    roundDeadlineMs = Number.isFinite(st.roundDeadlineMs)
+      ? st.roundDeadlineMs
+      : now + Math.max(0, Number(st.roundSecondsLeft ?? st.secondsLeft) || 0) * 1000;
+    renderRoundClock(now);
+  }
 
   /* One entry point. React polls the API and calls this; the engine never asks
      for anything itself. */
@@ -2314,6 +2376,10 @@ export function mountRoulette(root, opts) {
       }
     }
     refreshMoney();
+    // Set the true sub-second betting lock before phase-entry actions such as
+    // autoplay run. This prevents an optimistic chip in the backend's 0.4s
+    // safety window even if the phase poll has not flipped yet.
+    syncRoundClock(st);
 
     // --- phase ---
     const newRound = st.roundNumber != null && st.roundNumber !== roundNo;
@@ -2350,28 +2416,11 @@ export function mountRoulette(root, opts) {
       }
     }
 
-    // --- the countdown mirrors the server's remaining seconds ---
-    if (phase === 'BETTING' && st.secondsLeft != null) {
-      const left = Math.max(0, Math.ceil(st.secondsLeft));
-      const timer = $('bettimer'), tsec = $('btsec'), tval = $('btval');
-      const T_CIRC = 2 * Math.PI * 28;
-      tsec.textContent = left;
-      tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, st.secondsLeft / timing.bettingSeconds))).toFixed(1);
-      /* The second countdown ring rode on the table's own back button, which the
-         app's header already provides. With that gone this is simply absent, and
-         the ring in the wheel stage above is the only clock. */
-      if (ringval) {
-        ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, st.secondsLeft / timing.bettingSeconds))).toFixed(1);
-      }
-      timer.dataset.state = left <= 3 ? 'urgent' : left <= 6 ? 'warn' : '';
-      if (left >= 1 && left <= 3 && left !== lastAlarm) { lastAlarm = left; Sound.alarm(left); }
-      if (left > 3) lastAlarm = null;
-    }
-
     // --- the spin: start it once per round, timed to the phase that is left ---
     if (st.winningNumber != null && st.phase !== 'BETTING' && spunRound !== st.roundNumber) {
       spunRound = st.roundNumber;
-      const dur = st.phase === 'SPINNING' ? Math.max(1200, Math.round((st.secondsLeft || 0) * 1000)) : 1600;
+      const spinLeft = phaseDeadlineMs ? secondsUntil(phaseDeadlineMs) : Math.max(0, Number(st.secondsLeft) || 0);
+      const dur = st.phase === 'SPINNING' ? Math.max(1200, Math.round(spinLeft * 1000)) : 1600;
       spin(String(st.winningNumber), dur);
     }
 
@@ -2381,8 +2430,6 @@ export function mountRoulette(root, opts) {
       showResult(String(st.winningNumber), st.settled);
     }
   }
-  let lastAlarm = null;
-
   function showResult(win, settled) {
     phone.dataset.mode = 'result';
     const i = POCKETS.indexOf(win);
@@ -2436,6 +2483,7 @@ export function mountRoulette(root, opts) {
   idleTicker();
   refreshMoney();
   restAt('0');
+  const roundClockTimer = window.setInterval(() => renderRoundClock(), 100);
 
   /* The handle React holds. Nothing in here starts a round or decides a result;
      it only renders what the server has already settled. */
@@ -2450,6 +2498,7 @@ export function mountRoulette(root, opts) {
       renderHistory();
     },
     destroy() {
+      clearInterval(roundClockTimer);
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(relayoutFrame);
       clearTimeout(orientationTimer);

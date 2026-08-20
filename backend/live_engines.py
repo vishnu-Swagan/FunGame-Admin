@@ -26,11 +26,64 @@ def bad(msg):
 # ---------------- Cycle configuration (seconds) ----------------
 # phase order: BETTING -> REVEAL (animation) -> RESULT, then next round
 #
-# Betting runs a full minute on every table, which is what the client's machines
-# give a player. The reveal and result windows stay as they were: those are the
-# length of each game's own animation, and stretching them would leave the table
-# sitting on a finished result.
+# Most legacy tables retain their full-minute betting window. Keno is a strict
+# one-minute broadcast cycle: bets are accepted for the first 30 seconds, then
+# the shared draw has 20 seconds and the settled result remains visible for 10.
+# Keeping all three durations here means the API, client animation and epoch
+# round number are derived from one server-owned schedule.
 BET_SECONDS = 60
+# Dedicated American Roulette routes consume this schedule. It lives beside the
+# other live schedules so timing contract tests do not need a database-backed
+# route module just to verify the one-minute cycle.
+ROULETTE_TIMING = {"bet": 30, "spin": 20, "result": 10}
+
+
+def fixed_cycle_clock(now, bet_seconds, action_seconds, result_seconds,
+                      action_phase="REVEAL"):
+    """Return the deterministic phase clock for an epoch-aligned round.
+
+    Keeping this calculation pure makes the exact betting/action/result
+    boundaries testable without importing a route module or connecting to the
+    database.  Routes may expose either ``round_ends_in`` or ``total`` while
+    still consuming the same phase calculation.
+    """
+    total = bet_seconds + action_seconds + result_seconds
+    round_number = int(now // total)
+    elapsed = now % total
+    if elapsed < bet_seconds:
+        phase = "BETTING"
+        phase_ends_in = bet_seconds - elapsed
+    elif elapsed < bet_seconds + action_seconds:
+        phase = action_phase
+        phase_ends_in = bet_seconds + action_seconds - elapsed
+    else:
+        phase = "RESULT"
+        phase_ends_in = total - elapsed
+    return (
+        round_number,
+        phase,
+        round(phase_ends_in, 2),
+        round(total - elapsed, 2),
+        total,
+    )
+
+
+def roulette_history_max_round(round_number, phase):
+    """Newest round safe to expose in the public history strip.
+
+    The wheel needs its private target while it is spinning, but publishing the
+    same target in ``last_results`` before the result call would reveal it to
+    every player. The current round enters history only once RESULT begins.
+    """
+    return round_number if phase == "RESULT" else round_number - 1
+
+
+def betting_mutation_open(phase, seconds_left, round_number, expected_round=None, guard=0.4):
+    """Pure boundary predicate shared by all server-side bet mutations."""
+    return (phase == "BETTING" and seconds_left > guard
+            and (expected_round is None or round_number == expected_round))
+
+
 LIVE_GAMES = {
     "seven-up-down":     {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "sides"},
     "fun-target":        {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "pick"},
@@ -40,8 +93,10 @@ LIVE_GAMES = {
     "poker":             {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "sides"},
     "no-hold":           {"bet": BET_SECONDS, "reveal": 8, "result": 5, "kind": "stake"},
     "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
-    "andar-bahar":       {"bet": BET_SECONDS, "reveal": 16, "result": 5, "kind": "sides"},
-    "keno":              {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "picks"},
+    # One visible 60-second broadcast round: bets close at 00:30, leaving a
+    # full 24 seconds for the variable-length deal and 6 seconds for results.
+    "andar-bahar":       {"bet": 30, "reveal": 24, "result": 6, "kind": "sides"},
+    "keno":              {"bet": 30, "reveal": 20, "result": 10, "kind": "picks"},
     # Picture Play follows the supplied fast portrait cabinet: a short betting
     # window, one theatrical card reveal and one shared picture for everyone.
     "pappu-pictures":    {"bet": 12, "reveal": 8, "result": 4, "kind": "symbols"},

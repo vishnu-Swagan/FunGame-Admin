@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { mountRoulette } from "@/pages/play/rouletteVip/engine";
+import { ROULETTE_PREVIEW_TIMING, roulettePreviewState } from "@/pages/play/rouletteVip/previewClock";
 import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
+import { serverSyncedDeadline } from "@/lib/serverClock";
 import "@/pages/play/rouletteVip/styles.css";
 
 /** Server (bet_type, value) -> the engine's key, so chips land on the right spot. */
@@ -122,36 +124,73 @@ export default function RouletteGame({ game }) {
        surface. Production games never receive `demo` and continue to use the
        synchronized state endpoint below. */
     if (game.demo) {
-      engine.applyState({
-        phase: "BETTING",
-        roundNumber: "PREVIEW",
-        secondsLeft: 12,
-        timing: { bettingSeconds: 15, spinSeconds: 9, resultSeconds: 5 },
-        limits: { minimum: 10, even_money_position_max: 2000, position_max: 10000 },
-        myBets: [],
-        balance: 12500,
-        settled: null,
-      });
-      engine.setHistory(["17", "00", "32", "5", "21", "0", "14", "29", "8", "35"]);
+      const previewWinners = ["17", "00", "32", "5", "21", "0", "14", "29", "8", "35"];
+      const previewHistory = ["4", "19", "2", "31", "6", "23", "10", "27", "00", "12"];
+      const previewStartedAt = Date.now();
+      let previousPreviewRound = null;
+      const previewTick = () => {
+        const now = Date.now();
+        const preview = roulettePreviewState(now - previewStartedAt, previewWinners);
+        const newRound = preview.roundIndex !== previousPreviewRound;
+        previousPreviewRound = preview.roundIndex;
+        engine.applyState({
+          ...preview,
+          phaseDeadlineMs: now + preview.secondsLeft * 1000,
+          roundDeadlineMs: now + preview.roundSecondsLeft * 1000,
+          timing: ROULETTE_PREVIEW_TIMING,
+          limits: { minimum: 10, even_money_position_max: 2000, position_max: 10000 },
+          myBets: newRound ? [] : null,
+          balance: newRound ? 12500 : null,
+          settled: null,
+        });
+      };
+      engine.setHistory(previewHistory);
+      previewTick();
+      const previewTimer = window.setInterval(previewTick, 250);
       return () => {
+        window.clearInterval(previewTimer);
         try { engine.destroy(); } catch (e) { /* already gone */ }
         engineRef.current = null;
       };
     }
 
+    let requestSequence = 0;
+    let latestAppliedRequest = 0;
     const tick = async () => {
       if (!alive) return;
+      const requestId = ++requestSequence;
+      const requestStartedAt = Date.now();
       try {
         const { data } = await api.get("/games/fun-roulette/state");
-        if (!alive) return;
+        if (!alive || requestId < latestAppliedRequest) return;
+        latestAppliedRequest = requestId;
+        const receivedAt = Date.now();
         engine.applyState({
           phase: data.phase,
           roundNumber: data.round_number,
           secondsLeft: data.phase_ends_in,
+          roundSecondsLeft: data.next_round_in,
+          phaseDeadlineMs: serverSyncedDeadline({
+            serverNowSeconds: data.server_now,
+            serverSampledAtSeconds: data.clock_sampled_at,
+            serverDeadlineSeconds: data.phase_ends_at,
+            secondsLeft: data.phase_ends_in,
+            requestStartedAtMs: requestStartedAt,
+            receivedAtMs: receivedAt,
+          }),
+          roundDeadlineMs: serverSyncedDeadline({
+            serverNowSeconds: data.server_now,
+            serverSampledAtSeconds: data.clock_sampled_at,
+            serverDeadlineSeconds: data.round_ends_at,
+            secondsLeft: data.next_round_in,
+            requestStartedAtMs: requestStartedAt,
+            receivedAtMs: receivedAt,
+          }),
           timing: {
             bettingSeconds: data.betting_seconds,
             spinSeconds: data.spin_seconds,
             resultSeconds: Math.max(0, data.round_seconds - data.betting_seconds - data.spin_seconds),
+            roundSeconds: data.round_seconds,
           },
           limits: data.limits,
           winningNumber: data.winning_number,

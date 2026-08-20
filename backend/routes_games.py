@@ -17,6 +17,10 @@ from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (RNG, MIN_BET, roulette_multiplier, roulette_color,
                           ROULETTE_POCKETS, roulette_payout)
+from live_engines import (
+    ROULETTE_TIMING, betting_mutation_open, fixed_cycle_clock,
+    roulette_history_max_round,
+)
 
 logger = logging.getLogger('gameplay')
 router = APIRouter(tags=['gameplay'])
@@ -73,10 +77,10 @@ async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_a
 # ---------------- Live American Roulette (universal synchronized rounds) ----------------
 # Rounds are derived from universal epoch time: every player worldwide sees the
 # same round number, the same countdown and the same winning number.
-BETTING_SECONDS = 60   # 0-60s: bets open — a full minute, as the machine gives
-SPIN_SECONDS = 10      # 60-70s: the wheel spins, bets locked
-ROUND_SECONDS = 75     # then 5s on the result before the next round
-# 30-35s: result display, then the next round starts automatically
+BETTING_SECONDS = ROULETTE_TIMING['bet']       # 0-30s: bets open
+SPIN_SECONDS = ROULETTE_TIMING['spin']         # 30-50s: bets locked while the wheel spins
+ROUND_SECONDS = sum(ROULETTE_TIMING.values())  # 50-60s: result display, then the next round
+BETTING_MUTATION_GUARD = 0.4
 
 # Table limits (anti-Martingale). Even-money positions (red/black, odd/even,
 # 1-18/19-36) are capped so that doubling on loss hits the ceiling within a few
@@ -95,20 +99,22 @@ class RouletteBet(BaseModel):
     amount: int = Field(ge=1, le=100_000)
 
 
-def _roulette_clock():
-    now = time.time()
-    round_number = int(now // ROUND_SECONDS)
-    t = now % ROUND_SECONDS
-    if t < BETTING_SECONDS:
-        phase = 'BETTING'
-        phase_ends_in = BETTING_SECONDS - t
-    elif t < BETTING_SECONDS + SPIN_SECONDS:
-        phase = 'SPINNING'
-        phase_ends_in = BETTING_SECONDS + SPIN_SECONDS - t
-    else:
-        phase = 'RESULT'
-        phase_ends_in = ROUND_SECONDS - t
-    return round_number, phase, round(phase_ends_in, 2), round(ROUND_SECONDS - t, 2)
+def _roulette_clock(now=None):
+    now = time.time() if now is None else now
+    round_number, phase, phase_ends_in, round_ends_in, _ = fixed_cycle_clock(
+        now, BETTING_SECONDS, SPIN_SECONDS, ROULETTE_TIMING['result'], 'SPINNING'
+    )
+    return round_number, phase, phase_ends_in, round_ends_in
+
+
+def _require_roulette_betting(expected_round=None, message='Bets are closed - wait for the next round.'):
+    """Sample the authoritative clock immediately before a wallet/bet mutation."""
+    round_number, phase, phase_ends_in, _ = _roulette_clock()
+    if not betting_mutation_open(
+        phase, phase_ends_in, round_number, expected_round, BETTING_MUTATION_GUARD
+    ):
+        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': message})
+    return round_number, phase_ends_in
 
 
 async def _roulette_round_result(round_number: int):
@@ -183,7 +189,12 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
 
 @router.get('/games/fun-roulette/state')
 async def roulette_state(user: dict = Depends(require_active_player)):
-    round_number, phase, phase_ends_in, next_round_in = _roulette_clock()
+    clock_sampled_at = time.time()
+    round_number, phase, phase_ends_in, next_round_in = _roulette_clock(clock_sampled_at)
+    phase_offset = (BETTING_SECONDS if phase == 'BETTING'
+                    else BETTING_SECONDS + SPIN_SECONDS if phase == 'SPINNING'
+                    else ROUND_SECONDS)
+    phase_ends_at = round_number * ROUND_SECONDS + phase_offset
 
     # Settle anything owed to this user (idempotent, lazy)
     settled = await _roulette_settle_user(user['id'], round_number, phase)
@@ -197,13 +208,19 @@ async def roulette_state(user: dict = Depends(require_active_player)):
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},
     ).to_list(100)
 
-    last = await db.roulette_rounds.find({}, {'_id': 0}).sort('round_number', -1).to_list(12)
+    history_max = roulette_history_max_round(round_number, phase)
+    last = await db.roulette_rounds.find(
+        {'round_number': {'$lte': history_max}}, {'_id': 0}
+    ).sort('round_number', -1).to_list(12)
     balance = await _fresh_balance(user['id'])
     return {
         'round_number': round_number,
         'phase': phase,
         'phase_ends_in': phase_ends_in,
         'next_round_in': next_round_in,
+        'clock_sampled_at': clock_sampled_at,
+        'phase_ends_at': phase_ends_at,
+        'round_ends_at': (round_number + 1) * ROUND_SECONDS,
         'betting_seconds': BETTING_SECONDS,
         'spin_seconds': SPIN_SECONDS,
         'round_seconds': ROUND_SECONDS,
@@ -225,9 +242,7 @@ async def roulette_state(user: dict = Depends(require_active_player)):
 
 @router.post('/games/fun-roulette/bets')
 async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_active_player)):
-    round_number, phase, phase_ends_in, _ = _roulette_clock()
-    if phase != 'BETTING' or phase_ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are closed - wait for the next round.'})
+    round_number, _ = _require_roulette_betting()
     if body.amount < MIN_BET:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
     # Validate the bet shape now (winning number irrelevant, just validation)
@@ -248,6 +263,9 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
             'message': f'Table limit — max {cap} chips on this position ({kind} limit). You have {staked} here.',
         })
     bet_id = str(uuid.uuid4())
+    # Validation and the table-limit read can consume the tail of the window.
+    # Re-sample before taking chips so a request cannot cross into SPINNING.
+    _require_roulette_betting(expected_round=round_number)
     try:
         await debit_chips(user['id'], body.amount, f'American Roulette bet (round {round_number})', ref=bet_id, kind=ledger.STAKE, game='fun-roulette')
     except InsufficientChips:
@@ -267,10 +285,9 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
 
 @router.post('/games/fun-roulette/bets/clear')
 async def roulette_clear_bets(user: dict = Depends(require_active_player)):
-    round_number, phase, phase_ends_in, _ = _roulette_clock()
-    if phase != 'BETTING' or phase_ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+    round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
     open_bets = await db.roulette_bets.find({'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}).to_list(100)
+    _require_roulette_betting(expected_round=round_number, message='Bets are locked for this round.')
     refunded = 0
     for b in open_bets:
         res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
@@ -285,14 +302,13 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
 @router.post('/games/fun-roulette/bets/undo')
 async def roulette_undo_bet(user: dict = Depends(require_active_player)):
     """Undo the most-recently placed chip this round (refund just that one bet)."""
-    round_number, phase, phase_ends_in, _ = _roulette_clock()
-    if phase != 'BETTING' or phase_ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+    round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
     last = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}
     ).sort('created_at', -1).to_list(1)
     refunded = 0
     if last:
+        _require_roulette_betting(expected_round=round_number, message='Bets are locked for this round.')
         b = last[0]
         res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
         if res.modified_count:

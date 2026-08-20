@@ -557,6 +557,10 @@
     transform: none;
     pointer-events: auto !important;
   }
+  .rvip .phone[data-bet-open="false"] .tablewrap,
+  .rvip .phone[data-bet-open="false"] .betonly {
+    pointer-events: none !important;
+  }
 
   .rvip /* ---------- betting table ---------- */
   /* The layout is PRINTED on the same felt the wheel stands on — no panel, .rvip no
@@ -950,6 +954,10 @@
   .rvip /* these two fade rather than slide — a sideways slide reads wrong on a row */
   .chiptray .betonly { opacity: 0; transform: none; pointer-events: none !important; }
   .rvip .phone[data-mode="bet"] .chiptray .betonly { opacity: 1; pointer-events: auto !important; }
+  .rvip .phone[data-mode="bet"][data-bet-open="false"] .chiptray .betonly {
+    opacity: .42;
+    pointer-events: none !important;
+  }
   .rvip .chip {
     --c: #b0201c;
     --c-dk: #6d100e;
@@ -1308,22 +1316,31 @@
   .rvip .paytable td:last-child { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
 
   .rvip /* ---------- betting countdown ----------
-     A shared round is on a clock, .rvip so the clock has to be visible. It sits over
-     the wheel — which is dimmed while bets are open — and turns amber then red as
-     it runs down, .rvip so the state is readable without reading the number. */
+     The full-round clock occupies the right end of the fixed history strip.
+     Reserving real layout space keeps every betting target fully exposed. */
   .bettimer {
-    position: absolute;
-    left: 50%; top: 18px;
-    transform: translateX(-50%);
-    width: 62px; height: 62px;
-    z-index: 30;
+    position: relative;
+    flex: 0 0 88px;
+    align-self: stretch;
+    left: auto; top: auto;
+    transform: none;
+    width: 88px; height: var(--strip-h);
+    z-index: 1;
     pointer-events: none;
-    opacity: 0;
+    opacity: 1;
+    overflow: hidden;
+    border-left: 1px solid rgba(255,255,255,.13);
+    background: linear-gradient(90deg, rgba(7,9,9,.94), #050606);
     transition: opacity .35s ease;
     --tc: var(--cyan);
   }
-  .rvip .phone[data-mode="bet"] .bettimer { opacity: 1; }
-  .rvip .bettimer svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .rvip .phone[data-mode="spin"] .bettimer { --tc: #f0a92c; }
+  .rvip .phone[data-mode="result"] .bettimer { --tc: #29e0a4; }
+  .rvip .bettimer svg {
+    position: absolute; left: 2px; top: 2px;
+    width: 26px; height: 26px;
+    transform: rotate(-90deg);
+  }
   .rvip .bettimer .btrk {
     fill: rgba(6,2,4,.72);
     stroke: rgba(255,255,255,.16);
@@ -1338,29 +1355,31 @@
     filter: drop-shadow(0 0 5px var(--tc));
   }
   .rvip .bettimer b {
-    position: absolute; left: 0; right: 0; top: 15px;
+    position: absolute; left: 2px; top: 9px;
+    width: 26px;
     text-align: center;
-    font-family: var(--num); font-size: 21px; font-weight: 400;
+    font-family: var(--num); font-size: 11.5px; font-weight: 700;
     color: #fff;
     font-variant-numeric: tabular-nums;
     line-height: 1;
   }
   .rvip .bettimer em {
-    position: absolute; left: 0; right: 0; bottom: 12px;
-    text-align: center;
+    position: absolute; left: 32px; right: 3px; top: 10px;
+    text-align: left;
     font-style: normal; font-family: var(--ui);
-    font-size: 6.5px; font-weight: 700; letter-spacing: .2em;
-    color: rgba(255,255,255,.5);
+    font-size: 7px; font-weight: 800; letter-spacing: .08em;
+    color: rgba(255,255,255,.7);
+    white-space: nowrap;
   }
   .rvip .bettimer[data-state="warn"] { --tc: #f0a92c; }
   .rvip .bettimer[data-state="urgent"] { --tc: #e8342c; }
   .rvip .bettimer[data-state="urgent"] b { color: #ff6a60; }
-  .rvip /* one pulse per second, .rvip in step with the alarm */
+  .rvip /* A light pulse preserves urgency without moving or flickering the strip. */
   .bettimer[data-state="urgent"] { animation: rvip-btPulse 1s ease-out infinite; }
   @keyframes rvip-btPulse {
-    0%   { transform: translateX(-50%) scale(1.14) }
-    35%  { transform: translateX(-50%) scale(1) }
-    100% { transform: translateX(-50%) scale(1) }
+    0%   { filter: brightness(1.35) }
+    35%  { filter: brightness(1) }
+    100% { filter: brightness(1) }
   }
   @media (prefers-reduced-motion: reduce) {
     .rvip .bettimer[data-state="urgent"] { animation: none; }
@@ -1658,8 +1677,8 @@
        line have to stop short of it or the double-up button hides underneath */
     .chiptray { padding-right: 46px; }
     .rvip .moneybar { padding-right: 48px; }
-    .rvip /* the countdown sits over the wheel, .rvip which is now on the left */
-    .bettimer { top: 50%; margin-top: -31px; }
+    .rvip /* the round clock stays reserved in the history strip in landscape */
+    .bettimer { left: auto; top: auto; margin-top: 0; }
     .rvip /* the winner board would cover the layout; put it under the wheel instead */
     .winboard { left: 8px; bottom: 8px; width: calc(var(--wheelsz) - 16px); }
 

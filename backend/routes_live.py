@@ -29,7 +29,8 @@ from game_engines import (
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
     settle_bet, summarize_outcome, make_bingo_card, paytable_for, limits_for,
-    PICTURE_SYMBOLS, PICTURE_BASE_MULTIPLIER,
+    PICTURE_SYMBOLS, PICTURE_BASE_MULTIPLIER, betting_mutation_open,
+    fixed_cycle_clock,
 )
 
 logger = logging.getLogger('live')
@@ -491,19 +492,26 @@ class LiveBet(BaseModel):
     selection: object = None
 
 
-def _live_clock(slug):
+def _live_clock(slug, now=None):
     cfg = LIVE_GAMES[slug]
-    total = cfg['bet'] + cfg['reveal'] + cfg['result']
-    now = time.time()
-    rn = int(now // total)
-    t = now % total
-    if t < cfg['bet']:
-        phase, ends = 'BETTING', cfg['bet'] - t
-    elif t < cfg['bet'] + cfg['reveal']:
-        phase, ends = 'REVEAL', cfg['bet'] + cfg['reveal'] - t
-    else:
-        phase, ends = 'RESULT', total - t
+    now = time.time() if now is None else now
+    rn, phase, ends, _, total = fixed_cycle_clock(
+        now, cfg['bet'], cfg['reveal'], cfg['result']
+    )
     return rn, phase, round(ends, 2), total
+
+
+BETTING_MUTATION_GUARD = 0.4
+
+
+def _require_live_betting(slug, expected_round=None, message='Bets are closed - wait for the next round.'):
+    """Sample the shared clock immediately before mutating a bet or wallet."""
+    rn, phase, ends_in, _ = _live_clock(slug)
+    if not betting_mutation_open(
+        phase, ends_in, rn, expected_round, BETTING_MUTATION_GUARD
+    ):
+        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': message})
+    return rn, ends_in
 
 
 # A round's universal outcome is immutable once created, so an in-process cache
@@ -601,7 +609,12 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
 async def live_state(slug: str, user: dict = Depends(require_active_player)):
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
-    rn, phase, ends_in, total = _live_clock(slug)
+    clock_sampled_at = time.time()
+    rn, phase, ends_in, total = _live_clock(slug, clock_sampled_at)
+    phase_offset = (LIVE_GAMES[slug]['bet'] if phase == 'BETTING'
+                    else LIVE_GAMES[slug]['bet'] + LIVE_GAMES[slug]['reveal'] if phase == 'REVEAL'
+                    else total)
+    phase_ends_at = rn * total + phase_offset
     settled = await _live_settle_user(user['id'], slug, rn, phase)
 
     outcome = None
@@ -660,6 +673,9 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
     cfg = LIVE_GAMES[slug]
     return {
         'round_number': rn, 'phase': phase, 'phase_ends_in': ends_in,
+        'clock_sampled_at': clock_sampled_at,
+        'phase_ends_at': phase_ends_at,
+        'round_ends_at': (rn + 1) * total,
         'timings': {'bet': cfg['bet'], 'reveal': cfg['reveal'], 'result': cfg['result'], 'total': total},
         'kind': cfg['kind'], 'options': SIDE_OPTIONS.get(slug),
         # The stake limits the table is actually held to. The cabinet screens
@@ -694,9 +710,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
 async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_active_player)):
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
-    rn, phase, ends_in, _ = _live_clock(slug)
-    if phase != 'BETTING' or ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are closed - wait for the next round.'})
+    rn, _ = _require_live_betting(slug)
     _min, _max = limits_for(slug)
     if body.amount < _min:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {_min} chips')
@@ -705,6 +719,9 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     selection = validate_selection(slug, body.selection)
     card = make_bingo_card() if slug == 'bingo' else None
     bet_id = str(uuid.uuid4())
+    # Selection validation may be non-trivial (and Bingo creates a card), so
+    # close the race between the first check and the wallet debit.
+    _require_live_betting(slug, expected_round=rn)
     try:
         await debit_chips(user['id'], body.amount, f'Live bet {slug} (round {rn})', ref=bet_id, kind=ledger.STAKE, game=slug)
     except InsufficientChips:
@@ -732,12 +749,11 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
 async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)):
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
-    rn, phase, ends_in, _ = _live_clock(slug)
-    if phase != 'BETTING' or ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+    rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')
     open_bets = await db.live_bets.find(
         {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'}
     ).to_list(100)
+    _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
     refunded = 0
     for b in open_bets:
         res = await db.live_bets.update_one(
@@ -755,9 +771,7 @@ async def live_undo_bet(slug: str, user: dict = Depends(require_active_player)):
     """Refund only the most recently placed chip in the open betting window."""
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
-    rn, phase, ends_in, _ = _live_clock(slug)
-    if phase != 'BETTING' or ends_in < 0.4:
-        raise HTTPException(status_code=409, detail={'code': 'BETS_CLOSED', 'message': 'Bets are locked for this round.'})
+    rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')
 
     bet = await db.live_bets.find_one(
         {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
@@ -765,6 +779,7 @@ async def live_undo_bet(slug: str, user: dict = Depends(require_active_player)):
     )
     refunded = 0
     if bet:
+        _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
         res = await db.live_bets.update_one(
             {'id': bet['id'], 'status': 'OPEN'},
             {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},

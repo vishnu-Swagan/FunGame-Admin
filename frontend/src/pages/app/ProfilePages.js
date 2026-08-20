@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
+  Download, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { api, errMsg, APP_VERSION } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { PageTransition, AvatarBadge, UserStatusBadge, Disclaimer, formatChips } from "@/components/common";
+import { APP_INSTALL_REQUEST_EVENT, isAppStandalone } from "@/components/IosInstallHint";
 
 // ---------------- Profile ----------------
 export function Profile() {
@@ -170,12 +172,24 @@ function applyEngineSetting(key, value) {
 export function Settings() {
   const { user, setUser } = useAuth();
   const settings = user?.settings || {};
+  const [appInstalled, setAppInstalled] = useState(isAppStandalone);
 
   // apply stored sound/haptics prefs to the engines on load
   useEffect(() => {
     if (settings.haptics_enabled === false) setHaptics(false);
     if (settings.sound_enabled === false) setMuted(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const updateInstallState = () => setAppInstalled(isAppStandalone());
+    const standaloneQuery = window.matchMedia?.("(display-mode: standalone)");
+    window.addEventListener("appinstalled", updateInstallState);
+    standaloneQuery?.addEventListener?.("change", updateInstallState);
+    return () => {
+      window.removeEventListener("appinstalled", updateInstallState);
+      standaloneQuery?.removeEventListener?.("change", updateInstallState);
+    };
   }, []);
 
   const toggle = async (key, value) => {
@@ -207,6 +221,36 @@ export function Settings() {
             <Switch data-testid={`settings-toggle-${key}`} checked={!!settings[key]} onCheckedChange={(v) => toggle(key, v)} aria-label={label} />
           </div>
         ))}
+      </div>
+      <div className="rounded-2xl bg-card/55 border border-primary/20 p-4">
+        <div className="flex items-center gap-3">
+          <div className="h-11 w-11 shrink-0 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center">
+            {appInstalled ? (
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+            ) : (
+              <Download className="h-5 w-5 text-primary" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{appInstalled ? "App installed" : "Install Chakri.Casino"}</p>
+            <p className="text-[11px] text-white/50 mt-0.5 leading-relaxed">
+              {appInstalled
+                ? "You are using the standalone app experience."
+                : "Add it to this device and launch without the browser address bar."}
+            </p>
+          </div>
+          {!appInstalled && (
+            <Button
+              type="button"
+              size="sm"
+              data-testid="settings-install-app-button"
+              onClick={() => window.dispatchEvent(new Event(APP_INSTALL_REQUEST_EVENT))}
+              className="shrink-0 rounded-xl font-semibold"
+            >
+              Install
+            </Button>
+          )}
+        </div>
       </div>
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">About</p>
