@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { api, errMsg } from "@/lib/api";
 import { sfx } from "@/lib/sound";
 import { publishWins } from "@/lib/liveActivity";
+import { serverSyncedDeadline } from "@/lib/serverClock";
 
 /**
  * Universal live-round client. Polls /live/{slug}/state so every player sees
@@ -21,12 +22,17 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   const phaseKeyRef = useRef("");
   const boundaryPollRef = useRef("");
   const monoRef = useRef({ key: "", val: 0 });
+  const requestSequenceRef = useRef(0);
+  const latestAppliedRequestRef = useRef(0);
+  const activeSlugRef = useRef(slug);
+  const livePhaseRef = useRef(null);
   const settledShownRef = useRef(null);
   const prevPhaseRef = useRef(null);
   const formatRef = useRef(formatResult);
   formatRef.current = formatResult;
   const revealSoundRef = useRef(revealSound);
   revealSoundRef.current = revealSound;
+  activeSlugRef.current = slug;
 
   const loadHistory = useCallback(async () => {
     try {
@@ -38,7 +44,8 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   }, [slug]);
 
   const applyState = useCallback(
-    (data) => {
+    (data, requestClock = {}) => {
+      livePhaseRef.current = data.phase;
       setState(data);
       setBalance(data.balance);
       // Feed the live floor with REAL cross-player winners (masked, from server).
@@ -46,9 +53,19 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
       /* Anchor the phase deadline ONCE per (round, phase). Re-anchoring on every
          poll made the countdown jitter with network latency, which rewound the
          card-dealing timelines mid-animation (cards un-dealt / re-flipped =
-         the flicker bug). Only resync on real drift (tab slept, clock skew). */
+         the flicker bug). The deadline is translated with the server's
+         receive/send timestamps, so network and handler latency do not make
+         the client finish late. Only resync on real drift (tab slept, clock
+         skew). */
       const phaseKey = `${data.round_number}:${data.phase}`;
-      const newDeadline = Date.now() + data.phase_ends_in * 1000;
+      const newDeadline = serverSyncedDeadline({
+        serverNowSeconds: data.server_now,
+        serverSampledAtSeconds: data.clock_sampled_at,
+        serverDeadlineSeconds: data.phase_ends_at,
+        secondsLeft: data.phase_ends_in,
+        requestStartedAtMs: requestClock.startedAt,
+        receivedAtMs: requestClock.receivedAt,
+      });
       if (phaseKeyRef.current !== phaseKey) {
         phaseKeyRef.current = phaseKey;
         deadlineRef.current = newDeadline;
@@ -93,9 +110,16 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   );
 
   const poll = useCallback(async () => {
+    const requestId = ++requestSequenceRef.current;
+    const startedAt = Date.now();
     try {
       const { data } = await api.get(`/live/${slug}/state`);
-      applyState(data);
+      // Polls can overlap on a slow connection (the phase-boundary poll is
+      // intentionally immediate). Never let an older response rewind a newer
+      // round/phase, and never apply a response from a route we already left.
+      if (activeSlugRef.current !== slug || requestId < latestAppliedRequestRef.current) return;
+      latestAppliedRequestRef.current = requestId;
+      applyState(data, { startedAt, receivedAt: Date.now() });
     } catch (e) {
       /* transient */
     }
@@ -172,6 +196,10 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
   }, [slug]);
 
   const phase = state?.phase;
+  const bettingOpenNow = useCallback((guardSeconds = 0) => (
+    livePhaseRef.current === "BETTING"
+    && (deadlineRef.current - Date.now()) / 1000 >= Math.max(0, Number(guardSeconds) || 0)
+  ), []);
   const revealSecs = state?.timings?.reveal || 4;
   /* Monotonic reveal clock: within one round's REVEAL phase this value can
      only move forward, so deal/flip animations can never un-trigger even if
@@ -202,6 +230,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
     placeBet,
     clearBets,
     undoBet,
+    bettingOpenNow,
     phase,
     betting: phase === "BETTING",
     outcome: state?.outcome ?? null,
