@@ -7,6 +7,35 @@ Two Render services, and they are **not** interchangeable in how they behave.
 | `chakri-casino-api` | Docker | FastAPI backend — the RNG, settlement and the chip ledger |
 | `chakri-casino` | Static | The React app |
 
+The same static build serves the operator UI only on the canonical CRM host:
+`https://crm.chakri.casino`. Keep `REACT_APP_ADMIN_CONSOLE_HOSTS` restricted to
+that hostname.
+
+## Payment deployment boundary
+
+The payment code is a dormant integration scaffold, not authorization to accept
+or pay real money. Keep all of these values false during ordinary deployment:
+
+```dotenv
+REAL_MONEY_ENABLED=false
+DEPOSITS_ENABLED=false
+WITHDRAWALS_ENABLED=false
+AUTO_WITHDRAWALS_ENABLED=false
+FINANCIAL_GAME_WALLET_INTEGRATED=false
+```
+
+Do not add a production provider name or credentials until provider approval and
+the full runbook in `docs/PAYMENT-GATEWAY-INTEGRATION.md` is complete. A browser
+return must never credit chips; only a verified provider event or authenticated
+reconciliation may do so.
+
+Production registration also remains intentionally closed while
+`OTP_EMAIL_ADAPTER` and `OTP_SMS_ADAPTER` are disabled. Configure at least one
+real delivery adapter, its provider credentials, `OTP_PEPPER` and
+`OTP_EXPOSE_DEV_CODE=false` before advertising self-service sign-up. The public
+app reads `/api/auth/capabilities` and disables unavailable channels instead of
+claiming that a code was sent.
+
 ## The failure mode to know about
 
 A Docker service that does not deploy **keeps answering normally on its old

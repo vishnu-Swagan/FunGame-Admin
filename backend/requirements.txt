@@ -11,6 +11,7 @@ pymongo==4.6.3
 python-dotenv==1.2.2
 PyJWT==2.13.0
 bcrypt==4.1.3
+cryptography==46.0.7
 resend==2.34.0
 # The slim base image carries no /usr/share/zoneinfo, so zoneinfo has nothing
 # to read and ZoneInfo('Europe/London') raises at import. This is the database.

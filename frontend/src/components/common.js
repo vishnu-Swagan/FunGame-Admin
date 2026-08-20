@@ -6,7 +6,7 @@ import {
 
 export const Disclaimer = ({ className = "" }) => (
   <p data-testid="play-chips-disclaimer" className={`text-[11px] tracking-[0.18em] uppercase text-white/70 ${className}`}>
-    PLAY CHIPS ONLY
+    CHIP-BASED PLAY · 18+ · PLAY RESPONSIBLY
   </p>
 );
 
@@ -43,7 +43,7 @@ export const GameStatusBadge = ({ status, pulse = false, className = "" }) => (
     data-testid="game-card-status-badge"
     className={`rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide border ${GAME_STATUS_STYLES[status] || GAME_STATUS_STYLES.DISABLED} ${pulse ? "fg-badge-pulse" : ""} ${className}`}
   >
-    {String(status || "").replaceAll("_", " ")}
+    {status === "ENABLED" ? "LIVE" : String(status || "").replaceAll("_", " ")}
   </Badge>
 );
 

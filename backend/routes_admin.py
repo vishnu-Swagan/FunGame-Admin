@@ -19,7 +19,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     PayoutPaid,
                     ClawbackCreate,
                     AdminSetEmail)
-from auth_utils import require_admin, hash_password
+from auth_utils import require_admin, hash_password, require_legacy_chip_mutation_allowed
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
@@ -27,6 +27,8 @@ import compliance
 import revenue
 import commission
 import payouts
+from game_access import assert_admin_status_change_allowed
+from otp_service import normalize_identity
 import os
 
 logger = logging.getLogger('admin')
@@ -151,11 +153,27 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
         raise HTTPException(status_code=400, detail='User already active')
     if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
         raise HTTPException(status_code=400, detail='User has not submitted onboarding yet')
-    # Approving is a new decision, so it is gated rather than merely reported.
-    # This is not the retroactive case — nobody who is already playing is
-    # touched by it.
+    self_service = user.get('registration_source') == 'SELF_SERVICE'
+    if self_service:
+        if not user.get('contact_verified') or not (
+                user.get('email_verified') or user.get('phone_verified')):
+            raise HTTPException(status_code=403, detail={
+                'code': 'CONTACT_NOT_VERIFIED',
+                'message': 'The player must verify their registration contact before approval.',
+            })
+        country_code = compliance.normalise_country(user.get('country'))
+        if not country_code or country_code == compliance.UNKNOWN:
+            raise HTTPException(status_code=403, detail={
+                'code': 'COUNTRY_UNKNOWN',
+                'message': 'A recognized country or jurisdiction is required before approval.',
+            })
+    # Self-service accounts require a DOB at approval.  Older accounts and
+    # accounts provisioned directly by an operator retain their historic review
+    # path so this release does not retroactively lock them out.
     ok, code, message = await compliance.check_eligibility(
-        user.get('country'), user.get('date_of_birth'), require_dob=False)
+        user.get('country'), user.get('date_of_birth'),
+        require_dob=self_service,
+    )
     if not ok:
         raise HTTPException(status_code=403, detail=(
             f'{message} This account cannot be approved under the current '
@@ -235,11 +253,14 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     # Email is optional; the account logs in by Login ID. Synthesize a unique
     # placeholder when none is given so the unique email index is satisfied.
     email = body.email or f'{username.lower()}@chakri.casino'
-    if await db.users.find_one({'email': email}):
+    email_normalized = normalize_identity(email).value
+    if await db.users.find_one({'$or': [
+            {'email': email_normalized}, {'email_normalized': email_normalized},
+    ]}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
     user = {
         'id': str(uuid.uuid4()),
-        'email': email,
+        'email': email_normalized, 'email_normalized': email_normalized,
         'username': username,
         'password_hash': hash_password(password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
@@ -285,7 +306,21 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
     username = body.username  # validated + lowercased by the model
     if await db.users.find_one({'username': username}):
         raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
-    if await db.users.find_one({'email': req['email']}):
+    email_normalized = normalize_identity(req['email']).value
+    phone_normalized = None
+    if req.get('phone'):
+        try:
+            phone_normalized = normalize_identity(req['phone']).value
+        except ValueError:
+            phone_normalized = None
+    identity_clauses = [
+        {'email': email_normalized}, {'email_normalized': email_normalized},
+    ]
+    if phone_normalized:
+        identity_clauses.extend([
+            {'phone': phone_normalized}, {'phone_normalized': phone_normalized},
+        ])
+    if await db.users.find_one({'$or': identity_clauses}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
     # resolve the request atomically first (idempotency guard), then create the user
     result = await db.signup_requests.update_one(
@@ -297,12 +332,13 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         raise HTTPException(status_code=400, detail='Request already resolved')
     user = {
         'id': str(uuid.uuid4()),
-        'email': req['email'],
+        'email': email_normalized, 'email_normalized': email_normalized,
         'username': username,
         'password_hash': hash_password(body.password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': req['full_name'], 'full_name': req['full_name'],
-        'country': None, 'date_of_birth': req.get('date_of_birth'), 'phone': req.get('phone'),
+        'country': None, 'date_of_birth': req.get('date_of_birth'),
+        'phone': phone_normalized, 'phone_normalized': phone_normalized,
         'avatar': 'star',
         'chip_balance': 0, 'points_balance': 0,
         'favorites': [], 'recent_games': [],
@@ -381,6 +417,7 @@ async def list_chip_requests(status: str = Query(default=None), admin: dict = De
 
 @router.post('/chip-requests/{request_id}/approve')
 async def approve_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
+    require_legacy_chip_mutation_allowed()
     req = await db.chip_requests.find_one({'id': request_id})
     if not req:
         raise HTTPException(status_code=404, detail='Request not found')
@@ -541,6 +578,7 @@ async def update_game(slug: str, body: GameUpdate, admin: dict = Depends(require
     if not game:
         raise HTTPException(status_code=404, detail='Game not found')
     updates = body.model_dump(exclude_none=True)
+    assert_admin_status_change_allowed(slug, updates.get('status'))
     if updates:
         await db.games.update_one({'slug': slug}, {'$set': updates})
     updated = await db.games.find_one({'slug': slug}, {'_id': 0})
@@ -876,15 +914,19 @@ async def admin_change_email(user_id: str, body: AdminSetEmail, admin: dict = De
     reset, or a device holding a token would keep the access the change was meant
     to move.
     """
-    email = body.email.lower().strip()
+    email = normalize_identity(body.email).value
     user = await db.users.find_one({'id': user_id})
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
-    clash = await db.users.find_one({'email': email, 'id': {'$ne': user_id}})
+    clash = await db.users.find_one({
+        'id': {'$ne': user_id},
+        '$or': [{'email': email}, {'email_normalized': email}],
+    })
     if clash:
         raise HTTPException(status_code=409, detail='Another account already uses that email')
     await db.users.update_one({'id': user_id}, {'$set': {
         'email': email,
+        'email_normalized': email,
         'email_verified': True,
         'previous_email': user.get('email'),
         'email_changed_at': _now(),

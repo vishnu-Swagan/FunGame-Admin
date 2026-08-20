@@ -32,6 +32,7 @@ from live_engines import (
     PICTURE_SYMBOLS, PICTURE_BASE_MULTIPLIER, betting_mutation_open,
     fixed_cycle_clock,
 )
+from game_access import require_playable_game
 
 logger = logging.getLogger('live')
 router = APIRouter(tags=['live'])
@@ -238,6 +239,7 @@ def _av_phase(r, now):
 
 @router.get('/live/aviator/state')
 async def aviator_state(user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     r = await advance_aviator()
     now = time.time()
     phase, t = _av_phase(r, now)
@@ -313,6 +315,7 @@ async def aviator_state(user: dict = Depends(require_active_player)):
 
 @router.get('/live/aviator/rounds/{round_number}/fairness')
 async def aviator_round_fairness(round_number: int, user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     r = await db.aviator_rounds.find_one({'round_number': round_number}, {'_id': 0})
     if not r:
         raise HTTPException(status_code=404, detail='Round not found')
@@ -336,6 +339,7 @@ async def aviator_round_fairness(round_number: int, user: dict = Depends(require
 
 @router.get('/live/aviator/top')
 async def aviator_top(period: str = 'day', user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     windows = {'day': timedelta(days=1), 'month': timedelta(days=31), 'year': timedelta(days=366)}
     if period not in windows:
         raise HTTPException(status_code=400, detail='Period must be day, month, or year')
@@ -365,6 +369,7 @@ async def aviator_top(period: str = 'day', user: dict = Depends(require_active_p
 
 @router.post('/live/aviator/bets')
 async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     _min, _max = limits_for('aviator')
     if body.amount < _min:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {_min} chips')
@@ -415,6 +420,7 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
 
 @router.post('/live/aviator/bets/cancel')
 async def aviator_cancel_bet(body: BetRef, user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     b = await db.aviator_bets.find_one({'id': body.bet_id, 'user_id': user['id']})
     if not b:
         raise HTTPException(status_code=404, detail='Bet not found')
@@ -454,6 +460,7 @@ async def aviator_cancel_bet(body: BetRef, user: dict = Depends(require_active_p
 
 @router.post('/live/aviator/cashout')
 async def aviator_cashout(body: BetRef, user: dict = Depends(require_active_player)):
+    await require_playable_game('aviator')
     b = await db.aviator_bets.find_one({'id': body.bet_id, 'user_id': user['id']})
     if not b:
         raise HTTPException(status_code=404, detail='Bet not found')
@@ -607,6 +614,7 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
 
 @router.get('/live/{slug}/state')
 async def live_state(slug: str, user: dict = Depends(require_active_player)):
+    await require_playable_game(slug)
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
     clock_sampled_at = time.time()
@@ -708,6 +716,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
 
 @router.post('/live/{slug}/bets')
 async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_active_player)):
+    await require_playable_game(slug)
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
     rn, _ = _require_live_betting(slug)
@@ -747,6 +756,7 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
 
 @router.post('/live/{slug}/bets/clear')
 async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)):
+    await require_playable_game(slug)
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
     rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')
@@ -769,6 +779,7 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
 @router.post('/live/{slug}/bets/undo')
 async def live_undo_bet(slug: str, user: dict = Depends(require_active_player)):
     """Refund only the most recently placed chip in the open betting window."""
+    await require_playable_game(slug)
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
     rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')

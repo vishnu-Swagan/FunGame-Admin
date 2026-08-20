@@ -3,10 +3,12 @@ import { useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
 import { ADMIN_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 import { LoadingScreen } from "@/components/common";
+import { ADMIN_PERMISSIONS, hasPermission, isActiveAdmin } from "@/lib/adminPermissions";
 
 export function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
+  if (user && IS_ADMIN_CONSOLE && !isActiveAdmin(user)) return children;
   if (user) return <Navigate to={routeForUser(user)} replace />;
   return children;
 }
@@ -43,6 +45,15 @@ export function RequireAdmin({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to={IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/welcome"} replace />;
-  if (user.role !== "ADMIN") return <Navigate to={IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/home"} replace />;
+  if (!isActiveAdmin(user)) return <Navigate to={IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/home"} replace />;
   return children;
 }
+
+export function RequirePermission({ permission, children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!hasPermission(user, permission)) return <Navigate to="/admin" replace />;
+  return children;
+}
+
+export { ADMIN_PERMISSIONS, hasPermission, isActiveAdmin };

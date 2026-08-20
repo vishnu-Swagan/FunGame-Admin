@@ -1,0 +1,597 @@
+"""Channel-neutral, server-side OTP challenges.
+
+Codes are generated with ``secrets`` and stored only as a purpose-bound HMAC.
+Challenges are one-use, expire through both application checks and a Mongo TTL
+index, and use compare-and-set updates for attempt lockout and verification.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import logging
+import os
+import re
+import secrets
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Protocol
+
+from email_validator import EmailNotValidError, validate_email
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+
+from db import db
+from email_service import EmailService
+
+
+logger = logging.getLogger('otp')
+
+VERIFY_CONTACT = 'VERIFY_CONTACT'
+RESET_PASSWORD = 'RESET_PASSWORD'
+OTP_PURPOSES = frozenset({VERIFY_CONTACT, RESET_PASSWORD})
+
+OTP_TTL_SECONDS = 15 * 60
+OTP_RESEND_COOLDOWN_SECONDS = 60
+OTP_MAX_ATTEMPTS = 5
+OTP_ISSUE_LIMIT = 5
+OTP_ISSUE_WINDOW_SECONDS = 60 * 60
+OTP_VERIFY_LIMIT = 12
+OTP_VERIFY_WINDOW_SECONDS = 15 * 60
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _is_production() -> bool:
+    return (os.environ.get('APP_ENV') or 'development').strip().lower() in {
+        'prod', 'production',
+    }
+
+
+class OtpError(Exception):
+    def __init__(self, code: str, message: str, *, status_code: int = 400,
+                 retry_after: int | None = None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+class OtpConfigurationError(OtpError):
+    def __init__(self, diagnostic: str = 'Verification delivery is not configured'):
+        logger.error('OTP unavailable: %s', diagnostic)
+        super().__init__(
+            'OTP_UNAVAILABLE', 'Verification is temporarily unavailable.',
+            status_code=503,
+        )
+
+
+@dataclass(frozen=True)
+class Identity:
+    channel: str
+    value: str
+
+    @property
+    def normalized_field(self) -> str:
+        return 'email_normalized' if self.channel == 'EMAIL' else 'phone_normalized'
+
+    @property
+    def legacy_field(self) -> str:
+        return 'email' if self.channel == 'EMAIL' else 'phone'
+
+    @property
+    def verified_field(self) -> str:
+        return 'email_verified' if self.channel == 'EMAIL' else 'phone_verified'
+
+
+def normalize_identity(value: str) -> Identity:
+    raw = str(value or '').strip()
+    if '@' in raw:
+        try:
+            normalized = validate_email(raw, check_deliverability=False).normalized.casefold()
+        except EmailNotValidError as exc:
+            raise ValueError('Enter a valid email address or E.164 phone number') from exc
+        return Identity('EMAIL', normalized)
+
+    phone = re.sub(r'[\s().-]+', '', raw)
+    if not re.fullmatch(r'\+[1-9]\d{7,14}', phone):
+        raise ValueError('Phone must use E.164 format, for example +14155552671')
+    return Identity('SMS', phone)
+
+
+def identity_query(identity: Identity) -> dict:
+    """Match normalized records and pre-migration legacy records."""
+    return {'$or': [
+        {identity.normalized_field: identity.value},
+        {identity.legacy_field: identity.value},
+    ]}
+
+
+def identity_from_user(user: dict) -> Identity | None:
+    primary = user.get('primary_identity')
+    candidates = [primary, user.get('email_normalized'), user.get('email'),
+                  user.get('phone_normalized'), user.get('phone')]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return normalize_identity(candidate)
+        except ValueError:
+            continue
+    return None
+
+
+def masked_destination(identity: Identity) -> str:
+    if identity.channel == 'EMAIL':
+        local, domain = identity.value.split('@', 1)
+        shown = local[:1] + ('***' if len(local) > 1 else '*')
+        return f'{shown}@{domain}'
+    return f'{identity.value[:3]}******{identity.value[-2:]}'
+
+
+def _pepper() -> bytes:
+    configured = (os.environ.get('OTP_PEPPER') or '').strip()
+    if configured:
+        if _is_production() and len(configured) < 32:
+            raise OtpConfigurationError('OTP_PEPPER must contain at least 32 characters')
+        return configured.encode('utf-8')
+    if _is_production():
+        raise OtpConfigurationError('OTP_PEPPER is required in production')
+    # Development-only fallback.  Production takes the fail-closed branch above.
+    return (os.environ.get('JWT_SECRET') or 'chakri-development-otp-pepper').encode('utf-8')
+
+
+def _hmac_hex(value: str) -> str:
+    return hmac.new(_pepper(), value.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def _identity_hash(identity: Identity) -> str:
+    return _hmac_hex(f'identity:v1:{identity.channel}:{identity.value}')
+
+
+def _code_hash(challenge_id: str, purpose: str, code: str) -> str:
+    return _hmac_hex(f'otp:v1:{challenge_id}:{purpose}:{code}')
+
+
+def _new_code() -> str:
+    return f'{secrets.randbelow(1_000_000):06d}'
+
+
+async def ensure_indexes(*, database=None) -> None:
+    if database is None:
+        database = db
+    await database.otp_challenges.create_index('id', unique=True)
+    await database.otp_challenges.create_index('expires_at', expireAfterSeconds=0)
+    await database.otp_challenges.create_index(
+        [('identity_hash', 1), ('purpose', 1)],
+        unique=True,
+        partialFilterExpression={'active': True},
+        name='one_active_otp_per_identity_purpose',
+    )
+    await database.otp_challenges.create_index(
+        [('user_id', 1), ('purpose', 1), ('created_at', -1)]
+    )
+    await database.auth_rate_limits.create_index('expires_at', expireAfterSeconds=0)
+
+
+async def ensure_identity_indexes(*, database=None) -> None:
+    """Backfill normalized contacts, then install partial unique guards.
+
+    Invalid legacy phone values are left untouched rather than making startup
+    rewrite customer data it cannot safely interpret.  A normalized collision
+    fails the unique-index build and is surfaced for operator reconciliation.
+    """
+    if database is None:
+        database = db
+    users = database.users.find(
+        {},
+        {
+            '_id': 0, 'id': 1, 'email': 1, 'phone': 1,
+            'email_normalized': 1, 'phone_normalized': 1,
+        },
+    )
+    async for user in users:
+        updates = {}
+        email = user.get('email')
+        if email and not str(email).endswith('.phone.invalid') and not user.get('email_normalized'):
+            try:
+                updates['email_normalized'] = normalize_identity(email).value
+            except ValueError:
+                pass
+        phone = user.get('phone')
+        if phone and not user.get('phone_normalized'):
+            try:
+                normalized_phone = normalize_identity(phone)
+                if normalized_phone.channel == 'SMS':
+                    updates['phone_normalized'] = normalized_phone.value
+            except ValueError:
+                pass
+        if updates and user.get('id'):
+            await database.users.update_one({'id': user['id']}, {'$set': updates})
+
+    string_partial_email = {'email_normalized': {'$type': 'string'}}
+    string_partial_phone = {'phone_normalized': {'$type': 'string'}}
+    await database.users.create_index(
+        'email_normalized', unique=True,
+        partialFilterExpression=string_partial_email,
+        name='users_email_normalized_unique',
+    )
+    await database.users.create_index(
+        'phone_normalized', unique=True,
+        partialFilterExpression=string_partial_phone,
+        name='users_phone_normalized_unique',
+    )
+
+
+async def require_identity_indexes(*, database=None) -> None:
+    """Fail registration closed unless both normalized unique guards exist."""
+    if database is None:
+        database = db
+    try:
+        indexes = await database.users.index_information()
+    except Exception as exc:
+        raise OtpConfigurationError('Registration identity checks are unavailable') from exc
+    for name in ('users_email_normalized_unique', 'users_phone_normalized_unique'):
+        spec = indexes.get(name) or {}
+        if not spec.get('unique') or not spec.get('partialFilterExpression'):
+            raise OtpConfigurationError('Registration identity checks are unavailable')
+
+
+async def consume_persistent_limit(action: str, subject: str, *, limit: int,
+                                   window_seconds: int, database=None,
+                                   now: datetime | None = None) -> None:
+    """Consume one fixed-window allowance using Mongo's unique ``_id`` CAS."""
+    if database is None:
+        database = db
+    now = now or _now()
+    bucket = int(now.timestamp()) // window_seconds
+    subject_hash = _hmac_hex(f'rate:v1:{action}:{subject}')
+    key = f'{action}:{subject_hash}:{bucket}'
+    try:
+        await database.auth_rate_limits.find_one_and_update(
+            {'_id': key, 'count': {'$lt': limit}},
+            {
+                '$inc': {'count': 1},
+                '$setOnInsert': {
+                    'action': action,
+                    'subject_hash': subject_hash,
+                    'window_started_at': datetime.fromtimestamp(
+                        bucket * window_seconds, timezone.utc
+                    ),
+                    'expires_at': now + timedelta(seconds=window_seconds * 2),
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError as exc:
+        retry_after = window_seconds - (int(now.timestamp()) % window_seconds)
+        raise OtpError(
+            'RATE_LIMITED', 'Too many attempts. Please try again later.',
+            status_code=429, retry_after=max(1, retry_after),
+        ) from exc
+
+
+class OtpDeliveryAdapter(Protocol):
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict: ...
+
+
+class EmailOtpAdapter:
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        if purpose == RESET_PASSWORD:
+            return await EmailService.send_password_reset_code(identity.value, code)
+        return await EmailService.send_verification_code(identity.value, code)
+
+
+class TwilioSmsAdapter:
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        sid = (os.environ.get('TWILIO_ACCOUNT_SID') or '').strip()
+        token = (os.environ.get('TWILIO_AUTH_TOKEN') or '').strip()
+        sender = (os.environ.get('TWILIO_FROM_NUMBER') or '').strip()
+        if not sid or not token or not sender:
+            return {'sent': False, 'provider': 'twilio', 'error': 'not_configured'}
+        label = 'password reset' if purpose == RESET_PASSWORD else 'verification'
+        payload = urllib.parse.urlencode({
+            'To': identity.value,
+            'From': sender,
+            'Body': f'Your Chakri.Casino {label} code is {code}. It expires in 15 minutes.',
+        }).encode('utf-8')
+        auth = base64.b64encode(f'{sid}:{token}'.encode('utf-8')).decode('ascii')
+        request = urllib.request.Request(
+            f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json',
+            data=payload,
+            headers={'Authorization': f'Basic {auth}'},
+            method='POST',
+        )
+        try:
+            response = await asyncio.to_thread(urllib.request.urlopen, request, timeout=10)
+            return {'sent': 200 <= response.status < 300, 'provider': 'twilio'}
+        except Exception as exc:  # provider diagnostics only; never code/recipient
+            logger.error('Twilio OTP delivery failed: %s', type(exc).__name__)
+            return {'sent': False, 'provider': 'twilio', 'error': type(exc).__name__}
+
+
+class MockOtpAdapter:
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        if _is_production():
+            raise OtpConfigurationError('Mock OTP delivery is forbidden in production')
+        return {'sent': True, 'provider': 'mock'}
+
+
+class DisabledOtpAdapter:
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        return {'sent': False, 'provider': 'disabled', 'error': 'not_configured'}
+
+
+def delivery_adapter(channel: str) -> OtpDeliveryAdapter:
+    setting = 'OTP_EMAIL_ADAPTER' if channel == 'EMAIL' else 'OTP_SMS_ADAPTER'
+    default = 'email_service' if channel == 'EMAIL' else 'disabled'
+    adapter = (os.environ.get(setting) or default).strip().lower()
+    if adapter == 'mock':
+        if _is_production():
+            raise OtpConfigurationError('Mock OTP delivery is forbidden in production')
+        return MockOtpAdapter()
+    if channel == 'EMAIL' and adapter in {'email', 'email_service'}:
+        return EmailOtpAdapter()
+    if channel == 'SMS' and adapter == 'twilio':
+        return TwilioSmsAdapter()
+    if adapter == 'disabled':
+        return DisabledOtpAdapter()
+    raise OtpConfigurationError(f'Unsupported {channel.lower()} OTP adapter')
+
+
+def delivery_adapter_ready(channel: str) -> bool:
+    """Return whether a contact channel has a usable global configuration.
+
+    This is deliberately a channel-level capability rather than an
+    identity-specific delivery probe, so it is safe to expose to registration
+    clients without creating an account-enumeration oracle.
+    """
+    channel = str(channel or '').strip().upper()
+    setting = 'OTP_EMAIL_ADAPTER' if channel == 'EMAIL' else 'OTP_SMS_ADAPTER'
+    default = 'email_service' if channel == 'EMAIL' else 'disabled'
+    adapter = (os.environ.get(setting) or default).strip().lower()
+
+    if adapter == 'mock':
+        return not _is_production()
+    if adapter == 'disabled':
+        return False
+    if channel == 'EMAIL' and adapter in {'email', 'email_service'}:
+        provider = (os.environ.get('EMAIL_PROVIDER') or 'disabled').strip().lower()
+        if provider == 'resend':
+            return bool((os.environ.get('RESEND_API_KEY') or '').strip()
+                        and (os.environ.get('SENDER_EMAIL') or '').strip())
+        if provider == 'sendgrid':
+            return bool((os.environ.get('SENDGRID_API_KEY') or '').strip()
+                        and (os.environ.get('SENDER_EMAIL') or '').strip())
+        if provider == 'smtp':
+            return all((os.environ.get(name) or '').strip() for name in (
+                'SMTP_HOST', 'SMTP_USERNAME', 'SMTP_PASSWORD',
+            ))
+        return False
+    if channel == 'SMS' and adapter == 'twilio':
+        return all((os.environ.get(name) or '').strip() for name in (
+            'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+        ))
+    return False
+
+
+async def _restore_previous_challenge(database, previous: dict | None,
+                                      now: datetime) -> None:
+    """Best-effort restore when a replacement OTP could not be delivered."""
+    if not previous or previous.get('status') != 'PENDING':
+        return
+    expires_at = _as_utc(previous.get('expires_at'))
+    if not expires_at or expires_at <= now:
+        return
+    try:
+        await database.otp_challenges.update_one(
+            {'id': previous['id'], 'active': False, 'status': 'SUPERSEDED'},
+            {'$set': {'active': True, 'status': 'PENDING', 'updated_at': _now()}},
+        )
+    except DuplicateKeyError:
+        # Another request has already established a newer active challenge.
+        logger.info('Previous OTP was not restored because a newer challenge is active')
+
+
+async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
+                          database=None, now: datetime | None = None,
+                          consume_limit: bool = True) -> dict:
+    if database is None:
+        database = db
+    if purpose not in OTP_PURPOSES:
+        raise ValueError('Unsupported OTP purpose')
+    if not user or not user.get('id'):
+        raise ValueError('A user is required for an OTP challenge')
+    now = now or _now()
+    identity_hash = _identity_hash(identity)
+    if consume_limit:
+        await consume_persistent_limit(
+            f'otp_issue:{purpose}', f'{identity.channel}:{identity.value}',
+            limit=OTP_ISSUE_LIMIT, window_seconds=OTP_ISSUE_WINDOW_SECONDS,
+            database=database, now=now,
+        )
+
+    active = await database.otp_challenges.find_one({
+        'identity_hash': identity_hash, 'purpose': purpose, 'active': True,
+    })
+    if active:
+        cooldown = _as_utc(active.get('resend_not_before'))
+        if cooldown and cooldown > now:
+            retry_after = max(1, int((cooldown - now).total_seconds()) + 1)
+            raise OtpError(
+                'OTP_RESEND_COOLDOWN', 'Please wait before requesting another code.',
+                status_code=429, retry_after=retry_after,
+            )
+        await database.otp_challenges.update_one(
+            {'id': active['id'], 'active': True},
+            {'$set': {'active': False, 'status': 'SUPERSEDED', 'updated_at': now}},
+        )
+
+    challenge_id = str(uuid.uuid4())
+    code = _new_code()
+    doc = {
+        'id': challenge_id,
+        'user_id': user['id'],
+        'identity_hash': identity_hash,
+        'channel': identity.channel,
+        'purpose': purpose,
+        'code_hash': _code_hash(challenge_id, purpose, code),
+        'attempts': 0,
+        'max_attempts': OTP_MAX_ATTEMPTS,
+        'status': 'PENDING',
+        'active': True,
+        'created_at': now,
+        'updated_at': now,
+        'expires_at': now + timedelta(seconds=OTP_TTL_SECONDS),
+        'resend_not_before': now + timedelta(seconds=OTP_RESEND_COOLDOWN_SECONDS),
+    }
+    try:
+        await database.otp_challenges.insert_one(doc)
+    except DuplicateKeyError as exc:
+        raise OtpError(
+            'OTP_RESEND_COOLDOWN', 'Please wait before requesting another code.',
+            status_code=429, retry_after=OTP_RESEND_COOLDOWN_SECONDS,
+        ) from exc
+
+    try:
+        delivery = await delivery_adapter(identity.channel).send(identity, code, purpose)
+    except OtpError:
+        await database.otp_challenges.update_one(
+            {'id': challenge_id, 'active': True},
+            {'$set': {'active': False, 'status': 'DELIVERY_FAILED', 'updated_at': _now()}},
+        )
+        await _restore_previous_challenge(database, active, now)
+        raise
+    if not delivery.get('sent'):
+        await database.otp_challenges.update_one(
+            {'id': challenge_id, 'active': True},
+            {'$set': {
+                'active': False,
+                'status': 'DELIVERY_FAILED',
+                'delivery_provider': delivery.get('provider', 'unknown'),
+                'updated_at': _now(),
+            }},
+        )
+        await _restore_previous_challenge(database, active, now)
+        raise OtpConfigurationError('Verification delivery is temporarily unavailable')
+
+    await database.otp_challenges.update_one(
+        {'id': challenge_id, 'active': True},
+        {'$set': {
+            'delivery_provider': delivery.get('provider', 'unknown'),
+            'delivered_at': _now(),
+            'updated_at': _now(),
+        }},
+    )
+    public_channel = 'PHONE' if identity.channel == 'SMS' else 'EMAIL'
+    destination = masked_destination(identity)
+    response = {
+        'challenge_id': challenge_id,
+        'verification_id': challenge_id,
+        'channel': public_channel,
+        'destination': destination,
+        'destination_masked': destination,
+        'expires_in': OTP_TTL_SECONDS,
+        'expires_in_seconds': OTP_TTL_SECONDS,
+        'resend_in': OTP_RESEND_COOLDOWN_SECONDS,
+        'resend_after_seconds': OTP_RESEND_COOLDOWN_SECONDS,
+    }
+    if (delivery.get('provider') == 'mock'
+            and not _is_production()
+            and (os.environ.get('OTP_EXPOSE_DEV_CODE') or '').lower() == 'true'):
+        response['dev_code'] = code
+    return response
+
+
+async def verify_challenge(identity: Identity, code: str, purpose: str, *,
+                           challenge_id: str | None = None, database=None,
+                           now: datetime | None = None) -> dict:
+    if database is None:
+        database = db
+    now = now or _now()
+    identity_hash = _identity_hash(identity)
+    await consume_persistent_limit(
+        f'otp_verify:{purpose}', f'{identity.channel}:{identity.value}',
+        limit=OTP_VERIFY_LIMIT, window_seconds=OTP_VERIFY_WINDOW_SECONDS,
+        database=database, now=now,
+    )
+    query = {
+        'identity_hash': identity_hash,
+        'purpose': purpose,
+        'active': True,
+        'status': 'PENDING',
+    }
+    if challenge_id:
+        query['id'] = challenge_id
+    challenge = await database.otp_challenges.find_one(query, sort=[('created_at', -1)])
+    if not challenge:
+        raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+
+    expires_at = _as_utc(challenge.get('expires_at'))
+    if not expires_at or expires_at <= _as_utc(now):
+        await database.otp_challenges.update_one(
+            {'id': challenge['id'], 'active': True},
+            {'$set': {'active': False, 'status': 'EXPIRED', 'updated_at': now}},
+        )
+        raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+
+    supplied_hash = _code_hash(challenge['id'], purpose, str(code).strip())
+    if not hmac.compare_digest(challenge.get('code_hash', ''), supplied_hash):
+        result = await database.otp_challenges.update_one(
+            {
+                'id': challenge['id'], 'active': True, 'status': 'PENDING',
+                'attempts': {'$lt': challenge.get('max_attempts', OTP_MAX_ATTEMPTS)},
+            },
+            {'$inc': {'attempts': 1}, '$set': {'updated_at': now}},
+        )
+        current = await database.otp_challenges.find_one({'id': challenge['id']})
+        if result.modified_count == 0 or not current:
+            raise OtpError('OTP_LOCKED', 'Too many invalid verification attempts.', status_code=423)
+        if current.get('attempts', 0) >= current.get('max_attempts', OTP_MAX_ATTEMPTS):
+            await database.otp_challenges.update_one(
+                {'id': challenge['id'], 'active': True, 'status': 'PENDING'},
+                {'$set': {'active': False, 'status': 'LOCKED', 'locked_at': now, 'updated_at': now}},
+            )
+            raise OtpError('OTP_LOCKED', 'Too many invalid verification attempts.', status_code=423)
+        raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+
+    result = await database.otp_challenges.update_one(
+        {
+            'id': challenge['id'],
+            'identity_hash': identity_hash,
+            'purpose': purpose,
+            'code_hash': supplied_hash,
+            'status': 'PENDING',
+            'active': True,
+            'attempts': {'$lt': challenge.get('max_attempts', OTP_MAX_ATTEMPTS)},
+            'expires_at': {'$gt': now},
+        },
+        {'$set': {
+            'status': 'VERIFIED', 'active': False,
+            'verified_at': now, 'updated_at': now,
+        }},
+    )
+    if result.modified_count != 1:
+        raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+    challenge['status'] = 'VERIFIED'
+    challenge['active'] = False
+    challenge['verified_at'] = now
+    return challenge

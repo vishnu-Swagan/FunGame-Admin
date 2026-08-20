@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, errMsg } from "@/lib/api";
 import { GameArt } from "@/components/GameArt";
 import { GameStatusBadge, PageTransition, Disclaimer } from "@/components/common";
+import { findCatalogGame, gameStatusLabel, isComingSoonError, isGameEnabled } from "@/lib/gameAvailability";
 
 export default function GameDetail() {
   const { slug } = useParams();
@@ -14,23 +15,40 @@ export default function GameDetail() {
   const [game, setGame] = useState(null);
   const [isFav, setIsFav] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [playBusy, setPlayBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    api
-      .get(`/games/${slug}`)
-      .then(({ data }) => {
+    const load = async () => {
+      try {
+        const { data } = await api.get(`/games/${slug}`);
         if (!active) return;
         setGame(data.game);
         setIsFav(data.is_favorite);
-      })
-      .catch(() => {
-        toast.error("Game not found");
-        navigate("/games");
-      })
-      .finally(() => active && setLoading(false));
+      } catch (error) {
+        if (isComingSoonError(error)) {
+          try {
+            const { data } = await api.get("/catalog/games");
+            if (!active) return;
+            const catalogGame = findCatalogGame(data, slug);
+            if (catalogGame) {
+              setGame({ ...catalogGame, status: "COMING_SOON" });
+              setIsFav(false);
+              return;
+            }
+          } catch (_catalogError) {
+            // Fall through to the generic not-found state below.
+          }
+        }
+        if (active) {
+          toast.error("Game not found");
+          navigate("/games", { replace: true });
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    load();
     return () => {
       active = false;
     };
@@ -46,21 +64,7 @@ export default function GameDetail() {
     }
   };
 
-  const tryPlay = async () => {
-    if (game.status === "ENABLED") {
-      navigate(`/games/${slug}/play`);
-      return;
-    }
-    setPlayBusy(true);
-    try {
-      await api.post(`/games/${slug}/play`, { bet: 10, payload: {} });
-    } catch (e) {
-      // Server refuses for non-enabled games — surface its message
-      toast.info(errMsg(e, "This game is not playable yet."));
-    } finally {
-      setPlayBusy(false);
-    }
-  };
+  const tryPlay = () => navigate(`/games/${slug}/play`);
 
   if (loading || !game) {
     return (
@@ -89,14 +93,14 @@ export default function GameDetail() {
         {game.status !== "ENABLED" && (
           <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-3 left-3" />
         )}
-        <button
+        {isGameEnabled(game) && <button
           data-testid="favorite-toggle-button"
           onClick={toggleFav}
           aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
           className="absolute top-3 right-3 h-10 w-10 flex items-center justify-center rounded-full bg-black/35 hover:bg-black/50 border border-white/10 transition-[background-color] duration-150"
         >
           <Heart className={`h-5 w-5 ${isFav ? "fill-[hsl(var(--magenta))] text-[hsl(var(--magenta))]" : "text-white/85"}`} />
-        </button>
+        </button>}
       </div>
 
       <div>
@@ -108,16 +112,16 @@ export default function GameDetail() {
       <Button
         data-testid="game-detail-play-button"
         onClick={tryPlay}
-        disabled={playBusy}
-        variant={game.status === "ENABLED" ? "default" : "outline"}
+        disabled={!isGameEnabled(game)}
+        variant={isGameEnabled(game) ? "default" : "outline"}
         className={`w-full h-13 min-h-[52px] rounded-xl text-base font-bold ${
-          game.status === "ENABLED"
+          isGameEnabled(game)
             ? "hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150"
             : "border-[hsl(var(--cyan)/0.4)] bg-[hsl(var(--cyan)/0.08)] text-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.14)]"
         }`}
       >
         <Play className="h-5 w-5 mr-2" />
-        {game.status === "ENABLED" ? "Play now" : game.status === "COMING_SOON" ? "Coming soon" : game.status === "MAINTENANCE" ? "Under maintenance" : "Unavailable"}
+        {isGameEnabled(game) ? "Play now" : gameStatusLabel(game.status)}
       </Button>
 
       <div className="rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4">
@@ -132,7 +136,7 @@ export default function GameDetail() {
           <ListChecks className="h-4 w-4 text-primary" /> Rules & paytable
         </p>
         <p className="mt-2 text-sm text-white/55 leading-relaxed">
-          {game.status === "ENABLED"
+          {isGameEnabled(game)
             ? "Every round outcome is decided by the server — never the client. Open the game to see bets, paytables and your round history."
             : `Full rules, bet controls and history unlock when ${game.name} becomes available. Every round outcome is decided by the server — never the client.`}
         </p>

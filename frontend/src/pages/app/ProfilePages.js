@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2,
+  Download, CheckCircle2, Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ export function Profile() {
   const links = [
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
+    { icon: Landmark, label: "Bank details", to: "/profile/bank-details", testId: "profile-link-bank-details" },
     { icon: HeartPulse, label: "Responsible play", to: "/responsible-play", testId: "profile-link-responsible" },
     { icon: SettingsIcon, label: "Settings", to: "/settings", testId: "profile-link-settings" },
     { icon: Megaphone, label: "Announcements", to: "/announcements", testId: "profile-link-announcements" },
@@ -44,7 +45,7 @@ export function Profile() {
             <p className="text-xs text-white/55 truncate">
               {user?.username ? <span className="text-primary/85 font-semibold">@{user.username}</span> : null}
               {user?.username ? " · " : ""}
-              {user?.email}
+              {user?.email || user?.phone || user?.login_id}
             </p>
             <div className="mt-1.5 flex items-center gap-2">
               <UserStatusBadge status={user?.status} />
@@ -254,7 +255,7 @@ export function Settings() {
       </div>
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">About</p>
-        <p className="text-xs text-white/55 mt-1">Chakri.Casino v{APP_VERSION} — a play-chip-only amusement platform. No payments, prizes or cash-outs exist anywhere in the product.</p>
+        <p className="text-xs text-white/55 mt-1">Chakri.Casino v{APP_VERSION} — games, a secure chips wallet and account-level responsible-play controls.</p>
       </div>
       <Disclaimer />
     </PageTransition>

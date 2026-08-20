@@ -8,11 +8,77 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from db import db
 import compliance
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'chakri-dev-secret-change-me')
 JWT_ALG = 'HS256'
 ACCESS_TOKEN_DAYS = 7
 
 security = HTTPBearer(auto_error=False)
+
+
+def _real_money_enabled() -> bool:
+    return (os.environ.get('REAL_MONEY_ENABLED') or 'false').strip().lower() == 'true'
+
+
+def require_legacy_chip_mutation_allowed() -> None:
+    """Keep legacy play-chip workflows away from a source-separated wallet.
+
+    BUY/SELL/RETURN and points conversion mutate only the historical aggregate
+    ledger. They must remain unavailable once real-money mode is enabled until
+    they are transactionally integrated as explicit non-withdrawable bonus
+    movements.
+    """
+    if _real_money_enabled():
+        raise HTTPException(status_code=409, detail={
+            'code': 'LEGACY_CHIP_FLOW_DISABLED',
+            'message': 'This legacy chip operation is unavailable in real-money mode.',
+        })
+
+
+def _financial_gameplay_gate(user: dict) -> None:
+    """Apply launch-only age, KYC and jurisdiction gates to every game route.
+
+    Existing play-chip operation is intentionally unchanged. Once real-money
+    mode is explicitly enabled, this central dependency fails closed using the
+    same eligibility contract as the financial routes.
+    """
+    if not _real_money_enabled():
+        return
+    if str(user.get('financial_status') or '').upper() in {
+            'BLOCKED', 'FROZEN', 'REVIEW_REQUIRED'}:
+        raise HTTPException(status_code=403, detail={
+            'code': 'FINANCIAL_ACCOUNT_RESTRICTED',
+            'message': 'Gameplay is restricted while this account is under financial review.',
+        })
+    if not user.get('age_verified'):
+        raise HTTPException(status_code=403, detail={
+            'code': 'AGE_NOT_VERIFIED',
+            'message': 'Age verification is required.',
+        })
+    if str(user.get('kyc_status') or '').upper() != 'VERIFIED':
+        raise HTTPException(status_code=403, detail={
+            'code': 'KYC_REQUIRED',
+            'message': 'Identity verification is required.',
+        })
+    country = compliance.normalise_country(user.get('country'))
+    allowed = {
+        item.strip().upper()
+        for item in (os.environ.get('FINANCIAL_ALLOWED_COUNTRIES') or '').split(',')
+        if item.strip()
+    }
+    if not country or country not in allowed:
+        raise HTTPException(status_code=403, detail={
+            'code': 'FINANCIAL_MARKET_BLOCKED',
+            'message': 'Gameplay is unavailable in your registered country.',
+        })
+
+
+def _jwt_secret() -> str:
+    configured = (os.environ.get('JWT_SECRET') or '').strip()
+    production = (os.environ.get('APP_ENV') or '').strip().lower() in ('prod', 'production')
+    if production and (
+            configured == 'chakri-dev-secret-change-me'
+            or len(configured.encode('utf-8')) < 32):
+        raise RuntimeError('JWT_SECRET must contain at least 32 bytes in production')
+    return configured or 'chakri-dev-secret-change-me'
 
 
 def hash_password(password: str) -> str:
@@ -35,7 +101,7 @@ def create_access_token(user_id: str, role: str, session_id: str = None) -> str:
     }
     if session_id:
         payload['sid'] = session_id
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALG)
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -43,7 +109,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail='Not authenticated')
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALG])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail='Session expired. Please log in again.')
     except jwt.InvalidTokenError:
@@ -64,7 +130,55 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 async def require_admin(user: dict = Depends(get_current_user)):
     if user.get('role') != 'ADMIN':
         raise HTTPException(status_code=403, detail='Admin access required')
+    if user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail='Administrator access is disabled')
     return user
+
+
+def _parse_security_time(value):
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def require_recent_admin_step_up(admin: dict) -> None:
+    """Require server-recorded 2FA and password re-auth for trust decisions."""
+    if admin.get('mfa_enabled') is not True:
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_MFA_REQUIRED',
+            'message': 'Administrator 2FA enrollment and verification are required.',
+        })
+    try:
+        seconds = max(
+            60,
+            min(int(os.environ.get('ADMIN_FINANCIAL_STEP_UP_SECONDS', '300')), 900),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail={
+            'code': 'ADMIN_AUTH_NOT_READY',
+            'message': 'Administrator step-up verification is unavailable.',
+        }) from exc
+    current = datetime.now(timezone.utc)
+    mfa_at = _parse_security_time(admin.get('mfa_verified_at'))
+    reauth_at = _parse_security_time(admin.get('reauthenticated_at'))
+    mfa_age = (current - mfa_at).total_seconds() if mfa_at else None
+    reauth_age = (current - reauth_at).total_seconds() if reauth_at else None
+    if (
+        mfa_age is None
+        or reauth_age is None
+        or not 0 <= mfa_age <= seconds
+        or not 0 <= reauth_age <= seconds
+    ):
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_STEP_UP_REQUIRED',
+            'message': 'Recent password re-authentication and 2FA verification are required.',
+        })
 
 
 async def require_distributor(user: dict = Depends(get_current_user)):
@@ -122,4 +236,5 @@ async def require_active_player(user: dict = Depends(get_current_user)):
     # Self-exclusion, market and age. Last, so a player who is excluded is told
     # that rather than something less specific about their account status.
     await compliance.assert_playable(user)
+    _financial_gameplay_gate(user)
     return user

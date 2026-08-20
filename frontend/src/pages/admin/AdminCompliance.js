@@ -80,8 +80,18 @@ export default function AdminCompliance() {
   };
 
   const verifyAge = async (userId) => {
+    const note = window.prompt(
+      "Record why this player's age evidence was accepted (minimum 5 characters)."
+    );
+    if (!note || note.trim().length < 5) {
+      toast.error("An audit reason of at least 5 characters is required");
+      return;
+    }
     try {
-      const { data } = await api.post(`/admin/compliance/players/${userId}/age-verify`, { verified: true });
+      const { data } = await api.post(`/admin/compliance/players/${userId}/age-verify`, {
+        verified: true,
+        note: note.trim(),
+      });
       toast.success(`${data.message} (age ${data.age})`);
       load();
     } catch (e) { toast.error(errMsg(e)); }

@@ -103,24 +103,62 @@ def _parse(iso):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-async def get_config():
-    cfg = await db.compliance_config.find_one({'key': CONFIG_KEY}, {'_id': 0})
+async def get_config(session=None):
+    kwargs = {'session': session} if session is not None else {}
+    cfg = await db.compliance_config.find_one(
+        {'key': CONFIG_KEY}, {'_id': 0}, **kwargs)
     return {**DEFAULTS, **(cfg or {})}
 
 
-async def set_config(patch, actor):
+def _validated_minimum_age(value, label='Minimum age'):
+    """Return a configured age without ever crossing the legal-age floor."""
+    if isinstance(value, bool):
+        raise ValueError(f'{label} must be a whole number')
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{label} must be a whole number') from exc
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f'{label} must be a whole number')
+    floor = int(DEFAULTS['min_age'])
+    if not floor <= parsed <= 25:
+        raise ValueError(f'{label} must be between {floor} and 25')
+    return parsed
+
+
+async def set_config(patch, actor, session=None):
     patch = {k: v for k, v in patch.items() if k in DEFAULTS}
     if 'market_mode' in patch and patch['market_mode'] not in MARKET_MODES:
         raise ValueError(f"Market mode must be one of {', '.join(MARKET_MODES)}")
     if 'markets' in patch:
         patch['markets'] = sorted({normalise_country(c) for c in patch['markets'] if normalise_country(c)})
-    if 'min_age' in patch and not 16 <= int(patch['min_age']) <= 25:
-        raise ValueError('Minimum age must be between 16 and 25')
+    if 'min_age' in patch:
+        patch['min_age'] = _validated_minimum_age(patch['min_age'])
+    if 'min_age_by_country' in patch:
+        values = patch['min_age_by_country']
+        if not isinstance(values, dict):
+            raise ValueError('Country minimum ages must be an object')
+        normalised = {}
+        for raw_country, raw_age in values.items():
+            country = normalise_country(raw_country)
+            if not country:
+                raise ValueError(f'Unrecognised country for minimum age: {raw_country}')
+            minimum = _validated_minimum_age(
+                raw_age, f'Minimum age for {country}')
+            if country in normalised and normalised[country] != minimum:
+                raise ValueError(f'Conflicting minimum ages for {country}')
+            normalised[country] = minimum
+        patch['min_age_by_country'] = dict(sorted(normalised.items()))
     patch['updated_at'] = now_iso()
     patch['updated_by'] = actor
+    kwargs = {'session': session} if session is not None else {}
     await db.compliance_config.update_one(
-        {'key': CONFIG_KEY}, {'$set': patch, '$setOnInsert': {'key': CONFIG_KEY}}, upsert=True)
-    return await get_config()
+        {'key': CONFIG_KEY},
+        {'$set': patch, '$setOnInsert': {'key': CONFIG_KEY}},
+        upsert=True,
+        **kwargs,
+    )
+    return await get_config(session=session)
 
 
 # ------------------------------------------------------------------- markets
@@ -183,7 +221,15 @@ def market_allows(cfg, country_code):
 
 
 def min_age_for(cfg, country_code):
-    return int((cfg.get('min_age_by_country') or {}).get(country_code, cfg.get('min_age', 18)))
+    floor = int(DEFAULTS['min_age'])
+    configured = (cfg.get('min_age_by_country') or {}).get(
+        country_code, cfg.get('min_age', floor))
+    try:
+        return max(floor, int(configured))
+    except (TypeError, ValueError):
+        # A malformed historical row must fail towards the statutory floor,
+        # never towards admitting a minor or crashing the play guard.
+        return floor
 
 
 # ----------------------------------------------------------------------- age
@@ -343,22 +389,24 @@ async def request_reactivation(user_id):
     return {'status': 'LIFTED', 'message': 'Welcome back. Your limits are unchanged.'}
 
 
-async def admin_lift(user_id, actor, reason):
+async def admin_lift(user_id, actor, reason, session=None):
     """The operator ending an exclusion, including a permanent one.
 
     Requires a reason, and the reason is stored, because this is the one path
     that overrides a player's own decision and it has to be answerable later.
     """
+    reason = str(reason or '').strip()
     if not reason:
         raise ValueError('Lifting an exclusion has to have a reason recorded')
+    kwargs = {'session': session} if session is not None else {}
     row = await db.exclusions.find_one({'user_id': user_id, 'status': 'ACTIVE'},
-                                       sort=[('created_at', -1)])
+                                       sort=[('created_at', -1)], **kwargs)
     if not row:
         raise ValueError('This account has no active exclusion')
     await db.exclusions.update_one({'id': row['id']}, {'$set': {
         'status': 'LIFTED', 'lifted_at': now_iso(), 'lifted_by': actor,
-        'lift_reason': reason}})
-    return await db.exclusions.find_one({'id': row['id']}, {'_id': 0})
+        'lift_reason': reason}}, **kwargs)
+    return await db.exclusions.find_one({'id': row['id']}, {'_id': 0}, **kwargs)
 
 
 async def assert_not_excluded(user_id):
@@ -409,7 +457,7 @@ async def assert_playable(user):
     if age is None:
         return
     floor = int(DEFAULTS['min_age'])
-    minimum = min_age_for(cfg, code) if cfg.get('enforce_market_on_login') else min(floor, cfg.get('min_age', floor))
+    minimum = min_age_for(cfg, code) if cfg.get('enforce_market_on_login') else floor
     if age < minimum:
         raise ComplianceBlock('UNDERAGE', f'You must be at least {minimum} to play.')
 

@@ -24,7 +24,9 @@ export default function PerfectLiveChat() {
   const [msgContent, setMsgContent] = useState<string>("");
   const [emojiPicker, setEmojiPicker] = useState<boolean>(false);
   const [gifPicker, setGifPicker] = useState<boolean>(false);
-  const tenorApiKey = "AIzaSyAgrtott_iV2sRi-9cH_BKAdLKxpzbsIJY";
+  // Tenor browser keys are build-time configuration and must never be checked
+  // into source. When absent (the staging default), GIF search stays hidden.
+  const tenorApiKey = process.env.REACT_APP_TENOR_API_KEY || "";
 
   const msgContentRef = useRef(null);
 
@@ -209,7 +211,7 @@ export default function PerfectLiveChat() {
               />
             </div>
           )}
-          {gifPicker && (
+          {gifPicker && tenorApiKey && (
             <div className="gif-picker">
               <div className="modal-header">
                 <div className="modal-title text-uppercase">Gif</div>
@@ -250,15 +252,17 @@ export default function PerfectLiveChat() {
               >
                 <HiOutlineFaceSmile cursor={"pointer"} size={14} />
               </div>
-              <div
-                className="gif"
-                onClick={() => {
-                  setEmojiPicker(false);
-                  setGifPicker(!gifPicker);
-                }}
-              >
-                <HiOutlineGif cursor={"pointer"} size={14} />
-              </div>
+              {tenorApiKey && (
+                <div
+                  className="gif"
+                  onClick={() => {
+                    setEmojiPicker(false);
+                    setGifPicker(!gifPicker);
+                  }}
+                >
+                  <HiOutlineGif cursor={"pointer"} size={14} />
+                </div>
+              )}
               <div className="left-length">{160 - msgContent.length}</div>
             </div>
             <button className="enter" onClick={() => handleSendMsg()}></button>

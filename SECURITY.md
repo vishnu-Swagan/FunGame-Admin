@@ -1,5 +1,28 @@
 # Chakri.Casino — Security & Anti-Abuse
 
+## Financial feature status
+
+The repository includes a provider-neutral deposit, cash/bonus wallet and
+withdrawal scaffold, but it is **disabled by default**. No production gateway is
+fabricated or enabled. `REAL_MONEY_ENABLED`, `DEPOSITS_ENABLED`,
+`WITHDRAWALS_ENABLED`, `AUTO_WITHDRAWALS_ENABLED` and
+`FINANCIAL_GAME_WALLET_INTEGRATED` must remain false until the provider and
+game-ledger launch gates in
+[`docs/PAYMENT-GATEWAY-INTEGRATION.md`](docs/PAYMENT-GATEWAY-INTEGRATION.md)
+have been certified.
+
+The canonical operator console is `https://crm.chakri.casino`. Financial pages
+use explicit permissions and default-deny access; changing withdrawal mode also
+requires a designated Super Admin with recent password re-authentication and
+2FA. Legacy chip balances are treated as promotional and nonwithdrawable.
+Administrator financial roles are provisioned only through the reviewed
+control-plane procedure documented in
+[`docs/PAYMENT-GATEWAY-INTEGRATION.md`](docs/PAYMENT-GATEWAY-INTEGRATION.md);
+there is no public role-grant endpoint.
+Responsible-play configuration changes and self-exclusion overrides require the
+canonical `COMPLIANCE_ADMIN` grant plus recent password re-authentication and
+2FA. Each change and its immutable audit event commit in one transaction.
+
 ## The honest threat model
 
 The Android app is a **TWA (Trusted Web Activity)** — a thin shell that opens
@@ -19,13 +42,18 @@ Therefore:
 
 | Protection | Where | Effect |
 |---|---|---|
-| **CORS locked** to `https://chakri.casino` | `render.yaml` / `server.py` | A copied frontend on another domain can't call your backend from a browser |
+| **CORS allow-list** for Chakri player and CRM origins | `render.yaml` / `server.py` | A copied frontend on another domain can't call the authenticated backend from a browser |
 | **Production mode** (`APP_ENV=production`) | `render.yaml` | Verification/reset codes are **never** returned in API responses (`dev_code` killed) |
-| **Rate limiting** (per-IP) on auth endpoints | `backend/security.py` | Brute-force / abuse throttled (login 8/5min, resets 5/15min, etc.) |
+| **Persistent rate limiting** on sensitive auth flows | `backend/security.py`, `backend/otp_service.py` | Login, registration, OTP issue/resend/verify and reset abuse is throttled across workers |
 | **Security headers** | `security.py` + static `render.yaml` headers | `nosniff`, `X-Frame-Options: DENY` (anti-clickjacking/embedding), Referrer-Policy, Permissions-Policy |
 | **Server-authoritative games** | `game_engines.py`, `live_engines.py` | Outcomes/balances decided server-side — can't be forged client-side |
 | **Single active session per login** | `routes_auth.py` | A login elsewhere invalidates the old token |
-| **Admin-only password resets** | `POST /api/admin/users/{id}/reset-password` | No self-service email-code path to exploit; forces re-login |
+| **Purpose-bound OTP verification** | `backend/otp_service.py`, `backend/routes_auth.py` | Email/phone registration and password-reset challenges expire, limit attempts and cannot be reused for another purpose |
+| **Fail-closed OTP capabilities** | `backend/routes_auth.py`, auth UI | Registration channels are offered only when their global provider configuration is ready; production mock delivery is rejected |
+| **Account lock and opaque auth errors** | `backend/routes_auth.py` | Unknown accounts pay the same bcrypt cost, repeated failures lock known accounts, and OTP/account state is not exposed publicly |
+| **Financial feature gates** | `backend/financial_wallet.py`, hosting environment | Provider, deposits, withdrawals, auto-payout and gameplay-wallet integration fail closed independently |
+| **Encrypted payout details** | `backend/financial_wallet.py` | Raw bank details use authenticated encryption at rest and routine responses expose masked values only |
+| **Signed, replay-protected webhooks** | `backend/payment_providers.py`, `backend/financial_wallet.py` | Raw-body signatures, timestamps, unique event IDs and idempotent state transitions prevent browser or duplicate credits |
 | **Digital Asset Links** | `frontend/public/.well-known/assetlinks.json` | Binds the *verified* app to your domain; a repackaged APK with a different signing key won't validate |
 | **JS obfuscation** (app code) | `frontend/craco.config.js` | App bundle is hard to read; vendor left intact |
 | **Signed APK** | PWABuilder keystore | `~/Downloads/Chakri.Casino-apk/signing.keystore` — **keep safe**, required for updates |
@@ -63,7 +91,28 @@ To actually get it, you would:
 The backend endpoint already exists and returns `501` until enabled, so the wiring
 is ready when you move to a native client.
 
-## Recommended next hardening (optional)
+## Required before financial production activation
+
+- Run MongoDB as a replica set and verify multi-document transactions against
+  the production topology. Do not use a nontransaction fallback in production.
+- Configure a real email and SMS provider; development OTP mocks are rejected in
+  production.
+- Put OTP delivery on a durable queue/outbox (or otherwise equalize public
+  response work) before enabling providers; synchronous provider latency can
+  otherwise become a contact-existence timing signal even with opaque bodies.
+- Complete the source-attributed game-wallet integration so cash and promotional
+  chips reconcile through every stake, prize and refund.
+- Certify or replace every legacy BUY/SELL/RETURN and points-conversion path;
+  these mutations are blocked while real-money mode is on.
+- Add a production-grade administrator step-up/2FA ceremony and recovery policy.
+- Add the approved provider's audited beneficiary/token handoff before enabling
+  manual or automatic withdrawals; routine CRM responses remain masked.
+- Complete provider sandbox certification, webhook reconciliation tests, KYC,
+  jurisdiction and risk-control reviews.
+- Store `JWT_SECRET`, OTP pepper, bank-encryption key and provider credentials in
+  the hosting secret manager and establish rotation/recovery procedures.
+
+## Recommended next hardening
 
 - **Custom domain** instead of `*.onrender.com` (cleaner asset-links, harder to
   squat, and lets you move hosts without re-signing the APK).

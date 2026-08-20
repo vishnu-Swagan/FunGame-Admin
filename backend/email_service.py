@@ -87,11 +87,13 @@ class EmailService:
             # Resend SDK is synchronous - run in a thread to keep the event loop free
             result = await asyncio.to_thread(resend.Emails.send, params)
             email_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', None)
-            logger.info(f'Resend email sent to={to_email} id={email_id}')
+            logger.info('Resend verification email accepted id=%s', email_id)
             return {'sent': True, 'provider': 'resend', 'email_id': email_id}
         except Exception as e:
             # Testing-mode restriction, invalid recipient, rate limits, etc.
-            logger.error(f'Resend send failed: {type(e).__name__}: {e}')
+            # Provider exception bodies may echo the recipient or request
+            # payload, including the OTP. Keep diagnostics metadata-only.
+            logger.error('Resend send failed: %s', type(e).__name__)
             return {'sent': False, 'provider': 'resend', 'error': str(type(e).__name__)}
 
     @staticmethod

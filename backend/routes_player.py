@@ -8,7 +8,17 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Response
 from db import db, serialize_doc
 from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
-from auth_utils import get_current_user, require_active_player, check_maintenance_for_players
+from auth_utils import (
+    check_maintenance_for_players,
+    get_current_user,
+    require_active_player,
+    require_legacy_chip_mutation_allowed,
+)
+from game_access import (
+    normalise_game_slug,
+    project_catalogue_game,
+    require_playable_game,
+)
 from ledger import credit_chips, debit_chips, InsufficientChips
 import compliance
 import ledger
@@ -50,8 +60,8 @@ async def system_config():
 # ---------- Onboarding ----------
 @router.post('/onboarding/profile')
 async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depends(get_current_user)):
-    if not user.get('email_verified'):
-        raise HTTPException(status_code=403, detail='Verify your email first')
+    if not (user.get('contact_verified') or user.get('email_verified')):
+        raise HTTPException(status_code=403, detail='Verify your contact method first')
     if user.get('status') in ('ACTIVE', 'SUSPENDED'):
         raise HTTPException(status_code=400, detail='Onboarding already completed')
     # Country and date of birth are entered here, so this is where market and
@@ -77,8 +87,8 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
 
 @router.post('/onboarding/submit')
 async def onboarding_submit(user: dict = Depends(get_current_user)):
-    if not user.get('email_verified'):
-        raise HTTPException(status_code=403, detail='Verify your email first')
+    if not (user.get('contact_verified') or user.get('email_verified')):
+        raise HTTPException(status_code=403, detail='Verify your contact method first')
     if user.get('status') == 'ACTIVE':
         raise HTTPException(status_code=400, detail='Already approved')
     if user.get('status') not in ('PROFILE_SUBMITTED', 'PENDING', 'REJECTED'):
@@ -123,6 +133,7 @@ async def public_game_catalog(response: Response):
 
     public_games = []
     for game in games:
+        game = project_catalogue_game(game)
         slug = str(game.get('slug', '')).strip().lower()
         name = str(game.get('name', '')).strip()
         if not re.fullmatch(r'[a-z0-9-]{1,100}', slug) or not name:
@@ -158,6 +169,7 @@ async def public_game_catalog(response: Response):
 @router.get('/games')
 async def list_games(user: dict = Depends(require_active_player)):
     games = await db.games.find({}, {'_id': 0}).sort('order', 1).to_list(100)
+    games = [project_catalogue_game(game) for game in games]
     fresh = await db.users.find_one({'id': user['id']})
     favorites = fresh.get('favorites', []) if fresh else []
     recent = fresh.get('recent_games', []) if fresh else []
@@ -166,28 +178,26 @@ async def list_games(user: dict = Depends(require_active_player)):
 
 @router.get('/games/{slug}')
 async def game_detail(slug: str, user: dict = Depends(require_active_player)):
-    game = await db.games.find_one({'slug': slug}, {'_id': 0})
-    if not game:
-        raise HTTPException(status_code=404, detail='Game not found')
+    canonical_slug = normalise_game_slug(slug)
+    game = await require_playable_game(canonical_slug)
     # track recently viewed (max 10, most recent first)
-    recent = [s for s in user.get('recent_games', []) if s != slug]
-    recent.insert(0, slug)
+    recent = [s for s in user.get('recent_games', []) if s != canonical_slug]
+    recent.insert(0, canonical_slug)
     await db.users.update_one({'id': user['id']}, {'$set': {'recent_games': recent[:10]}})
-    is_fav = slug in user.get('favorites', [])
+    is_fav = canonical_slug in user.get('favorites', [])
     return {'game': serialize_doc(game), 'is_favorite': is_fav}
 
 
 @router.post('/games/{slug}/favorite')
 async def toggle_favorite(slug: str, user: dict = Depends(require_active_player)):
-    game = await db.games.find_one({'slug': slug})
-    if not game:
-        raise HTTPException(status_code=404, detail='Game not found')
+    canonical_slug = normalise_game_slug(slug)
+    await require_playable_game(canonical_slug)
     favs = user.get('favorites', [])
-    if slug in favs:
-        favs = [f for f in favs if f != slug]
+    if canonical_slug in favs:
+        favs = [f for f in favs if f != canonical_slug]
         action = 'removed'
     else:
-        favs = favs + [slug]
+        favs = favs + [canonical_slug]
         action = 'added'
     await db.users.update_one({'id': user['id']}, {'$set': {'favorites': favs}})
     return {'favorites': favs, 'action': action}
@@ -211,6 +221,7 @@ async def chip_balance(user: dict = Depends(require_active_player)):
 async def convert_chips_points(body: ConvertRequest, user: dict = Depends(require_active_player)):
     """Points -> chips is instant (1:1, minimum 500).
     Chips -> points now requires an admin-approved SELL request."""
+    require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not convert chips')
     uid = user['id']
@@ -245,6 +256,7 @@ async def my_points_transactions(user: dict = Depends(require_active_player)):
 
 @router.post('/chips/request')
 async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(require_active_player)):
+    require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not request chips')
     pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': {'$ne': 'SELL'}})
@@ -268,6 +280,7 @@ async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(requ
 async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends(require_active_player)):
     """Player asks the operator to sell chips for points (1:1).
     Chips stay in the balance until the admin approves the request."""
+    require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not sell chips')
     pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'SELL'})
@@ -292,6 +305,7 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
 async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Depends(require_active_player)):
     """Player asks the operator to return chips to the admin. Chips are deducted
     only when the admin approves the request (nothing is credited back)."""
+    require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not return chips')
     pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'RETURN'})

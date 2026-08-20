@@ -15,6 +15,7 @@ from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import MIN_BET, MAX_BET
 import blackjack as bj
+from game_access import require_playable_game
 
 router = APIRouter(tags=['blackjack'])
 
@@ -135,6 +136,7 @@ def _dealer_and_settle(g):
 
 @router.get('/blackjack/state')
 async def bj_state(user: dict = Depends(require_active_player)):
+    await require_playable_game('blackjack')
     g = await _load(user['id'])
     bal = await _balance(user['id'])
     if not g:
@@ -144,6 +146,7 @@ async def bj_state(user: dict = Depends(require_active_player)):
 
 @router.post('/blackjack/deal')
 async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
+    await require_playable_game('blackjack')
     uid = user['id']
     existing = await _load(uid)
     if existing and existing['status'] not in ('done', 'idle'):
@@ -216,6 +219,7 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
 
 @router.post('/blackjack/insurance')
 async def bj_insurance(body: InsuranceBody, user: dict = Depends(require_active_player)):
+    await require_playable_game('blackjack')
     uid = user['id']
     g = await _load(uid)
     if not g or g['status'] != 'insurance':
@@ -247,6 +251,7 @@ async def bj_insurance(body: InsuranceBody, user: dict = Depends(require_active_
 
 @router.post('/blackjack/action')
 async def bj_action(body: ActionBody, user: dict = Depends(require_active_player)):
+    await require_playable_game('blackjack')
     uid = user['id']
     g = await _load(uid)
     if not g or g['status'] != 'player_turn':

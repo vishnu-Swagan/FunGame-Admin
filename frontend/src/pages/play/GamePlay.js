@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, errCode } from "@/lib/api";
+import { isComingSoonError, isGameEnabled } from "@/lib/gameAvailability";
 import { PageTransition } from "@/components/common";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GameIntro } from "@/components/play/GameIntro";
@@ -88,16 +89,21 @@ export default function GamePlay() {
       .get(`/games/${slug}`)
       .then(({ data }) => {
         if (!active) return;
-        if (data.game.status !== "ENABLED") {
-          toast.info(`${data.game.name} is not playable right now (${data.game.status.replaceAll("_", " ").toLowerCase()}).`);
+        if (!isGameEnabled(data.game)) {
+          toast.info(data.game.status === "COMING_SOON" ? `${data.game.name} is coming soon.` : `${data.game.name} is not playable right now.`);
           navigate(`/games/${slug}`, { replace: true });
           return;
         }
         setGame(data.game);
       })
-      .catch(() => {
-        toast.error("Game not found");
-        navigate("/games", { replace: true });
+      .catch((error) => {
+        if (isComingSoonError(error) || errCode(error) === "GAME_COMING_SOON") {
+          toast.info("This game is coming soon.");
+          navigate(`/games/${slug}`, { replace: true });
+        } else {
+          toast.error("Game could not be opened");
+          navigate("/games", { replace: true });
+        }
       });
     return () => {
       active = false;

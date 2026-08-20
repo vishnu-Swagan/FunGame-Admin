@@ -1,132 +1,145 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, Mail, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
+import { registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
-/**
- * Public sign-up is closed. New players submit an account REQUEST with their
- * details - the admin verifies them and assigns a unique Login ID + password.
- */
-export default function Register() {
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [dob, setDob] = useState("");
-  const [phone, setPhone] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
+const CHANNELS = [
+  { key: "EMAIL", label: "Email", icon: Mail },
+  { key: "PHONE", label: "Mobile", icon: Smartphone },
+];
 
-  const submit = async (e) => {
-    e.preventDefault();
+export default function Register() {
+  const navigate = useNavigate();
+  const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
+  const [channel, setChannel] = useState("EMAIL");
+  const [identifier, setIdentifier] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [dob, setDob] = useState("");
+  const [country, setCountry] = useState("India");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (capabilitiesLoading || registrationChannelAvailable(capabilities, channel)) return;
+    if (registrationChannelAvailable(capabilities, "EMAIL")) setChannel("EMAIL");
+    else if (registrationChannelAvailable(capabilities, "PHONE")) setChannel("PHONE");
+  }, [capabilities, capabilitiesLoading, channel]);
+
+  const selectedChannelAvailable = registrationChannelAvailable(capabilities, channel);
+  const registrationAvailable = capabilities.registration_enabled;
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (capabilitiesLoading || !registrationAvailable || !selectedChannelAvailable) {
+      return toast.info("Registration is temporarily unavailable for this contact method.");
+    }
+    if (password.length < 8) return toast.error("Password must be at least 8 characters");
+    if (password !== confirm) return toast.error("Passwords do not match");
+    if (channel === "PHONE" && !/^\+[1-9]\d{6,14}$/.test(identifier.replace(/[\s-]/g, ""))) {
+      return toast.error("Enter your mobile number with country code, for example +919876543210");
+    }
     setBusy(true);
     try {
-      await api.post("/auth/signup-request", {
-        full_name: fullName,
-        email,
+      const normalized = channel === "PHONE" ? identifier.replace(/[\s-]/g, "") : identifier.trim().toLowerCase();
+      const { data } = await api.post("/auth/register", {
+        channel,
+        identifier: normalized,
+        email: channel === "EMAIL" ? normalized : undefined,
+        phone: channel === "PHONE" ? normalized : undefined,
+        password,
+        full_name: fullName.trim(),
         date_of_birth: dob,
-        phone,
+        country,
       });
-      setDone(true);
-    } catch (err) {
-      toast.error(errMsg(err));
+      toast.success(data?.message || "Verification code sent");
+      navigate("/verify", {
+        state: {
+          channel,
+          identifier: normalized,
+          destinationMasked: data?.destination_masked,
+          resendAfter: data?.resend_after_seconds,
+        },
+      });
+    } catch (error) {
+      toast.error(errMsg(error));
     } finally {
       setBusy(false);
     }
   };
 
-  if (done) {
-    return (
-      <AuthShell title="Request submitted" subtitle="You are one step away from the lounge.">
-        <div data-testid="signup-success-card" className="rounded-2xl border border-[hsl(var(--emerald)/0.4)] bg-[hsl(var(--emerald)/0.1)] p-5 text-center space-y-3">
-          <CheckCircle2 className="h-10 w-10 mx-auto text-[hsl(var(--emerald))]" />
-          <p className="font-semibold text-white">Thanks, {fullName.split(" ")[0]}!</p>
-          <p className="text-sm text-white/65 leading-relaxed">
-            The admin will verify your details and share your unique <span className="text-primary font-semibold">Login ID and password</span> with you.
-            Once you receive them, log in below.
-          </p>
-        </div>
-        <Button asChild data-testid="signup-success-login-button" className="w-full h-12 rounded-xl text-base font-bold mt-5">
-          <Link to="/login">Go to log in</Link>
-        </Button>
-      </AuthShell>
-    );
-  }
-
   return (
-    <AuthShell title="Request an account" subtitle="The admin verifies every player and assigns your unique Login ID and password.">
+    <AuthShell title="Create your account" subtitle="Choose one secure contact method. We will send a one-time verification code.">
+      <div className="grid grid-cols-2 gap-2 mb-5" role="tablist" aria-label="Sign-up method">
+        {CHANNELS.map(({ key, label, icon: Icon }) => {
+          const available = registrationChannelAvailable(capabilities, key);
+          return <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={channel === key}
+              aria-disabled={capabilitiesLoading || !available}
+              disabled={capabilitiesLoading || !available}
+              data-testid={`register-channel-${key.toLowerCase()}`}
+              onClick={() => { setChannel(key); setIdentifier(""); }}
+              className={`h-11 rounded-xl border flex items-center justify-center gap-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${channel === key && available ? "border-primary/55 bg-primary/12 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}
+            >
+              <Icon className="h-4 w-4" /> {label}
+            </button>;
+        })}
+      </div>
+
+      {!capabilitiesLoading && !registrationAvailable && <div data-testid="registration-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><span><strong>Registration is temporarily unavailable.</strong> Email and mobile verification delivery are not currently ready. Please try again later.</span></div>}
+
       <form onSubmit={submit} className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="fullName">Full name</Label>
+        <Field label="Full name" htmlFor="reg-name">
+          <Input id="reg-name" required minLength={2} maxLength={64} autoComplete="name" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+        </Field>
+        <Field label={channel === "EMAIL" ? "Email address" : "Mobile number with country code"} htmlFor="reg-contact">
           <Input
-            id="fullName"
-            data-testid="signup-fullname-input"
-            type="text"
+            id="reg-contact"
+            data-testid="register-identifier-input"
+            type={channel === "EMAIL" ? "email" : "tel"}
+            inputMode={channel === "EMAIL" ? "email" : "tel"}
+            autoComplete={channel === "EMAIL" ? "email" : "tel"}
             required
-            minLength={2}
-            maxLength={64}
-            autoComplete="name"
-            placeholder="Your full name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            placeholder={channel === "EMAIL" ? "you@example.com" : "+91 98765 43210"}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             className="h-12 rounded-xl bg-white/5 border-white/12"
           />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Date of birth" htmlFor="reg-dob">
+            <Input id="reg-dob" type="date" required max={new Date().toISOString().slice(0, 10)} value={dob} onChange={(e) => setDob(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+          </Field>
+          <Field label="Country" htmlFor="reg-country">
+            <Input id="reg-country" required value={country} onChange={(e) => setCountry(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+          </Field>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="email">Email ID</Label>
-          <Input
-            id="email"
-            data-testid="signup-email-input"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="h-12 rounded-xl bg-white/5 border-white/12"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="dob">Date of birth</Label>
-          <Input
-            id="dob"
-            data-testid="signup-dob-input"
-            type="date"
-            required
-            max={new Date().toISOString().slice(0, 10)}
-            value={dob}
-            onChange={(e) => setDob(e.target.value)}
-            className="h-12 rounded-xl bg-white/5 border-white/12"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="phone">Phone number (with country code)</Label>
-          <Input
-            id="phone"
-            data-testid="signup-phone-input"
-            type="tel"
-            required
-            autoComplete="tel"
-            placeholder="+91 98765 43210"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="h-12 rounded-xl bg-white/5 border-white/12"
-          />
-          <p className="text-[11px] text-white/40">Include your country code, e.g. +91, +1, +44</p>
-        </div>
-        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
-          {busy ? "Submitting…" : "Submit request"}
+        <Field label="Password" htmlFor="reg-password">
+          <Input id="reg-password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+        </Field>
+        <Field label="Confirm password" htmlFor="reg-confirm">
+          <Input id="reg-confirm" type="password" autoComplete="new-password" required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+        </Field>
+        <p className="text-[11px] text-white/45 leading-relaxed">You will re-enter this password with the OTP. It is not saved until your contact ownership is verified.</p>
+        <p className="text-[11px] text-white/45 leading-relaxed">Deposits, gameplay and withdrawals remain unavailable until required identity, age and jurisdiction checks are complete.</p>
+        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
+          {capabilitiesLoading ? "Checking availability…" : busy ? "Creating account…" : registrationAvailable ? "Create account & verify" : "Registration temporarily unavailable"}
         </Button>
       </form>
-      <p className="mt-5 text-center text-sm text-white/60">
-        Already have your Login ID?{" "}
-        <Link data-testid="register-login-link" to="/login" className="text-primary font-semibold hover:underline">
-          Log in
-        </Link>
-      </p>
+      <p className="mt-5 text-center text-sm text-white/60">Already registered? <Link to="/login" className="text-primary font-semibold hover:underline">Log in</Link></p>
     </AuthShell>
   );
+}
+
+function Field({ label, htmlFor, children }) {
+  return <div className="space-y-1.5"><Label htmlFor={htmlFor}>{label}</Label>{children}</div>;
 }

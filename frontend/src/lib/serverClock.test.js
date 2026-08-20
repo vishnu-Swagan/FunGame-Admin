@@ -1,4 +1,9 @@
-import { CLIENT_BETTING_GUARD_SECONDS, secondsUntil, serverSyncedDeadline } from "./serverClock";
+import {
+  bettingControlsOpen,
+  CLIENT_BETTING_GUARD_SECONDS,
+  secondsUntil,
+  serverSyncedDeadline,
+} from "./serverClock";
 
 test("server deadline compensates with the request midpoint", () => {
   expect(serverSyncedDeadline({
@@ -49,4 +54,8 @@ test("server deadline falls back to receipt time without a valid server clock", 
 
 test("client closes before the backend mutation guard", () => {
   expect(CLIENT_BETTING_GUARD_SECONDS).toBeGreaterThan(0.4);
+  expect(bettingControlsOpen("BETTING", 0.501)).toBe(true);
+  expect(bettingControlsOpen("BETTING", 0.5)).toBe(false);
+  expect(bettingControlsOpen("BETTING", 0.401)).toBe(false);
+  expect(bettingControlsOpen("REVEAL", 12)).toBe(false);
 });

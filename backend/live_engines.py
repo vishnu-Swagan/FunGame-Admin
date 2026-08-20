@@ -26,11 +26,12 @@ def bad(msg):
 # ---------------- Cycle configuration (seconds) ----------------
 # phase order: BETTING -> REVEAL (animation) -> RESULT, then next round
 #
-# Most legacy tables retain their full-minute betting window. Keno is a strict
-# one-minute broadcast cycle: bets are accepted for the first 30 seconds, then
-# the shared draw has 20 seconds and the settled result remains visible for 10.
-# Keeping all three durations here means the API, client animation and epoch
-# round number are derived from one server-owned schedule.
+# Most legacy tables retain their full-minute betting window. Every shortened
+# table opts out explicitly below: Teen Patti and Poker use 30-second betting
+# windows, Keno and Andar Bahar divide a one-minute broadcast round, and Pappu
+# Pictures keeps its fast portrait cadence. Keeping all three durations here
+# means the API, client animation and epoch round number come from one
+# server-owned schedule.
 BET_SECONDS = 60
 # Dedicated American Roulette routes consume this schedule. It lives beside the
 # other live schedules so timing contract tests do not need a database-backed
@@ -89,8 +90,12 @@ LIVE_GAMES = {
     "fun-target":        {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "pick"},
     "super-golden-wheel": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
     "checker":           {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "sides"},
-    "teen-patti":        {"bet": BET_SECONDS, "reveal": 12, "result": 6, "kind": "sides"},
-    "poker":             {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "sides"},
+    # The card-duel tables accept bets for exactly 30 seconds. The extra time is
+    # moved into the settled-result hold so their historical 78s/80s cycle
+    # lengths (and therefore epoch-derived round IDs) remain continuous across
+    # deployment. Deal animations still use their original 12s/14s windows.
+    "teen-patti":        {"bet": 30, "reveal": 12, "result": 36, "kind": "sides"},
+    "poker":             {"bet": 30, "reveal": 14, "result": 36, "kind": "sides"},
     "no-hold":           {"bet": BET_SECONDS, "reveal": 8, "result": 5, "kind": "stake"},
     "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
     # One visible 60-second broadcast round: bets close at 00:30, leaving a

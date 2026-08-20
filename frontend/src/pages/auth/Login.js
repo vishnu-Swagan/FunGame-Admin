@@ -12,7 +12,7 @@ import { AuthShell } from "@/pages/auth/AuthShell";
 export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -30,19 +30,30 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/login", { email, password });
+      // `email` keeps older API deployments compatible during the rollout.
+      const { data } = await api.post("/auth/login", { identifier, email: identifier, password });
+      if (data.user.role === "ADMIN") {
+        toast.info("Administrators sign in on the dedicated operator console.");
+        window.location.assign("https://crm.chakri.casino/admin/login");
+        return;
+      }
       login(data.access_token, data.user);
       toast.success(`Welcome back${data.user.display_name ? ", " + data.user.display_name : ""}!`);
       navigate(routeForUser(data.user), { replace: true });
     } catch (err) {
       const detail = err?.response?.data?.detail;
-      if (detail?.code === "EMAIL_NOT_VERIFIED") {
-        toast.info("Please verify your email first");
+      if (["EMAIL_NOT_VERIFIED", "CONTACT_NOT_VERIFIED"].includes(detail?.code)) {
+        const channel = detail?.channel || (identifier.includes("@") ? "EMAIL" : "PHONE");
+        toast.info(`Please verify your ${channel === "PHONE" ? "mobile number" : "email"} first`);
         try {
-          await api.post("/auth/resend-verification", { email });
-          navigate("/verify-email", { state: { email } });
+          const { data } = await api.post("/auth/resend-otp", {
+            channel,
+            identifier,
+            email: identifier,
+          });
+          navigate("/verify", { state: { channel, identifier, resendAfter: data?.resend_after_seconds } });
         } catch (_e) {
-          navigate("/verify-email", { state: { email } });
+          navigate("/verify", { state: { channel, identifier } });
         }
       } else {
         toast.error(errMsg(err));
@@ -62,16 +73,16 @@ export default function Login() {
       )}
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="email">Login ID or Email</Label>
+          <Label htmlFor="identifier">Email, mobile number, or Login ID</Label>
           <Input
-            id="email"
+            id="identifier"
             data-testid="login-email-input"
             type="text"
             required
             autoComplete="username"
-            placeholder="your Login ID or email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            placeholder="email, +91 mobile, or GK Login ID"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
             className="h-12 rounded-xl bg-white/5 border-white/12"
           />
         </div>
@@ -102,7 +113,7 @@ export default function Login() {
         <Link data-testid="login-forgot-link" to="/forgot-password" className="text-white/60 hover:text-white/85">
           Forgot password?
         </Link>
-        <span className="text-white/40">Accounts are issued by the operator</span>
+        <Link to="/register" className="text-white/60 hover:text-white/85">Create account</Link>
       </div>
     </AuthShell>
   );

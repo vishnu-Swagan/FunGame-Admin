@@ -21,6 +21,7 @@ from live_engines import (
     ROULETTE_TIMING, betting_mutation_open, fixed_cycle_clock,
     roulette_history_max_round,
 )
+from game_access import require_playable_game
 
 logger = logging.getLogger('gameplay')
 router = APIRouter(tags=['gameplay'])
@@ -49,16 +50,6 @@ class PlayRequest(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
-async def _get_enabled_game(slug: str):
-    game = await db.games.find_one({'slug': slug})
-    if not game:
-        raise HTTPException(status_code=404, detail='Game not found')
-    if game.get('status') != 'ENABLED':
-        status = game.get('status', 'DISABLED')
-        raise HTTPException(status_code=409, detail={'code': status, 'message': f"{game['name']} is currently not playable ({status.replace('_', ' ').title()})."})
-    return game
-
-
 async def _fresh_balance(user_id: str):
     u = await db.users.find_one({'id': user_id})
     return u.get('chip_balance', 0) if u else 0
@@ -67,7 +58,7 @@ async def _fresh_balance(user_id: str):
 # ---------------- Legacy instant play: everything is live now ----------------
 @router.post('/games/{slug}/play')
 async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_active_player)):
-    game = await _get_enabled_game(slug)
+    game = await require_playable_game(slug)
     raise HTTPException(status_code=409, detail={
         'code': 'LIVE_ROUNDS',
         'message': f"{game['name']} runs in universal live synchronized rounds. Join the table from the game screen.",
@@ -189,6 +180,7 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
 
 @router.get('/games/fun-roulette/state')
 async def roulette_state(user: dict = Depends(require_active_player)):
+    await require_playable_game('fun-roulette')
     clock_sampled_at = time.time()
     round_number, phase, phase_ends_in, next_round_in = _roulette_clock(clock_sampled_at)
     phase_offset = (BETTING_SECONDS if phase == 'BETTING'
@@ -242,6 +234,7 @@ async def roulette_state(user: dict = Depends(require_active_player)):
 
 @router.post('/games/fun-roulette/bets')
 async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_active_player)):
+    await require_playable_game('fun-roulette')
     round_number, _ = _require_roulette_betting()
     if body.amount < MIN_BET:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
@@ -285,6 +278,7 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
 
 @router.post('/games/fun-roulette/bets/clear')
 async def roulette_clear_bets(user: dict = Depends(require_active_player)):
+    await require_playable_game('fun-roulette')
     round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
     open_bets = await db.roulette_bets.find({'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}).to_list(100)
     _require_roulette_betting(expected_round=round_number, message='Bets are locked for this round.')
@@ -302,6 +296,7 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
 @router.post('/games/fun-roulette/bets/undo')
 async def roulette_undo_bet(user: dict = Depends(require_active_player)):
     """Undo the most-recently placed chip this round (refund just that one bet)."""
+    await require_playable_game('fun-roulette')
     round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
     last = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}
@@ -330,7 +325,7 @@ async def recent_game_winners(slug: str, user: dict = Depends(require_active_pla
     Values come only from settled game-round records. Raw user identifiers are
     intentionally never serialized; the frontend receives a masked fragment.
     """
-    await _get_enabled_game(slug)
+    await require_playable_game(slug)
     rows = await db.game_rounds.find(
         {'slug': slug, 'status': 'SETTLED', 'payout': {'$gt': 0}},
         {
@@ -356,6 +351,7 @@ async def recent_game_winners(slug: str, user: dict = Depends(require_active_pla
 # ---------------- Round history ----------------
 @router.get('/games/{slug}/history')
 async def game_history(slug: str, user: dict = Depends(require_active_player)):
+    await require_playable_game(slug)
     rounds = await db.game_rounds.find(
         {'user_id': user['id'], 'slug': slug, 'status': 'SETTLED'}, {'_id': 0, 'crash_point': 0, 'deck': 0, 'cards': 0}
     ).sort('created_at', -1).to_list(15)

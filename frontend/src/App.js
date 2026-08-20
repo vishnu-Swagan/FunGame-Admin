@@ -1,16 +1,18 @@
 import "@/App.css";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
 import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
-import { PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner } from "@/components/RouteGuards";
+import { ADMIN_PERMISSIONS, PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner, RequirePermission } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
 
 // Auth
 import Welcome from "@/pages/auth/Welcome";
+import Register from "@/pages/auth/Register";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import Login from "@/pages/auth/Login";
 import AdminLogin from "@/pages/auth/AdminLogin";
@@ -28,6 +30,8 @@ import GameDetail from "@/pages/app/GameDetail";
 import SearchPage from "@/pages/app/SearchPage";
 import { Favorites, Recent } from "@/pages/app/FavoritesRecent";
 import ChipsPage from "@/pages/app/ChipsPage";
+import BankDetailsPage from "@/pages/app/wallet/BankDetailsPage";
+import DepositReturn from "@/pages/app/wallet/DepositReturn";
 import Announcements from "@/pages/app/Announcements";
 import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
@@ -58,6 +62,7 @@ import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminPayouts from "@/pages/admin/AdminPayouts";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
+import { AdminDeposits, AdminWithdrawals, AdminPaymentEvents, AdminWalletLedger, AdminPaymentAudit, AdminPaymentSettings, AdminKyc } from "@/pages/admin/AdminPaymentPages";
 
 // Partner portal (distributors)
 import PartnerLayout from "@/pages/partner/PartnerLayout";
@@ -81,6 +86,13 @@ function FallbackRedirect() {
   return <Navigate to={routeForUser(user)} replace />;
 }
 
+function OperatorConsoleRedirect() {
+  useEffect(() => {
+    window.location.replace("https://crm.chakri.casino/admin/login");
+  }, []);
+  return <LoadingScreen />;
+}
+
 function AdminConsoleApp() {
   return (
     <BrowserRouter>
@@ -93,6 +105,13 @@ function AdminConsoleApp() {
             <Route path="signups" element={<AdminSignups />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="kyc" element={<RequirePermission permission={ADMIN_PERMISSIONS.KYC_VIEW}><AdminKyc /></RequirePermission>} />
+            <Route path="deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
+            <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
+            <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<AdminDistributors />} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="payouts" element={<AdminPayouts />} />
@@ -127,12 +146,13 @@ function PlayerApp() {
           {/* Public / auth */}
           <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
           <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
-          {/* Signup removed — accounts are provisioned by the admin. Old links go to login. */}
-          <Route path="/register" element={<Navigate to="/login" replace />} />
+          <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+          <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
-          {/* Private operator sign-in — separate, unlinked admin URL */}
-          <Route path="/gk-admin-portal" element={<PublicOnly><AdminLogin /></PublicOnly>} />
+          {/* Operator UI is isolated on the dedicated CRM origin. */}
+          <Route path="/gk-admin-portal" element={<OperatorConsoleRedirect />} />
+          <Route path="/admin/*" element={<OperatorConsoleRedirect />} />
           <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
 
           {/* Onboarding */}
@@ -157,11 +177,17 @@ function PlayerApp() {
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/recent" element={<Recent />} />
             <Route path="/chips" element={<ChipsPage />} />
-            <Route path="/chips/request" element={<ChipsPage />} />
-            <Route path="/chips/history" element={<ChipsPage />} />
+            <Route path="/chips/deposit" element={<ChipsPage />} />
+            <Route path="/chips/deposit/return" element={<DepositReturn />} />
+            <Route path="/chips/deposit/return/:depositId" element={<DepositReturn />} />
+            <Route path="/chips/withdraw" element={<ChipsPage />} />
+            <Route path="/chips/activity" element={<ChipsPage />} />
+            <Route path="/chips/request" element={<Navigate to="/chips/deposit" replace />} />
+            <Route path="/chips/history" element={<Navigate to="/chips/activity" replace />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/profile/bank-details" element={<BankDetailsPage />} />
             <Route path="/security" element={<Security />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
@@ -178,22 +204,6 @@ function PlayerApp() {
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/offline" element={<Offline />} />
           <Route path="/update-required" element={<UpdateRequired />} />
-
-          {/* Admin */}
-          <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="signups" element={<AdminSignups />} />
-            <Route path="users" element={<AdminUsers />} />
-            <Route path="chip-requests" element={<AdminChipRequests />} />
-            <Route path="distributors" element={<AdminDistributors />} />
-            <Route path="commission" element={<AdminCommission />} />
-            <Route path="payouts" element={<AdminPayouts />} />
-            <Route path="compliance" element={<AdminCompliance />} />
-            <Route path="support" element={<AdminSupport />} />
-            <Route path="games" element={<AdminGames />} />
-            <Route path="announcements" element={<AdminAnnouncements />} />
-            <Route path="settings" element={<AdminSettings />} />
-          </Route>
 
           {/* Partner portal — distributors only; no wallet, no games */}
           <Route path="/partner" element={<RequirePartner><PartnerLayout /></RequirePartner>}>

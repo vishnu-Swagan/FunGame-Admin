@@ -68,7 +68,7 @@ export default function AdminPayouts() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="font-display text-2xl text-white flex items-center gap-2">
-            <Banknote className="h-5 w-5 text-primary" /> Payouts
+            <Banknote className="h-5 w-5 text-primary" /> Distributor Payouts
           </h1>
           <p className="text-xs text-white/55 mt-1">
             Commission inside the holdback period, or under the minimum, stays accrued

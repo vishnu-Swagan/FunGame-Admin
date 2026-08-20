@@ -1,17 +1,27 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Sparkles, ShieldCheck, Coins, Gamepad2 } from "lucide-react";
+import { AlertTriangle, Sparkles, ShieldCheck, Coins, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclaimer } from "@/components/common";
+import { useAuthCapabilities } from "@/lib/authCapabilities";
 
 const FEATURES = [
-  { icon: Gamepad2, title: "20 original games", text: "Aviator, Teen Patti, American Roulette and more — all in production." },
-  { icon: Coins, title: "Play chips only", text: "No payments or withdrawals. Pure amusement." },
-  { icon: ShieldCheck, title: "Members only", text: "Accounts are issued by the operator — log in with the Login ID and password you were given." },
+  { icon: Gamepad2, title: "Live casino games", text: "Play the live tables now and preview the premium games coming next." },
+  { icon: Coins, title: "One chips wallet", text: "Add chips in INR and follow every deposit or withdrawal from your dashboard." },
+  { icon: ShieldCheck, title: "Verified accounts", text: "Sign up securely with your email address or mobile number." },
 ];
 
 export default function Welcome() {
   const navigate = useNavigate();
+  const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
+  const registrationAvailable = capabilities.registration_enabled;
+  const channelSummary = capabilities.email_registration && capabilities.phone_registration
+    ? "Email and mobile verification are available."
+    : capabilities.email_registration
+      ? "Email verification is available."
+      : capabilities.phone_registration
+        ? "Mobile verification is available."
+        : "Registration verification is temporarily unavailable.";
   return (
     <div className="App fg-noise min-h-dvh bg-background relative overflow-hidden">
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[220px] pointer-events-none" />
@@ -27,7 +37,7 @@ export default function Welcome() {
               Chakri<span className="text-primary">.Casino</span>
             </h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
-              A premium play-chip amusement lounge. 20 original games, one glowing midnight lobby.
+              Premium chip-based casino games in one glowing midnight lobby.
             </p>
             <Disclaimer className="mt-3" />
           </motion.div>
@@ -54,11 +64,15 @@ export default function Welcome() {
         </div>
 
         <div className="space-y-3 pt-8">
+          {!capabilitiesLoading && !registrationAvailable && <div data-testid="welcome-registration-unavailable" className="flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><span><strong>Registration is temporarily unavailable.</strong> Existing users can still log in.</span></div>}
+          <Button data-testid="welcome-register-button" disabled={capabilitiesLoading || !registrationAvailable} onClick={() => navigate("/register")} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
+            {capabilitiesLoading ? "Checking registration…" : registrationAvailable ? "Create account" : "Registration temporarily unavailable"}
+          </Button>
           <Button data-testid="welcome-login-button" onClick={() => navigate("/login")} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">
-            Log in
+            Log in instead
           </Button>
           <p className="text-center text-xs text-white/45">
-            No account? Ask the operator to create one for you.
+            {capabilitiesLoading ? "Checking verification availability…" : channelSummary}
           </p>
         </div>
       </div>

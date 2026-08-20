@@ -95,6 +95,10 @@ async def main():
     per_country = {**allow, 'min_age_by_country': {'GB': 21}}
     T("a per-country minimum wins",   C.min_age_for(per_country, 'GB') == 21)
     T("others keep the default",      C.min_age_for(per_country, 'IE') == 18)
+    T("a corrupt default cannot lower the legal floor",
+      C.min_age_for({'min_age': 16}, 'GB') == 18)
+    T("a corrupt country override cannot lower the legal floor",
+      C.min_age_for({'min_age': 18, 'min_age_by_country': {'GB': 16}}, 'GB') == 18)
 
     ok, code, _ = await C.check_eligibility('United Kingdom', just18)
     T("eligible passes",              ok)
@@ -115,6 +119,9 @@ async def main():
                                       and C.DEFAULTS['enforce_market_on_login'] is False)
     T("a nonsense mode is refused",   await refused(C.set_config({'market_mode': 'MAYBE'}, 'a'), 'mode'))
     T("an absurd age is refused",     await refused(C.set_config({'min_age': 40}, 'a'), 'between'))
+    T("an under-18 default is refused", await refused(C.set_config({'min_age': 16}, 'a'), 'between 18'))
+    T("an under-18 country override is refused",
+      await refused(C.set_config({'min_age_by_country': {'GB': 16}}, 'a'), 'between 18'))
     cfg = await C.set_config({'markets': ['gb', 'United Kingdom', 'ie']}, 'admin')
     T("markets are folded and unique", cfg['markets'] == ['GB', 'IE'])
 

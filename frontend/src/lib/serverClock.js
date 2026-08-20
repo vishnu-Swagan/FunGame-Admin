@@ -47,3 +47,13 @@ export function secondsUntil(deadlineMs, nowMs = Date.now()) {
 // time to reach it instead of showing a control that is virtually guaranteed
 // to be rejected.
 export const CLIENT_BETTING_GUARD_SECONDS = 0.5;
+
+/** Reactive UI predicate matching the stricter client-side betting cutoff. */
+export function bettingControlsOpen(
+  phase,
+  secondsLeft,
+  guardSeconds = CLIENT_BETTING_GUARD_SECONDS
+) {
+  return phase === "BETTING"
+    && Number(secondsLeft) > Math.max(0, Number(guardSeconds) || 0);
+}

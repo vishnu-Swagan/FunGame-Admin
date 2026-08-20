@@ -1,13 +1,48 @@
 """Pydantic request/response models for Chakri.Casino API."""
 import re
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 from typing import Optional, List
 
 
 # ---------- Auth ----------
+def _consistent_identity_values(*values):
+    supplied = [str(value).strip() for value in values if value is not None]
+    if not supplied:
+        raise ValueError('Provide an email address or E.164 phone number')
+    normalized = {re.sub(r'[\s().-]+', '', value).casefold() for value in supplied}
+    if len(normalized) != 1:
+        raise ValueError('Identity fields must refer to the same email address or phone number')
+
+
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    # ``email`` stays for existing clients; new clients may use the neutral
+    # ``identity`` field or an E.164 ``phone`` value.
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    channel: Optional[str] = None
+    full_name: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    date_of_birth: Optional[str] = None
+    country: Optional[str] = Field(default=None, max_length=64)
     password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode='after')
+    def exactly_one_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        if self.channel is not None and self.channel.upper() not in ('EMAIL', 'PHONE', 'SMS'):
+            raise ValueError('Channel must be EMAIL or PHONE')
+        return self
+
+    @field_validator('phone')
+    @classmethod
+    def register_phone_e164(cls, value):
+        if value is None:
+            return None
+        cleaned = re.sub(r'[\s().-]+', '', value)
+        if not re.fullmatch(r'\+[1-9]\d{7,14}', cleaned):
+            raise ValueError('Phone must use E.164 format, e.g. +14155552671')
+        return cleaned
 
 
 class SignupRequestCreate(BaseModel):
@@ -29,7 +64,7 @@ class SignupRequestCreate(BaseModel):
     @classmethod
     def phone_with_country_code(cls, v):
         cleaned = v.strip().replace(' ', '').replace('-', '')
-        if not re.fullmatch(r'\+\d{6,15}', cleaned):
+        if not re.fullmatch(r'\+[1-9]\d{7,14}', cleaned):
             raise ValueError('Phone must include country code, e.g. +14155552671')
         return cleaned
 
@@ -79,31 +114,83 @@ class AdminCreateUser(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
-    email: EmailStr
-    code: str = Field(min_length=4, max_length=8)
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    channel: Optional[str] = None
+    challenge_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
+    verification_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
+    code: str = Field(pattern=r'^\d{6}$')
+    # Contact ownership and the chosen password are committed together. The
+    # password supplied before OTP proof is deliberately never persisted.
+    password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode='after')
+    def verification_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        return self
 
 
 class ResendVerificationRequest(BaseModel):
-    email: EmailStr
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    channel: Optional[str] = None
+    verification_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
+
+    @model_validator(mode='after')
+    def resend_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        return self
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=254)  # Login ID (username) or email
-    password: str
+    # ``email`` is the legacy Login ID/email field and intentionally remains a
+    # plain string because it also carries GK usernames.
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    password: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode='after')
+    def login_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        return self
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+
+    @model_validator(mode='after')
+    def forgot_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        return self
 
 
 class ResetPasswordRequest(BaseModel):
-    email: EmailStr
-    code: str
+    identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    challenge_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
+    verification_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
+    code: str = Field(pattern=r'^\d{6}$')
     new_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode='after')
+    def reset_identity(self):
+        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
+        return self
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)
 
 

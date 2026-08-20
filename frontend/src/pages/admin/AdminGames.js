@@ -7,8 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, errMsg } from "@/lib/api";
 import { GameArt } from "@/components/GameArt";
 import { PageTransition, GameStatusBadge } from "@/components/common";
+import { isReviewedGame } from "@/lib/gameAvailability";
 
-const STATUSES = ["COMING_SOON", "ENABLED", "DISABLED", "MAINTENANCE", "UPDATE_REQUIRED", "RETIRED"];
+const LIVE_STATUSES = ["COMING_SOON", "ENABLED", "MAINTENANCE"];
 
 export default function AdminGames() {
   const [games, setGames] = useState([]);
@@ -45,7 +46,7 @@ export default function AdminGames() {
     <PageTransition className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Games</h1>
-        <p className="text-sm text-white/55 mt-1">{games.length} registered · statuses are enforced by the server on every play attempt.</p>
+        <p className="text-sm text-white/55 mt-1">{games.length} registered · only the nine reviewed games can be made live; the server enforces every play attempt.</p>
       </div>
 
       {loading ? (
@@ -79,8 +80,8 @@ export default function AdminGames() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {STATUSES.map((s) => (
-                          <SelectItem key={s} value={s} className="text-xs">{s.replaceAll("_", " ")}</SelectItem>
+                        {(isReviewedGame(g) ? LIVE_STATUSES : ["COMING_SOON"]).map((s) => (
+                          <SelectItem key={s} value={s} className="text-xs">{s === "ENABLED" ? "LIVE" : s.replaceAll("_", " ")}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

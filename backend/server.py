@@ -1,6 +1,8 @@
-"""Chakri.Casino API — play-chip-only amusement platform backend.
+"""Chakri.Casino API.
 
-PLAY CHIPS ONLY. No payments, deposits, withdrawals or transfers exist.
+The deployed default remains play-chip-only. Financial routes are present but
+fail closed behind explicit readiness flags, reviewed source accounting, a
+transaction-capable database, and an installed real payment-provider adapter.
 """
 import os
 import time
@@ -14,7 +16,8 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from db import client, db
-from seed import enable_all_games_for_launch, run_seed
+from game_access import reconcile_game_availability
+from seed import run_seed
 import crm
 import revenue
 import commission
@@ -31,6 +34,9 @@ import routes_blackjack
 import routes_security
 import routes_migration_export
 import routes_game_settlement
+import routes_payments
+import financial_wallet
+from payment_providers import load_payment_provider
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,10 +79,35 @@ async def _aviator_keepalive():
         await asyncio.sleep(0.7)
 
 
-async def _migrate_gameplay_v1():
-    await db.games.update_many({'status': 'COMING_SOON'}, {'$set': {'status': 'ENABLED'}})
-    await db.system_config.update_one({'key': 'main'}, {'$set': {'gameplay_v1_migrated': True}})
-    logger.info('Gameplay v1 migration: all COMING_SOON games set to ENABLED')
+async def _financial_worker():
+    """Dormant-by-default outbox runner and bounded reconciliation loop."""
+    last_reconciliation = 0.0
+    while True:
+        try:
+            status = financial_wallet.financial_status()
+            if status['ready'] and status['features']['real_money']:
+                leader = await financial_wallet.acquire_financial_worker_lease(
+                    f'financial-{_WORKER_ID}', ttl_seconds=45,
+                )
+                if leader:
+                    provider = load_payment_provider()
+                    if status['features']['automatic_withdrawals']:
+                        outbox = await financial_wallet.process_outbox_batch(provider, limit=10)
+                        if any(outbox.values()):
+                            logger.info('financial outbox result: %s', outbox)
+                    current = time.monotonic()
+                    if current - last_reconciliation >= 60:
+                        result = await financial_wallet.reconcile_financial_records(
+                            provider, limit=50,
+                        )
+                        last_reconciliation = current
+                        if any(result.values()):
+                            logger.info('financial reconciliation result: %s', result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - worker retries; money remains held
+            logger.error('financial worker failed safely (%s)', type(exc).__name__)
+        await asyncio.sleep(3)
 
 
 async def _migrate_nocash_wording():
@@ -141,10 +172,6 @@ async def lifespan(app: FastAPI):
         logger.error('startup: could not read system_config (%s); skipping migrations', e)
         cfg = None
 
-    if cfg and not cfg.get('gameplay_v1_migrated'):
-        await step('migrate:gameplay_v1', _migrate_gameplay_v1())
-    if cfg and not cfg.get('all_games_live_v2'):
-        await step('migrate:all_games_live_v2', enable_all_games_for_launch())
     if cfg and not cfg.get('nocash_wording_stripped'):
         await step('migrate:nocash_wording', _migrate_nocash_wording())
 
@@ -159,10 +186,26 @@ async def lifespan(app: FastAPI):
     # separately reviewed Supabase game-settlement bridge is explicitly enabled.
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
 
+    # Payment indexes and transaction support are a hard readiness gate for
+    # money routes.  Unlike ordinary bootstrap steps this failure is retained
+    # by the financial module and makes /health return 503 whenever a payment
+    # flag was explicitly requested; no partially initialized money path opens.
+    financial = await financial_wallet.prepare_financial_core()
+    if financial_wallet.financial_flags_requested() and not financial['ready']:
+        logger.error('financial core requested but not ready: %s', financial['errors'])
+    # This is deliberately the final catalogue mutation at startup. Static API
+    # gates still fail closed if reconciliation itself cannot reach Mongo.
+    await step('games:reviewed-availability', reconcile_game_availability())
+
     keepalive = asyncio.create_task(_aviator_keepalive())
-    logger.info('Chakri.Casino ready - 21 games running universal 24/7 live rounds')
+    financial_worker = asyncio.create_task(_financial_worker())
+    logger.info(
+        'Chakri.Casino ready - nine reviewed games available; '
+        'remaining catalogue coming soon'
+    )
     yield
     keepalive.cancel()
+    financial_worker.cancel()
     client.close()
 
 
@@ -207,7 +250,13 @@ async def health():
         raise HTTPException(
             status_code=503, detail='Aviator configuration unavailable'
         ) from exc
-    return {'status': 'ok'}
+    financial = financial_wallet.financial_status()
+    if financial_wallet.financial_flags_requested() and not financial['ready']:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'FINANCIAL_NOT_READY', 'message': 'Financial services are not ready.'},
+        )
+    return {'status': 'ok', 'financial_ready': bool(financial['ready'])}
 
 
 api_router.include_router(routes_auth.router)
@@ -224,6 +273,8 @@ api_router.include_router(routes_security.router)
 # migration window is explicitly configured.  See routes_migration_export.py.
 api_router.include_router(routes_migration_export.router)
 api_router.include_router(routes_game_settlement.router)
+api_router.include_router(routes_payments.router)
+api_router.include_router(routes_payments.admin_router)
 app.include_router(api_router)
 
 # --- Security middleware ---

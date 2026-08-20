@@ -9,6 +9,8 @@ import logging
 from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
 from db import db
+from game_access import PLAYABLE_GAME_SLUGS, reconcile_game_availability
+from otp_service import ensure_identity_indexes, ensure_indexes as ensure_otp_indexes
 
 logger = logging.getLogger('seed')
 
@@ -90,47 +92,35 @@ GAMES = [
 
 
 async def enable_all_games_for_launch():
-    """One-time launch migration for the complete implemented game set.
-
-    Every slug in ``GAMES`` has a corresponding frontend play component and
-    backend game route.  Scoping the update to that reviewed set avoids
-    accidentally reviving retired or incomplete database records.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-    slugs = [game['slug'] for game in GAMES]
-    result = await db.games.update_many(
-        {'slug': {'$in': slugs}, 'status': {'$ne': 'ENABLED'}},
-        {'$set': {'status': 'ENABLED', 'updated_at': now}},
-    )
-    await db.system_config.update_one(
-        {'key': 'main'},
-        {'$set': {'all_games_live_v2': True, 'updated_at': now}},
-        upsert=True,
-    )
+    """Compatibility name for the reviewed-game availability migration."""
+    result = await reconcile_game_availability()
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!'},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.'}},
     )
     await db.announcements.update_one(
         {'title': '18 games are on the way'},
         {'$set': {
-            'title': 'All 21 games are live',
-            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+            'title': 'Nine reviewed games are live',
+            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'All 21 games are live',
-            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+            'title': 'Nine reviewed games are live',
+            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
-    logger.info('All implemented games enabled for launch: %s updated', result.modified_count)
-    return result.modified_count
+    logger.info(
+        'Reviewed game availability reconciled: %s enabled, %s coming soon',
+        result['enabled'], result['coming_soon'],
+    )
+    return result['enabled'] + result['coming_soon']
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.", "pinned": True},
-    {"title": "All 21 games are live", "body": "The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.", "pinned": False},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
+    {"title": "Nine reviewed games are live", "body": "Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
@@ -141,7 +131,6 @@ async def run_seed():
     # Unique guards must exist before any insert so concurrent seeders can't
     # create duplicates (they'll hit the index and no-op instead).
     await db.system_config.create_index('key', unique=True)
-    await db.users.create_index('email', unique=True)
 
     # System config
     if not await db.system_config.find_one({'key': 'main'}):
@@ -160,7 +149,8 @@ async def run_seed():
             docs.append({
                 'id': str(uuid.uuid4()), 'slug': g['slug'], 'name': g['name'],
                 'category': g['category'], 'tagline': g['tagline'], 'description': g['description'],
-                'status': 'COMING_SOON', 'featured': g['featured'], 'art': g['art'], 'order': i,
+                'status': 'ENABLED' if g['slug'] in PLAYABLE_GAME_SLUGS else 'COMING_SOON',
+                'featured': g['featured'], 'art': g['art'], 'order': i,
                 'created_at': now,
             })
         try:
@@ -178,11 +168,17 @@ async def run_seed():
                 {'$setOnInsert': {
                     'id': str(uuid.uuid4()), 'slug': slug, 'name': gm['name'],
                     'category': gm['category'], 'tagline': gm['tagline'], 'description': gm['description'],
-                    'status': 'ENABLED', 'featured': gm['featured'], 'art': gm['art'], 'order': order,
+                    'status': 'ENABLED' if slug in PLAYABLE_GAME_SLUGS else 'COMING_SOON',
+                    'featured': gm['featured'], 'art': gm['art'], 'order': order,
                     'created_at': now,
                 }},
                 upsert=True,
             )
+
+    # Enforce the immutable reviewed set before optional copy/index maintenance.
+    # This also marks the superseded broad migrations complete before server.py
+    # considers them, even if a later nonessential seed operation fails.
+    await reconcile_game_availability()
 
     # Upgrade the original catalogue title without overwriting an operator's
     # later custom name. The slug stays stable because live bets, history and
@@ -226,18 +222,17 @@ async def run_seed():
         except Exception as e:
             logger.info(f'announcements seed race (ok): {e}')
 
-    # Keep the live catalogue count accurate on databases whose launch
-    # migration already ran before Pappu Pictures was added.
+    # Replace stale broad-launch copy without deleting operator announcements.
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'All 21 games are live',
-            'body': 'The complete Chakri game catalogue is now enabled. Game status and availability update in real time from the server.',
+            'title': 'Nine reviewed games are live',
+            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
-        {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': '20 live games'}},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Complete onboarding, get approved, and explore all 21 live games.'}},
+        {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': 'live games'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.'}},
     )
 
     # Indexes (idempotent)
@@ -248,3 +243,5 @@ async def run_seed():
     await db.chip_transactions.create_index([('user_id', 1), ('created_at', -1)])
     await db.chip_requests.create_index([('user_id', 1), ('created_at', -1)])
     await db.notifications.create_index([('user_id', 1), ('created_at', -1)])
+    await ensure_identity_indexes()
+    await ensure_otp_indexes()

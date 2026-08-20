@@ -8,6 +8,7 @@ import { FitWidth } from "@/components/FitWidth";
 import { ResultBanner } from "@/components/play/ResultBanner";
 import { GameStage } from "@/components/play/GameStage";
 import { formatChips } from "@/components/common";
+import { bettingControlsOpen, CLIENT_BETTING_GUARD_SECONDS } from "@/lib/serverClock";
 
 /**
  * Teen Patti / Poker duel with a REAL dealing flow, driven entirely by the
@@ -54,7 +55,7 @@ const SeatRow = ({ label, seat, cards, hand, nCards, outcome, showHands, winner,
 
 export default function CardDuelGame({ game }) {
   const nCards = game.slug === "teen-patti" ? 3 : 5;
-  const { state, countdown, balance, betting, phase, outcome, result, history, placeBet, clearBets, myBets, myTotal, lastResults, placing, revealElapsed } =
+  const { state, countdown, balance, phase, outcome, result, history, placeBet, clearBets, bettingOpenNow, myBets, myTotal, lastResults, placing, revealElapsed } =
     useLiveRound(game.slug, {
       formatResult: (s) => {
         const push = s.bets.length > 0 && s.bets.every((b) => b.result === "push");
@@ -68,6 +69,7 @@ export default function CardDuelGame({ game }) {
   const [side, setSide] = useState(null);
   const [amount, setAmount] = useState(50);
   const options = state?.options || { player: 1.4, dealer: 1.4, tie: game.slug === "teen-patti" ? 6 : 15 };
+  const betting = bettingControlsOpen(phase, countdown, CLIENT_BETTING_GUARD_SECONDS);
 
   /* ---------- universal dealing timeline (monotonic server clock) ---------- */
   const elapsed = revealElapsed;
@@ -118,7 +120,9 @@ export default function CardDuelGame({ game }) {
               <button
                 key={s.id}
                 data-testid={`duel-side-${s.id}`}
-                onClick={() => setSide(s.id)}
+                onClick={() => {
+                  if (bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS)) setSide(s.id);
+                }}
                 disabled={!betting}
                 className={`relative rounded-xl border p-3 min-h-[60px] transition-[background-color,border-color] duration-150 ${side === s.id ? "bg-primary/12 border-primary/50" : "bg-white/5 border-white/10 hover:bg-white/10"} ${!betting ? "opacity-70" : ""}`}
               >
@@ -136,7 +140,12 @@ export default function CardDuelGame({ game }) {
           <LiveBetPanel
             amount={amount}
             setAmount={setAmount}
-            onPlace={() => side && placeBet(side, amount)}
+            onPlace={() => {
+              if (side && bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS)) {
+                return placeBet(side, amount);
+              }
+              return null;
+            }}
             betting={betting}
             placing={placing}
             disabled={!side}
@@ -145,7 +154,11 @@ export default function CardDuelGame({ game }) {
             hint="Player/Dealer pay 1.40x · a tie is a house win"
           />
           {betting && myBets.length > 0 && (
-            <button data-testid="live-clear-bets" onClick={clearBets} className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400">
+            <button
+              data-testid="live-clear-bets"
+              onClick={() => bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS) && clearBets()}
+              className="w-full text-[11px] font-bold text-red-400/85 hover:text-red-400"
+            >
               Clear my bets (refund)
             </button>
           )}

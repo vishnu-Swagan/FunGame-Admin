@@ -1,21 +1,29 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale } from "lucide-react";
+import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale, ArrowDownToLine, ArrowUpFromLine, Webhook, BookOpenCheck, ScrollText, SlidersHorizontal } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
 import { toast } from "sonner";
 import { ADMIN_LOGOUT_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
+import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
   { to: "/admin/signups", label: "Create User", icon: UserPlus, testId: "admin-nav-signups" },
   { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
+  { to: "/admin/kyc", label: "KYC Review", icon: ShieldCheck, permission: ADMIN_PERMISSIONS.KYC_VIEW, testId: "admin-nav-kyc" },
   { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
+  { to: "/admin/deposits", label: "Deposits", icon: ArrowDownToLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-deposits" },
+  { to: "/admin/withdrawals", label: "Withdrawals", icon: ArrowUpFromLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-withdrawals" },
+  { to: "/admin/payment-events", label: "Provider Events", icon: Webhook, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-payment-events" },
+  { to: "/admin/wallet-ledger", label: "Wallet Ledger", icon: BookOpenCheck, permission: ADMIN_PERMISSIONS.LEDGER_VIEW, testId: "admin-nav-wallet-ledger" },
+  { to: "/admin/payment-audit", label: "Payment Audit", icon: ScrollText, permission: ADMIN_PERMISSIONS.AUDIT_VIEW, testId: "admin-nav-payment-audit" },
+  { to: "/admin/payment-settings", label: "Payment Controls", icon: SlidersHorizontal, permission: ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE, testId: "admin-nav-payment-settings" },
   { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
   // The distributor CRM — the deck's sections 1, 4 and 5.
   { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
   { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
-  { to: "/admin/payouts", label: "Payouts", icon: Banknote, testId: "admin-nav-payouts" },
+  { to: "/admin/payouts", label: "Distributor Payouts", icon: Banknote, testId: "admin-nav-payouts" },
   { to: "/admin/compliance", label: "Compliance", icon: Scale, testId: "admin-nav-compliance" },
   { to: "/admin/games", label: "Games", icon: Gamepad2, testId: "admin-nav-games" },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, testId: "admin-nav-announcements" },
@@ -25,6 +33,7 @@ const NAV = [
 export default function AdminLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const visibleNav = NAV.filter((item) => !item.permission || hasPermission(user, item.permission));
 
   return (
     <div className="App fg-noise min-h-dvh bg-background">
@@ -76,7 +85,7 @@ export default function AdminLayout() {
         {/* Rail */}
         <aside className="col-span-12 lg:col-span-3">
           <nav className="fg-rail flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible -mx-4 px-4 lg:mx-0 lg:px-0" aria-label="Admin navigation">
-            {NAV.map(({ to, label, icon: Icon, end, testId }) => (
+            {visibleNav.map(({ to, label, icon: Icon, end, testId }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -92,7 +101,7 @@ export default function AdminLayout() {
               </NavLink>
             ))}
           </nav>
-          <p className="hidden lg:block mt-6 text-[11px] text-white/35 px-2">Signed in as {user?.email}</p>
+          <p className="hidden lg:block mt-6 text-[11px] text-white/35 px-2">Signed in as {user?.email || user?.phone || user?.username}</p>
         </aside>
 
         {/* Main */}

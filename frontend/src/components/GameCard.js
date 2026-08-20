@@ -2,28 +2,32 @@ import { useNavigate } from "react-router-dom";
 import { Heart } from "lucide-react";
 import { GameArt } from "@/components/GameArt";
 import { GameStatusBadge } from "@/components/common";
+import { gameStatusLabel, isGameEnabled, isReviewedGame } from "@/lib/gameAvailability";
 
 export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) => {
   const navigate = useNavigate();
   const wide = size === "rail";
+  const enabled = isGameEnabled(game);
+  const displayStatus = isReviewedGame(game) ? (game.status || "COMING_SOON") : "COMING_SOON";
 
   return (
     <div
       data-testid="game-card"
       role="button"
       tabIndex={0}
-      aria-label={`${game.name} — ${game.status.replaceAll("_", " ")}`}
+      aria-label={`${game.name} — ${gameStatusLabel(displayStatus)}`}
       onClick={() => navigate(`/games/${game.slug}`)}
       onKeyDown={(e) => e.key === "Enter" && navigate(`/games/${game.slug}`)}
       className={`group relative overflow-hidden rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.35)] cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45)] active:scale-[0.985] ${wide ? "w-[150px] shrink-0" : ""}`}
     >
       <GameArt game={game} className={`${wide ? "h-[110px]" : "h-[120px] sm:h-[140px]"} rounded-t-2xl`} glyphSize={wide ? "text-3xl" : "text-4xl"} />
 
-      {game.status !== "ENABLED" && (
-        <GameStatusBadge status={game.status} pulse={game.status === "COMING_SOON"} className="absolute top-2.5 left-2.5" />
-      )}
+      {!enabled && <>
+        <div className="absolute inset-x-0 top-0 h-[120px] sm:h-[140px] bg-black/30 pointer-events-none" aria-hidden="true" />
+        <GameStatusBadge status={displayStatus} pulse={displayStatus === "COMING_SOON"} className="absolute top-2.5 left-2.5" />
+      </>}
 
-      {onToggleFavorite && (
+      {onToggleFavorite && enabled && (
         <button
           data-testid="game-card-favorite-toggle"
           aria-label={isFavorite ? `Remove ${game.name} from favorites` : `Add ${game.name} to favorites`}

@@ -8,12 +8,14 @@ somebody needs when they have shut themselves out have to keep working after
 they have.
 """
 import logging
+import os
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 
 import compliance
 import ledger
-from auth_utils import get_current_user, require_admin
+from auth_utils import get_current_user, require_admin, require_recent_admin_step_up
 from db import db, serialize_doc
 from models import (LimitSet, ExclusionCreate, ComplianceConfigUpdate,
                     AgeVerify, AdminExclusion)
@@ -25,6 +27,53 @@ admin_router = APIRouter(prefix='/admin/compliance', tags=['admin compliance'])
 
 # Typing this exactly is the last chance to notice what is being agreed to.
 PERMANENT_PHRASE = 'CLOSE MY ACCOUNT PERMANENTLY'
+
+
+def _admin_permissions(admin: dict) -> set[str]:
+    # An explicitly empty canonical list means revoked. Only genuinely legacy
+    # records that lack the canonical field may fall back to `permissions`.
+    values = (
+        admin.get('admin_permissions')
+        if 'admin_permissions' in admin
+        else admin.get('permissions', [])
+    )
+    return {str(value).strip().upper() for value in (values or []) if value}
+
+
+def _require_kyc_review(admin: dict) -> None:
+    super_admin = str(admin.get('admin_role') or '').upper() == 'SUPER_ADMIN'
+    if not super_admin and 'KYC_REVIEW' not in _admin_permissions(admin):
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_PERMISSION_REQUIRED',
+            'message': 'Missing permission: KYC_REVIEW.',
+        })
+
+
+def _require_compliance_admin(admin: dict) -> None:
+    """Guard trust-changing responsible-play actions with one exact grant."""
+    super_admin = str(admin.get('admin_role') or '').upper() == 'SUPER_ADMIN'
+    if not super_admin and 'COMPLIANCE_ADMIN' not in _admin_permissions(admin):
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_PERMISSION_REQUIRED',
+            'message': 'Missing permission: COMPLIANCE_ADMIN.',
+        })
+    # A Super Admin may bypass the named grant, never the step-up ceremony.
+    require_recent_admin_step_up(admin)
+
+
+async def _transactional_audited_update(callback):
+    """A compliance trust change and its audit record commit together."""
+    try:
+        session_cm = await db.client.start_session()
+    except (AttributeError, NotImplementedError):
+        if (os.environ.get('APP_ENV') or '').strip().lower() == 'test':
+            return await callback(None)
+        raise HTTPException(status_code=503, detail={
+            'code': 'AUDITED_UPDATE_UNAVAILABLE',
+            'message': 'Audited compliance updates are temporarily unavailable.',
+        })
+    async with session_cm as session:
+        return await session.with_transaction(callback)
 
 
 async def _spend_summary(user_id):
@@ -141,13 +190,34 @@ async def get_config(admin: dict = Depends(require_admin)):
 
 @admin_router.patch('/config')
 async def patch_config(body: ComplianceConfigUpdate, admin: dict = Depends(require_admin)):
+    _require_compliance_admin(admin)
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if not patch:
         raise HTTPException(status_code=400, detail='Nothing to change')
-    try:
-        cfg = await compliance.set_config(patch, admin['id'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+    async def apply(session):
+        kwargs = {'session': session} if session is not None else {}
+        before = await compliance.get_config(session=session)
+        try:
+            cfg = await compliance.set_config(patch, admin['id'], session=session)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        changed = sorted(patch)
+        await db.financial_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'COMPLIANCE_CONFIG_CHANGED',
+            'target_type': 'COMPLIANCE_CONFIG',
+            'target_id': compliance.CONFIG_KEY,
+            'reason': 'Compliance configuration changed through the operator CRM.',
+            'before': {key: before.get(key) for key in changed},
+            'after': {key: cfg.get(key) for key in changed},
+            'metadata': {'changed_fields': changed},
+            'created_at': compliance.now(),
+        }, **kwargs)
+        return cfg
+
+    cfg = await _transactional_audited_update(apply)
     logger.info('compliance config changed by %s: %s', admin['id'], sorted(patch))
     return {'message': 'Compliance settings saved', 'config': cfg}
 
@@ -220,30 +290,135 @@ async def admin_exclude(user_id: str, body: AdminExclusion,
 
 @admin_router.post('/players/{user_id}/exclusion/lift')
 async def admin_lift(user_id: str, body: AdminExclusion, admin: dict = Depends(require_admin)):
-    try:
-        doc = await compliance.admin_lift(user_id, admin['id'], body.reason)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    _require_compliance_admin(admin)
+    reason = str(body.reason or '').strip()
+    if len(reason) < 5:
+        raise HTTPException(status_code=422, detail={
+            'code': 'AUDIT_REASON_REQUIRED',
+            'message': 'Record an audit reason of at least 5 characters.',
+        })
+
+    async def apply(session):
+        kwargs = {'session': session} if session is not None else {}
+        before = await db.exclusions.find_one(
+            {'user_id': user_id, 'status': 'ACTIVE'},
+            {'_id': 0},
+            sort=[('created_at', -1)],
+            **kwargs,
+        )
+        if not before:
+            raise HTTPException(status_code=400, detail='This account has no active exclusion')
+        try:
+            doc = await compliance.admin_lift(
+                user_id, admin['id'], reason, session=session)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        await db.financial_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'SELF_EXCLUSION_LIFTED',
+            'target_type': 'PLAYER',
+            'target_id': user_id,
+            'reason': reason,
+            'before': {
+                'exclusion_id': before.get('id'),
+                'status': before.get('status'),
+                'kind': before.get('kind'),
+                'ends_at': before.get('ends_at'),
+            },
+            'after': {
+                'exclusion_id': doc.get('id'),
+                'status': doc.get('status'),
+                'lifted_at': doc.get('lifted_at'),
+                'lifted_by': doc.get('lifted_by'),
+            },
+            'metadata': {'source': before.get('source')},
+            'created_at': compliance.now(),
+        }, **kwargs)
+        return doc
+
+    doc = await _transactional_audited_update(apply)
     return {'message': 'Exclusion lifted', 'exclusion': serialize_doc(doc)}
 
 
 @admin_router.post('/players/{user_id}/age-verify')
 async def verify_age(user_id: str, body: AgeVerify, admin: dict = Depends(require_admin)):
-    user = await db.users.find_one({'id': user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail='Player not found')
-    age = compliance.age_on(user.get('date_of_birth'))
-    if body.verified and age is None:
-        raise HTTPException(status_code=400, detail=(
-            'This account has no usable date of birth — record one before verifying it'))
-    await db.users.update_one({'id': user_id}, {'$set': {
-        'age_verified': bool(body.verified),
-        'age_verified_at': compliance.now_iso() if body.verified else None,
-        'age_verified_by': admin['id'] if body.verified else None,
-        'age_verified_note': body.note,
-    }})
-    return {'message': 'Age verified' if body.verified else 'Age verification withdrawn',
-            'age': age}
+    _require_kyc_review(admin)
+    require_recent_admin_step_up(admin)
+    reason = str(body.note or '').strip()
+    if len(reason) < 5:
+        raise HTTPException(status_code=422, detail={
+            'code': 'AUDIT_REASON_REQUIRED',
+            'message': 'Record an audit reason of at least 5 characters.',
+        })
+
+    async def apply(session):
+        kwargs = {'session': session} if session is not None else {}
+        user = await db.users.find_one({'id': user_id}, **kwargs)
+        if not user or user.get('role') != 'PLAYER':
+            raise HTTPException(status_code=404, detail='Player not found')
+        cfg = await db.compliance_config.find_one(
+            {'key': compliance.CONFIG_KEY}, {'_id': 0}, **kwargs,
+        )
+        cfg = {**compliance.DEFAULTS, **(cfg or {})}
+        country_code = compliance.normalise_country(user.get('country'))
+        age = compliance.age_on(user.get('date_of_birth'))
+        minimum = compliance.min_age_for(cfg, country_code or compliance.UNKNOWN)
+        if body.verified:
+            if not country_code:
+                raise HTTPException(status_code=400, detail={
+                    'code': 'COUNTRY_UNKNOWN',
+                    'message': 'Record a recognised country before verifying age.',
+                })
+            if age is None:
+                raise HTTPException(status_code=400, detail={
+                    'code': 'AGE_UNKNOWN',
+                    'message': 'Record a valid date of birth before verifying age.',
+                })
+            if age < minimum:
+                raise HTTPException(status_code=403, detail={
+                    'code': 'UNDERAGE',
+                    'message': f'The player must be at least {minimum}.',
+                })
+            if not compliance.market_allows(cfg, country_code):
+                raise HTTPException(status_code=403, detail={
+                    'code': 'MARKET_BLOCKED',
+                    'message': 'The registered country is outside the configured market.',
+                })
+
+        before = {
+            'age_verified': bool(user.get('age_verified')),
+            'age_verified_at': user.get('age_verified_at'),
+            'age_verified_by': user.get('age_verified_by'),
+            'age_verified_note': user.get('age_verified_note'),
+        }
+        after = {
+            'age_verified': bool(body.verified),
+            'age_verified_at': compliance.now_iso() if body.verified else None,
+            'age_verified_by': admin['id'] if body.verified else None,
+            'age_verified_note': reason,
+        }
+        await db.users.update_one({'id': user_id}, {'$set': after}, **kwargs)
+        await db.financial_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'AGE_VERIFIED' if body.verified else 'AGE_VERIFICATION_WITHDRAWN',
+            'target_type': 'PLAYER',
+            'target_id': user_id,
+            'reason': reason,
+            'before': before,
+            'after': after,
+            'metadata': {
+                'age': age, 'minimum_age': minimum, 'country_code': country_code,
+            },
+            'created_at': compliance.now(),
+        }, **kwargs)
+        return {
+            'message': 'Age verified' if body.verified else 'Age verification withdrawn',
+            'age': age,
+        }
+
+    return await _transactional_audited_update(apply)
 
 
 @admin_router.get('/players/{user_id}')
