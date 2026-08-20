@@ -5,10 +5,40 @@ from fastapi import HTTPException
 from game_engines import (AMERICAN_ORDER, ROULETTE_POCKETS, ROULETTE_SECTORS,
                           ROULETTE_RED, roulette_color, roulette_multiplier,
                           roulette_payout, LEGAL_INSIDE)
+from live_engines import ROULETTE_TIMING, betting_mutation_open, fixed_cycle_clock, roulette_history_max_round
 
 fail = []
 def ck(cond, msg):
     if not cond: fail.append(msg)
+
+# ---- the live broadcast clock ----
+ck(ROULETTE_TIMING == {"bet": 30, "spin": 20, "result": 10},
+   "roulette must run a 60s cycle with betting locked after 30s")
+ck(sum(ROULETTE_TIMING.values()) == 60, "roulette round must total exactly 60s")
+ck(roulette_history_max_round(800, "BETTING") == 799,
+   "current roulette round must stay out of history while betting")
+ck(roulette_history_max_round(800, "SPINNING") == 799,
+   "current roulette winner must stay out of history while spinning")
+ck(roulette_history_max_round(800, "RESULT") == 800,
+   "current roulette round should enter history only during result")
+ck(betting_mutation_open("BETTING", .41, 800, expected_round=800),
+   "roulette mutation guard should remain open above 0.4s")
+ck(not betting_mutation_open("BETTING", .40, 800, expected_round=800),
+   "roulette mutation guard must close at the 0.4s boundary")
+
+def roulette_clock(now):
+    return fixed_cycle_clock(now, 30, 20, 10, "SPINNING")
+
+for timestamp, expected in [
+    (29.99, (0, "BETTING", 0.01)),
+    (30.00, (0, "SPINNING", 20.0)),
+    (49.99, (0, "SPINNING", 0.01)),
+    (50.00, (0, "RESULT", 10.0)),
+    (59.99, (0, "RESULT", 0.01)),
+    (60.00, (1, "BETTING", 30.0)),
+]:
+    ck(roulette_clock(timestamp)[:3] == expected,
+       f"roulette clock boundary {timestamp:.2f} must be {expected}")
 
 # ---- the wheel itself ----
 ck(len(AMERICAN_ORDER) == 38, "wheel must have 38 pockets")
