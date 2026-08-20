@@ -57,11 +57,13 @@
   -webkit-mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
   mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
 }
-.ab-dealer-foreground { z-index: 3; transition: opacity 120ms linear; }
-.ab-dealer-foreground.is-hidden { opacity: 0; }
-.ab-dealer-video { z-index: 4; transition: opacity 180ms ease; }
-.ab-dealer-video.is-idle { opacity: 0; }
-.ab-dealer-video.is-active { opacity: 1; }
+.ab-dealer-foreground { z-index: 3; transition: none; }
+.ab-dealer-foreground.is-hidden { opacity: 0; visibility: hidden; }
+.ab-dealer-video { z-index: 4; transition: none; }
+/* Never cross-fade two generated hands. The shared poster is aligned behind
+   every take, so an atomic layer swap stays clean without duplicate shadows. */
+.ab-dealer-video.is-idle { opacity: 0; visibility: hidden; }
+.ab-dealer-video.is-active { opacity: 1; visibility: visible; }
 .ab-canvas { z-index: 10; pointer-events: none; }
 
 .ab-more-games {
