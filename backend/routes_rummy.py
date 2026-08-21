@@ -351,7 +351,7 @@ async def _start_round(room: dict, category: dict, session):
 async def _public_state(room: dict, requester_id: str, session=None):
     kwargs = _kwargs(session)
     seats = await db.rummy_seats.find(
-        {"room_id": room["id"]}, {"_id": 0, "user_id": 0, "room_id": 0, "round_id": 0}, **kwargs,
+        {"room_id": room["id"]}, {"_id": 0, "room_id": 0, "round_id": 0}, **kwargs,
     ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
     hands = await db.rummy_hands.find(
         {"room_id": room["id"], "round_id": room.get("round_id")},
@@ -366,6 +366,13 @@ async def _public_state(room: dict, requester_id: str, session=None):
         {"room_id": room["id"]}, {"_id": 0}, **kwargs,
     ).sort("created_at", -1).to_list(40)
     chat_rows.reverse()
+    public_chat_rows = [
+        {
+            key: value for key, value in row.items()
+            if key not in {"user_id", "room_id", "round_id"}
+        }
+        for row in chat_rows
+    ]
     remaining = None
     if room.get("state") == "TURN_ACTIVE" and room.get("turn_deadline"):
         remaining = max(0.0, round(float(room["turn_deadline"]) - _epoch(), 3))
@@ -429,7 +436,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
         "closedDeckCount": len(room.get("closed_deck", [])),
         "openDiscard": top_discard, "wildJoker": room.get("wild_joker"),
         "privateState": private, "result": room.get("result"),
-        "chat": serialize_doc(chat_rows),
+        "chat": serialize_doc(public_chat_rows),
         "shuffleProof": proof, "balance": int((user or {}).get("chip_balance", 0)),
     }
 

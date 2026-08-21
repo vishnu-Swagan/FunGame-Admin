@@ -507,19 +507,23 @@ class _Collection:
         self.rows = list(rows)
 
     def find(self, query, projection=None, **kwargs):
-        return _Cursor([row for row in self.rows if all(row.get(key) == value for key, value in query.items())])
+        rows = [row for row in self.rows if all(row.get(key) == value for key, value in query.items())]
+        if projection:
+            excluded = {key for key, value in projection.items() if value == 0}
+            rows = [{key: value for key, value in row.items() if key not in excluded} for row in rows]
+        return _Cursor(rows)
 
     async def find_one(self, query, projection=None, **kwargs):
         return next((dict(row) for row in self.rows if all(row.get(key) == value for key, value in query.items())), None)
 
 
 class _PrivacyDb:
-    def __init__(self, seats, hands, categories, users):
+    def __init__(self, seats, hands, categories, users, chat=None):
         self.rummy_seats = _Collection(seats)
         self.rummy_hands = _Collection(hands)
         self.rummy_categories = _Collection(categories)
         self.users = _Collection(users)
-        self.rummy_chat = _Collection([])
+        self.rummy_chat = _Collection(chat or [])
 
 
 def test_public_projection_contains_only_requesters_private_hand():
@@ -542,7 +546,15 @@ def test_public_projection_contains_only_requesters_private_hand():
         "wild_joker": deck[29], "wild_rank": 9,
         "shuffle_proof": {"seedCommitment": "commit", "deckHash": "hash", "shuffleVersion": "rummy-hmac-fy-v1"},
     }
-    fake = _PrivacyDb(seats, hands, [dict(rummy.RUMMY_CATEGORIES[0])], [{"id": "player-1", "chip_balance": 900}])
+    chat = [{
+        "id": "message-1", "room_id": "room-1", "round_id": "round-1",
+        "user_id": "player-2", "seatIndex": 1, "displayName": "Rival",
+        "body": "Good luck", "created_at": "2026-08-21T00:00:00+00:00",
+    }]
+    fake = _PrivacyDb(
+        seats, hands, [dict(rummy.RUMMY_CATEGORIES[0])],
+        [{"id": "player-1", "chip_balance": 900}], chat,
+    )
     original = routes_rummy.db
     routes_rummy.db = fake
     try:
@@ -553,7 +565,11 @@ def test_public_projection_contains_only_requesters_private_hand():
     encoded = json.dumps(payload)
     assert {card["id"] for card in payload["privateState"]["cards"]} == {card["id"] for card in own}
     assert payload["seats"][1]["cardCount"] == 13
+    assert payload["seats"][0]["status"] == "ACTIVE"
     assert all(card["id"] not in encoded for card in opponent)
+    assert "player-1" not in encoded
+    assert "player-2" not in encoded
+    assert payload["chat"][0]["body"] == "Good luck"
     assert "seedReveal" not in payload["shuffleProof"]
     assert len(payload["seats"]) == 5
     assert payload["seats"][4] == {"seatIndex": 4, "status": "EMPTY", "cardCount": 0}
