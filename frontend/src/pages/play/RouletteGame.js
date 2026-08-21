@@ -244,8 +244,10 @@ export default function RouletteGame({ game }) {
       }
       const w = el.clientWidth;
       if (!w) return;
+      const parentHeight = el.parentElement?.clientHeight;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
       const docTop = el.getBoundingClientRect().top + window.scrollY;
-      const h = Math.max(360, Math.round(window.innerHeight - docTop - 8));
+      const h = Math.max(320, Math.round(parentHeight || (viewportHeight - docTop - 8)));
       const s = Math.min(1, w / DESIGN_W);
       el.style.height = `${h}px`;
       el.style.setProperty("--fit-s", String(s));
@@ -254,21 +256,25 @@ export default function RouletteGame({ game }) {
       el.setAttribute("data-fit", "");
     };
     fit();
-    const ro = new ResizeObserver(fit);
+    const ro = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(fit) : null;
     if (hostRef.current) {
-      ro.observe(hostRef.current);
+      ro?.observe(hostRef.current);
       /* The chrome above the table settles after this runs — the live activity
          bar arrives with its first poll and pushes the table down — so the
          parent is watched too, otherwise the table keeps the height it was
          given before the bar existed and overhangs the bottom of the screen. */
-      if (hostRef.current.parentElement) ro.observe(hostRef.current.parentElement);
+      if (hostRef.current.parentElement) ro?.observe(hostRef.current.parentElement);
     }
     window.addEventListener("resize", fit);
     window.addEventListener("orientationchange", fit);
+    window.visualViewport?.addEventListener("resize", fit);
+    window.visualViewport?.addEventListener("scroll", fit);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("resize", fit);
       window.removeEventListener("orientationchange", fit);
+      window.visualViewport?.removeEventListener("resize", fit);
+      window.visualViewport?.removeEventListener("scroll", fit);
     };
   }, []);
 

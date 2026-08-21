@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Map, RotateCcw, Undo2, Volume2, VolumeX, Wifi, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import { fitDesignCanvas } from "@/lib/viewport";
 import "./pappuPictures.css";
 
 const SYMBOLS = [
@@ -162,22 +163,38 @@ function useDemoPictures() {
   };
 }
 
-function useCabinetScale() {
+function useCabinetScale(shellRef) {
   const measure = () => {
     if (typeof window === "undefined") return 1;
-    const height = window.visualViewport?.height || window.innerHeight;
-    return Math.min(1.15, window.innerWidth / 430, height / 880);
+    const shell = shellRef.current;
+    const width = shell?.clientWidth || window.visualViewport?.width || window.innerWidth;
+    const height = shell?.clientHeight || window.visualViewport?.height || window.innerHeight;
+    return fitDesignCanvas({
+      availableWidth: width,
+      availableHeight: height,
+      designWidth: 430,
+      designHeight: 880,
+      maxScale: 1.15,
+    }).scale;
   };
   const [scale, setScale] = useState(measure);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const resize = () => setScale(measure());
+    const observer = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(resize) : null;
+    if (shellRef.current) observer?.observe(shellRef.current);
     window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
     window.visualViewport?.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("scroll", resize);
+    resize();
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
       window.visualViewport?.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("scroll", resize);
     };
-  }, []);
+  }, [shellRef]);
   return scale;
 }
 
@@ -321,7 +338,8 @@ function ScratchCard({ roundKey, revealed, onReveal }) {
 
 function PappuPicturesTable({ game, live, demo = false }) {
   const navigate = useNavigate();
-  const scale = useCabinetScale();
+  const shellRef = useRef(null);
+  const scale = useCabinetScale(shellRef);
   const {
     state, countdown, balance, placing, phase, betting, outcome, myBets, myTotal,
     lastResults, placeBet, clearBets, undoBet, result,
@@ -402,7 +420,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
   }, [betting, busy, clearBets, maxBet, minBet, myBets, placeBet, placing]);
 
   return (
-    <div className="pp-shell" data-testid="pappu-pictures-cabinet" data-phase={phase || "LOADING"} data-demo={demo ? "true" : "false"}>
+    <div ref={shellRef} className="pp-shell" data-testid="pappu-pictures-cabinet" data-phase={phase || "LOADING"} data-demo={demo ? "true" : "false"}>
       <div className="pp-viewport" style={{ width: `${430 * scale}px`, height: `${880 * scale}px`, "--pp-scale": scale }}>
       <div className="pp-stage">
         <header className="pp-topbar">

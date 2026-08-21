@@ -61,15 +61,19 @@ export const FitToStage = ({ children, min = 0.85, fluid = false, className = ""
     };
 
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(box);
-    ro.observe(inner);
+    const ro = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(measure) : null;
+    ro?.observe(box);
+    ro?.observe(inner);
     window.addEventListener("orientationchange", measure);
     window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("scroll", measure);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("orientationchange", measure);
       window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("scroll", measure);
     };
   }, [min, fluid]);
 

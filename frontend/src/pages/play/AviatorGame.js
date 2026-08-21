@@ -41,11 +41,13 @@ export default function AviatorGame() {
       allow="autoplay; fullscreen"
       style={{
         position: "fixed",
-        inset: 0,
-        width: "100vw",
-        height: "100dvh",
+        left: "calc(var(--fg-viewport-left, 0px) + var(--fg-safe-left, 0px))",
+        top: "calc(var(--fg-viewport-top, 0px) + var(--fg-safe-top, 0px))",
+        width: "var(--fg-usable-w, 100vw)",
+        height: "var(--fg-usable-h, 100dvh)",
         border: 0,
         background: "#08090b",
+        boxShadow: "0 0 0 100vmax #08090b",
         zIndex: 100,
       }}
     />

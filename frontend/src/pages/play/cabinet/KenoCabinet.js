@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronDown, CircleHelp, Coins, History, Menu, Minus, Play, Plus,
-  RefreshCw, Volume2, VolumeX, X,
+  Music2, RefreshCw, Volume2, VolumeX, X,
 } from "lucide-react";
 import { useLiveRound } from "@/lib/useLiveRound";
-import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import { isMuted, kenoMusic, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import { CLIENT_BETTING_GUARD_SECONDS } from "@/lib/serverClock";
 import { formatRoundClock, kenoPayoutLabel } from "./kenoResult";
 import "./keno.css";
@@ -278,10 +278,39 @@ function KenoTable({ game, live, demo = false }) {
   const [autoRemaining, setAutoRemaining] = useState(0);
   const [stopLoss, setStopLoss] = useState(0);
   const [stopWin, setStopWin] = useState(0);
+  const [musicOn, setMusicOn] = useState(false);
   const autoStartBalance = useRef(null);
   const autoRoundRef = useRef(null);
   const shownRef = useRef(0);
   const matchesRef = useRef(0);
+
+  const toggleKenoMusic = useCallback(async () => {
+    if (musicOn) {
+      kenoMusic.stop();
+      setMusicOn(false);
+      return;
+    }
+    // This handler is the required user gesture. It both unlocks Web Audio on
+    // iOS/Android and keeps us inside browser autoplay rules.
+    if (isMuted()) toggleMuted();
+    setMusicOn(await kenoMusic.start());
+  }, [musicOn]);
+
+  useEffect(() => () => kenoMusic.stop(), []);
+  useEffect(() => onMuteChange((nextMuted) => {
+    if (!nextMuted) return;
+    kenoMusic.stop();
+    setMusicOn(false);
+  }), []);
+  useEffect(() => {
+    const stopWhenHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      kenoMusic.stop();
+      setMusicOn(false);
+    };
+    document.addEventListener("visibilitychange", stopWhenHidden);
+    return () => document.removeEventListener("visibilitychange", stopWhenHidden);
+  }, []);
 
   useEffect(() => {
     setAmount((value) => Math.min(maxBet, Math.max(minBet, Number(value) || minBet)).toFixed(2));
@@ -415,6 +444,16 @@ function KenoTable({ game, live, demo = false }) {
           </button>
           <div className="keno-live-mode">LIVE MODE</div>
           <div className="keno-balance" data-testid="keno-balance">₹{balance == null ? "…" : money(balance)} <span>INR</span></div>
+          <button
+            type="button"
+            className={`keno-music-button ${musicOn ? "is-active" : ""}`}
+            onClick={toggleKenoMusic}
+            aria-label={musicOn ? "Stop Keno motivational music" : "Play Keno motivational music"}
+            aria-pressed={musicOn}
+            data-testid="keno-music"
+          >
+            {musicOn ? <Volume2 /> : <Music2 />}
+          </button>
           <button type="button" className="keno-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open game menu"><Menu /></button>
         </header>
 
@@ -501,6 +540,7 @@ function KenoTable({ game, live, demo = false }) {
         <Modal title="KENO MENU" onClose={() => setMenuOpen(false)} className="keno-menu-modal">
           <div className="keno-menu-body">
             <div className="keno-menu-live"><span>LIVE MODE</span><b>ROUND #{state?.round_number ?? "—"}</b></div>
+            <button type="button" onClick={toggleKenoMusic}>{musicOn ? <Volume2 /> : <Music2 />}<span>{musicOn ? "Motivational music on" : "Play motivational music"}</span></button>
             <button type="button" onClick={toggleMuted}>{muted ? <VolumeX /> : <Volume2 />}<span>{muted ? "Sound off" : "Sound on"}</span></button>
             <button type="button" onClick={() => { setMenuOpen(false); setAutoOpen(true); }}><RefreshCw /><span>Auto Play</span></button>
             {locked && betting && <button type="button" onClick={() => {

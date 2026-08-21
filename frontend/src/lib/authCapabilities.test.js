@@ -8,15 +8,55 @@ import {
 } from "./authCapabilities";
 
 test("auth capabilities fail closed for missing, malformed or inconsistent responses", () => {
-  expect(normalizeAuthCapabilities()).toEqual({ registration_enabled: false, email_registration: false, phone_registration: false });
+  expect(normalizeAuthCapabilities()).toEqual({ registration_enabled: false, email_registration: false, phone_registration: false, phone_verification_required: true, manual_admin_review: false, registration_mode: "PHONE_OTP", verification_required: true });
   expect(normalizeAuthCapabilities({ registration_enabled: true, email_registration: "yes", phone_registration: false }))
-    .toEqual({ registration_enabled: false, email_registration: false, phone_registration: false });
+    .toEqual({ registration_enabled: false, email_registration: false, phone_registration: false, phone_verification_required: true, manual_admin_review: false, registration_mode: "PHONE_OTP", verification_required: true });
 });
 
-test("only explicitly ready registration channels are selectable", () => {
-  const capabilities = normalizeAuthCapabilities({ registration_enabled: true, email_registration: true, phone_registration: false });
-  expect(registrationChannelAvailable(capabilities, "EMAIL")).toBe(true);
-  expect(registrationChannelAvailable(capabilities, "PHONE")).toBe(false);
+test("the client never accepts a no-OTP capability downgrade", () => {
+  expect(normalizeAuthCapabilities({
+    registration_enabled: true,
+    email_registration: true,
+    phone_registration: true,
+    verification_required: false,
+  })).toMatchObject({ registration_enabled: true, verification_required: true, registration_mode: "PHONE_OTP" });
+  expect(normalizeAuthCapabilities({
+    registration_enabled: true,
+    email_registration: true,
+  })).toMatchObject({ registration_enabled: false, verification_required: true });
+});
+
+test("manual admin review is accepted only when the server names the mode and both contacts are ready", () => {
+  expect(normalizeAuthCapabilities({
+    registration_enabled: true,
+    email_registration: true,
+    phone_registration: true,
+    verification_required: false,
+    manual_admin_review: true,
+    registration_mode: "ADMIN_REVIEW",
+  })).toEqual({
+    registration_enabled: true,
+    email_registration: true,
+    phone_registration: true,
+    phone_verification_required: false,
+    verification_required: false,
+    manual_admin_review: true,
+    registration_mode: "ADMIN_REVIEW",
+  });
+  expect(normalizeAuthCapabilities({
+    registration_enabled: true,
+    email_registration: false,
+    phone_registration: true,
+    verification_required: false,
+    manual_admin_review: true,
+    registration_mode: "ADMIN_REVIEW",
+  }).registration_enabled).toBe(false);
+});
+
+test("only an explicitly ready phone channel can register", () => {
+  const capabilities = normalizeAuthCapabilities({ registration_enabled: true, email_registration: true, phone_registration: true });
+  expect(registrationChannelAvailable(capabilities, "EMAIL")).toBe(false);
+  expect(registrationChannelAvailable(capabilities, "PHONE")).toBe(true);
 });
 
 test("contact normalization matches backend email and E.164 phone rules", () => {

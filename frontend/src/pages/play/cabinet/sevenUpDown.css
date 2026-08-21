@@ -1,9 +1,14 @@
 .j7-shell {
-  width: 100%;
-  min-height: 100dvh;
-  overflow: auto;
+  position: fixed;
+  left: calc(var(--fg-viewport-left, 0px) + var(--fg-safe-left, 0px));
+  top: calc(var(--fg-viewport-top, 0px) + var(--fg-safe-top, 0px));
+  width: var(--fg-usable-w, 100vw);
+  height: var(--fg-usable-h, 100dvh);
+  min-height: 0;
+  overflow: hidden;
   color: white;
   background: #060a12;
+  box-shadow: 0 0 0 100vmax #060a12;
 }
 
 .j7-titlebar {
@@ -31,7 +36,7 @@
   position: relative;
   display: grid;
   place-items: start center;
-  height: calc(100dvh - 58px);
+  height: calc(100% - 58px);
   min-height: 0;
   overflow: hidden;
   border-radius: 0;
@@ -700,8 +705,8 @@
 
 @media (max-width: 500px) {
   .j7-stage {
-    width: 100vw;
-    height: calc(100dvh - 58px);
+    width: 100%;
+    height: calc(100% - 58px);
     min-height: 0;
     overflow: hidden;
   }

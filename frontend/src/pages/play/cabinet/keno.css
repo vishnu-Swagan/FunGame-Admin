@@ -8,13 +8,18 @@
   --keno-ease-press: cubic-bezier(.22, .78, .28, 1);
   --keno-fast: 180ms;
   --keno-smooth: 240ms;
-  width: 100%;
-  min-height: 100dvh;
+  position: fixed;
+  left: calc(var(--fg-viewport-left, 0px) + var(--fg-safe-left, 0px));
+  top: calc(var(--fg-viewport-top, 0px) + var(--fg-safe-top, 0px));
+  width: var(--fg-usable-w, 100vw);
+  height: var(--fg-usable-h, 100dvh);
+  min-height: 0;
   display: grid;
   place-items: center;
-  overflow: auto;
+  overflow: hidden;
   color: #fff;
   background: #17000a;
+  box-shadow: 0 0 0 100vmax #17000a;
   font-family: "Chakra Petch", "Manrope", ui-sans-serif, system-ui, sans-serif;
   font-kerning: normal;
   font-synthesis: none;
@@ -29,6 +34,7 @@
 .keno-game-button,
 .keno-help-button,
 .keno-menu-button,
+.keno-music-button,
 .keno-selection-actions button,
 .keno-stake-control button,
 .keno-auto-button,
@@ -45,6 +51,7 @@
 .keno-game-button:not(:disabled):hover,
 .keno-help-button:not(:disabled):hover,
 .keno-menu-button:not(:disabled):hover,
+.keno-music-button:not(:disabled):hover,
 .keno-selection-actions button:not(:disabled):hover,
 .keno-stake-control button:not(:disabled):hover,
 .keno-auto-button:not(:disabled):hover,
@@ -56,6 +63,7 @@
 .keno-game-button:not(:disabled):active,
 .keno-help-button:not(:disabled):active,
 .keno-menu-button:not(:disabled):active,
+.keno-music-button:not(:disabled):active,
 .keno-selection-actions button:not(:disabled):active,
 .keno-stake-control button:not(:disabled):active,
 .keno-auto-button:not(:disabled):active,
@@ -73,9 +81,9 @@
 
 .keno-cabinet {
   position: relative;
-  width: min(100vw, calc(100dvh * 1.8145));
-  height: min(100dvh, calc(100vw / 1.8145));
-  min-height: 560px;
+  width: min(var(--fg-usable-w, 100vw), calc(var(--fg-usable-h, 100dvh) * 1.8145));
+  height: min(var(--fg-usable-h, 100dvh), calc(var(--fg-usable-w, 100vw) / 1.8145));
+  min-height: 0;
   display: grid;
   grid-template-rows: 6.6% 80% 13.4%;
   overflow: hidden;
@@ -89,7 +97,7 @@
   position: relative;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(150px, 13.5%) minmax(180px, 16%) 1fr auto 56px;
+  grid-template-columns: minmax(150px, 13.5%) minmax(180px, 16%) 1fr auto 52px 56px;
   gap: clamp(8px, 1.6vw, 30px);
   align-items: center;
   padding: 5px 10px;
@@ -160,7 +168,7 @@
 .keno-balance span { color: #efa6bd; font-weight: 600; }
 
 .keno-menu-button {
-  grid-column: 5;
+  grid-column: 6;
   width: 48px;
   height: 48px;
   display: grid;
@@ -174,6 +182,28 @@
   box-shadow: inset 0 2px 1px rgba(255,255,255,.26), inset 0 -5px 8px rgba(89,0,31,.3), 0 4px 0 #710027, 0 7px 12px rgba(38,0,14,.28);
 }
 .keno-menu-button svg { width: 26px; }
+
+.keno-music-button {
+  grid-column: 5;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  color: #4a2000;
+  border: 2px solid #ffcf58 !important;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 24%, rgba(255,255,255,.55), transparent 24%),
+    linear-gradient(145deg, #ffd85b 0%, #ff9e17 58%, #bf5200 100%);
+  box-shadow: inset 0 2px 1px rgba(255,255,255,.4), inset 0 -5px 8px rgba(96,36,0,.28), 0 4px 0 #8a3100, 0 7px 14px rgba(43,0,13,.3);
+}
+.keno-music-button svg { width: 23px; }
+.keno-music-button.is-active {
+  color: #fff;
+  border-color: #e6ff71 !important;
+  background: linear-gradient(145deg, #92df35, #43a90c 58%, #236900);
+  box-shadow: inset 0 2px 1px rgba(255,255,255,.38), inset 0 -5px 8px rgba(17,70,0,.3), 0 4px 0 #174b00, 0 0 18px rgba(170,255,67,.46);
+}
 
 .keno-playfield {
   position: relative;
@@ -830,8 +860,8 @@
 
 @media (max-aspect-ratio: 1/1) {
   .keno-shell { display: block; overflow: hidden; }
-  .keno-cabinet { width: 100vw; height: 100dvh; min-height: 0; grid-template-rows: 64px minmax(0, 1fr) 126px; border: 0; border-radius: 0; }
-  .keno-header { grid-template-columns: 88px 44px 1fr auto 44px; gap: 5px; padding: 6px; }
+  .keno-cabinet { width: 100%; height: 100%; min-height: 0; grid-template-rows: 64px minmax(0, 1fr) 126px; border: 0; border-radius: 0; }
+  .keno-header { grid-template-columns: 82px 42px 1fr auto 40px 40px; gap: 4px; padding: 6px 5px; }
   .keno-game-button { min-height: 44px; gap: 3px; font-size: 14px; }
   .keno-game-button svg { width: 17px; }
   .keno-help-button { min-width: 0; min-height: 44px; padding: 0; }
@@ -840,7 +870,9 @@
   .keno-live-mode { position: static; grid-column: 3; min-width: 0; height: 46px; border: 2px solid #ffad32; border-radius: 12px; font-size: 13px; transform: none; }
   .keno-balance { grid-column: 4; font-size: 12px; }
   .keno-balance span { display: block; font-size: 9px; text-align: right; }
-  .keno-menu-button { grid-column: 5; width: 42px; height: 42px; }
+  .keno-music-button { grid-column: 5; width: 38px; height: 38px; }
+  .keno-music-button svg { width: 19px; }
+  .keno-menu-button { grid-column: 6; width: 38px; height: 38px; }
   .keno-menu-button svg { width: 21px; }
   .keno-playfield { grid-template-rows: 36px minmax(0, 1fr) 48px; gap: 5px; padding: 5px 6px 3px; }
   .keno-status { width: 88%; padding: 6px 10px; font-size: 12px; }
@@ -873,6 +905,45 @@
   .keno-auto-button { width: 56px; height: 56px; border-width: 3px !important; }
   .keno-bet-button { grid-column: 1 / -1; width: 100%; height: 52px; grid-template-columns: 58px 1fr; border-width: 3px !important; font-size: 18px; }
   .keno-bet-button svg { width: 36px; height: 36px; }
+}
+
+/* Compact portrait phones (including 320/360 CSS-pixel installed PWAs) need a
+   deliberately bounded header. Fixed icon and balance tracks keep every
+   control inside the safe viewport while LIVE MODE owns the flexible space. */
+@media (max-width: 380px) and (orientation: portrait) {
+  .keno-cabinet { grid-template-rows: 60px minmax(0, 1fr) 126px; }
+  .keno-header {
+    grid-template-columns: 54px 36px minmax(58px, 1fr) 62px 36px 36px;
+    gap: 2px;
+    padding: 4px 2px;
+  }
+  .keno-game-button,
+  .keno-help-button { min-height: 40px; height: 40px; }
+  .keno-game-button { min-width: 0; padding: 0 4px; font-size: 12px; }
+  .keno-game-button svg { display: none; }
+  .keno-help-button svg { width: 22px; height: 22px; }
+  .keno-live-mode {
+    width: 100%;
+    height: 42px;
+    overflow: hidden;
+    padding: 0 2px;
+    font-size: 10px;
+    letter-spacing: .025em;
+    white-space: nowrap;
+  }
+  .keno-balance {
+    width: 62px;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 10px;
+    text-align: right;
+    text-overflow: ellipsis;
+  }
+  .keno-balance span { display: none; }
+  .keno-music-button,
+  .keno-menu-button { width: 36px; height: 36px; }
+  .keno-music-button svg,
+  .keno-menu-button svg { width: 18px; height: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

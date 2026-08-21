@@ -1,6 +1,9 @@
 .pp-shell {
   position: fixed;
-  inset: 0;
+  left: calc(var(--fg-viewport-left, 0px) + var(--fg-safe-left, 0px));
+  top: calc(var(--fg-viewport-top, 0px) + var(--fg-safe-top, 0px));
+  width: var(--fg-usable-w, 100vw);
+  height: var(--fg-usable-h, 100dvh);
   z-index: 20;
   display: grid;
   place-items: center;
@@ -8,6 +11,7 @@
   background:
     radial-gradient(ellipse at 50% 20%, rgba(0, 172, 103, .28), transparent 44%),
     radial-gradient(ellipse at 50% 100%, #002f22 0%, #00130e 70%);
+  box-shadow: 0 0 0 100vmax #00130e;
   color: #f5fff7;
   font-family: "Avenir Next", Inter, system-ui, sans-serif;
   user-select: none;

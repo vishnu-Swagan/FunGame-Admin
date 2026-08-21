@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Star, Crown, Gem, Zap, Rocket, Sun, Moon, Heart, Spade, Club, Diamond, Dices, Coins,
 } from "lucide-react";
+import { BrandWordmark } from "@/components/Brand";
 
 export const Disclaimer = ({ className = "" }) => (
   <p data-testid="play-chips-disclaimer" className={`text-[11px] tracking-[0.18em] uppercase text-white/70 ${className}`}>
@@ -13,7 +14,7 @@ export const Disclaimer = ({ className = "" }) => (
 export const LoadingScreen = () => (
   <div className="min-h-dvh flex flex-col items-center justify-center bg-background gap-4" data-testid="loading-screen">
     <div className="h-12 w-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-    <span className="font-display text-xl text-primary">Chakri.Casino</span>
+    <BrandWordmark logoClassName="h-28 w-28" />
   </div>
 );
 

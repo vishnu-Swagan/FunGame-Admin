@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, MonitorSmartphone } from "lucide-react";
+import { Eye, EyeOff, MonitorSmartphone, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,7 @@ import { AuthShell } from "@/pages/auth/AuthShell";
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -69,6 +70,12 @@ export default function Login() {
 
   return (
     <AuthShell title="Welcome back" subtitle="Log in to enter the Chakri.Casino lounge.">
+      {location.state?.registrationSubmitted && (
+        <div data-testid="registration-submitted-notice" className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">
+          <UserCheck className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>Registration submitted. You can log in after an administrator approves your account.</span>
+        </div>
+      )}
       {sessionNotice && (
         <div data-testid="session-replaced-notice" className="mb-4 flex items-start gap-2.5 rounded-xl border border-primary/35 bg-primary/10 p-3 text-sm text-primary">
           <MonitorSmartphone className="h-4 w-4 mt-0.5 shrink-0" />

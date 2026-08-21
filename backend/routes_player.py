@@ -6,8 +6,9 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query, Response
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
-from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
+from models import (OnboardingProfileRequest, PlayerProfileUpdate, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
 from auth_utils import (
     check_maintenance_for_players,
@@ -76,6 +77,111 @@ async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO', *, s
         'id': str(uuid.uuid4()), 'user_id': user_id, 'title': title, 'body': body,
         'type': ntype, 'read': False, 'created_at': _now(),
     }, **kwargs)
+
+
+def _requester_contact(user: dict) -> dict:
+    """Snapshot a real display contact for CRM request queues.
+
+    Phone registrations carry a non-routable compatibility email internally;
+    never expose that synthetic address to an operator as user contact data.
+    """
+    email = user.get('email')
+    if str(email or '').endswith('.phone.invalid'):
+        email = None
+    return {
+        'user_email': email,
+        'user_phone': user.get('phone'),
+    }
+
+
+async def _run_chip_request_transaction(callback):
+    """Reserve pending-request capacity and create the request atomically."""
+    try:
+        session_cm = await db.client.start_session()
+    except Exception as exc:
+        if (_allow_nontransactional_auth_tests()
+                and isinstance(exc, (AttributeError, NotImplementedError))):
+            return await callback(None)
+        logger.error('Chip request transaction unavailable: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'CHIP_REQUESTS_UNAVAILABLE',
+            'message': 'Chip requests are temporarily unavailable.',
+        }) from exc
+    try:
+        async with session_cm as session:
+            return await session.with_transaction(callback)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error('Chip request transaction failed: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'CHIP_REQUESTS_UNAVAILABLE',
+            'message': 'Chip requests are temporarily unavailable.',
+        }) from exc
+
+
+async def _create_chip_request_with_cap(req: dict, request_type: str) -> dict:
+    """Atomically enforce the three-pending-request cap per player and type.
+
+    The deterministic counter document serializes concurrent submissions. Its
+    first value includes legacy pending rows written before counters existed.
+    Admin approval/denial releases the reservation using the key stored on the
+    request.
+    """
+    counter_key = f"chip-request:{req['user_id']}:{request_type}"
+    req['pending_counter_key'] = counter_key
+
+    async def reserve_and_insert(session):
+        kwargs = {'session': session} if session is not None else {}
+        counter = await db.chip_request_pending_counters.find_one(
+            {'_id': counter_key}, **kwargs,
+        )
+        if not counter:
+            legacy_query = {
+                'user_id': req['user_id'],
+                'status': 'PENDING',
+            }
+            if request_type == 'BUY':
+                legacy_query['$or'] = [
+                    {'type': 'BUY'}, {'type': None}, {'type': {'$exists': False}},
+                ]
+            else:
+                legacy_query['type'] = request_type
+            legacy_count = min(
+                3,
+                await db.chip_requests.count_documents(legacy_query, **kwargs),
+            )
+            counter = {
+                '_id': counter_key,
+                'user_id': req['user_id'],
+                'request_type': request_type,
+                'count': legacy_count,
+                'created_at': _now(),
+                'updated_at': _now(),
+            }
+            try:
+                await db.chip_request_pending_counters.insert_one(counter, **kwargs)
+            except DuplicateKeyError:
+                # Non-transactional test doubles can interleave here. A real
+                # transaction aborts/retries the callback on this write race.
+                if session is not None:
+                    raise
+
+        reserved = await db.chip_request_pending_counters.find_one_and_update(
+            {'_id': counter_key, 'count': {'$lt': 3}},
+            {'$inc': {'count': 1}, '$set': {'updated_at': _now()}},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not reserved:
+            raise HTTPException(
+                status_code=429,
+                detail='You already have 3 pending requests of this type. Please wait for review.',
+            )
+        await db.chip_requests.insert_one(req, **kwargs)
+        return req
+
+    return await _run_chip_request_transaction(reserve_and_insert)
 
 
 # ---------- System config (public for logged-out screens too) ----------
@@ -352,20 +458,18 @@ async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(requ
     require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not request chips')
-    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': {'$ne': 'SELL'}})
-    if pending >= 3:
-        raise HTTPException(status_code=429, detail='You already have 3 pending requests. Please wait for review.')
     # Checked when the request is made so the player is told now, and again at
     # approval so an operator cannot wave through what the limit refuses.
     await compliance.check_deposit(user['id'], body.amount)
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
-        'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        **_requester_contact(user),
+        'user_display_name': user.get('display_name'),
         'type': 'BUY',
         'amount': body.amount, 'note': body.note, 'status': 'PENDING',
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
-    await db.chip_requests.insert_one(req)
+    req = await _create_chip_request_with_cap(req, 'BUY')
     return {'message': 'Chip request submitted for review.', 'request': serialize_doc(req)}
 
 
@@ -376,21 +480,19 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
     require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not sell chips')
-    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'SELL'})
-    if pending >= 3:
-        raise HTTPException(status_code=429, detail='You already have 3 pending sell requests. Please wait for review.')
     fresh = await db.users.find_one({'id': user['id']})
     balance = fresh.get('chip_balance', 0) if fresh else 0
     if balance < body.amount:
         raise HTTPException(status_code=400, detail='Not enough chips — you can only sell up to your current balance.')
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
-        'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        **_requester_contact(user),
+        'user_display_name': user.get('display_name'),
         'type': 'SELL',
         'amount': body.amount, 'note': body.note, 'status': 'PENDING',
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
-    await db.chip_requests.insert_one(req)
+    req = await _create_chip_request_with_cap(req, 'SELL')
     return {'message': 'Sell request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
 
 
@@ -401,21 +503,19 @@ async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Dep
     require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not return chips')
-    pending = await db.chip_requests.count_documents({'user_id': user['id'], 'status': 'PENDING', 'type': 'RETURN'})
-    if pending >= 3:
-        raise HTTPException(status_code=429, detail='You already have 3 pending return requests. Please wait for review.')
     fresh = await db.users.find_one({'id': user['id']})
     balance = fresh.get('chip_balance', 0) if fresh else 0
     if balance < body.amount:
         raise HTTPException(status_code=400, detail='Not enough chips — you can only return up to your current balance.')
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
-        'user_email': user['email'], 'user_display_name': user.get('display_name'),
+        **_requester_contact(user),
+        'user_display_name': user.get('display_name'),
         'type': 'RETURN',
         'amount': body.amount, 'note': body.note, 'status': 'PENDING',
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
-    await db.chip_requests.insert_one(req)
+    req = await _create_chip_request_with_cap(req, 'RETURN')
     return {'message': 'Return request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
 
 
@@ -496,6 +596,35 @@ async def mark_all_read(user: dict = Depends(get_current_user)):
 
 
 # ---------- Settings / profile ----------
+@router.patch('/profile')
+async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_current_user)):
+    """Edit only the public game identity of an active player.
+
+    Email, phone, country, date of birth, verification and balances are
+    intentionally absent from the request model so this endpoint cannot become
+    an identity, compliance or wallet mutation path.
+    """
+    if user.get('role') != 'PLAYER' or user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail={
+            'code': 'ACTIVE_PLAYER_REQUIRED',
+            'message': 'An active player account is required.',
+        })
+    updates = body.model_dump(exclude_none=True)
+    updates['profile_updated_at'] = _now()
+    fresh = await db.users.find_one_and_update(
+        {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE'},
+        {'$set': updates},
+        projection={'_id': 0, 'display_name': 1, 'avatar': 1, 'profile_updated_at': 1},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not fresh:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'The player account changed. Refresh and try again.',
+        })
+    return {'message': 'Game profile updated.', 'profile': serialize_doc(fresh)}
+
+
 @router.patch('/settings')
 async def update_settings(body: SettingsUpdate, user: dict = Depends(get_current_user)):
     updates = {f'settings.{k}': v for k, v in body.model_dump(exclude_none=True).items()}

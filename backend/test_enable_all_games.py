@@ -42,7 +42,7 @@ async def main():
     config = await database.system_config.find_one({'key': 'main'})
 
     assert updated == len(rows)
-    assert len(reviewed_slugs) == 9
+    assert len(reviewed_slugs) == 10
     assert all(by_slug[slug]['status'] == 'ENABLED' for slug in reviewed_slugs)
     assert all(
         by_slug[slug]['status'] == 'COMING_SOON'
@@ -97,6 +97,9 @@ async def main():
             'live_state', 'live_place_bet', 'live_clear_bets', 'live_undo_bet',
         },
         'routes_blackjack.py': {'bj_state', 'bj_deal', 'bj_insurance', 'bj_action'},
+        'routes_rummy.py': {
+            'rummy_categories', 'rummy_join', 'rummy_room_state', 'rummy_action',
+        },
         'routes_player.py': {'game_detail', 'toggle_favorite'},
     }
     backend_dir = os.path.dirname(os.path.abspath(__file__))

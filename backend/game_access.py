@@ -22,6 +22,7 @@ PLAYABLE_GAME_SLUGS = frozenset({
     'teen-patti',
     'poker',
     'blackjack',
+    'rummy',
 })
 
 GAME_COMING_SOON = 'GAME_COMING_SOON'
@@ -79,7 +80,7 @@ async def require_playable_game(slug: str, *, database=None) -> dict:
 
 
 async def reconcile_game_availability(*, database=None) -> dict:
-    """Idempotently publish the reviewed nine and retire no catalogue data.
+    """Idempotently publish the reviewed games and retire no catalogue data.
 
     Only ``status`` and migration metadata are changed.  Round histories,
     game records, artwork and operator-authored catalogue copy are preserved.

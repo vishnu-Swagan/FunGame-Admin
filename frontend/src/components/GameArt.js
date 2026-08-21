@@ -32,6 +32,7 @@ const PATTERNS = {
   "triple-fun": "reels",
   poker: "chevrons",
   "teen-patti": "cardfan",
+  rummy: "cardfan",
 };
 
 function patternStyle(type, accent) {

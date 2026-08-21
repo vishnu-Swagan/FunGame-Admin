@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Globe } from "lucide-react";
+import { BrandWordmark } from "@/components/Brand";
 
 /* Cinematic opening shown EVERY time you enter a game (3–5s, tap to skip).
    The game's key art animates up over a scanlit stage with a LIVE · synced-
@@ -99,14 +100,14 @@ export const GameIntro = ({ game }) => {
           {!reduced && <Sparks />}
 
           {/* brand wordmark */}
-          <motion.span
-            className="absolute top-[13%] font-tech tracking-[0.3em] text-sm text-white/85 drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]"
+          <motion.div
+            className="absolute top-[5%] drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]"
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            CHAKRI<span className="text-primary">.CASINO</span>
-          </motion.span>
+            <BrandWordmark logoClassName="h-24 w-24" />
+          </motion.div>
 
           {/* soft radial glow behind the art */}
           <motion.div

@@ -136,11 +136,14 @@ export default function AdminUsers() {
                   </TableCell>
                   <TableCell data-testid="admin-user-review-readiness">
                     <div className="space-y-1 text-[11px] leading-tight">
-                      <p className={review.contactVerified ? "text-emerald-300" : "text-red-300"}>
-                        {review.contactLabel}: {review.contactVerified ? "verified" : "not verified"}
+                      <p
+                        data-testid="admin-user-contact-verification"
+                        className={review.contactVerified || review.manualReviewApproved ? "text-emerald-300" : review.verificationDeferred || review.manualReview ? "text-amber-300" : "text-red-300"}
+                      >
+                        {review.contactLabel}: {review.contactStatusLabel}
                       </p>
-                      <p className={review.submitted ? "text-white/65" : "text-amber-300"}>
-                        {review.submitted ? `Submitted ${timeAgo(u.submitted_at)}` : "Not submitted"}
+                      <p className={review.submitted || review.directlyActivated ? "text-white/65" : "text-amber-300"}>
+                        {review.submitted ? `Submitted ${timeAgo(u.submitted_at)}` : review.submissionLabel}
                       </p>
                       {review.selfService && <p className={review.termsAccepted ? "text-white/50" : "text-amber-300"}>Terms: {review.termsAccepted ? "accepted" : "missing"}</p>}
                     </div>
@@ -165,7 +168,7 @@ export default function AdminUsers() {
                           data-testid="admin-approve-user-button"
                           size="sm"
                           disabled={busyId === u.id || !review.approvalReady}
-                          title={!review.approvalReady ? "Contact verification, accepted terms and onboarding submission are required" : undefined}
+                          title={!review.approvalReady ? "Accepted terms and a submitted eligible profile are required; non-manual accounts also require contact verification" : undefined}
                           onClick={() => act(u.id, "approve")}
                           className="h-8 rounded-lg text-xs font-bold bg-[hsl(var(--emerald))] text-black hover:brightness-110"
                         >

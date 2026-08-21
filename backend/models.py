@@ -1,6 +1,6 @@
 """Pydantic request/response models for Chakri.Casino API."""
 import re
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator, model_validator
 from typing import Optional, List
 
 
@@ -22,25 +22,45 @@ def _bcrypt_password_size(value):
 
 
 class RegisterRequest(BaseModel):
-    # ``email`` stays for existing clients; new clients may use the neutral
-    # ``identity`` field or an E.164 ``phone`` value.
+    model_config = ConfigDict(extra='forbid')
+
+    # The public form always collects both contact methods.  They remain
+    # unverified while registration is in ADMIN_REVIEW mode; the optional
+    # password fields preserve the existing PHONE_OTP flow, where the password
+    # is deliberately created only after OTP proof.
     identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
     identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
-    channel: Optional[str] = None
+    phone: str = Field(min_length=8, max_length=20)
+    channel: Optional[str] = Field(default='PHONE')
     full_name: Optional[str] = Field(default=None, min_length=2, max_length=64)
     date_of_birth: Optional[str] = None
     country: Optional[str] = Field(default=None, max_length=64)
-    password: str = Field(min_length=8, max_length=128)
+    # Registration collects the full activation profile before issuing an SMS
+    # challenge, so terms and eligibility cannot be deferred until after OTP.
+    accepted_terms: bool = False
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    password_confirmation: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
-    _password_bytes = field_validator('password')(_bcrypt_password_size)
+    _password_bytes = field_validator(
+        'password', 'password_confirmation',
+    )(_bcrypt_password_size)
 
     @model_validator(mode='after')
-    def exactly_one_identity(self):
-        _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
-        if self.channel is not None and self.channel.upper() not in ('EMAIL', 'PHONE', 'SMS'):
-            raise ValueError('Channel must be EMAIL or PHONE')
+    def phone_is_registration_identity(self):
+        phone = re.sub(r'[\s().-]+', '', self.phone)
+        supplied_identity = [
+            str(value).strip() for value in (self.identifier, self.identity)
+            if value is not None
+        ]
+        if any(re.sub(r'[\s().-]+', '', value) != phone for value in supplied_identity):
+            raise ValueError('Registration identity must match the supplied phone number')
+        if self.channel is not None and self.channel.upper() not in ('PHONE', 'SMS'):
+            raise ValueError('Registration identity must be the supplied phone number')
+        if ((self.password is None) != (self.password_confirmation is None)):
+            raise ValueError('Password and confirmation must both be supplied')
+        if self.password is not None and self.password != self.password_confirmation:
+            raise ValueError('Password confirmation does not match')
         return self
 
     @field_validator('phone')
@@ -227,6 +247,43 @@ class OnboardingProfileRequest(BaseModel):
         if not v:
             raise ValueError('You must accept the terms to continue')
         return v
+
+
+PLAYER_AVATAR_KEYS = frozenset({
+    'star', 'crown', 'gem', 'zap', 'rocket', 'sun',
+    'moon', 'heart', 'spade', 'club', 'diamond', 'dice',
+})
+
+
+class PlayerProfileUpdate(BaseModel):
+    """Narrow public game-profile edit; contact and compliance data stay fixed."""
+    model_config = ConfigDict(extra='forbid')
+
+    display_name: Optional[str] = Field(default=None, min_length=2, max_length=32)
+    avatar: Optional[str] = Field(default=None, min_length=2, max_length=24)
+
+    @field_validator('display_name')
+    @classmethod
+    def clean_display_name(cls, value):
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError('Display name must contain at least 2 characters')
+        return cleaned
+
+    @field_validator('avatar')
+    @classmethod
+    def known_avatar(cls, value):
+        if value is not None and value not in PLAYER_AVATAR_KEYS:
+            raise ValueError('Unknown avatar')
+        return value
+
+    @model_validator(mode='after')
+    def at_least_one_profile_field(self):
+        if self.display_name is None and self.avatar is None:
+            raise ValueError('Provide a display name or avatar')
+        return self
 
 
 # ---------- Chips / Points ----------

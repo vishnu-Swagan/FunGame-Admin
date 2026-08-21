@@ -48,7 +48,7 @@ const ac = () => {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   if (!ctx) ctx = new AC();
-  if (ctx.state === "suspended") ctx.resume();
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
   return ctx;
 };
 
@@ -549,4 +549,152 @@ export const music = {
     clearInterval(musicTimer);
     musicTimer = null;
   },
+};
+
+/* ---------------- Keno motivational loop (original, generated Web Audio) ---
+   No recording, sample, remote URL, or copyrighted melody is used here. The
+   loop is assembled at runtime from short synthesized chords, bass, percussion,
+   and a pentatonic countermelody. It starts only from Keno's visible music
+   button, keeping iOS/Android autoplay policy intact. */
+const KENO_CHORDS = [
+  [146.83, 174.61, 220.00], // Dm
+  [116.54, 146.83, 174.61], // Bb
+  [174.61, 220.00, 261.63], // F
+  [130.81, 164.81, 196.00], // C
+];
+const KENO_MELODY = [587.33, 659.25, 783.99, 880.00, 783.99, 659.25, 698.46, 587.33];
+let kenoTimer = null;
+let kenoOutput = null;
+let kenoNext = 0;
+let kenoStep = 0;
+
+function kenoTone(c, destination, { frequency, start, duration, gain, type = "triangle" }) {
+  try {
+    const oscillator = c.createOscillator();
+    const envelope = c.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    envelope.gain.setValueAtTime(0.0001, start);
+    envelope.gain.linearRampToValueAtTime(gain, start + Math.min(0.025, duration * 0.18));
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(envelope).connect(destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.04);
+  } catch (e) {
+    /* A missed decorative note must never interrupt the live game. */
+  }
+}
+
+function kenoPercussion(c, destination, start, bright = false) {
+  try {
+    const duration = bright ? 0.045 : 0.11;
+    const length = Math.max(1, Math.floor(c.sampleRate * duration));
+    const buffer = c.createBuffer(1, length, c.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < length; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * (1 - index / length);
+    }
+    const source = c.createBufferSource();
+    const filter = c.createBiquadFilter();
+    const envelope = c.createGain();
+    source.buffer = buffer;
+    filter.type = bright ? "highpass" : "lowpass";
+    filter.frequency.setValueAtTime(bright ? 4800 : 210, start);
+    envelope.gain.setValueAtTime(bright ? 0.018 : 0.04, start);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    source.connect(filter).connect(envelope).connect(destination);
+    source.start(start);
+    source.stop(start + duration + 0.03);
+  } catch (e) {
+    /* Percussion is optional polish. */
+  }
+}
+
+function scheduleKenoMusic() {
+  const c = ac();
+  if (!c || !kenoOutput || muted) return;
+  if (kenoNext < c.currentTime - 1) kenoNext = c.currentTime + 0.06;
+
+  // 112 BPM, eighth-note pulse. Scheduling ahead avoids gaps on busy frames.
+  const stepSeconds = (60 / 112) / 2;
+  while (kenoNext < c.currentTime + 0.8) {
+    const step = kenoStep;
+    const chord = KENO_CHORDS[Math.floor(step / 8) % KENO_CHORDS.length];
+    const beat = step % 8;
+
+    if (beat % 2 === 0) {
+      chord.forEach((frequency, index) => kenoTone(c, kenoOutput, {
+        frequency: frequency * 2,
+        start: kenoNext + index * 0.012,
+        duration: 0.45,
+        gain: 0.012,
+        type: "triangle",
+      }));
+    }
+    if (beat === 0 || beat === 4) {
+      kenoTone(c, kenoOutput, {
+        frequency: chord[0] / 2,
+        start: kenoNext,
+        duration: 0.38,
+        gain: 0.038,
+        type: "sine",
+      });
+      kenoPercussion(c, kenoOutput, kenoNext, false);
+    }
+    if (beat === 2 || beat === 6) kenoPercussion(c, kenoOutput, kenoNext, true);
+
+    kenoTone(c, kenoOutput, {
+      frequency: KENO_MELODY[step % KENO_MELODY.length],
+      start: kenoNext + 0.02,
+      duration: beat === 7 ? 0.36 : 0.19,
+      gain: beat % 2 ? 0.012 : 0.019,
+      type: "triangle",
+    });
+
+    kenoNext += stepSeconds;
+    kenoStep += 1;
+  }
+}
+
+export const kenoMusic = {
+  start: async () => {
+    if (kenoTimer || muted) return !!kenoTimer;
+    const c = ac();
+    if (!c) return false;
+    try {
+      // `AudioContext.resume()` is asynchronous on iOS. Do not report music as
+      // active or start its scheduler until the user-gesture resume succeeds.
+      if (c.state === "suspended") await c.resume();
+      if (c.state !== "running") return false;
+      kenoOutput = c.createGain();
+      kenoOutput.gain.setValueAtTime(0.0001, c.currentTime);
+      kenoOutput.gain.linearRampToValueAtTime(0.72, c.currentTime + 0.35);
+      kenoOutput.connect(bus(c));
+      kenoNext = c.currentTime + 0.08;
+      kenoStep = 0;
+      scheduleKenoMusic();
+      kenoTimer = window.setInterval(scheduleKenoMusic, 220);
+      return true;
+    } catch (e) {
+      kenoOutput = null;
+      return false;
+    }
+  },
+  stop: () => {
+    if (kenoTimer) window.clearInterval(kenoTimer);
+    kenoTimer = null;
+    const output = kenoOutput;
+    kenoOutput = null;
+    if (!output || !ctx) return;
+    try {
+      output.gain.cancelScheduledValues(ctx.currentTime);
+      output.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.06);
+      window.setTimeout(() => {
+        try { output.disconnect(); } catch (e) { /* already disconnected */ }
+      }, 450);
+    } catch (e) {
+      /* already stopped */
+    }
+  },
+  isPlaying: () => !!kenoTimer,
 };

@@ -5,6 +5,7 @@ import { PauseCircle, LifeBuoy, LogOut } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
 
 /**
  * Where a player lands when the app has closed itself to them.
@@ -58,7 +59,7 @@ export default function AccountClosed() {
     <div className="App fg-noise min-h-dvh bg-background flex items-center justify-center px-5" data-testid="account-closed">
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[160px] pointer-events-none" />
       <div className="relative z-[2] w-full max-w-[400px] rounded-2xl bg-card/60 backdrop-blur-md border border-white/10 p-8 text-center">
-        <p className="font-display text-lg text-primary">Chakri.Casino</p>
+        <BrandWordmark logoClassName="h-24 w-24" />
         <div className="mt-6 flex justify-center">
           <div className="h-16 w-16 rounded-2xl flex items-center justify-center border bg-amber-400/10 border-amber-400/30 text-amber-300">
             <PauseCircle className="h-7 w-7" />

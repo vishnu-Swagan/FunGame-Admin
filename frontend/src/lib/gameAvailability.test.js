@@ -19,9 +19,9 @@ test("recognises the canonical and legacy coming-soon error codes", () => {
   expect(isComingSoonError({ response: { data: { detail: { code: "COMING_SOON" } } } })).toBe(true);
 });
 
-test("the reviewed game set contains exactly the nine published games", () => {
-  expect(REVIEWED_GAME_SLUGS.size).toBe(9);
-  expect(["aviator", "seven-up-down", "fun-roulette", "keno", "pappu-pictures", "andar-bahar", "teen-patti", "poker", "blackjack"].every(isReviewedGame)).toBe(true);
+test("the reviewed game set contains exactly the ten published games", () => {
+  expect(REVIEWED_GAME_SLUGS.size).toBe(10);
+  expect(["aviator", "seven-up-down", "fun-roulette", "keno", "pappu-pictures", "andar-bahar", "teen-patti", "poker", "blackjack", "rummy"].every(isReviewedGame)).toBe(true);
   expect(isReviewedGame("bingo")).toBe(false);
 });
 

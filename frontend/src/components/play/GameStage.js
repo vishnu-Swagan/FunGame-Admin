@@ -25,7 +25,7 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
   return (
     <div
       className="flex flex-col"
-      style={{ height: "calc(100dvh - var(--fg-header-h, 56px))" }}
+      style={{ height: "calc(var(--fg-viewport-h, 100dvh) - var(--fg-header-h, 56px) - var(--fg-safe-bottom, 0px))" }}
       data-testid="game-stage"
     >
       {/* sticky game bar (below the Chakri.Casino logo) */}
@@ -51,7 +51,7 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
       {/* middle — the table is scaled to this box, so it fits any handset */}
       <div className="flex-1 min-h-0 px-3 py-3" data-testid="game-stage-middle">
         {fit ? (
-          <FitToStage className="h-full">{children}</FitToStage>
+          <FitToStage min={0.64} className="h-full">{children}</FitToStage>
         ) : (
           <div className="h-full overflow-y-auto overflow-x-hidden" data-testid="game-stage-scroll">
             {children}

@@ -31,6 +31,7 @@ import routes_compliance
 import routes_games
 import routes_live
 import routes_blackjack
+import routes_rummy
 import routes_security
 import routes_migration_export
 import routes_game_settlement
@@ -244,6 +245,7 @@ async def lifespan(app: FastAPI):
     await step('indexes:payouts', payouts.ensure_indexes())
     await step('indexes:compliance', compliance.ensure_indexes())
     await step('gameplay:core-readiness', _prepare_gameplay_core())
+    await step('gameplay:rummy-core', routes_rummy.ensure_rummy_core())
     # Disabled by default; this creates no collection or index until the
     # separately reviewed Supabase game-settlement bridge is explicitly enabled.
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
@@ -262,7 +264,7 @@ async def lifespan(app: FastAPI):
     keepalive = asyncio.create_task(_aviator_keepalive())
     financial_worker = asyncio.create_task(_financial_worker())
     logger.info(
-        'Chakri.Casino ready - nine reviewed games available; '
+        'Chakri.Casino ready - ten reviewed games available; '
         'remaining catalogue coming soon'
     )
     yield
@@ -347,6 +349,7 @@ api_router.include_router(routes_auth.router)
 api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
+api_router.include_router(routes_rummy.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_distributor.router)

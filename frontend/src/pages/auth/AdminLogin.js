@@ -72,7 +72,7 @@ export default function AdminLogin() {
       >
         {/* brand wordmark + ops tag */}
         <div className="flex items-center justify-center gap-2.5 mb-6">
-          <BrandWordmark logoClassName="h-7 w-7" textClassName="text-base" />
+          <BrandWordmark logoClassName="h-20 w-20" />
           <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
             <Terminal className="h-3 w-3 text-sky-400" />
             <span className="font-mono text-[9px] tracking-[0.25em] text-sky-300 uppercase">Ops</span>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, Mail, Smartphone } from "lucide-react";
+import { AlertTriangle, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -19,7 +19,7 @@ export default function VerifyEmail() {
   const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
   const initial = location.state || {};
   const issuedChallenge = Boolean(initial.identifier || initial.email);
-  const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "EMAIL", initial.identifier || initial.email));
+  const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "PHONE", initial.identifier || initial.email));
   const [identifier, setIdentifier] = useState(initial.identifier || initial.email || "");
   const [destinationMasked, setDestinationMasked] = useState(initial.destinationMasked || "");
   const [code, setCode] = useState("");
@@ -37,8 +37,7 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (issuedChallenge || capabilitiesLoading || registrationChannelAvailable(capabilities, channel)) return;
-    if (registrationChannelAvailable(capabilities, "EMAIL")) setChannel("EMAIL");
-    else if (registrationChannelAvailable(capabilities, "PHONE")) setChannel("PHONE");
+    if (registrationChannelAvailable(capabilities, "PHONE")) setChannel("PHONE");
   }, [capabilities, capabilitiesLoading, channel, issuedChallenge]);
 
   const {
@@ -110,12 +109,25 @@ export default function VerifyEmail() {
 
   const destination = destinationMasked || identifier || (channel === "PHONE" ? "your mobile" : "your email");
 
+  if (!capabilitiesLoading && capabilities.registration_mode === "ADMIN_REVIEW" && !issuedChallenge) {
+    return (
+      <AuthShell title="Administrator review" subtitle="Contact OTP is not part of the current registration flow." backTo="/register">
+        <div className="rounded-xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm leading-relaxed text-amber-100">
+          Enter your email, mobile number and password on the registration page. An administrator must approve the account before you can log in and play.
+        </div>
+        <Button type="button" onClick={() => navigate("/register")} className="mt-5 h-12 w-full rounded-xl font-bold">
+          Go to registration
+        </Button>
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell title="Verify your account" subtitle={`Enter the 6-digit code sent to ${destination}.`} backTo="/register">
       {!issuedChallenge && !capabilitiesLoading && !anyChannelAvailable && (
         <div data-testid="verification-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-          <span><strong>Verification is temporarily unavailable.</strong> Email and mobile code delivery are not currently ready. Please try again later.</span>
+          <span><strong>Verification is temporarily unavailable.</strong> Mobile code delivery is not currently ready. Please try again later.</span>
         </div>
       )}
       {issuedChallenge && !capabilitiesLoading && !selectedChannelAvailable && (
@@ -126,15 +138,10 @@ export default function VerifyEmail() {
       )}
       {!initial.identifier && !initial.email && (
         <div className="space-y-3 mb-5">
-          <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Verification method">
-            {[{ key: "EMAIL", label: "Email", icon: Mail }, { key: "PHONE", label: "Mobile", icon: Smartphone }].map(({ key, label, icon: Icon }) => {
-              const available = registrationChannelAvailable(capabilities, key);
-              return <button key={key} type="button" role="tab" aria-selected={channel === key} aria-disabled={capabilitiesLoading || !available} disabled={capabilitiesLoading || !available} data-testid={`verify-channel-${key.toLowerCase()}`} onClick={() => { setChannel(key); setIdentifier(""); }} className={`h-10 rounded-xl border flex items-center justify-center gap-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${channel === key && available ? "border-primary/55 bg-primary/12 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>
-                <Icon className="h-4 w-4" /> {label}
-              </button>;
-            })}
+          <div className="flex h-10 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
+            <Smartphone className="h-4 w-4" /> Mobile OTP verification
           </div>
-          <Input data-testid="verify-identifier-input" disabled={capabilitiesLoading || !selectedChannelAvailable} type={channel === "EMAIL" ? "email" : "tel"} placeholder={channel === "EMAIL" ? "you@example.com" : "+91 98765 43210"} value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+          <Input data-testid="verify-identifier-input" disabled={capabilitiesLoading || !selectedChannelAvailable} type="tel" placeholder="+91 98765 43210" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
         </div>
       )}
       <form onSubmit={submit} className="space-y-5">

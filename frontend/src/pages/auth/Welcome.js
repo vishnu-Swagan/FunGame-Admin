@@ -1,40 +1,36 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Sparkles, ShieldCheck, Coins, Gamepad2 } from "lucide-react";
+import { ShieldCheck, Coins, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclaimer } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
 import { useAuthCapabilities } from "@/lib/authCapabilities";
 
-const FEATURES = [
+const BASE_FEATURES = [
   { icon: Gamepad2, title: "Live casino games", text: "Play the live tables now and preview the premium games coming next." },
   { icon: Coins, title: "One chips wallet", text: "Add chips in INR and follow every deposit or withdrawal from your dashboard." },
-  { icon: ShieldCheck, title: "Verified accounts", text: "Sign up securely with your email address or mobile number." },
 ];
 
 export default function Welcome() {
   const navigate = useNavigate();
   const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
-  const channelSummary = capabilities.email_registration && capabilities.phone_registration
-    ? "Email and mobile verification are available."
-    : capabilities.email_registration
-      ? "Email verification is available."
-      : capabilities.phone_registration
-        ? "Mobile verification is available."
-        : "Secure email or mobile verification is required to activate a new account.";
+  const manualReview = capabilities.registration_mode === "ADMIN_REVIEW";
+  const features = [...BASE_FEATURES, manualReview
+    ? { icon: ShieldCheck, title: "Admin-reviewed access", text: "Submit both contact details securely. Play begins only after an administrator approves the account." }
+    : { icon: ShieldCheck, title: "Verified accounts", text: "Sign up securely with mandatory mobile OTP verification." }];
+  const channelSummary = manualReview
+    ? "New accounts are reviewed by an administrator before login and play."
+    : capabilities.phone_registration
+      ? "Mobile OTP verification is available."
+      : "Secure mobile OTP verification is required to activate a new account.";
   return (
     <div className="App fg-noise min-h-dvh bg-background relative overflow-hidden">
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[220px] pointer-events-none" />
       <div className="relative z-[2] mx-auto max-w-[430px] px-6 min-h-dvh flex flex-col justify-between py-10">
         <div className="pt-10">
           <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-            <div className="flex items-center gap-2 mb-5">
-              <div className="h-10 w-10 rounded-xl bg-primary/15 border border-primary/35 flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-primary" />
-              </div>
-            </div>
-            <h1 className="font-display text-5xl leading-[1.05] text-white">
-              Chakri<span className="text-primary">.Casino</span>
-            </h1>
+            <BrandWordmark logoClassName="h-44 w-44" className="mb-5" />
+            <h1 className="sr-only">CHAKRI.CASINO</h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
               Premium chip-based casino games in one glowing midnight lobby.
             </p>
@@ -42,7 +38,7 @@ export default function Welcome() {
           </motion.div>
 
           <div className="mt-8 space-y-3">
-            {FEATURES.map(({ icon: Icon, title, text }, i) => (
+            {features.map(({ icon: Icon, title, text }, i) => (
               <motion.div
                 key={title}
                 initial={{ opacity: 0, y: 10 }}
@@ -70,7 +66,7 @@ export default function Welcome() {
             Log in instead
           </Button>
           <p className="text-center text-xs text-white/45">
-            {capabilitiesLoading ? "Checking verification availability…" : channelSummary}
+            {capabilitiesLoading ? "Checking registration availability…" : channelSummary}
           </p>
         </div>
       </div>

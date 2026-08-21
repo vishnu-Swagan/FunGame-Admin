@@ -30,6 +30,7 @@ os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
 os.environ['OTP_SMS_ADAPTER'] = 'mock'
 os.environ['OTP_EXPOSE_DEV_CODE'] = 'true'
 os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
+os.environ['REGISTRATION_MODE'] = 'PHONE_OTP'
 
 import otp_service
 import auth_utils
@@ -84,8 +85,11 @@ async def main():
     await crm.require_registration_attribution_readiness()
     capabilities = await routes_auth.authentication_capabilities()
     assert capabilities['registration_enabled'] is True
-    assert capabilities['email_registration'] is True
+    assert capabilities['email_registration'] is False
     assert capabilities['phone_registration'] is True
+    assert capabilities['phone_verification_required'] is True
+    assert capabilities['verification_required'] is True
+    assert capabilities['registration_mode'] == routes_auth.PHONE_OTP_ACTIVATION_MODE
 
     # Public capability discovery requires an explicit pepper and every exact
     # identity/OTP index, not merely a configured delivery adapter.
@@ -113,9 +117,10 @@ async def main():
     assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
     await expect_http_error(
         routes_auth.register(RegisterRequest(
-            channel='EMAIL', identifier='missing-index@example.com',
-            email='missing-index@example.com', password='Strong-Password-10',
+            channel='PHONE', identifier='+919100000000', phone='+919100000000',
+            email='missing-index@example.com',
             full_name='Missing Index', date_of_birth='1990-01-01', country='India',
+            accepted_terms=True,
         )),
         503, 'OTP_UNAVAILABLE',
     )
@@ -148,31 +153,32 @@ async def main():
         pass
     await database.users.delete_many({})
 
-    # Real registration contract: UI aliases and contact verification. The
-    # contact-pending row moves to VERIFIED/profile setup, never directly to
-    # operator review. Contact OTP must never grant KYC identity verification.
+    # Real registration contract: SMS is the sole activation proof, optional
+    # email remains unverified, and the complete eligible profile activates as
+    # soon as the phone challenge is consumed.
     registration = await routes_auth.register(RegisterRequest(
-        channel='EMAIL', identifier='player@example.com', email='player@example.com',
-        password='Attacker-Planted-9', full_name='Player One',
+        channel='PHONE', identifier='+919100000001', phone='+919100000001',
+        email='player@example.com', full_name='Player One',
         date_of_birth='1990-01-01', country='India',
+        accepted_terms=True,
     ))
-    assert registration['channel'] == 'EMAIL'
+    assert registration['channel'] == 'PHONE'
+    assert registration['verification_required'] is True
     assert registration['verification_id'] == registration['challenge_id']
     assert registration['destination_masked'] == registration['destination']
     assert registration['expires_in_seconds'] == 900
     assert registration['resend_after_seconds'] == 60
 
-    # Re-registering an existing contact is opaque regardless of whether the
-    # account is verified. In particular, an active OTP cooldown must not leak
-    # the unverified state as a 429 response or replace the real challenge.
+    # Restarting a pending registration reuses the actual live challenge and
+    # never fabricates or sends a second delivery.
     duplicate_unverified = await routes_auth.register(RegisterRequest(
-        channel='EMAIL', identifier='player@example.com', email='player@example.com',
-        password='A-Different-Password-9', full_name='Someone Else',
-        date_of_birth='1990-01-01', country='India',
+        channel='PHONE', identifier='+919100000001', phone='+919100000001',
+        email='player@example.com', full_name='Someone Else',
+        date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     assert duplicate_unverified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
+    assert duplicate_unverified['challenge_id'] == registration['challenge_id']
     assert 'dev_code' not in duplicate_unverified
-    assert duplicate_unverified['challenge_id'] != registration['challenge_id']
     assert await database.otp_challenges.count_documents({}) == 1
     assert await database.otp_challenges.count_documents({
         'id': registration['challenge_id'], 'active': True,
@@ -219,9 +225,10 @@ async def main():
     try:
         await expect_http_error(
             routes_auth.register(RegisterRequest(
-                channel='EMAIL', identifier='crm-failure@example.com',
-                email='crm-failure@example.com', password='CRM-Failure-Password-9',
+                channel='PHONE', identifier='+919100000002', phone='+919100000002',
+                email='crm-failure@example.com',
                 full_name='CRM Failure', date_of_birth='1990-01-01', country='India',
+                accepted_terms=True,
             )),
             503, 'AUTH_TEMPORARILY_UNAVAILABLE',
         )
@@ -239,39 +246,40 @@ async def main():
     stored = await database.otp_challenges.find_one({'id': registration['challenge_id']})
     assert 'code' not in stored
     assert 'player@example.com' not in repr(stored)
+    assert '+919100000001' not in repr(stored)
     assert stored['code_hash'] != hashlib.sha256(registration['dev_code'].encode()).hexdigest()
 
     verification = await routes_auth.verify_contact(VerifyEmailRequest(
-        channel='EMAIL', identifier='player@example.com', email='player@example.com',
-        # Real clients may have replaced the server's real id with the opaque
-        # duplicate-registration id. Omitting it intentionally selects the
-        # one active purpose-bound challenge.
+        channel='PHONE', identifier='+919100000001', phone='+919100000001',
         code=registration['dev_code'],
         password='Victim-Owned-Password-9',
     ))
     assert verification['access_token']
     player = await database.users.find_one({'id': player['id']})
     assert player['contact_verified'] is True
-    assert player['email_verified'] is True
+    assert player['phone_verified'] is True
+    assert player['email_verified'] is False
     assert player['identity_verified'] is False
-    assert player['status'] == 'VERIFIED'
-    assert verification['user']['status'] == 'VERIFIED'
+    assert player['status'] == 'ACTIVE'
+    assert player['approved_by'] == 'SELF_SERVICE_PHONE_OTP'
+    assert player['approved_at'] == player['activated_at']
+    assert verification['user']['status'] == 'ACTIVE'
 
     # Verified, unknown and locked challenge state all use the same opaque
     # invalid-code contract. A verified contact must never be an existence
     # oracle on the public verification endpoint.
     verified_error = await expect_http_error(
         routes_auth.verify_contact(VerifyEmailRequest(
-            channel='EMAIL', identifier='player@example.com',
-            email='player@example.com', code='000000',
+            channel='PHONE', identifier='+919100000001',
+            phone='+919100000001', code='000000',
             password='Victim-Owned-Password-9',
         )),
         400, 'OTP_INVALID',
     )
     unknown_error = await expect_http_error(
         routes_auth.verify_contact(VerifyEmailRequest(
-            channel='EMAIL', identifier='nobody@example.com',
-            email='nobody@example.com', code='000000',
+            channel='PHONE', identifier='+919100009999',
+            phone='+919100009999', code='000000',
             password='Victim-Owned-Password-9',
         )),
         400, 'OTP_INVALID',
@@ -279,22 +287,27 @@ async def main():
     assert verified_error.detail == unknown_error.detail
 
     duplicate_verified = await routes_auth.register(RegisterRequest(
-        channel='EMAIL', identifier='player@example.com', email='player@example.com',
-        password='Another-Different-9', full_name='Another Name',
-        date_of_birth='1990-01-01', country='India',
+        channel='PHONE', identifier='+919100000001', phone='+919100000001',
+        email='player@example.com', full_name='Another Name',
+        date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
-    assert set(duplicate_verified) == set(duplicate_unverified)
-    assert duplicate_verified['message'] == duplicate_unverified['message']
-    assert duplicate_verified['channel'] == duplicate_unverified['channel']
-    assert duplicate_verified['destination'] == duplicate_unverified['destination']
+    assert duplicate_verified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
+    assert duplicate_verified['verification_required'] is True
+    assert duplicate_verified['channel'] == 'PHONE'
+    assert 'dev_code' not in duplicate_verified
 
     planted_password = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='player@example.com', email='player@example.com',
         password='Attacker-Planted-9',
     )), 401)
     assert planted_password.detail == routes_auth.INVALID_LOGIN_MESSAGE
-    login = await routes_auth.login(LoginRequest(
+    unverified_email_login = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='player@example.com', email='player@example.com',
+        password='Victim-Owned-Password-9',
+    )), 401)
+    assert unverified_email_login.detail == routes_auth.INVALID_LOGIN_MESSAGE
+    login = await routes_auth.login(LoginRequest(
+        identifier='+919100000001', phone='+919100000001',
         password='Victim-Owned-Password-9',
     ))
     assert login['access_token']
@@ -388,17 +401,13 @@ async def main():
 
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
-        password='Phone-Password-9', full_name='Phone Player',
-        date_of_birth='1990-01-01', country='India',
+        full_name='Phone Player', date_of_birth='1990-01-01', country='India',
+        accepted_terms=True,
     ))
     assert phone_registration['channel'] == 'PHONE'
-    phone_cooldown = await routes_auth.resend_verification(ResendVerificationRequest(
+    await expect_http_error(routes_auth.resend_verification(ResendVerificationRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
-    ))
-    assert 'dev_code' not in phone_cooldown
-    assert phone_cooldown['challenge_id'] != phone_registration['challenge_id']
-    # A cooldown response intentionally carries an opaque id. Verification
-    # without an id still accepts the original active code.
+    )), 429, 'OTP_RESEND_COOLDOWN')
     await routes_auth.verify_contact(VerifyEmailRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
         code=phone_registration['dev_code'],
@@ -413,7 +422,7 @@ async def main():
     # Reusing a verified challenge is impossible.
     await expect_otp_error(
         otp_service.verify_challenge(
-            otp_service.normalize_identity('player@example.com'),
+            otp_service.normalize_identity('+919100000001'),
             registration['dev_code'], otp_service.VERIFY_CONTACT,
             challenge_id=registration['challenge_id'], database=database,
         ),
@@ -421,12 +430,12 @@ async def main():
     )
 
     race_registration = await routes_auth.register(RegisterRequest(
-        channel='EMAIL', identifier='race@example.com', email='race@example.com',
-        password='Race-Password-9', full_name='Race Player',
-        date_of_birth='1990-01-01', country='India',
+        channel='PHONE', identifier='+919100000003', phone='+919100000003',
+        email='race@example.com', full_name='Race Player',
+        date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     race_request = VerifyEmailRequest(
-        channel='EMAIL', identifier='race@example.com', email='race@example.com',
+        channel='PHONE', identifier='+919100000003', phone='+919100000003',
         code=race_registration['dev_code'], password='Race-Owner-Password-9',
     )
     race_results = await asyncio.gather(
@@ -438,7 +447,7 @@ async def main():
     race_errors = [value for value in race_results if isinstance(value, HTTPException)]
     assert len(race_errors) == 1 and race_errors[0].detail['code'] == 'OTP_INVALID'
     race_player = await database.users.find_one({'email_normalized': 'race@example.com'})
-    assert race_player['status'] == 'VERIFIED' and race_player['contact_verified'] is True
+    assert race_player['status'] == 'ACTIVE' and race_player['contact_verified'] is True
 
     # Phone registration returns PHONE publicly while retaining SMS internally.
     phone_user = {'id': 'phone-user'}
@@ -521,16 +530,16 @@ async def main():
 
     # Password reset consumes a separate, one-use purpose-bound challenge.
     reset = await otp_service.issue_challenge(
-        player, otp_service.normalize_identity('player@example.com'),
+        player, otp_service.normalize_identity('+919100000001'),
         otp_service.RESET_PASSWORD, database=database,
     )
     await routes_auth.reset_password(ResetPasswordRequest(
-        identifier='player@example.com', email='player@example.com',
+        identifier='+919100000001', phone='+919100000001',
         verification_id=reset['verification_id'], code=reset['dev_code'],
         new_password='A-New-Password-10',
     ))
     changed = await routes_auth.login(LoginRequest(
-        identifier='player@example.com', email='player@example.com',
+        identifier='+919100000001', phone='+919100000001',
         password='A-New-Password-10',
     ))
     assert changed['access_token']
@@ -539,12 +548,12 @@ async def main():
     # same public 401 for wrong, unknown and temporarily locked accounts.
     for _ in range(routes_auth.PASSWORD_FAILURE_LIMIT):
         failure = await expect_http_error(routes_auth.login(LoginRequest(
-            identifier='player@example.com', email='player@example.com',
+            identifier='+919100000001', phone='+919100000001',
             password='Definitely-Wrong-10',
         )), 401)
         assert failure.detail == routes_auth.INVALID_LOGIN_MESSAGE
     locked_login = await expect_http_error(routes_auth.login(LoginRequest(
-        identifier='player@example.com', email='player@example.com',
+        identifier='+919100000001', phone='+919100000001',
         password='A-New-Password-10',
     )), 401)
     assert locked_login.detail == routes_auth.INVALID_LOGIN_MESSAGE
@@ -555,7 +564,7 @@ async def main():
         'locked_until': (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
     }})
     unlocked = await routes_auth.login(LoginRequest(
-        identifier='player@example.com', email='player@example.com',
+        identifier='+919100000001', phone='+919100000001',
         password='A-New-Password-10',
     ))
     assert unlocked['access_token']
@@ -622,11 +631,10 @@ async def main():
     original_adapter = otp_service.delivery_adapter
     otp_service.delivery_adapter = lambda channel: FailingAdapter()
     try:
-        opaque_resend = await routes_auth.resend_verification(ResendVerificationRequest(
+        await expect_http_error(routes_auth.resend_verification(ResendVerificationRequest(
             channel='EMAIL', identifier=resilient_identity.value,
             email=resilient_identity.value,
-        ))
-        assert 'dev_code' not in opaque_resend
+        )), 503, 'OTP_UNAVAILABLE')
     finally:
         otp_service.delivery_adapter = original_adapter
     restored = await database.otp_challenges.find_one({'id': resilient['challenge_id']})
@@ -1047,17 +1055,17 @@ async def main():
     assert production_capabilities['registration_enabled'] is False
     assert production_capabilities['email_registration'] is False
     disabled_registration = RegisterRequest(
-        channel='EMAIL', identifier='provider-disabled@example.com',
-        email='provider-disabled@example.com', password='Strong-Password-10',
+        channel='PHONE', identifier='+919100000004', phone='+919100000004',
+        email='provider-disabled@example.com',
         full_name='Disabled Provider', date_of_birth='1990-01-01', country='India',
+        accepted_terms=True,
     )
     await expect_http_error(
         routes_auth.register(disabled_registration), 503, 'OTP_UNAVAILABLE',
     )
     await database.users.insert_one({
         'id': 'provider-disabled-existing', 'role': 'PLAYER', 'status': 'PENDING',
-        'email': 'provider-disabled@example.com',
-        'email_normalized': 'provider-disabled@example.com',
+        'phone': '+919100000004', 'phone_normalized': '+919100000004',
     })
     await expect_http_error(
         routes_auth.register(disabled_registration), 503, 'OTP_UNAVAILABLE',

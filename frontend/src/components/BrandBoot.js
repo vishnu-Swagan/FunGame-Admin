@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { ChakriLogo } from "@/components/Brand";
 
 /* Cinematic brand boot — shown once per app session the first time the app is
-   opened: the logo forms up, the CHAKRI.CASINO wordmark strikes in, a loader sweeps,
+   opened: the complete 3D CHAKRI.CASINO lockup forms up, a loader sweeps,
    then it dissolves into the home screen. The lobby loads underneath meanwhile. */
 
 const bootSeen = () => {
@@ -43,22 +43,13 @@ export const BrandBoot = () => {
             animate={{ scale: 1, rotate: 0, opacity: 1 }}
             transition={{ type: reduced ? "tween" : "spring", stiffness: 140, damping: 13, duration: reduced ? 0.3 : undefined }}
           >
-            <ChakriLogo className="h-24 w-24 drop-shadow-[0_0_34px_rgba(255,199,64,0.55)]" />
-          </motion.div>
-          <motion.div
-            className="mt-5 font-tech font-black text-4xl tracking-tight"
-            initial={{ opacity: 0, y: 16, letterSpacing: reduced ? "0" : "0.3em" }}
-            animate={{ opacity: 1, y: 0, letterSpacing: "-0.01em" }}
-            transition={{ delay: 0.35, duration: 0.55, ease: "easeOut" }}
-          >
-            <span className="text-white">CHAKRI</span>
-            <span style={{ color: "#ffca3a" }}>.CASINO</span>
+            <ChakriLogo className="h-56 w-56 sm:h-64 sm:w-64 drop-shadow-[0_0_42px_rgba(255,174,45,0.48)]" />
           </motion.div>
           <motion.p
-            className="mt-3 font-gaming text-[11px] tracking-[0.45em] uppercase text-white/45"
+            className="mt-2 font-gaming text-[11px] tracking-[0.45em] uppercase text-white/45"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ delay: 0.75 }}
+            transition={{ delay: 0.5 }}
           >
             Play Chips · Live Worldwide
           </motion.p>

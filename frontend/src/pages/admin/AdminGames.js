@@ -46,7 +46,7 @@ export default function AdminGames() {
     <PageTransition className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Games</h1>
-        <p className="text-sm text-white/55 mt-1">{games.length} registered · only the nine reviewed games can be made live; the server enforces every play attempt.</p>
+        <p className="text-sm text-white/55 mt-1">{games.length} registered · only the ten reviewed games can be made live; the server enforces every play attempt.</p>
       </div>
 
       {loading ? (

@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
 import { routeForUser, APP_VERSION, compareVersions } from "@/lib/api";
 import { Disclaimer } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
 
 const Shell = ({ icon: Icon, iconClass, title, children, testId }) => (
   <div className="App fg-noise min-h-dvh bg-background flex items-center justify-center px-5" data-testid={testId}>
     <div className="fg-aurora absolute top-0 left-0 right-0 h-[160px] pointer-events-none" />
     <div className="relative z-[2] w-full max-w-[400px] rounded-2xl bg-card/60 backdrop-blur-md border border-white/10 p-8 text-center shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
-      <p className="font-display text-lg text-primary">Chakri.Casino</p>
+      <BrandWordmark logoClassName="h-24 w-24" />
       <div className="mt-6 flex justify-center">
         <div className={`h-16 w-16 rounded-2xl flex items-center justify-center border ${iconClass}`}>
           <Icon className="h-7 w-7" />

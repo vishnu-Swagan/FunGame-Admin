@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, CheckCircle2, History, Landmark, Plus, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, CheckCircle2, HandCoins, History, Landmark, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageTransition, EmptyState, Disclaimer, formatChips } from "@/components/common";
 import { useAuth } from "@/context/AuthContext";
-import { errMsg } from "@/lib/api";
+import { api, errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { isFinancialFeatureAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
@@ -31,15 +32,25 @@ export default function ChipsPage() {
   const [financial, setFinancial] = useState(null);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [chipRequests, setChipRequests] = useState([]);
   const [banks, setBanks] = useState([]);
   const [selectedBankId, setSelectedBankId] = useState("");
   const [loading, setLoading] = useState(true);
   const [depositAmount, setDepositAmount] = useState("1000");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [requestAmount, setRequestAmount] = useState("1000");
+  const [requestNote, setRequestNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [requestBusy, setRequestBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const results = await Promise.allSettled([payments.wallet(), payments.deposits(), payments.withdrawals(), payments.bankDetails()]);
+    const results = await Promise.allSettled([
+      payments.wallet(),
+      payments.deposits(),
+      payments.withdrawals(),
+      payments.bankDetails(),
+      api.get("/chips/requests"),
+    ]);
     if (results[0].status === "fulfilled") {
       setWallet(normalizeWallet(results[0].value, user?.chip_balance));
       setFinancial(results[0].value?.financial || null);
@@ -51,6 +62,7 @@ export default function ChipsPage() {
       setBanks(methods);
       setSelectedBankId((current) => methods.some((method) => method.id === current) ? current : (methods[0]?.id || ""));
     }
+    if (results[4].status === "fulfilled") setChipRequests(results[4].value?.data?.requests || []);
     setLoading(false);
   }, [user?.chip_balance]);
 
@@ -63,6 +75,7 @@ export default function ChipsPage() {
   ].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)), [deposits, withdrawals]);
   const depositsAvailable = isFinancialFeatureAvailable(financial, "deposits");
   const withdrawalsAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
+  const manualChipRequestsAvailable = financial?.features?.real_money === false;
   const selectedBank = banks.find((method) => method.id === selectedBankId) || null;
 
   const startDeposit = async (event) => {
@@ -115,33 +128,62 @@ export default function ChipsPage() {
     }
   };
 
+  const requestChips = async (event) => {
+    event.preventDefault();
+    const amount = Number(requestAmount);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 1_000_000) {
+      return toast.error("Enter a whole-number chip amount between 1 and 1,000,000");
+    }
+    setRequestBusy(true);
+    try {
+      const { data } = await api.post("/chips/request", {
+        amount,
+        note: requestNote.trim() || null,
+      });
+      toast.success(data?.message || "Chip request submitted for operator review");
+      setRequestNote("");
+      await load();
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setRequestBusy(false);
+    }
+  };
+
   const changeTab = (value) => { setTab(value); navigate(TAB_PATH[value], { replace: true }); };
 
   return (
     <PageTransition className="space-y-5" data-testid="wallet-page">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Chips wallet</h1>
-        <p className="mt-1 text-sm text-white/50">Secure INR deposits, chip balances and withdrawal tracking.</p>
+        <p className="mt-1 text-sm text-white/50">Chip requests, balances, INR deposits and withdrawal tracking.</p>
       </div>
       <WalletBalanceCard wallet={wallet} />
       <Tabs value={tab} onValueChange={changeTab}>
         <TabsList className="grid h-12 w-full grid-cols-3 rounded-xl border border-white/10 bg-white/5">
-          <TabsTrigger value="deposit" className="rounded-lg text-xs font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><ArrowDownToLine className="mr-1 h-4 w-4" />Deposit</TabsTrigger>
+          <TabsTrigger value="deposit" className="rounded-lg text-xs font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><ArrowDownToLine className="mr-1 h-4 w-4" />{manualChipRequestsAvailable ? "Request" : "Deposit"}</TabsTrigger>
           <TabsTrigger value="withdraw" className="rounded-lg text-xs font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><ArrowUpFromLine className="mr-1 h-4 w-4" />Withdraw</TabsTrigger>
           <TabsTrigger value="activity" className="rounded-lg text-xs font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><History className="mr-1 h-4 w-4" />Activity</TabsTrigger>
         </TabsList>
 
         <TabsContent value="deposit" className="mt-4">
-          <form onSubmit={startDeposit} className="space-y-4 rounded-2xl border border-white/10 bg-card/55 p-4" data-testid="deposit-form">
+          {loading ? <div className="h-52 rounded-2xl fg-shimmer border border-white/5" /> : depositsAvailable ? <form onSubmit={startDeposit} className="space-y-4 rounded-2xl border border-white/10 bg-card/55 p-4" data-testid="deposit-form">
             <div><p className="font-semibold">Add chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">You will complete payment on the provider's secure checkout. Chips are credited only after the server verifies the provider webhook.</p></div>
-            {!loading && !depositsAvailable && <UnavailableNotice noun="Deposits" />}
             <div className="grid grid-cols-4 gap-2">
               {QUICK_DEPOSITS.map((value) => <button key={value} type="button" disabled={!depositsAvailable} onClick={() => setDepositAmount(String(value))} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:cursor-not-allowed disabled:opacity-40 ${depositAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}
             </div>
             <div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/45">₹</span><Input aria-label="Deposit amount in INR" disabled={!depositsAvailable} inputMode="decimal" value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} className="h-12 rounded-xl border-white/12 bg-white/5 pl-9 tabular-nums" /></div>
             <Button type="submit" disabled={busy || loading || !depositsAvailable} className="h-12 w-full rounded-xl text-base font-bold">{busy ? "Opening secure checkout…" : depositsAvailable ? "Continue to payment" : "Deposits temporarily unavailable"}</Button>
             <p className="flex items-center gap-1.5 text-[11px] text-white/40"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />A browser return page never credits chips. Only a verified server webhook can do that.</p>
-          </form>
+          </form> : manualChipRequestsAvailable ? <ManualChipRequest
+            amount={requestAmount}
+            note={requestNote}
+            requests={chipRequests}
+            busy={requestBusy}
+            onAmountChange={setRequestAmount}
+            onNoteChange={setRequestNote}
+            onSubmit={requestChips}
+          /> : <UnavailableNotice noun="Deposits" />}
         </TabsContent>
 
         <TabsContent value="withdraw" className="mt-4">
@@ -172,12 +214,49 @@ export default function ChipsPage() {
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4">
-          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : activity.length === 0 ? <EmptyState icon={History} title="No wallet activity" subtitle="Your deposits and withdrawals will appear here." /> : <div className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-card/55">{activity.map((item) => <PaymentRow key={`${item._kind}-${item.id}`} item={item} kind={item._kind} />)}</div>}
+          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : activity.length === 0 && chipRequests.length === 0 ? <EmptyState icon={History} title="No wallet activity" subtitle="Your chip requests, deposits and withdrawals will appear here." /> : <div className="space-y-4">
+            {chipRequests.length > 0 && <section aria-label="Chip request activity" className="overflow-hidden rounded-2xl border border-white/10 bg-card/55">
+              <div className="border-b border-white/5 px-4 py-3 text-xs font-semibold text-white/55">Chip requests</div>
+              <div className="divide-y divide-white/5">{chipRequests.map((item) => <ChipRequestRow key={item.id} item={item} />)}</div>
+            </section>}
+            {activity.length > 0 && <section aria-label="Payment activity" className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-card/55">{activity.map((item) => <PaymentRow key={`${item._kind}-${item.id}`} item={item} kind={item._kind} />)}</section>}
+          </div>}
         </TabsContent>
       </Tabs>
       <Disclaimer />
     </PageTransition>
   );
+}
+
+function ManualChipRequest({ amount, note, requests, busy, onAmountChange, onNoteChange, onSubmit }) {
+  return <div className="space-y-4">
+    <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="manual-chip-request-form">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><HandCoins className="h-5 w-5 text-primary" /></div>
+        <div><p className="font-semibold">Request play chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">Your request is sent to the operator review queue. Chips appear in your balance only after approval.</p></div>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {QUICK_DEPOSITS.map((value) => <button key={value} type="button" onClick={() => onAmountChange(String(value))} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums ${amount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>{value.toLocaleString("en-IN")}</button>)}
+      </div>
+      <Input data-testid="manual-chip-request-amount" aria-label="Requested chips" type="number" min="1" max="1000000" step="1" inputMode="numeric" value={amount} onChange={(event) => onAmountChange(event.target.value)} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
+      <Textarea data-testid="manual-chip-request-note" aria-label="Request note" maxLength={280} placeholder="Note to the operator (optional)" value={note} onChange={(event) => onNoteChange(event.target.value)} className="min-h-20 rounded-xl border-white/12 bg-white/5" />
+      <Button data-testid="manual-chip-request-submit" type="submit" disabled={busy} className="h-12 w-full rounded-xl text-base font-bold">{busy ? "Submitting…" : "Submit chip request"}</Button>
+      <p className="text-[11px] leading-relaxed text-white/40">Pending requests do not change your balance. You can keep up to three requests awaiting review.</p>
+    </form>
+    {requests.length > 0 && <section aria-label="Recent chip requests" className="overflow-hidden rounded-2xl border border-white/10 bg-card/55">
+      <div className="border-b border-white/5 px-4 py-3 text-xs font-semibold text-white/55">Recent requests</div>
+      <div className="divide-y divide-white/5">{requests.slice(0, 3).map((item) => <ChipRequestRow key={item.id} item={item} />)}</div>
+    </section>}
+  </div>;
+}
+
+function ChipRequestRow({ item }) {
+  const status = String(item.status || "PENDING").toUpperCase();
+  const statusClass = status === "APPROVED" ? "text-emerald-300 bg-emerald-300/10 border-emerald-300/25" : status === "DENIED" ? "text-red-300 bg-red-300/10 border-red-300/25" : "text-amber-300 bg-amber-300/10 border-amber-300/25";
+  return <div data-testid="manual-chip-request-row" className="flex items-center justify-between gap-3 px-4 py-3">
+    <div className="min-w-0"><p className="text-sm font-semibold tabular-nums">{formatChips(item.amount)} chips</p><p className="truncate text-[11px] text-white/45">{item.admin_note || item.note || "Operator review"}</p></div>
+    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold ${statusClass}`}>{status}</span>
+  </div>;
 }
 
 function UnavailableNotice({ noun }) {

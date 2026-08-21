@@ -21,8 +21,12 @@
 
 .cab-viewport {
     position: fixed;
-    inset: 0;
+    left: calc(var(--fg-viewport-left, 0px) + var(--fg-safe-left, 0px));
+    top: calc(var(--fg-viewport-top, 0px) + var(--fg-safe-top, 0px));
+    width: var(--fg-usable-w, 100vw);
+    height: var(--fg-usable-h, 100dvh);
     background: #000;
+    box-shadow: 0 0 0 100vmax #000;
     overflow: hidden;
     /* A table is dragged and tapped, never selected or long-pressed. */
     -webkit-user-select: none;

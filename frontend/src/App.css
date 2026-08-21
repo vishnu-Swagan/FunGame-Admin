@@ -5,7 +5,7 @@
        leaves the board magnified with the chip rail off screen. */
     touch-action: manipulation;
     min-height: 100vh;      /* fallback */
-    min-height: 100dvh;     /* dynamic viewport: no jump as mobile browser chrome shows/hides */
+    min-height: var(--fg-viewport-h, 100dvh);
     /* No overflow guard on the scroll root — it freezes vertical scroll in
        Android WebView. Any wide element is clipped locally on its own wrapper. */
 }
@@ -317,4 +317,3 @@
   50% { box-shadow: 0 0 26px rgba(255, 199, 64, 0.6); }
 }
 .fg-win-glow { animation: fg-win-glow 0.8s ease-in-out infinite; }
-

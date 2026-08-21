@@ -15,6 +15,13 @@ const NAV = [
   { to: "/profile", label: "Profile", icon: User, testId: "bottom-nav-profile" },
 ];
 
+const FULLSCREEN_GAME_SLUGS = new Set([
+  "aviator", "seven-up-down", "keno", "fun-roulette", "pappu-pictures",
+  "andar-bahar", "fun-target", "checker", "bingo", "super-golden-wheel",
+  "no-hold", "champion-poker", "fever-joker-bonus", "giant-jackpot",
+  "lucky-8-line", "triple-fun", "rummy",
+]);
+
 export default function AppShell() {
   const { user, refreshUser, config, refreshConfig } = useAuth();
   const navigate = useNavigate();
@@ -26,11 +33,8 @@ export default function AppShell() {
      so the app wordmark, balance header, navigation and safe-area padding must
      not consume playable table space. */
   const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
-  const isAviatorPlay = location.pathname === "/games/aviator/play";
-  const isSevenUpDownPlay = location.pathname === "/games/seven-up-down/play";
-  const isKenoPlay = location.pathname === "/games/keno/play";
-  const isRoulettePlay = location.pathname === "/games/fun-roulette/play";
-  const isPappuPicturesPlay = location.pathname === "/games/pappu-pictures/play";
+  const playSlug = location.pathname.match(/^\/games\/([^/]+)\/play$/)?.[1];
+  const fullscreenGame = FULLSCREEN_GAME_SLUGS.has(playSlug);
 
   const loadInbox = useCallback(async () => {
     try {
@@ -78,14 +82,14 @@ export default function AppShell() {
     const root = el.closest(".App") || document.documentElement;
     const set = () => root.style.setProperty("--fg-header-h", `${el.offsetHeight}px`);
     set();
-    const ro = new ResizeObserver(set);
-    ro.observe(el);
+    const ro = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(set) : null;
+    ro?.observe(el);
     window.addEventListener("orientationchange", set);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("orientationchange", set);
     };
-  }, []);
+  }, [fullscreenGame]);
 
   // Online/offline
   useEffect(() => {
@@ -99,9 +103,17 @@ export default function AppShell() {
     };
   }, []);
 
-  if (isAviatorPlay || isSevenUpDownPlay || isKenoPlay || isRoulettePlay || isPappuPicturesPlay) {
+  if (fullscreenGame) {
     return (
-      <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#08090b" }}>
+      <div style={{
+        position: "fixed",
+        left: "var(--fg-viewport-left, 0px)",
+        top: "var(--fg-viewport-top, 0px)",
+        width: "var(--fg-viewport-w, 100vw)",
+        height: "var(--fg-viewport-h, 100dvh)",
+        overflow: "hidden",
+        background: "#08090b",
+      }}>
         <Outlet />
       </div>
     );
@@ -115,7 +127,7 @@ export default function AppShell() {
         <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
             <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
-              <BrandWordmark logoClassName="h-8 w-8" textClassName="text-xl" />
+              <BrandWordmark logoClassName="h-12 w-12" />
             </button>
             <div className="flex items-center gap-2">
               <button

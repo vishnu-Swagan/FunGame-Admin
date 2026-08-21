@@ -7,6 +7,7 @@ export const GAME_STATUS = Object.freeze({
 export const REVIEWED_GAME_SLUGS = new Set([
   "aviator", "seven-up-down", "fun-roulette", "keno", "pappu-pictures",
   "andar-bahar", "teen-patti", "poker", "blackjack",
+  "rummy",
 ]);
 
 export function isReviewedGame(gameOrSlug) {

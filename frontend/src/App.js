@@ -181,7 +181,7 @@ function PlayerApp() {
             <Route path="/chips/deposit/return/:depositId" element={<DepositReturn />} />
             <Route path="/chips/withdraw" element={<ChipsPage />} />
             <Route path="/chips/activity" element={<ChipsPage />} />
-            <Route path="/chips/request" element={<Navigate to="/chips/deposit" replace />} />
+            <Route path="/chips/request" element={<ChipsPage />} />
             <Route path="/chips/history" element={<Navigate to="/chips/activity" replace />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="/notifications" element={<Notifications />} />

@@ -44,7 +44,9 @@ from otp_service import (
     normalize_identity,
     prepare_challenge_verification,
     registration_storage_ready,
+    require_identity_indexes,
     require_registration_readiness,
+    require_registration_transactions,
 )
 
 
@@ -66,6 +68,29 @@ PASSWORD_LOCK_SECONDS = 15 * 60
 # A fixed valid bcrypt hash makes unknown-account logins perform the same
 # deliberately expensive password check as known accounts.
 DUMMY_PASSWORD_HASH = '$2b$12$UUHmLbCVBIW2CJx57KwQfeD3CUQJ4g1p7oYWdID7ZzPYVc2AKfwru'
+# Registration does not accept a password before phone ownership is proved,
+# but an equivalent fixed-cost hash still keeps existing/new lookup timing from
+# becoming a cheap account-enumeration signal. The result is never persisted.
+DUMMY_REGISTRATION_SECRET = 'Chakri-Registration-Timing-Pad-Only'
+PHONE_OTP_ACTIVATION_MODE = 'PHONE_OTP'
+ADMIN_REVIEW_ACTIVATION_MODE = 'ADMIN_REVIEW'
+ADMIN_REVIEW_PENDING = 'ADMIN_REVIEW_PENDING'
+ADMIN_REVIEW_APPROVED = 'ADMIN_APPROVED'
+
+
+def _registration_mode() -> str:
+    """Return the explicit registration gate currently selected by operations.
+
+    ADMIN_REVIEW is the temporary default requested by the operator.  Switching
+    back to the retained SMS flow is a configuration-only change after the OTP
+    provider is ready.  Unknown values fail closed instead of silently choosing
+    the less restrictive path.
+    """
+    configured = (os.environ.get('REGISTRATION_MODE') or ADMIN_REVIEW_ACTIVATION_MODE)
+    configured = configured.strip().upper()
+    if configured in (ADMIN_REVIEW_ACTIVATION_MODE, PHONE_OTP_ACTIVATION_MODE):
+        return configured
+    return 'DISABLED'
 
 
 def _now() -> datetime:
@@ -138,6 +163,14 @@ def _dummy_challenge(identity: Identity) -> dict:
     }
 
 
+def _opaque_registration_response(identity: Identity) -> dict:
+    return {
+        'message': GENERIC_REGISTER_MESSAGE,
+        'verification_required': True,
+        **_dummy_challenge(identity),
+    }
+
+
 def _user_public(user: dict) -> dict:
     public = serialize_doc(user)
     for key in (
@@ -155,6 +188,38 @@ def _user_public(user: dict) -> dict:
 async def _find_identity_user(identity: Identity, *, session=None):
     kwargs = {'session': session} if session is not None else {}
     return await db.users.find_one(identity_query(identity), **kwargs)
+
+
+async def _active_challenge_response(user: dict, identity: Identity) -> dict | None:
+    """Return truthful metadata for a still-live challenge without resending."""
+    challenge = await db.otp_challenges.find_one({
+        'user_id': user.get('id'),
+        'purpose': VERIFY_CONTACT,
+        'active': True,
+        'status': 'PENDING',
+    }, sort=[('created_at', -1)])
+    if not challenge:
+        return None
+    now = _now()
+    expires_at = _as_utc(challenge.get('expires_at'))
+    if not expires_at or expires_at <= now:
+        return None
+    resend_not_before = _as_utc(challenge.get('resend_not_before'))
+    expires_in = max(1, int((expires_at - now).total_seconds()))
+    resend_in = max(0, int((resend_not_before - now).total_seconds())) \
+        if resend_not_before else 0
+    destination = masked_destination(identity)
+    return {
+        'challenge_id': challenge['id'],
+        'verification_id': challenge['id'],
+        'channel': 'PHONE',
+        'destination': destination,
+        'destination_masked': destination,
+        'expires_in': expires_in,
+        'expires_in_seconds': expires_in,
+        'resend_in': resend_in,
+        'resend_after_seconds': resend_in,
+    }
 
 
 def _identity_is_verified(user: dict, identity: Identity) -> bool:
@@ -239,24 +304,69 @@ def _raise_public_code_error(exc: OtpError, message: str) -> None:
 @router.get('/capabilities')
 async def authentication_capabilities():
     """Expose global channel readiness without leaking any account state."""
-    storage_ready = await registration_storage_ready()
-    if storage_ready:
-        storage_ready = await crm.registration_attribution_ready()
-    email_ready = storage_ready and delivery_adapter_ready('EMAIL')
-    phone_ready = storage_ready and delivery_adapter_ready('SMS')
+    mode = _registration_mode()
+    manual_storage_ready = False
+    if mode == ADMIN_REVIEW_ACTIVATION_MODE:
+        try:
+            await require_identity_indexes()
+            await require_registration_transactions()
+            await crm.require_registration_attribution_readiness()
+            manual_storage_ready = True
+        except (OtpConfigurationError, crm.CrmConfigurationError):
+            manual_storage_ready = False
+
+    otp_storage_ready = await registration_storage_ready()
+    if otp_storage_ready:
+        otp_storage_ready = await crm.registration_attribution_ready()
+    email_otp_ready = otp_storage_ready and delivery_adapter_ready('EMAIL')
+    phone_otp_ready = otp_storage_ready and delivery_adapter_ready('SMS')
+
+    if mode == ADMIN_REVIEW_ACTIVATION_MODE:
+        return {
+            'registration_enabled': manual_storage_ready,
+            'email_registration': manual_storage_ready,
+            'phone_registration': manual_storage_ready,
+            'phone_verification_required': False,
+            'email_password_reset': email_otp_ready,
+            'phone_password_reset': phone_otp_ready,
+            'verification_required': False,
+            'manual_admin_review': True,
+            'registration_mode': ADMIN_REVIEW_ACTIVATION_MODE,
+        }
+
     return {
-        'registration_enabled': email_ready or phone_ready,
-        'email_registration': email_ready,
-        'phone_registration': phone_ready,
-        'email_password_reset': email_ready,
-        'phone_password_reset': phone_ready,
+        'registration_enabled': mode == PHONE_OTP_ACTIVATION_MODE and phone_otp_ready,
+        # Email can be collected on the phone-registration form, but is not a
+        # registration identity and never receives an activation challenge.
+        'email_registration': False,
+        'phone_registration': mode == PHONE_OTP_ACTIVATION_MODE and phone_otp_ready,
+        'phone_verification_required': True,
+        # Legacy verified-email accounts may still use their existing recovery
+        # channel. New self-service accounts are activated only by phone OTP.
+        'email_password_reset': email_otp_ready,
+        'phone_password_reset': phone_otp_ready,
+        'verification_required': True,
+        'registration_mode': PHONE_OTP_ACTIVATION_MODE,
     }
 
 
-@router.post('/register', status_code=status.HTTP_202_ACCEPTED)
-async def register(body: RegisterRequest):
-    """Create a pending player account with an email or E.164 phone login."""
+async def _register_phone_otp(body: RegisterRequest):
+    """Create a phone-OTP-pending self-service player.
+
+    Email is optional profile data. It is never used as the activation proof.
+    """
+    if body.password is not None or body.password_confirmation is not None:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PASSWORD_AFTER_OTP',
+            'message': 'Create the password only after mobile verification.',
+        })
     identity = _request_identity(body)
+    if identity.channel != 'SMS' or identity.value != body.phone:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PHONE_REQUIRED',
+            'message': 'Register with a mobile number that can receive an OTP.',
+        })
+
     try:
         await require_registration_readiness()
         await crm.require_registration_attribution_readiness()
@@ -269,41 +379,89 @@ async def register(body: RegisterRequest):
     # contact. Runtime provider failures remain opaque below.
     if not delivery_adapter_ready(identity.channel):
         _raise_otp(OtpConfigurationError('Requested OTP channel is not configured'))
-    if body.date_of_birth or body.country:
-        ok, code, message = await compliance.check_eligibility(
-            body.country, body.date_of_birth, require_dob=False,
-        )
-        if not ok:
-            raise HTTPException(status_code=403, detail={'code': code, 'message': message})
+    full_name = (body.full_name or '').strip()
+    country = (body.country or '').strip()
+    country_code = compliance.normalise_country(country)
+    if not full_name:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PROFILE_REQUIRED', 'message': 'A full name is required.',
+        })
+    if not country or not country_code or country_code == compliance.UNKNOWN:
+        raise HTTPException(status_code=422, detail={
+            'code': 'COUNTRY_REQUIRED', 'message': 'A recognized country is required.',
+        })
+    if not body.date_of_birth:
+        raise HTTPException(status_code=422, detail={
+            'code': 'AGE_UNKNOWN', 'message': 'A valid date of birth is required.',
+        })
+    if body.accepted_terms is not True:
+        raise HTTPException(status_code=422, detail={
+            'code': 'TERMS_REQUIRED',
+            'message': 'Accept the account and play terms to continue.',
+        })
+    ok, code, message = await compliance.check_eligibility(
+        country, body.date_of_birth, require_dob=True,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail={'code': code, 'message': message})
 
-    # Do the expensive password work before the existence check so response
-    # timing does not become a practical account-enumeration side channel.
-    # Match the bcrypt cost of a new registration, but do not persist a
-    # caller-chosen password before contact ownership has been proved. The
-    # verifier commits their password atomically with the OTP below.
-    await asyncio.to_thread(hash_password, body.password)
-    existing = await _find_identity_user(identity)
-    if existing:
-        # Registration is never a resend endpoint. Returning the same opaque
-        # success for verified and unverified accounts prevents the active OTP
-        # cooldown (or delivery state) from revealing account state.
-        return {'message': GENERIC_REGISTER_MESSAGE, **_dummy_challenge(identity)}
+    await asyncio.to_thread(hash_password, DUMMY_REGISTRATION_SECRET)
+    email_identity = normalize_identity(str(body.email)) if body.email else None
+    phone_existing = await _find_identity_user(identity)
+    email_existing = await _find_identity_user(email_identity) if email_identity else None
+    if phone_existing:
+        recoverable_pending = bool(
+            phone_existing.get('role') == 'PLAYER'
+            and phone_existing.get('status') == 'PENDING'
+            and phone_existing.get('registration_source') == 'SELF_SERVICE'
+            and phone_existing.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+            and phone_existing.get('phone_verified') is not True
+        )
+        if recoverable_pending:
+            # A player who lost the verification screen can safely restart the
+            # flow. Reuse truthful metadata when a code is already live rather
+            # than claiming a second SMS was sent.
+            active_challenge = await _active_challenge_response(phone_existing, identity)
+            if active_challenge:
+                return {
+                    'message': GENERIC_REGISTER_MESSAGE,
+                    'verification_required': True,
+                    **active_challenge,
+                }
+            # With no live challenge, a replacement still goes only to the
+            # already-recorded phone.
+            challenge = await _issue_or_raise(phone_existing, identity, VERIFY_CONTACT)
+            return {
+                'message': GENERIC_REGISTER_MESSAGE,
+                'verification_required': True,
+                **challenge,
+            }
+    if phone_existing or email_existing:
+        # Verified phone and optional-email collisions use the exact opaque
+        # public response shape. It deliberately does not claim unconditional
+        # delivery and cannot reveal which identity matched.
+        return _opaque_registration_response(identity)
 
     user_id = str(uuid.uuid4())
+    created_at = _now().isoformat()
     user = {
         'id': user_id,
         'role': 'PLAYER',
         'status': 'PENDING',
         'registration_source': 'SELF_SERVICE',
+        'activation_mode': PHONE_OTP_ACTIVATION_MODE,
         'primary_identity': identity.value,
-        'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+        'primary_identity_channel': 'PHONE',
+        'contact_verification_status': 'PENDING',
         # Reserved for the later KYC workflow; contact OTP never changes it.
         'identity_verified': False,
+        'contact_verified': False,
         'email_verified': False,
         'phone_verified': False,
-        'display_name': (body.full_name or '').strip() or None,
-        'full_name': (body.full_name or '').strip() or None,
-        'country': (body.country or '').strip() or None,
+        'display_name': full_name,
+        'full_name': full_name,
+        'country': country,
+        'country_code': country_code,
         'date_of_birth': body.date_of_birth,
         'avatar': 'star',
         'chip_balance': 0,
@@ -315,44 +473,217 @@ async def register(body: RegisterRequest):
             'haptics_enabled': True, 'reduced_motion': False,
             'high_contrast': False,
         },
-        'accepted_terms': False,
-        'created_at': _now().isoformat(),
+        'accepted_terms': True,
+        'accepted_terms_at': created_at,
+        'created_at': created_at,
     }
-    if identity.channel == 'EMAIL':
-        user['email'] = identity.value
-        user['email_normalized'] = identity.value
-        user['phone'] = None
+    user['phone'] = identity.value
+    user['phone_normalized'] = identity.value
+    if email_identity:
+        user['email'] = email_identity.value
+        user['email_normalized'] = email_identity.value
     else:
-        user['phone'] = identity.value
-        user['phone_normalized'] = identity.value
-        # Compatibility for legacy player/support serializers that still index
-        # into ``email``.  It is unique, non-routable and hidden publicly.
         user['email'] = f'phone-{user_id}@account.phone.invalid'
 
     async def create_account(session):
         kwargs = {'session': session} if session is not None else {}
         await db.users.insert_one(user, **kwargs)
         await crm.attribute_user(
-            user['id'], None, actor='self-registration', session=session,
+            user['id'], None, actor='self-registration-phone-otp', session=session,
         )
         return await db.users.find_one({'id': user['id']}, **kwargs)
 
     try:
         user = await _run_auth_transaction(create_account)
     except DuplicateKeyError:
-        # A concurrent registration won the unique normalized-identity race.
-        # Do not branch on its verification/challenge state publicly.
-        return {'message': GENERIC_REGISTER_MESSAGE, **_dummy_challenge(identity)}
+        # A concurrent insert won either normalized-identity guard. Keep the
+        # same non-enumerating response as a pre-existing collision.
+        return _opaque_registration_response(identity)
 
     try:
         challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
     except OtpError as exc:
-        # The pending account remains recoverable through resend when the
-        # provider returns. Never reveal that insertion happened by returning
-        # a different status from the existing-account branch.
-        logger.warning('Initial contact challenge not issued: %s', exc.code)
-        challenge = _dummy_challenge(identity)
-    return {'message': GENERIC_REGISTER_MESSAGE, **challenge}
+        # A registration is not successful unless the SMS provider accepted
+        # the challenge. Remove the unusable pending row and its attribution so
+        # the player can retry cleanly when delivery recovers.
+        async def rollback_failed_registration(session):
+            kwargs = {'session': session} if session is not None else {}
+            await db.otp_challenges.delete_many({'user_id': user['id']}, **kwargs)
+            await db.player_attribution.delete_many({'user_id': user['id']}, **kwargs)
+            await db.users.delete_one({
+                'id': user['id'], 'status': 'PENDING', 'phone_verified': False,
+            }, **kwargs)
+
+        try:
+            await _run_auth_transaction(rollback_failed_registration)
+        except HTTPException:
+            logger.error('Failed to roll back undeliverable registration')
+        _raise_otp(exc)
+    return {
+        'message': GENERIC_REGISTER_MESSAGE,
+        'verification_required': True,
+        **challenge,
+    }
+
+
+async def _register_for_admin_review(body: RegisterRequest):
+    """Create one zero-chip player application for explicit admin approval.
+
+    No delivery adapter is consulted and no response claims that a code was
+    sent.  Contacts remain unverified; the password proves only knowledge of
+    the chosen credential, while the operator's approval controls activation.
+    """
+    try:
+        await require_identity_indexes()
+        await require_registration_transactions()
+        await crm.require_registration_attribution_readiness()
+    except OtpConfigurationError as exc:
+        _raise_otp(exc)
+    except crm.CrmConfigurationError as exc:
+        _raise_otp(OtpConfigurationError(str(exc)))
+
+    identity = _request_identity(body)
+    if identity.channel != 'SMS' or identity.value != body.phone:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PHONE_REQUIRED',
+            'message': 'Enter a valid mobile number with country code.',
+        })
+    if not body.email:
+        raise HTTPException(status_code=422, detail={
+            'code': 'EMAIL_REQUIRED',
+            'message': 'A valid email address is required.',
+        })
+    if body.password is None or body.password_confirmation is None:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PASSWORD_REQUIRED',
+            'message': 'Create and confirm a password of at least 8 characters.',
+        })
+    if body.password != body.password_confirmation:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PASSWORD_MISMATCH',
+            'message': 'Password confirmation does not match.',
+        })
+
+    full_name = (body.full_name or '').strip()
+    country = (body.country or '').strip()
+    country_code = compliance.normalise_country(country)
+    if not full_name:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PROFILE_REQUIRED', 'message': 'A full name is required.',
+        })
+    if not country or not country_code or country_code == compliance.UNKNOWN:
+        raise HTTPException(status_code=422, detail={
+            'code': 'COUNTRY_REQUIRED', 'message': 'A recognized country is required.',
+        })
+    if not body.date_of_birth:
+        raise HTTPException(status_code=422, detail={
+            'code': 'AGE_UNKNOWN', 'message': 'A valid date of birth is required.',
+        })
+    if body.accepted_terms is not True:
+        raise HTTPException(status_code=422, detail={
+            'code': 'TERMS_REQUIRED',
+            'message': 'Accept the account and play terms to continue.',
+        })
+    ok, code, message = await compliance.check_eligibility(
+        country, body.date_of_birth, require_dob=True,
+    )
+    if not ok:
+        raise HTTPException(status_code=403, detail={'code': code, 'message': message})
+
+    # Hash before account lookup so a duplicate and a new registration incur
+    # the same expensive password work. The candidate hash is discarded on a
+    # collision and can never overwrite an existing credential.
+    password_hash = await asyncio.to_thread(hash_password, body.password)
+    email_identity = normalize_identity(str(body.email))
+    phone_existing = await _find_identity_user(identity)
+    email_existing = await _find_identity_user(email_identity)
+    public_request_id = str(uuid.uuid4())
+    response = {
+        'message': (
+            'If the details are eligible, the account request has been '
+            'submitted for administrator review.'
+        ),
+        'request_id': public_request_id,
+        'registration_mode': ADMIN_REVIEW_ACTIVATION_MODE,
+        'review_required': True,
+        'verification_required': False,
+    }
+    if phone_existing or email_existing:
+        return response
+
+    user_id = str(uuid.uuid4())
+    created_at = _now().isoformat()
+    user = {
+        'id': user_id,
+        'role': 'PLAYER',
+        'status': 'PENDING',
+        'registration_source': 'SELF_SERVICE',
+        'activation_mode': ADMIN_REVIEW_ACTIVATION_MODE,
+        'primary_identity': identity.value,
+        'primary_identity_channel': 'PHONE',
+        'contact_verification_status': ADMIN_REVIEW_PENDING,
+        'manual_contact_reviewed': False,
+        'identity_verified': False,
+        'contact_verified': False,
+        'email_verified': False,
+        'phone_verified': False,
+        'email': email_identity.value,
+        'email_normalized': email_identity.value,
+        'phone': identity.value,
+        'phone_normalized': identity.value,
+        'password_hash': password_hash,
+        'password_set_at': created_at,
+        'password_failed_attempts': 0,
+        'display_name': full_name,
+        'full_name': full_name,
+        'country': country,
+        'country_code': country_code,
+        'date_of_birth': body.date_of_birth,
+        'avatar': 'star',
+        'chip_balance': 0,
+        'points_balance': 0,
+        'favorites': [],
+        'recent_games': [],
+        'settings': {
+            'sound_enabled': True, 'music_enabled': True,
+            'haptics_enabled': True, 'reduced_motion': False,
+            'high_contrast': False,
+        },
+        'accepted_terms': True,
+        'accepted_terms_at': created_at,
+        # The complete profile is the application. There is no hidden second
+        # onboarding submission required before it appears in the admin queue.
+        'submitted_at': created_at,
+        'created_at': created_at,
+    }
+
+    async def create_account(session):
+        kwargs = {'session': session} if session is not None else {}
+        await db.users.insert_one(user, **kwargs)
+        await crm.attribute_user(
+            user_id, None, actor='self-registration-admin-review', session=session,
+        )
+        return await db.users.find_one({'id': user_id}, **kwargs)
+
+    try:
+        await _run_auth_transaction(create_account)
+    except DuplicateKeyError:
+        # Exact same response shape and work factor as the pre-read collision.
+        return response
+    return response
+
+
+@router.post('/register', status_code=status.HTTP_202_ACCEPTED)
+async def register(body: RegisterRequest):
+    mode = _registration_mode()
+    if mode == ADMIN_REVIEW_ACTIVATION_MODE:
+        return await _register_for_admin_review(body)
+    if mode == PHONE_OTP_ACTIVATION_MODE:
+        return await _register_phone_otp(body)
+    raise HTTPException(status_code=503, detail={
+        'code': 'REGISTRATION_UNAVAILABLE',
+        'message': 'Registration is temporarily unavailable.',
+    })
 
 
 @router.post('/signup-request')
@@ -437,6 +768,7 @@ async def verify_contact(body: VerifyEmailRequest):
         updates = {
             contact_field: True,
             'contact_verified': True,
+            'contact_verification_status': 'VERIFIED',
             'contact_verified_at': verified_at,
             'primary_identity': identity.value,
             'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
@@ -445,11 +777,40 @@ async def verify_contact(body: VerifyEmailRequest):
             'password_failed_attempts': 0,
             'active_session_id': session_id,
         }
-        if _self_service_needs_profile(user):
+        phone_self_service = bool(
+            user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+        )
+        if phone_self_service:
+            if identity.channel != 'SMS':
+                raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+            # The full eligible profile and terms were recorded before the SMS
+            # was sent, so proof of phone ownership is the final activation
+            # gate. approved_at prevents a later reactivation bonus.
+            updates.update({
+                'status': 'ACTIVE',
+                'activated_at': verified_at,
+                'approved_at': verified_at,
+                'approved_by': 'SELF_SERVICE_PHONE_OTP',
+                'activation_mode': PHONE_OTP_ACTIVATION_MODE,
+                'email_verified': False,
+            })
+        elif _self_service_needs_profile(user):
             updates['status'] = 'VERIFIED'
         kwargs = {'session': session} if session is not None else {}
+        verification_query = {'id': user['id'], contact_field: {'$ne': True}}
+        if phone_self_service:
+            verification_query.update({
+                'role': 'PLAYER',
+                'status': 'PENDING',
+                'registration_source': 'SELF_SERVICE',
+                'activation_mode': PHONE_OTP_ACTIVATION_MODE,
+                'primary_identity_channel': 'PHONE',
+                'phone_normalized': identity.value,
+                'accepted_terms': True,
+            })
         updated = await db.users.find_one_and_update(
-            {'id': user['id'], contact_field: {'$ne': True}},
+            verification_query,
             {
                 '$set': updates,
                 '$unset': {
@@ -470,7 +831,11 @@ async def verify_contact(body: VerifyEmailRequest):
         _raise_public_code_error(exc, 'The verification code is invalid or expired.')
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {
-        'message': 'Contact verified. Complete your profile to continue.',
+        'message': (
+            'Mobile number verified. Your account is active.'
+            if user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+            else 'Contact verified. Complete your profile to continue.'
+        ),
         'access_token': token,
         'user': _user_public(user),
     }
@@ -492,15 +857,22 @@ async def resend_verification(body: ResendVerificationRequest):
     user = await _find_identity_user(identity)
     if not user or user.get('role') != 'PLAYER' or _identity_is_verified(user, identity):
         return {'message': GENERIC_RESEND_MESSAGE, **_dummy_challenge(identity)}
+    if (user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+            and identity.channel != 'SMS'):
+        raise HTTPException(status_code=422, detail={
+            'code': 'PHONE_REQUIRED',
+            'message': 'This account must be verified by mobile OTP.',
+        })
     try:
         challenge = await issue_challenge(
             user, identity, VERIFY_CONTACT, consume_limit=False,
         )
     except OtpError as exc:
-        # Cooldown/provider state also identifies a real unverified account.
-        # The original code remains valid; return the same opaque 202 shape.
-        logger.warning('Contact resend challenge not issued: %s', exc.code)
-        challenge = _dummy_challenge(identity)
+        # Never tell a known player that a new SMS was sent when the provider
+        # rejected it. Unknown/verified contacts retain the opaque response
+        # above, which makes no unconditional delivery claim.
+        _raise_otp(exc)
     return {'message': GENERIC_RESEND_MESSAGE, **challenge}
 
 
@@ -535,6 +907,20 @@ async def login(body: LoginRequest):
         body.password,
         user.get('password_hash', DUMMY_PASSWORD_HASH) if user else DUMMY_PASSWORD_HASH,
     )
+    phone_self_service_identity_ok = True
+    if (user
+            and user.get('role') == 'PLAYER'
+            and user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
+        # The optional email collected during sign-up is profile data only. It
+        # must not silently become a login identifier without its own ownership
+        # proof. Phone-OTP accounts authenticate exclusively with the exact
+        # verified E.164 number.
+        phone_self_service_identity_ok = bool(
+            contact_identity
+            and contact_identity.channel == 'SMS'
+            and contact_identity.value == user.get('phone_normalized')
+        )
     locked_until = _as_utc(user.get('locked_until')) if user else None
     if user and locked_until and locked_until <= now:
         await db.users.update_one({'id': user['id']}, {
@@ -546,7 +932,7 @@ async def login(body: LoginRequest):
         locked_until = None
     if user and locked_until and locked_until > now:
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
-    if not user or not password_ok:
+    if not user or not password_ok or not phone_self_service_identity_ok:
         if user:
             updated = await db.users.find_one_and_update(
                 {'id': user['id']},
@@ -564,15 +950,51 @@ async def login(body: LoginRequest):
     if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=403, detail='Administrator access is disabled')
     player_contact_verified = False
+    phone_self_service = False
+    manual_review_account = False
     legacy_operator_repair = False
     if user.get('role') == 'PLAYER':
-        primary = contact_identity
+        phone_self_service = bool(
+            user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+        )
+        manual_review_account = bool(
+            user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == ADMIN_REVIEW_ACTIVATION_MODE
+        )
+        if manual_review_account and user.get('status') != 'ACTIVE':
+            if user.get('status') == 'REJECTED':
+                raise HTTPException(status_code=403, detail={
+                    'code': 'ACCOUNT_REVIEW_REJECTED',
+                    'message': 'Your registration was not approved. Contact support for help.',
+                })
+            if user.get('status') == 'SUSPENDED':
+                raise HTTPException(status_code=403, detail={
+                    'code': 'ACCOUNT_SUSPENDED',
+                    'message': 'Your account is suspended. Contact support.',
+                })
+            raise HTTPException(status_code=403, detail={
+                'code': 'ACCOUNT_PENDING_REVIEW',
+                'message': 'Your registration is pending administrator approval.',
+            })
+        primary = None if phone_self_service else contact_identity
         if primary is None:
             try:
-                primary = normalize_identity(user.get('primary_identity') or user.get('email'))
+                primary = normalize_identity(
+                    user.get('phone') if phone_self_service
+                    else user.get('primary_identity') or user.get('email')
+                )
             except ValueError:
                 primary = None
         player_contact_verified = bool(primary and _identity_is_verified(user, primary))
+        # In the temporary ADMIN_REVIEW mode an explicit operator decision,
+        # not an OTP, is the activation gate. Contact flags deliberately stay
+        # false so the UI and future verification migration remain truthful.
+        if manual_review_account:
+            player_contact_verified = bool(
+                user.get('manual_contact_reviewed') is True
+                and user.get('contact_verification_status') == ADMIN_REVIEW_APPROVED
+            )
         if (not player_contact_verified
                 and _legacy_operator_contact_repair_allowed(user, primary)):
             player_contact_verified = True
@@ -609,7 +1031,27 @@ async def login(body: LoginRequest):
             'contact_verification_repair': 'LEGACY_OPERATOR_ACTIVE',
         })
     login_query = {'id': user['id']}
-    if legacy_operator_repair:
+    if user.get('role') == 'PLAYER' and phone_self_service:
+        # A concurrent admin/edit must not let a stale password check mint a
+        # session after the verified-phone state changed.
+        login_query.update({
+            'registration_source': 'SELF_SERVICE',
+            'activation_mode': PHONE_OTP_ACTIVATION_MODE,
+            'phone_verified': True,
+            'contact_verified': True,
+        })
+    elif user.get('role') == 'PLAYER' and manual_review_account:
+        # Prevent a concurrent suspension/rejection from minting a session
+        # after the password check but before the write.
+        login_query.update({
+            'role': 'PLAYER',
+            'status': 'ACTIVE',
+            'registration_source': 'SELF_SERVICE',
+            'activation_mode': ADMIN_REVIEW_ACTIVATION_MODE,
+            'manual_contact_reviewed': True,
+            'contact_verification_status': ADMIN_REVIEW_APPROVED,
+        })
+    elif legacy_operator_repair:
         # The compatibility repair is itself a CAS: a concurrent explicit
         # verification decision or account-state change must win, never be
         # overwritten by a stale legacy login.
@@ -627,7 +1069,12 @@ async def login(body: LoginRequest):
         return_document=ReturnDocument.AFTER,
     )
     if not user:
-        if legacy_operator_repair:
+        if manual_review_account:
+            raise HTTPException(status_code=403, detail={
+                'code': 'ACCOUNT_PENDING_REVIEW',
+                'message': 'Your account is not currently approved for login.',
+            })
+        if legacy_operator_repair or phone_self_service:
             raise HTTPException(status_code=403, detail={
                 'code': 'CONTACT_NOT_VERIFIED',
                 'message': 'Verify your contact method before logging in.',

@@ -1,0 +1,96 @@
+{
+  "manifestVersion": "rummy-reference-2026-08-21-v1",
+  "approvalDate": "2026-08-21",
+  "sourceArchive": "/Users/vishnu/Downloads/rummy.zip",
+  "usage": "Visual reference evidence only; these captured screenshots are not runtime assets.",
+  "files": [
+    {
+      "filename": "1000279341.png",
+      "sha256": "42ce81fc1a8ddd6c54aeb5dfe837f2d3129a15c5f2dcf0e0e5b23f81bb75e199",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "five-category-lobby",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279342.png",
+      "sha256": "48e9d32c779f8681044d5ab252bd538f59aa36693371acb4c73656206bcfe03b",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "initial-live-table",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279343.png",
+      "sha256": "476bba1bd5e3719ddd8f352225a3070905e9c82b2ed2d49ed48038c61df443ca",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "drawn-card-and-meld-groups",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279345.png",
+      "sha256": "2c34041e139509f257f0e8be702b2599adc585f6738fa8172a5f522f322050d5",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "manual-card-selection-and-placement",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279346.png",
+      "sha256": "f5f10983dd4b4b3047cff13a94260df52653bf5d11544a889f80d68a0410ad75",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "turn-guidance-and-legal-draw-targets",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279347.png",
+      "sha256": "6aebfae18aa02cf822a9701d37cd82a7c23dc846f10ae3ea418debc615f9e417",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "automatic-grouping-and-validation",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279348.png",
+      "sha256": "35dbcb401dc6e5e6d9f4383de7cd1c5ba08d6a188b915428a45cca03b07a53c0",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "valid-declaration",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279349.png",
+      "sha256": "23080437209d7aeabb70cc9ffa4782e1f76a60c0a8f400b4ea175c5eb26b93b0",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "in-table-settlement",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279350.png",
+      "sha256": "4be294ac8eaf30dc48e7c6c1260ab2621750598fb4fc891b1d16be5937d2b332",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "win-celebration",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279351.png",
+      "sha256": "93d531b7b40496a393f6f4c30804657c22e1eeba49c865af8834b30adf42c4c1",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "results-overlay-opening",
+      "approvalDate": "2026-08-21"
+    },
+    {
+      "filename": "1000279352.png",
+      "sha256": "4761643029738c637e25d14507232ea2c7809610f7ff506d937ac19ffa8fcbd9",
+      "width": 2392,
+      "height": 1080,
+      "assignedState": "completed-results",
+      "approvalDate": "2026-08-21"
+    }
+  ]
+}

@@ -36,6 +36,9 @@ logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
 
 WELCOME_BONUS = 1000
+ADMIN_REVIEW_ACTIVATION_MODE = 'ADMIN_REVIEW'
+ADMIN_REVIEW_PENDING = 'ADMIN_REVIEW_PENDING'
+ADMIN_REVIEW_APPROVED = 'ADMIN_APPROVED'
 
 # Fixed issued-credential format: Login ID = "GK" + 7 digits, password = 7 CAPITAL letters.
 _RNG = secrets.SystemRandom()
@@ -129,6 +132,19 @@ def _require_player_credential_target(user: dict) -> None:
         })
 
 
+def _directly_activated_self_service_account(user: dict) -> bool:
+    """Recognise self-service accounts activated without an admin decision."""
+    return bool(
+        user.get('role') == 'PLAYER'
+        and user.get('registration_source') == 'SELF_SERVICE'
+        and user.get('activation_mode') in ('SELF_SERVICE_NO_OTP', 'PHONE_OTP')
+        and (
+            user.get('activation_mode') == 'SELF_SERVICE_NO_OTP'
+            or (user.get('phone_verified') is True and user.get('contact_verified') is True)
+        )
+    )
+
+
 # ---------- Dashboard ----------
 @router.get('/stats')
 async def stats(admin: dict = Depends(require_admin)):
@@ -213,9 +229,19 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
         if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
             raise HTTPException(status_code=400, detail='User has not submitted onboarding yet')
         self_service = user.get('registration_source') == 'SELF_SERVICE'
+        manual_review_registration = bool(
+            self_service
+            and user.get('activation_mode') == ADMIN_REVIEW_ACTIVATION_MODE
+            and user.get('contact_verification_status') in (
+                ADMIN_REVIEW_PENDING, ADMIN_REVIEW_APPROVED,
+            )
+        )
         if self_service:
-            if not user.get('contact_verified') or not (
-                    user.get('email_verified') or user.get('phone_verified')):
+            verified_contact = bool(
+                user.get('contact_verified')
+                and (user.get('email_verified') or user.get('phone_verified'))
+            )
+            if not verified_contact and not manual_review_registration:
                 raise HTTPException(status_code=403, detail={
                     'code': 'CONTACT_NOT_VERIFIED',
                     'message': 'The player must verify their registration contact before approval.',
@@ -225,7 +251,8 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                     'code': 'TERMS_NOT_ACCEPTED',
                     'message': 'The player must accept the account terms before approval.',
                 })
-            if not user.get('submitted_at') and not user.get('approved_at'):
+            if (not user.get('submitted_at') and not user.get('approved_at')
+                    and not _directly_activated_self_service_account(user)):
                 raise HTTPException(status_code=403, detail={
                     'code': 'ONBOARDING_NOT_SUBMITTED',
                     'message': 'The player must complete and submit their profile before approval.',
@@ -244,11 +271,39 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 f'{message} This account cannot be approved under the current '
                 f'compliance settings ({code}).'))
 
-        was_approved_before = user.get('approved_at') is not None
+        was_approved_before = bool(
+            user.get('approved_at')
+            or _directly_activated_self_service_account(user)
+        )
         approved_at = _now()
+        approval_updates = {
+            'status': 'ACTIVE',
+            'approved_at': approved_at,
+            'approved_by': admin['id'],
+        }
+        if manual_review_registration:
+            approval_updates.update({
+                'manual_contact_reviewed': True,
+                'manual_contact_reviewed_at': approved_at,
+                'manual_contact_reviewed_by': admin['id'],
+                # This does not mean the contacts were OTP-verified. Both
+                # channel flags remain false and can be migrated later.
+                'contact_verification_status': ADMIN_REVIEW_APPROVED,
+            })
+        approval_query = {
+            'id': user_id, 'role': 'PLAYER', 'status': user.get('status'),
+        }
+        if manual_review_registration:
+            approval_query.update({
+                'registration_source': 'SELF_SERVICE',
+                'activation_mode': ADMIN_REVIEW_ACTIVATION_MODE,
+                'contact_verification_status': user.get('contact_verification_status'),
+                'accepted_terms': True,
+                'submitted_at': user.get('submitted_at'),
+            })
         updated = await db.users.find_one_and_update(
-            {'id': user_id, 'role': 'PLAYER', 'status': user.get('status')},
-            {'$set': {'status': 'ACTIVE', 'approved_at': approved_at},
+            approval_query,
+            {'$set': approval_updates,
              '$unset': {'rejection_reason': ''}},
             return_document=ReturnDocument.AFTER,
             **kwargs,
@@ -535,101 +590,235 @@ async def list_chip_requests(status: str = Query(default=None), admin: dict = De
     return {'requests': serialize_doc(reqs)}
 
 
-@router.post('/chip-requests/{request_id}/approve')
-async def approve_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
-    require_legacy_chip_mutation_allowed()
-    req = await db.chip_requests.find_one({'id': request_id})
+async def _release_pending_chip_request_slot(req: dict, *, session=None) -> None:
+    """Release an atomic pending-request reservation on terminal settlement.
+
+    Older request rows predate the reservation counter and intentionally have
+    no key, so they remain resolvable without inventing or decrementing state.
+    The guarded decrement prevents retries or legacy/manual data repair from
+    driving the counter below zero.
+    """
+    counter_key = req.get('pending_counter_key')
+    if not counter_key:
+        return
+    kwargs = {'session': session} if session is not None else {}
+    result = await db.chip_request_pending_counters.update_one(
+        {'_id': counter_key, 'count': {'$gt': 0}},
+        {'$inc': {'count': -1}, '$set': {'updated_at': _now()}},
+        **kwargs,
+    )
+    if result.modified_count != 1:
+        raise HTTPException(status_code=503, detail={
+            'code': 'CHIP_REQUEST_COUNTER_INVALID',
+            'message': 'Chip-request capacity is inconsistent. Refresh and try again.',
+        })
+
+
+async def _settle_chip_request(request_id: str, note: str | None,
+                               admin: dict, *, session=None) -> dict:
+    """Settle one pending request as a single Mongo transaction.
+
+    Balance/points movements, their ledger row, the player notification, the
+    request-state CAS and pending-cap release either all commit or all roll
+    back. This avoids an APPROVED row with no chips after a process or database
+    failure midway through settlement.
+    """
+    kwargs = {'session': session} if session is not None else {}
+    req = await db.chip_requests.find_one({'id': request_id}, **kwargs)
     if not req:
         raise HTTPException(status_code=404, detail='Request not found')
     if req.get('status') != 'PENDING':
-        raise HTTPException(status_code=400, detail='Request already resolved')  # idempotent settlement guard
-    note = (body.note if body else None)
-    req_type = req.get('type', 'BUY')
-    # Mark resolved FIRST (atomically) to guarantee idempotency, then settle
-    result = await db.chip_requests.update_one(
-        {'id': request_id, 'status': 'PENDING'},
-        {'$set': {'status': 'APPROVED', 'admin_note': note, 'resolved_at': _now(), 'resolved_by': admin['id']}},
-    )
-    if result.modified_count == 0:
         raise HTTPException(status_code=400, detail='Request already resolved')
 
-    if req_type == 'SELL':
-        # Chips -> points (1:1). Chips are deducted only now, on approval.
-        try:
-            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Sold {req['amount']} chips for points (1:1) — approved by operator", ref=request_id, kind=ledger.WITHDRAWAL)
-        except InsufficientChips:
-            # Revert so the admin can retry or deny with a note
-            await db.chip_requests.update_one(
-                {'id': request_id},
-                {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}},
-            )
-            raise HTTPException(status_code=400, detail='Player no longer has enough chips to cover this sale. Ask them to top up or deny the request.')
-        updated = await db.users.find_one_and_update(
-            {'id': req['user_id']}, {'$inc': {'points_balance': req['amount']}}, return_document=True,
-        )
-        points_balance = updated.get('points_balance', 0) if updated else req['amount']
-        await db.points_transactions.insert_one({
-            'id': str(uuid.uuid4()), 'user_id': req['user_id'], 'type': 'CREDIT', 'amount': req['amount'],
-            'balance_after': points_balance, 'note': f"Sold {req['amount']} chips for points (1:1) — approved by operator",
-            'ref': request_id, 'created_at': _now(),
+    req_type = req.get('type') or 'BUY'
+    if req_type not in {'BUY', 'SELL', 'RETURN'}:
+        raise HTTPException(status_code=409, detail={
+            'code': 'INVALID_CHIP_REQUEST_TYPE',
+            'message': 'This chip request has an invalid type and cannot be settled.',
         })
-        await _notify(req['user_id'], 'Sell request approved!',
-                      f"Your request to sell {req['amount']} chips was approved. {req['amount']} points credited (new points balance: {points_balance}).", 'POINTS')
-        return {'message': 'Sell request approved — chips deducted and points credited', 'chip_balance': chip_balance, 'points_balance': points_balance}
-
-    if req_type == 'RETURN':
-        # Return chips to the admin — deduct from the player, credit nothing.
+    player = await db.users.find_one(
+        {'id': req['user_id'], 'role': 'PLAYER'}, {'_id': 1}, **kwargs,
+    )
+    if not player:
+        raise HTTPException(status_code=409, detail={
+            'code': 'PLAYER_STATE_CHANGED',
+            'message': 'The player account is unavailable. Refresh and try again.',
+        })
+    if req_type == 'SELL':
         try:
-            chip_balance = await debit_chips(req['user_id'], req['amount'], f"Returned {req['amount']} chips to operator — approved", ref=request_id)
-        except InsufficientChips:
-            await db.chip_requests.update_one(
-                {'id': request_id},
-                {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}},
+            chip_balance = await debit_chips(
+                req['user_id'], req['amount'],
+                f"Sold {req['amount']} chips for points (1:1) — approved by operator",
+                ref=request_id, kind=ledger.WITHDRAWAL, session=session,
             )
-            raise HTTPException(status_code=400, detail='Player no longer has enough chips to cover this return. Ask them to adjust or deny the request.')
-        await _notify(req['user_id'], 'Return approved',
-                      f"Your request to return {req['amount']} chips was approved. {req['amount']} chips were returned to the operator. New balance: {chip_balance}.", 'CHIPS')
-        return {'message': 'Return approved — chips deducted from the player', 'chip_balance': chip_balance}
+        except InsufficientChips as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    'Player no longer has enough chips to cover this sale. '
+                    'Ask them to top up or deny the request.'
+                ),
+            ) from exc
+        updated = await db.users.find_one_and_update(
+            {'id': req['user_id'], 'role': 'PLAYER'},
+            {'$inc': {'points_balance': req['amount']}},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail={
+                'code': 'PLAYER_STATE_CHANGED',
+                'message': 'The player account changed. Refresh and try again.',
+            })
+        points_balance = updated.get('points_balance', 0)
+        await db.points_transactions.insert_one({
+            'id': str(uuid.uuid4()), 'user_id': req['user_id'],
+            'type': 'CREDIT', 'amount': req['amount'],
+            'balance_after': points_balance,
+            'note': f"Sold {req['amount']} chips for points (1:1) — approved by operator",
+            'ref': request_id, 'created_at': _now(),
+        }, **kwargs)
+        await _notify(
+            req['user_id'], 'Sell request approved!',
+            f"Your request to sell {req['amount']} chips was approved. "
+            f"{req['amount']} points credited (new points balance: {points_balance}).",
+            'POINTS', session=session,
+        )
+        response = {
+            'message': 'Sell request approved — chips deducted and points credited',
+            'chip_balance': chip_balance,
+            'points_balance': points_balance,
+        }
+    elif req_type == 'RETURN':
+        try:
+            chip_balance = await debit_chips(
+                req['user_id'], req['amount'],
+                f"Returned {req['amount']} chips to operator — approved",
+                ref=request_id, session=session,
+            )
+        except InsufficientChips as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    'Player no longer has enough chips to cover this return. '
+                    'Ask them to adjust or deny the request.'
+                ),
+            ) from exc
+        await _notify(
+            req['user_id'], 'Return approved',
+            f"Your request to return {req['amount']} chips was approved. "
+            f"{req['amount']} chips were returned to the operator. New balance: {chip_balance}.",
+            'CHIPS', session=session,
+        )
+        response = {
+            'message': 'Return approved — chips deducted from the player',
+            'chip_balance': chip_balance,
+        }
+    else:
+        try:
+            await compliance.check_deposit(req['user_id'], req['amount'])
+        except compliance.ComplianceBlock as exc:
+            raise HTTPException(status_code=400, detail=(
+                f"This player's deposit limit refuses it: "
+                f"{exc.detail.get('message')}"
+            )) from exc
+        balance = await ledger.credit_chips(
+            req['user_id'], req['amount'],
+            f"Chip request approved ({req['amount']} chips)",
+            ref=request_id, kind=ledger.DEPOSIT, session=session,
+        )
+        await _notify(
+            req['user_id'], 'Chips added!',
+            f"Your request for {req['amount']} play chips was approved. "
+            f"New balance: {balance}.",
+            'CHIPS', session=session,
+        )
+        response = {
+            'message': 'Request approved and chips credited',
+            'balance_after': balance,
+        }
 
-    # BUY (default): credit chips.
-    try:
-        await compliance.check_deposit(req['user_id'], req['amount'])
-    except compliance.ComplianceBlock as e:
-        await db.chip_requests.update_one(
-            {'id': request_id},
-            {'$set': {'status': 'PENDING', 'admin_note': None, 'resolved_at': None, 'resolved_by': None}})
-        raise HTTPException(status_code=400, detail=(
-            f"This player's deposit limit refuses it: {e.detail.get('message')}"))
-    # Typed as a DEPOSIT rather than an untyped credit, so the deposit limit and
-    # the revenue engine agree on what a deposit is.
-    balance = await ledger.credit_chips(
-        req['user_id'], req['amount'], f"Chip request approved ({req['amount']} chips)",
-        ref=request_id, kind=ledger.DEPOSIT)
-    await _notify(req['user_id'], 'Chips added!', f"Your request for {req['amount']} play chips was approved. New balance: {balance}.", 'CHIPS')
-    return {'message': 'Request approved and chips credited', 'balance_after': balance}
+    result = await db.chip_requests.update_one(
+        {'id': request_id, 'status': 'PENDING'},
+        {'$set': {
+            'status': 'APPROVED', 'admin_note': note,
+            'resolved_at': _now(), 'resolved_by': admin['id'],
+        }},
+        **kwargs,
+    )
+    if result.modified_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'REQUEST_STATE_CHANGED',
+            'message': 'The chip request was resolved concurrently. Refresh and try again.',
+        })
+    await _release_pending_chip_request_slot(req, session=session)
+    return response
+
+
+@router.post('/chip-requests/{request_id}/approve')
+async def approve_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
+    require_legacy_chip_mutation_allowed()
+    note = (body.note if body else None)
+    async def commit_approval(session):
+        return await _settle_chip_request(
+            request_id, note, admin, session=session,
+        )
+
+    return await _run_account_transaction(commit_approval)
 
 
 @router.post('/chip-requests/{request_id}/deny')
 async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
-    req = await db.chip_requests.find_one({'id': request_id})
-    if not req:
-        raise HTTPException(status_code=404, detail='Request not found')
-    if req.get('status') != 'PENDING':
-        raise HTTPException(status_code=400, detail='Request already resolved')
     note = (body.note if body else None) or 'Not approved by operator'
-    result = await db.chip_requests.update_one(
-        {'id': request_id, 'status': 'PENDING'},
-        {'$set': {'status': 'DENIED', 'admin_note': note, 'resolved_at': _now(), 'resolved_by': admin['id']}},
-    )
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail='Request already resolved')
-    if req.get('type') == 'SELL':
-        await _notify(req['user_id'], 'Sell request update', f"Your request to sell {req['amount']} chips was denied. Your chips were not deducted. Note: {note}", 'POINTS')
-    elif req.get('type') == 'RETURN':
-        await _notify(req['user_id'], 'Return request update', f"Your request to return {req['amount']} chips was denied. Your chips were not deducted. Note: {note}", 'CHIPS')
-    else:
-        await _notify(req['user_id'], 'Chip request update', f"Your request for {req['amount']} play chips was denied. Note: {note}", 'CHIPS')
-    return {'message': 'Request denied'}
+
+    async def commit_denial(session):
+        kwargs = {'session': session} if session is not None else {}
+        req = await db.chip_requests.find_one({'id': request_id}, **kwargs)
+        if not req:
+            raise HTTPException(status_code=404, detail='Request not found')
+        if req.get('status') != 'PENDING':
+            raise HTTPException(status_code=400, detail='Request already resolved')
+        if req.get('type') == 'SELL':
+            title = 'Sell request update'
+            message = (
+                f"Your request to sell {req['amount']} chips was denied. "
+                f"Your chips were not deducted. Note: {note}"
+            )
+            notification_type = 'POINTS'
+        elif req.get('type') == 'RETURN':
+            title = 'Return request update'
+            message = (
+                f"Your request to return {req['amount']} chips was denied. "
+                f"Your chips were not deducted. Note: {note}"
+            )
+            notification_type = 'CHIPS'
+        else:
+            title = 'Chip request update'
+            message = (
+                f"Your request for {req['amount']} play chips was denied. "
+                f"Note: {note}"
+            )
+            notification_type = 'CHIPS'
+        await _notify(
+            req['user_id'], title, message, notification_type, session=session,
+        )
+        result = await db.chip_requests.update_one(
+            {'id': request_id, 'status': 'PENDING'},
+            {'$set': {
+                'status': 'DENIED', 'admin_note': note,
+                'resolved_at': _now(), 'resolved_by': admin['id'],
+            }},
+            **kwargs,
+        )
+        if result.modified_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'REQUEST_STATE_CHANGED',
+                'message': 'The chip request was resolved concurrently. Refresh and try again.',
+            })
+        await _release_pending_chip_request_slot(req, session=session)
+        return {'message': 'Request denied'}
+
+    return await _run_account_transaction(commit_denial)
 
 
 # ---------- Support / messaging ----------

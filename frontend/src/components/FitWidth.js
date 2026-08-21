@@ -23,13 +23,17 @@ export const FitWidth = ({ children, className = "" }) => {
       setHeight(ih ? Math.ceil(ih * s) : null);
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    if (outerRef.current) ro.observe(outerRef.current);
-    if (innerRef.current) ro.observe(innerRef.current);
+    const ro = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(measure) : null;
+    if (outerRef.current) ro?.observe(outerRef.current);
+    if (innerRef.current) ro?.observe(innerRef.current);
     window.addEventListener("orientationchange", measure);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("orientationchange", measure);
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
     };
   }, []);
 

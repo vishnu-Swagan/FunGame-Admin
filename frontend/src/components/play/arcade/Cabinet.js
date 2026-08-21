@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Volume2, VolumeX } from "lucide-react";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
+import { fitDesignCanvas } from "@/lib/viewport";
 import "./arcade.css";
 
 /**
@@ -84,18 +85,26 @@ export const Cabinet = ({
       /* Two candidate fits: as laid out, and turned 90°. Whichever draws the
          cabinet bigger wins, which picks rotation on a portrait phone and
          leaves a laptop alone without either being special-cased. */
-      const flat = Math.min(vw / designWidth, vh / designHeight);
-      const turned = Math.min(vh / designWidth, vw / designHeight);
-      setFit(turned > flat ? { scale: turned, rotate: true } : { scale: flat, rotate: false });
+      setFit(fitDesignCanvas({
+        availableWidth: vw,
+        availableHeight: vh,
+        designWidth,
+        designHeight,
+        allowRotate: true,
+      }));
     };
 
     measure();
-    const ro = new ResizeObserver(measure);
-    if (boxRef.current) ro.observe(boxRef.current);
+    const ro = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(measure) : null;
+    if (boxRef.current) ro?.observe(boxRef.current);
     window.addEventListener("orientationchange", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("scroll", measure);
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       window.removeEventListener("orientationchange", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("scroll", measure);
     };
   }, [designHeight, designWidth, fluid]);
 

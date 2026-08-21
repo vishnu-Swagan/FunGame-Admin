@@ -41,17 +41,43 @@ test("welcome page removes the unavailable warning while registration itself rem
   expect(screen.querySelector('[data-testid="welcome-registration-unavailable"]')).toBeNull();
 });
 
-test("registration disables an unavailable channel but keeps the ready channel usable", () => {
+test("welcome page describes administrator review in the current manual mode", () => {
   mockLocationState = null;
   mockCapabilitiesState = {
     loading: false,
-    capabilities: { registration_enabled: true, email_registration: true, phone_registration: false },
+    capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
+  };
+  const screen = render(Welcome);
+  expect(screen.textContent).toMatch(/Admin-reviewed access/);
+  expect(screen.textContent).toMatch(/reviewed by an administrator before login and play/i);
+  expect(screen.textContent).not.toMatch(/mandatory mobile OTP/i);
+});
+
+test("manual-review registration requires both contacts and password confirmation", () => {
+  mockLocationState = null;
+  mockCapabilitiesState = {
+    loading: false,
+    capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
   };
   const screen = render(Register);
-  expect(screen.querySelector('[data-testid="register-channel-email"]').disabled).toBe(false);
-  expect(screen.querySelector('[data-testid="register-channel-phone"]').disabled).toBe(true);
-  expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
+  expect(screen.querySelector('#reg-contact').type).toBe("tel");
+  expect(screen.querySelector('#reg-email').required).toBe(true);
+  expect(screen.querySelector('#reg-password').required).toBe(true);
+  expect(screen.querySelector('#reg-password-confirmation').required).toBe(true);
+  expect(screen.querySelector('[data-testid="register-terms-checkbox"]')).not.toBeNull();
+  expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
   expect(screen.querySelector('[data-testid="registration-unavailable"]')).toBeNull();
+});
+
+test("registration clearly labels manual approval without claiming an OTP", () => {
+  mockLocationState = null;
+  mockCapabilitiesState = {
+    loading: false,
+    capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
+  };
+  const screen = render(Register);
+  expect(screen.querySelector('[data-testid="register-verification-copy"]').textContent).toMatch(/No verification code is sent.*administrator must approve/i);
+  expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').textContent).toMatch(/Create account for review/);
 });
 
 test("registration stays fail-closed without rendering the removed unavailable banner", () => {
@@ -62,8 +88,6 @@ test("registration stays fail-closed without rendering the removed unavailable b
   };
   const screen = render(Register);
   expect(screen.querySelector('[data-testid="registration-unavailable"]')).toBeNull();
-  expect(screen.querySelector('[data-testid="register-channel-email"]').disabled).toBe(true);
-  expect(screen.querySelector('[data-testid="register-channel-phone"]').disabled).toBe(true);
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
 });
 
@@ -75,23 +99,20 @@ test("direct verification fails closed when neither delivery channel is ready", 
   };
   const screen = render(VerifyEmail);
   expect(screen.querySelector('[data-testid="verification-unavailable"]')).not.toBeNull();
-  expect(screen.querySelector('[data-testid="verify-channel-email"]').disabled).toBe(true);
-  expect(screen.querySelector('[data-testid="verify-channel-phone"]').disabled).toBe(true);
   expect(screen.querySelector('[data-testid="verify-identifier-input"]').disabled).toBe(true);
   expect(screen.querySelector('[data-testid="verify-email-resend-button"]').disabled).toBe(true);
 });
 
-test("verification exposes only the ready delivery channel", () => {
+test("verification exposes the ready mobile delivery channel", () => {
   mockLocationState = null;
   mockCapabilitiesState = {
     loading: false,
-    capabilities: { registration_enabled: true, email_registration: true, phone_registration: false },
+    capabilities: { registration_enabled: true, email_registration: false, phone_registration: true, verification_required: true },
   };
   const screen = render(VerifyEmail);
   expect(screen.querySelector('[data-testid="verification-unavailable"]')).toBeNull();
-  expect(screen.querySelector('[data-testid="verify-channel-email"]').disabled).toBe(false);
-  expect(screen.querySelector('[data-testid="verify-channel-phone"]').disabled).toBe(true);
   expect(screen.querySelector('[data-testid="verify-identifier-input"]').disabled).toBe(false);
+  expect(screen.querySelector('[data-testid="verify-identifier-input"]').type).toBe("tel");
 });
 
 test("an already delivered code stays verifiable while resend is unavailable", () => {

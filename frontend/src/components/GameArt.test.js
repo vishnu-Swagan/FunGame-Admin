@@ -13,6 +13,11 @@ const cases = [
     path: "/game-art/blackjack.png",
     art: { from: "#08331a", to: "#1d8a4f", accent: "#ffd447", icon: "spade", glyph: "A♠" },
   },
+  {
+    slug: "rummy",
+    path: "/game-art/rummy.png",
+    art: { from: "#072f25", to: "#0b6b4f", accent: "#e3c06e", icon: "layers", glyph: "13" },
+  },
 ];
 
 beforeAll(() => {

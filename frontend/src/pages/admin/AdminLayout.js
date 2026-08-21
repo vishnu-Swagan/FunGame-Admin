@@ -43,7 +43,7 @@ export default function AdminLayout() {
             wider than a 390px phone on every admin page. */}
         <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0" data-testid="admin-logo">
-            <BrandWordmark logoClassName="h-8 w-8" textClassName="text-base" />
+            <BrandWordmark logoClassName="h-11 w-11" />
             <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5">
               <ShieldCheck className="h-3 w-3 text-sky-400" />
               <span className="font-mono text-[9px] tracking-[0.2em] text-sky-300 uppercase">Admin</span>

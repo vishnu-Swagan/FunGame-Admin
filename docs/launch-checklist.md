@@ -1,6 +1,6 @@
 # Chakri.Casino staging and production launch checklist
 
-Product: Chakri.Casino player web app, operator CRM, nine reviewed play-chip games, and an installable PWA.
+Product: Chakri.Casino player web app, operator CRM, ten reviewed play-chip games, and an installable PWA.
 
 Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, and chip ledger.
 
@@ -16,7 +16,7 @@ Expected incremental cost:
 - Staging API web service: **$0/month** on Render Free, subject to shared free-instance hours, cold starts, bandwidth, and build-minute limits. It is a test target, not a reliable production tier.
 - Staging MongoDB: **Atlas M0 at $0/month** if available and within its limits; recommended fallback **Atlas Flex at approximately $8–30/month**, depending on usage.
 - Production night cron: at least **$1/month plus run time**. Render does not support <code>plan: free</code> for cron jobs, so the current Blueprint declaration is invalid.
-- Production email OTP: Resend Free is **$0/month for up to 3,000 transactional emails and 100 per day**; Pro starts at **$20/month**. SMS is optional later and is usage-priced.
+- Production phone OTP: Twilio SMS is usage-priced. Confirm current India destination, carrier, sender-registration, and tax charges in the Twilio console before enabling it.
 - Existing production Render, Hostinger, domain, and database charges are not included because their current account plans are not recorded in the repository.
 
 Legend:
@@ -41,6 +41,18 @@ Legend:
 | Supabase | Two visible projects are named Production; this repo is not linked to either | Do not use either as an improvised staging target |
 | Payments | All five financial switches are off and the provider integration is fail-closed | Keep real-money deposit and withdrawal unavailable |
 | Cron | Blueprint declares a free cron plan and a hostname that is not the live API | Keep staging cron disabled; repair and price production cron separately |
+
+## Current account-access mode — administrator review
+
+The temporary production mode is <code>REGISTRATION_MODE=ADMIN_REVIEW</code>. Registration requires full name, recognized country, valid adult date of birth, accepted terms, a unique valid email, a unique E.164 mobile number, and a confirmed password. It creates one zero-chip <code>PENDING</code> player with immutable CRM attribution. No verification code is generated or claimed; <code>email_verified</code>, <code>phone_verified</code>, and <code>contact_verified</code> remain false. A correct password still cannot create a session until an administrator explicitly approves the account. Approval is recorded as <code>contact_verification_status=ADMIN_APPROVED</code> without pretending that either contact was OTP-verified.
+
+- [ ] 🤖 **Validate the administrator-review registration boundary** — 20 minutes. Confirm both normalized contact guards, password hashing, eligibility and terms checks, generic collision responses, zero starting chips, exact CRM attribution, pending-login refusal, and explicit atomic admin approval. Cost: **$0**.
+
+  > Prompt: “Test ADMIN_REVIEW registration with controlled identities. Verify no OTP challenge, delivery call, dev code or pre-approval session is created; wrong credentials remain generic; correct credentials return ACCOUNT_PENDING_REVIEW; both contact flags stay false after approval; approved_by/manual review fields identify the operator; and only the approved account can log in and reach gameplay. Do not enable deposits or withdrawals.”
+
+  **You'll know it worked when:** capabilities advertise <code>registration_mode=ADMIN_REVIEW</code> and <code>verification_required=false</code>, the complete application appears once in the Render-backed operator user queue, and only an explicit approval changes it to <code>ACTIVE</code>.
+
+- [ ] 🤝 **Inventory historical activation modes before launch** — 15 minutes. Existing phone-OTP and deferred rows are not rewritten or silently treated as administrator-reviewed. Count and plan their migration separately. Cost: **$0**.
 
 ## Phase 0 — stop accidental production changes
 
@@ -138,7 +150,7 @@ Legend:
 
 - [ ] 🤖 **Verify all launch safety gates fail closed** — 20 minutes.
 
-  > Prompt: “Test the release with APP_ENV=production and all provider/financial features disabled. Prove registration reports unavailable channels while OTP adapters are disabled; deposits, withdrawals, automatic withdrawals, payment webhooks, and Supabase settlement cannot activate; health reports failure for invalid critical configuration; and the mock payment provider is rejected in production. Use only local tests and staging fixtures.”
+  > Prompt: “Test the release with APP_ENV=production and all provider/financial features disabled. Prove ADMIN_REVIEW registration remains available without an OTP adapter while creating only pending zero-chip accounts; separately prove PHONE_OTP mode reports registration unavailable while SMS delivery is disabled. Confirm deposits, withdrawals, automatic withdrawals, payment webhooks, and Supabase settlement cannot activate; health reports failure for invalid critical configuration; and the mock payment provider is rejected in production. Use only local tests and staging fixtures.”
 
   **You'll know it worked when:** every unavailable capability is denied by the server, not merely hidden by React.
 
@@ -162,17 +174,15 @@ Legend:
 
 ## Phase 4 — test complete user journeys in staging
 
-- [ ] 🤝 **Test login and the intentionally closed registration state** — 20 minutes. Use staging-only seeded accounts. Open the staging player URL in a private window, sign in, sign out, request password recovery, and inspect the public auth-capabilities response. Do not use a real customer's contact details. Cost: **$0**.
+- [ ] 🤝 **Test login and administrator-reviewed registration** — 20 minutes. In a private window, submit one controlled profile, confirm pre-approval login is refused, approve it from the staging operator queue, then sign in with both the email and E.164 mobile number. Do not use a customer's contact details. Cost: **$0**.
 
-  > Prompt: “Observe the staging auth flow using test identities only. Verify disabled email/SMS channels are clearly unavailable, codes are never returned or logged, lockout/rate-limit behavior works, sessions expire correctly, and no request reaches production. Do not bypass verification or change production users.”
+  **You'll know it worked when:** the pending account has zero chips and no verified-contact flags, appears in the operator queue, cannot authenticate before approval, and can authenticate only after the recorded operator decision.
 
-  **You'll know it worked when:** test accounts can authenticate, unavailable signup channels are honestly disabled, and production receives no request.
+- [ ] 🤝 **Play every reviewed game end to end** — 45–60 minutes. In the staging player site, use only staging chips and play Aviator, 7Up7Down, American Roulette, Keno, Pappu Pictures, Andar Bahar, Teen Patti, Poker, Blackjack, and Rummy. Check one win, one loss, history, balance changes, mobile layout, and a refresh/reconnect where applicable. Cost: **$0**.
 
-- [ ] 🤝 **Play every reviewed game end to end** — 45–60 minutes. In the staging player site, use only staging chips and play Aviator, 7Up7Down, American Roulette, Keno, Pappu Pictures, Andar Bahar, Teen Patti, Poker, and Blackjack. Check one win, one loss, history, balance changes, mobile layout, and a refresh/reconnect where applicable. Cost: **$0**.
+  > Prompt: “Monitor only the staging API and database while I play the ten reviewed games. Verify every accepted stake, result, payout, refund, round timer, history entry, and balance mutation is server-authoritative and exactly once. Confirm Keno, Andar Bahar, and American Roulette use the one-minute round with only the intended betting window, Teen Patti/Poker use their reviewed 30-second timing, and Rummy uses its centrally configured turn duration.”
 
-  > Prompt: “Monitor only the staging API and database while I play the nine reviewed games. Verify every accepted stake, result, payout, refund, round timer, history entry, and balance mutation is server-authoritative and exactly once. Confirm Keno, Andar Bahar, and American Roulette use the one-minute round with only the intended betting window, and Teen Patti/Poker use their reviewed 30-second timing.”
-
-  **You'll know it worked when:** all nine games settle precisely once, UI balances match the staging ledger after refresh, and no request or record appears in production.
+  **You'll know it worked when:** all ten games settle precisely once, UI balances match the staging ledger after refresh, and no request or record appears in production.
 
 - [ ] 🤖 **Prove financial features remain unavailable** — 15 minutes.
 
@@ -200,21 +210,29 @@ Legend:
 
   **You'll know it worked when:** one draft PR contains the complete release evidence and is not mergeable by accident.
 
-## Phase 5 — make public account verification real
+## Phase 5 — restore phone OTP after the provider is approved
 
-- [ ] 🧑 **Configure Resend for production email OTP** — 30–60 minutes. In Resend, open **Domains → Add Domain**, enter a dedicated sending subdomain such as <code>mail.chakri.casino</code>, and add the displayed DNS records at the domain provider. After verification, open **API Keys → Create API Key**, name it <code>Chakri production transactional</code>, and restrict it to sending access. Paste it directly into the production Render API's <code>RESEND_API_KEY</code> secret field; set <code>EMAIL_PROVIDER=resend</code>, <code>OTP_EMAIL_ADAPTER=email_service</code>, and <code>SENDER_EMAIL</code> to the verified sender. Keep <code>OTP_EXPOSE_DEV_CODE=false</code>. Cost: **$0/month up to 3,000 emails and 100/day**, then **$20/month for 50,000** at the current published tier.
+The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVIEW</code> until the live-delivery checks below pass. Then set <code>REGISTRATION_MODE=PHONE_OTP</code>; the retained OTP route and provider controls become active without rewriting existing administrator-reviewed accounts.
 
-  **You'll know it worked when:** Resend marks the domain verified, a staging or controlled production test account receives one real code, the code is absent from API responses/logs, and reuse is rejected.
+- [ ] 🧑 **Configure the approved production SMS route** — 30–60 minutes plus provider approval. In Twilio, complete the account, sender, India messaging-registration and spend-cap requirements. Enter <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, and <code>TWILIO_FROM_NUMBER</code> directly in the production Render API secret fields; set <code>OTP_SMS_ADAPTER=twilio</code> and <code>OTP_EXPOSE_DEV_CODE=false</code>. Keep <code>OTP_EMAIL_ADAPTER=disabled</code> for new-account activation. Cost: usage-priced; confirm current destination, carrier and sender charges in Twilio.
 
-- [ ] 🧑 **Keep phone signup disabled until an approved SMS route exists** — 5 minutes. In Render production API → **Environment**, leave <code>OTP_SMS_ADAPTER=disabled</code> unless a verified Twilio account, compliant sender, India messaging registration, and spend cap are complete. If later enabled, enter <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, and <code>TWILIO_FROM_NUMBER</code> directly in Render. Review **Twilio Console → Messaging → Monitor → Logs** and **Billing → Usage Triggers**. Cost: usage-priced; confirm the India rate and carrier fees in Twilio before enabling.
+  **You'll know it worked when:** a designated test mobile receives one real code, no code or provider secret appears in API responses/logs, and capabilities advertise phone registration only while the provider is ready.
 
-  **You'll know it worked when:** the app advertises only channels that can actually deliver, and SMS cannot generate spend while disabled.
+- [ ] 🤖 **Prove SMS failure closes registration** — 15 minutes. Before the live test, validate staging with the SMS adapter disabled and with invalid non-secret fixture configuration. Do not intentionally break production credentials. Cost: **$0**.
+
+  **You'll know it worked when:** registration reports unavailable and creates no player, attribution, password or session whenever SMS readiness/delivery fails.
 
 - [ ] 🤖 **Run live-delivery safety tests without exposing OTPs** — 20 minutes.
 
-  > Prompt: “After the operator configures Resend directly in Render, test one controlled email registration and password reset. Verify generic responses prevent account enumeration, OTP expiry is 15 minutes, resend cooldown and attempt limits work, codes are hashed at rest, and logs contain neither code nor full recipient. Do not request or display provider keys or OTP values.”
+  > Prompt: “After the operator configures Twilio directly in Render, test one controlled phone registration and phone password reset. Verify OTP expiry is 15 minutes, resend cooldown and attempt limits work, codes are hashed at rest, optional email remains unverified, and logs contain neither code nor full recipient. Do not request or display provider keys or OTP values.”
 
   **You'll know it worked when:** both controlled messages arrive, each challenge is one-use, and the redacted audit contains no sensitive value.
+
+- [ ] 🤝 **Confirm the retired no-OTP setting cannot reopen access** — 15 minutes. Remove <code>SELF_SERVICE_NO_OTP_ENABLED</code> from Render after the reviewed release is deployed. The code ignores it, but removing the stale variable prevents operator confusion. Confirm capabilities return <code>verification_required=true</code> and prepare the historical deferred-account phone-verification campaign. Cost: **$0**.
+
+  > Prompt: “After real SMS delivery is proven, verify one controlled phone signup and resend, then confirm SELF_SERVICE_NO_OTP_ENABLED is absent. Check that no new DEFERRED account can be created, verified-phone accounts still log in, and historical deferred accounts remain blocked without changing balances, history, attribution or settings.”
+
+  **You'll know it worked when:** every new registration requires delivered contact verification and no historical account data was rewritten or lost.
 
 ## Phase 6 — protect and promote the exact staging commit
 

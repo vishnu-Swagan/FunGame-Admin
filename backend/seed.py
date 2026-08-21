@@ -88,6 +88,9 @@ GAMES = [
     {"slug": "blackjack", "name": "Blackjack", "category": "Cards", "tagline": "Hit, stand, beat the dealer", "featured": True,
      "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side bets, insurance, blackjack pays 3:2. Real casino rules.",
      "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
+    {"slug": "rummy", "name": "Rummy", "category": "Cards", "tagline": "Five seats, thirteen cards, one royal table", "featured": True,
+     "description": "Server-authoritative Indian 13-card Rummy for exactly five seats across five skill categories. Played exclusively with virtual chips.",
+     "art": {"from": "#072f25", "to": "#0b6b4f", "accent": "#e3c06e", "icon": "layers", "glyph": "13"}},
 ]
 
 
@@ -96,20 +99,20 @@ async def enable_all_games_for_launch():
     result = await reconcile_game_availability()
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!'},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
     )
     await db.announcements.update_one(
         {'title': '18 games are on the way'},
         {'$set': {
-            'title': 'Nine reviewed games are live',
-            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': 'Ten reviewed games are live',
+            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'Nine reviewed games are live',
-            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': 'Ten reviewed games are live',
+            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
     logger.info(
@@ -119,8 +122,8 @@ async def enable_all_games_for_launch():
     return result['enabled'] + result['coming_soon']
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
-    {"title": "Nine reviewed games are live", "body": "Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.", "pinned": False},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
+    {"title": "Ten reviewed games are live", "body": "Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
@@ -160,7 +163,7 @@ async def run_seed():
 
     # Games added after the initial seed — ensure they exist and are playable on
     # already-seeded databases (idempotent; won't clobber later edits).
-    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101)):
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101), ('rummy', 102)):
         gm = next((g for g in GAMES if g['slug'] == slug), None)
         if gm:
             await db.games.update_one(
@@ -226,13 +229,13 @@ async def run_seed():
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'Nine reviewed games are live',
-            'body': 'Nine reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': 'Ten reviewed games are live',
+            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': 'live games'}},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Nine reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
     )
 
     # Indexes (idempotent)

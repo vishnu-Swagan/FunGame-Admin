@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer, UserStatusBadge, AvatarBadge } from "@/components/common";
 import { motion } from "framer-motion";
+import { BrandWordmark } from "@/components/Brand";
 
 export default function OnboardingPending() {
   const navigate = useNavigate();
@@ -46,7 +47,7 @@ export default function OnboardingPending() {
     <div className="App fg-noise min-h-dvh bg-background">
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[160px] pointer-events-none" />
       <div className="relative z-[2] mx-auto max-w-[430px] px-5 py-10 min-h-dvh flex flex-col">
-        <p className="font-display text-lg text-primary">Chakri.Casino</p>
+        <BrandWordmark logoClassName="h-20 w-20" />
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="flex-1 flex flex-col items-center justify-center text-center">
           <div data-testid="pending-approval-status" className="w-full rounded-2xl bg-card/60 backdrop-blur-md border border-white/10 p-8 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
             <div className="flex justify-center">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Settings, RotateCcw, Undo2, X, ChevronDown, ChevronUp,
@@ -7,6 +7,7 @@ import {
 import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
+import { fitDesignCanvas } from "@/lib/viewport";
 import playerAvatar from "./sevenUpDownMascot.png";
 import "./sevenUpDown.css";
 
@@ -172,25 +173,38 @@ function useJiliSoundState() {
   return muted;
 }
 
-function useCabinetScale() {
+function useCabinetScale(stageRef) {
   const measure = () => {
     if (typeof window === "undefined") return 1;
-    const viewportHeight = window.visualViewport?.height || window.innerHeight;
-    const availableHeight = Math.max(360, viewportHeight - 58);
-    return Math.min(1, window.innerWidth / 500, availableHeight / 884);
+    const stage = stageRef.current;
+    const width = stage?.clientWidth || window.visualViewport?.width || window.innerWidth;
+    const height = stage?.clientHeight || Math.max(320, (window.visualViewport?.height || window.innerHeight) - 58);
+    return fitDesignCanvas({
+      availableWidth: width,
+      availableHeight: height,
+      designWidth: 500,
+      designHeight: 884,
+      maxScale: 1,
+    }).scale;
   };
   const [scale, setScale] = useState(measure);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const resize = () => setScale(measure());
+    const observer = typeof window.ResizeObserver === "function" ? new window.ResizeObserver(resize) : null;
+    if (stageRef.current) observer?.observe(stageRef.current);
     window.addEventListener("resize", resize);
     window.addEventListener("orientationchange", resize);
     window.visualViewport?.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("scroll", resize);
+    resize();
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", resize);
       window.removeEventListener("orientationchange", resize);
       window.visualViewport?.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("scroll", resize);
     };
-  }, []);
+  }, [stageRef]);
   return scale;
 }
 
@@ -297,7 +311,8 @@ function SevenUpDownTable({ game, live, demo = false }) {
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const cabinetScale = useCabinetScale();
+  const stageRef = useRef(null);
+  const cabinetScale = useCabinetScale(stageRef);
   const repeatRef = useRef([]);
   const landedRef = useRef("");
 
@@ -383,6 +398,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
   return (
     <CabinetShell game={game}>
       <div
+        ref={stageRef}
         className="j7-stage"
         data-testid="seven-up-down-table"
         data-demo={demo ? "true" : "false"}
