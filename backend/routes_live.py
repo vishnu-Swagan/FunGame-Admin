@@ -33,6 +33,7 @@ from live_engines import (
     fixed_cycle_clock,
 )
 from game_access import require_playable_game
+from transactions import run_game_transaction
 
 logger = logging.getLogger('live')
 router = APIRouter(tags=['live'])
@@ -93,9 +94,12 @@ async def _av_create_round(round_number: int, start_ts: float):
     try:
         await db.aviator_rounds.insert_one(dict(doc))
         return doc
-    except Exception:
+    except DuplicateKeyError:
         # unique index on round_number: someone else created it first
-        return await db.aviator_rounds.find_one({'round_number': round_number})
+        persisted = await db.aviator_rounds.find_one({'round_number': round_number})
+        if persisted is None:
+            raise RuntimeError('Aviator round insert raced but no persisted round exists')
+        return persisted
 
 
 async def _av_history_doc(bet, payout, outcome, session=None):
@@ -553,9 +557,11 @@ async def _live_outcome(slug, rn):
         await db.live_outcomes.insert_one(doc)
         _cache_outcome(slug, rn, outcome)
         return outcome
-    except Exception:
+    except DuplicateKeyError:
         ex = await db.live_outcomes.find_one({'slug': slug, 'round_number': rn}, {'_id': 0})
-        final = ex['outcome'] if ex else outcome
+        if ex is None:
+            raise RuntimeError('Live outcome insert raced but no persisted outcome exists')
+        final = ex['outcome']
         _cache_outcome(slug, rn, final)
         return final
 
@@ -564,51 +570,65 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
     """Idempotently settle this user's OPEN bets from closed betting windows."""
     query = {'user_id': user_id, 'slug': slug, 'status': 'OPEN'}
     query['round_number'] = {'$lte': current_rn} if phase == 'RESULT' else {'$lt': current_rn}
-    open_bets = await db.live_bets.find(query).to_list(200)
-    if not open_bets:
+    # Discover rounds without applying a UI-page cap. Each complete round is
+    # then read and settled inside its own transaction below.
+    round_numbers = await db.live_bets.distinct('round_number', query)
+    if not round_numbers:
         return None
     game = await db.games.find_one({'slug': slug})
     gname = game['name'] if game else slug
     summary = None
-    by_round = {}
-    for b in open_bets:
-        by_round.setdefault(b['round_number'], []).append(b)
-    for rn, bets in sorted(by_round.items()):
+    for rn in sorted(round_numbers):
         outcome = await _live_outcome(slug, rn)
-        total_bet, total_payout, details = 0, 0, []
-        for b in bets:
-            try:
-                payout, detail = settle_bet(slug, outcome, b.get('selection'), b['amount'], card=b.get('card'))
-            except HTTPException:
-                payout, detail = 0, {'result': 'void'}
-            payout = int(payout)
-            res = await db.live_bets.update_one(
-                {'id': b['id'], 'status': 'OPEN'},
-                {'$set': {'status': 'SETTLED', 'payout': payout, 'settled_at': _now_iso()}},
-            )
-            if res.modified_count == 0:
-                continue
-            total_bet += b['amount']
-            total_payout += payout
-            entry = {'selection': b.get('selection'), 'amount': b['amount'], 'payout': payout}
-            entry.update(detail)
-            if b.get('card'):
-                entry['card'] = b['card']
-            details.append(entry)
-        if total_bet == 0:
-            continue
-        if total_payout > 0:
-            await credit_chips(user_id, total_payout, f'{gname} win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game=slug)
-        await db.game_rounds.insert_one({
-            'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': slug, 'game_name': gname,
-            'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
-            'outcome': {'round_number': rn, 'summary': summarize_outcome(slug, outcome), 'bets': details},
-            'created_at': _now_iso(), 'settled_at': _now_iso(),
-        })
-        summary = {
-            'round_number': rn, 'total_bet': total_bet, 'payout': total_payout,
-            'outcome': outcome, 'bets': details,
-        }
+        async def settle_round(session):
+            kwargs = {'session': session} if session is not None else {}
+            bets = await db.live_bets.find({
+                'user_id': user_id, 'slug': slug, 'round_number': rn, 'status': 'OPEN',
+            }, **kwargs).to_list(length=None)
+            total_bet, total_payout, details = 0, 0, []
+            for b in bets:
+                try:
+                    payout, detail = settle_bet(
+                        slug, outcome, b.get('selection'), b['amount'], card=b.get('card'),
+                    )
+                except HTTPException:
+                    payout, detail = 0, {'result': 'void'}
+                payout = int(payout)
+                res = await db.live_bets.update_one(
+                    {'id': b['id'], 'status': 'OPEN'},
+                    {'$set': {'status': 'SETTLED', 'payout': payout, 'settled_at': _now_iso()}},
+                    **kwargs,
+                )
+                if res.modified_count == 0:
+                    continue
+                total_bet += b['amount']
+                total_payout += payout
+                entry = {'selection': b.get('selection'), 'amount': b['amount'], 'payout': payout}
+                entry.update(detail)
+                if b.get('card'):
+                    entry['card'] = b['card']
+                details.append(entry)
+            if total_bet == 0:
+                return None
+            if total_payout > 0:
+                await credit_chips(
+                    user_id, total_payout, f'{gname} win (round {rn})', ref=str(rn),
+                    kind=ledger.PAYOUT, game=slug, session=session,
+                )
+            await db.game_rounds.insert_one({
+                'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': slug, 'game_name': gname,
+                'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
+                'outcome': {'round_number': rn, 'summary': summarize_outcome(slug, outcome), 'bets': details},
+                'created_at': _now_iso(), 'settled_at': _now_iso(),
+            }, **kwargs)
+            return {
+                'round_number': rn, 'total_bet': total_bet, 'payout': total_payout,
+                'outcome': outcome, 'bets': details,
+            }
+
+        settled_round = await run_game_transaction(client, settle_round)
+        if settled_round is not None:
+            summary = settled_round
     return summary
 
 
@@ -728,13 +748,6 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     selection = validate_selection(slug, body.selection)
     card = make_bingo_card() if slug == 'bingo' else None
     bet_id = str(uuid.uuid4())
-    # Selection validation may be non-trivial (and Bingo creates a card), so
-    # close the race between the first check and the wallet debit.
-    _require_live_betting(slug, expected_round=rn)
-    try:
-        await debit_chips(user['id'], body.amount, f'Live bet {slug} (round {rn})', ref=bet_id, kind=ledger.STAKE, game=slug)
-    except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     doc = {
         'id': bet_id, 'user_id': user['id'], 'slug': slug, 'round_number': rn,
         'selection': selection, 'amount': body.amount, 'status': 'OPEN', 'payout': 0,
@@ -742,7 +755,22 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     }
     if card:
         doc['card'] = card
-    await db.live_bets.insert_one(dict(doc))
+
+    async def place_bet(session):
+        kwargs = {'session': session} if session is not None else {}
+        # Selection validation may be non-trivial (and Bingo creates a card),
+        # so close the race immediately before the atomic wallet/bet mutation.
+        _require_live_betting(slug, expected_round=rn)
+        await debit_chips(
+            user['id'], body.amount, f'Live bet {slug} (round {rn})',
+            ref=bet_id, kind=ledger.STAKE, game=slug, session=session,
+        )
+        await db.live_bets.insert_one(dict(doc), **kwargs)
+
+    try:
+        await run_game_transaction(client, place_bet)
+    except InsufficientChips:
+        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     my_bets = await db.live_bets.find(
         {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
         {'_id': 0, 'user_id': 0},
@@ -760,18 +788,30 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
     if slug not in LIVE_GAMES:
         raise HTTPException(status_code=404, detail='No live table for this game')
     rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')
-    open_bets = await db.live_bets.find(
-        {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'}
-    ).to_list(100)
-    _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
-    refunded = 0
-    for b in open_bets:
-        res = await db.live_bets.update_one(
-            {'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
-        if res.modified_count:
-            refunded += b['amount']
-    if refunded > 0:
-        await credit_chips(user['id'], refunded, f'Live bets refunded ({slug} round {rn})', ref=str(rn), kind=ledger.REFUND, game=slug)
+    async def clear_bets(session):
+        kwargs = {'session': session} if session is not None else {}
+        open_bets = await db.live_bets.find(
+            {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
+            **kwargs,
+        ).to_list(length=None)
+        _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
+        refunded = 0
+        for b in open_bets:
+            res = await db.live_bets.update_one(
+                {'id': b['id'], 'status': 'OPEN'},
+                {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},
+                **kwargs,
+            )
+            if res.modified_count:
+                refunded += b['amount']
+        if refunded > 0:
+            await credit_chips(
+                user['id'], refunded, f'Live bets refunded ({slug} round {rn})',
+                ref=str(rn), kind=ledger.REFUND, game=slug, session=session,
+            )
+        return refunded
+
+    refunded = await run_game_transaction(client, clear_bets)
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
 
@@ -784,23 +824,30 @@ async def live_undo_bet(slug: str, user: dict = Depends(require_active_player)):
         raise HTTPException(status_code=404, detail='No live table for this game')
     rn, _ = _require_live_betting(slug, message='Bets are locked for this round.')
 
-    bet = await db.live_bets.find_one(
-        {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
-        sort=[('created_at', -1)],
-    )
-    refunded = 0
-    if bet:
+    async def undo_bet(session):
+        kwargs = {'session': session} if session is not None else {}
+        bet = await db.live_bets.find_one(
+            {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
+            sort=[('created_at', -1)], **kwargs,
+        )
+        if not bet:
+            return 0
         _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
         res = await db.live_bets.update_one(
             {'id': bet['id'], 'status': 'OPEN'},
             {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},
+            **kwargs,
         )
-        if res.modified_count:
-            refunded = bet['amount']
-            await credit_chips(
-                user['id'], refunded, f'Live bet undone ({slug} round {rn})',
-                ref=bet['id'], kind=ledger.REFUND, game=slug,
-            )
+        if res.modified_count == 0:
+            return 0
+        refunded = bet['amount']
+        await credit_chips(
+            user['id'], refunded, f'Live bet undone ({slug} round {rn})',
+            ref=bet['id'], kind=ledger.REFUND, game=slug, session=session,
+        )
+        return refunded
+
+    refunded = await run_game_transaction(client, undo_bet)
 
     my_bets = await db.live_bets.find(
         {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},

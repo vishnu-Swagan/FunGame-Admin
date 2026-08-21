@@ -11,7 +11,8 @@ import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from db import db, serialize_doc
+from pymongo.errors import DuplicateKeyError
+from db import client, db, serialize_doc
 from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
@@ -22,6 +23,7 @@ from live_engines import (
     roulette_history_max_round,
 )
 from game_access import require_playable_game
+from transactions import run_game_transaction
 
 logger = logging.getLogger('gameplay')
 router = APIRouter(tags=['gameplay'])
@@ -82,12 +84,29 @@ EVEN_MONEY_TYPES = {"color", "parity", "range"}
 WIDE_SECTORS = {"zeroside", "dzeroside"}
 EVEN_MONEY_MAX = MIN_BET * 200   # 2000 — 10,20,40,...,1280 then blocked
 POSITION_MAX = MIN_BET * 1000    # 10000 — general per-position table max
+INSIDE_BET_TYPES = frozenset({'split', 'street', 'corner', 'sixline', 'basket'})
 
 
 class RouletteBet(BaseModel):
     bet_type: str
     value: object = None
     amount: int = Field(ge=1, le=100_000)
+
+
+def _roulette_position_key(bet_type, value):
+    """Canonical key for enforcing a cap on one physical felt position.
+
+    Settlement accepts integer or string pocket labels, while an inside bet is
+    a set whose submitted order is irrelevant. Comparing the raw request value
+    would therefore let the same position bypass its cap (for example ``7`` vs
+    ``"7"`` or a reordered corner). The caller validates first, so this helper
+    only needs deterministic normalization.
+    """
+    if bet_type == 'straight':
+        return str(value).strip()
+    if bet_type in INSIDE_BET_TYPES:
+        return frozenset(part.strip() for part in str(value).split('-'))
+    return value
 
 
 def _roulette_clock(now=None):
@@ -124,10 +143,12 @@ async def _roulette_round_result(round_number: int):
             'color': roulette_color(n), 'created_at': _now_iso(),
         })
         return n
-    except Exception:
+    except DuplicateKeyError:
         # Another request/instance created it first - unique index guarantees one result
         existing = await db.roulette_rounds.find_one({'round_number': round_number})
-        return str(existing['winning_number']) if existing else n
+        if existing is None:
+            raise RuntimeError('Roulette result insert raced but no persisted round exists')
+        return str(existing['winning_number'])
 
 
 async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
@@ -137,44 +158,70 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
         query['round_number'] = {'$lte': current_round}
     else:
         query['round_number'] = {'$lt': current_round}
-    open_bets = await db.roulette_bets.find(query).to_list(200)
-    if not open_bets:
+    # Discover rounds without applying a UI-page cap. Each complete round is
+    # then read and settled inside its own transaction below.
+    round_numbers = await db.roulette_bets.distinct('round_number', query)
+    if not round_numbers:
         return None
     settled_summary = None
-    by_round = {}
-    for b in open_bets:
-        by_round.setdefault(b['round_number'], []).append(b)
-    for rn, bets in sorted(by_round.items()):
+    for rn in sorted(round_numbers):
         winning = await _roulette_round_result(rn)
-        total_bet, total_payout, bet_details = 0, 0, []
-        for b in bets:
-            mult = 0
-            try:
-                mult = roulette_multiplier(b['bet_type'], b['value'], winning)
-            except HTTPException:
-                mult = 0
-            payout = roulette_payout(b['amount'], mult)
-            res = await db.roulette_bets.update_one(
-                {'id': b['id'], 'status': 'OPEN'},
-                {'$set': {'status': 'SETTLED', 'payout': payout, 'winning_number': winning, 'settled_at': _now_iso()}},
-            )
-            if res.modified_count == 0:
-                continue  # already settled elsewhere
-            total_bet += b['amount']
-            total_payout += payout
-            bet_details.append({'bet_type': b['bet_type'], 'value': b['value'], 'amount': b['amount'], 'payout': payout})
-        if total_bet == 0:
-            continue
-        if total_payout > 0:
-            await credit_chips(user_id, total_payout, f'American Roulette win (round {rn})', ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette')
-        round_doc = {
-            'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette', 'game_name': 'American Roulette',
-            'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
-            'outcome': {'round_number': rn, 'winning_number': winning, 'color': roulette_color(winning), 'bets': bet_details},
-            'created_at': _now_iso(), 'settled_at': _now_iso(),
-        }
-        await db.game_rounds.insert_one(round_doc)
-        settled_summary = {'round_number': rn, 'winning_number': winning, 'color': roulette_color(winning), 'total_bet': total_bet, 'payout': total_payout, 'bets': bet_details}
+
+        async def settle_round(session):
+            kwargs = {'session': session} if session is not None else {}
+            bets = await db.roulette_bets.find({
+                'user_id': user_id, 'slug': 'fun-roulette-bet',
+                'round_number': rn, 'status': 'OPEN',
+            }, **kwargs).to_list(length=None)
+            total_bet, total_payout, bet_details = 0, 0, []
+            for b in bets:
+                try:
+                    mult = roulette_multiplier(b['bet_type'], b['value'], winning)
+                except HTTPException:
+                    mult = 0
+                payout = roulette_payout(b['amount'], mult)
+                res = await db.roulette_bets.update_one(
+                    {'id': b['id'], 'status': 'OPEN'},
+                    {'$set': {
+                        'status': 'SETTLED', 'payout': payout,
+                        'winning_number': winning, 'settled_at': _now_iso(),
+                    }},
+                    **kwargs,
+                )
+                if res.modified_count == 0:
+                    continue
+                total_bet += b['amount']
+                total_payout += payout
+                bet_details.append({
+                    'bet_type': b['bet_type'], 'value': b['value'],
+                    'amount': b['amount'], 'payout': payout,
+                })
+            if total_bet == 0:
+                return None
+            if total_payout > 0:
+                await credit_chips(
+                    user_id, total_payout, f'American Roulette win (round {rn})',
+                    ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette', session=session,
+                )
+            await db.game_rounds.insert_one({
+                'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette',
+                'game_name': 'American Roulette', 'bet': total_bet,
+                'payout': total_payout, 'status': 'SETTLED',
+                'outcome': {
+                    'round_number': rn, 'winning_number': winning,
+                    'color': roulette_color(winning), 'bets': bet_details,
+                },
+                'created_at': _now_iso(), 'settled_at': _now_iso(),
+            }, **kwargs)
+            return {
+                'round_number': rn, 'winning_number': winning,
+                'color': roulette_color(winning), 'total_bet': total_bet,
+                'payout': total_payout, 'bets': bet_details,
+            }
+
+        result = await run_game_transaction(client, settle_round)
+        if result is not None:
+            settled_summary = result
     return settled_summary
 
 
@@ -240,34 +287,48 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
         raise HTTPException(status_code=400, detail=f'Minimum bet is {MIN_BET} chips')
     # Validate the bet shape now (winning number irrelevant, just validation)
     roulette_multiplier(body.bet_type, body.value, '0')
-    # Table limit — cap cumulative stake on this exact position. Even-money
-    # positions get the lower ceiling so Martingale doubling cannot run away.
     wide_arc = body.bet_type == 'sector' and str(body.value) in WIDE_SECTORS
     cap = EVEN_MONEY_MAX if (body.bet_type in EVEN_MONEY_TYPES or wide_arc) else POSITION_MAX
-    existing_pos = await db.roulette_bets.find(
-        {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN',
-         'bet_type': body.bet_type, 'value': body.value}, {'amount': 1},
-    ).to_list(300)
-    staked = sum(b['amount'] for b in existing_pos)
-    if staked + body.amount > cap:
-        kind = 'even-money' if (body.bet_type in EVEN_MONEY_TYPES or wide_arc) else 'table'
-        raise HTTPException(status_code=400, detail={
-            'code': 'TABLE_LIMIT',
-            'message': f'Table limit — max {cap} chips on this position ({kind} limit). You have {staked} here.',
-        })
     bet_id = str(uuid.uuid4())
-    # Validation and the table-limit read can consume the tail of the window.
-    # Re-sample before taking chips so a request cannot cross into SPINNING.
-    _require_roulette_betting(expected_round=round_number)
-    try:
-        await debit_chips(user['id'], body.amount, f'American Roulette bet (round {round_number})', ref=bet_id, kind=ledger.STAKE, game='fun-roulette')
-    except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
-    await db.roulette_bets.insert_one({
+    doc = {
         'id': bet_id, 'user_id': user['id'], 'slug': 'fun-roulette-bet',
         'round_number': round_number, 'bet_type': body.bet_type, 'value': body.value,
         'amount': body.amount, 'status': 'OPEN', 'payout': 0, 'created_at': _now_iso(),
-    })
+    }
+
+    async def place_bet(session):
+        kwargs = {'session': session} if session is not None else {}
+        # Read and enforce the position cap in the same transaction as the
+        # wallet debit, so concurrent chips cannot both pass a stale total.
+        existing_type = await db.roulette_bets.find(
+            {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN',
+             'bet_type': body.bet_type},
+            {'amount': 1, 'value': 1}, **kwargs,
+        ).to_list(length=None)
+        position_key = _roulette_position_key(body.bet_type, body.value)
+        staked = sum(
+            b['amount'] for b in existing_type
+            if _roulette_position_key(body.bet_type, b.get('value')) == position_key
+        )
+        if staked + body.amount > cap:
+            kind = 'even-money' if (body.bet_type in EVEN_MONEY_TYPES or wide_arc) else 'table'
+            raise HTTPException(status_code=400, detail={
+                'code': 'TABLE_LIMIT',
+                'message': f'Table limit — max {cap} chips on this position ({kind} limit). You have {staked} here.',
+            })
+        # Validation and the table-limit read can consume the tail of the
+        # window. Re-sample immediately before the balance/bet mutation.
+        _require_roulette_betting(expected_round=round_number)
+        await debit_chips(
+            user['id'], body.amount, f'American Roulette bet (round {round_number})',
+            ref=bet_id, kind=ledger.STAKE, game='fun-roulette', session=session,
+        )
+        await db.roulette_bets.insert_one(dict(doc), **kwargs)
+
+    try:
+        await run_game_transaction(client, place_bet)
+    except InsufficientChips:
+        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
     my_bets = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},
@@ -280,15 +341,34 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
 async def roulette_clear_bets(user: dict = Depends(require_active_player)):
     await require_playable_game('fun-roulette')
     round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
-    open_bets = await db.roulette_bets.find({'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}).to_list(100)
-    _require_roulette_betting(expected_round=round_number, message='Bets are locked for this round.')
-    refunded = 0
-    for b in open_bets:
-        res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
-        if res.modified_count:
-            refunded += b['amount']
-    if refunded > 0:
-        await credit_chips(user['id'], refunded, f'American Roulette bets refunded (round {round_number})', ref=str(round_number), kind=ledger.REFUND, game='fun-roulette')
+    async def clear_bets(session):
+        kwargs = {'session': session} if session is not None else {}
+        open_bets = await db.roulette_bets.find(
+            {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
+            **kwargs,
+        ).to_list(length=None)
+        _require_roulette_betting(
+            expected_round=round_number, message='Bets are locked for this round.',
+        )
+        refunded = 0
+        for b in open_bets:
+            res = await db.roulette_bets.update_one(
+                {'id': b['id'], 'status': 'OPEN'},
+                {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},
+                **kwargs,
+            )
+            if res.modified_count:
+                refunded += b['amount']
+        if refunded > 0:
+            await credit_chips(
+                user['id'], refunded,
+                f'American Roulette bets refunded (round {round_number})',
+                ref=str(round_number), kind=ledger.REFUND,
+                game='fun-roulette', session=session,
+            )
+        return refunded
+
+    refunded = await run_game_transaction(client, clear_bets)
     balance = await _fresh_balance(user['id'])
     return {'message': 'Bets cleared', 'refunded': refunded, 'balance': balance}
 
@@ -298,17 +378,31 @@ async def roulette_undo_bet(user: dict = Depends(require_active_player)):
     """Undo the most-recently placed chip this round (refund just that one bet)."""
     await require_playable_game('fun-roulette')
     round_number, _ = _require_roulette_betting(message='Bets are locked for this round.')
-    last = await db.roulette_bets.find(
-        {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'}
-    ).sort('created_at', -1).to_list(1)
-    refunded = 0
-    if last:
+    async def undo_bet(session):
+        kwargs = {'session': session} if session is not None else {}
+        last = await db.roulette_bets.find(
+            {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
+            **kwargs,
+        ).sort('created_at', -1).to_list(1)
+        if not last:
+            return 0
         _require_roulette_betting(expected_round=round_number, message='Bets are locked for this round.')
         b = last[0]
-        res = await db.roulette_bets.update_one({'id': b['id'], 'status': 'OPEN'}, {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}})
-        if res.modified_count:
-            refunded = b['amount']
-            await credit_chips(user['id'], refunded, f'American Roulette undo (round {round_number})', ref=b['id'], kind=ledger.REFUND, game='fun-roulette')
+        res = await db.roulette_bets.update_one(
+            {'id': b['id'], 'status': 'OPEN'},
+            {'$set': {'status': 'REFUNDED', 'settled_at': _now_iso()}},
+            **kwargs,
+        )
+        if res.modified_count == 0:
+            return 0
+        refunded = b['amount']
+        await credit_chips(
+            user['id'], refunded, f'American Roulette undo (round {round_number})',
+            ref=b['id'], kind=ledger.REFUND, game='fun-roulette', session=session,
+        )
+        return refunded
+
+    refunded = await run_game_transaction(client, undo_bet)
     my_bets = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},

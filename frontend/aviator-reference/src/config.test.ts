@@ -13,11 +13,12 @@ describe("Aviator API runtime isolation", () => {
     ]);
   });
 
-  it("retains approved failover origins on the canonical CRM host", () => {
+  it("pins canonical production hosts to the single ledger API", () => {
     expect(apiOriginsForRuntime("https://api.chakri.casino", "Crm.Chakri.Casino")).toEqual([
       "https://api.chakri.casino",
-      "https://chakri-casino-api.onrender.com",
-      "https://fungame-api.onrender.com",
+    ]);
+    expect(apiOriginsForRuntime("https://old-api.example", "mydgp.casino")).toEqual([
+      "https://api.chakri.casino",
     ]);
   });
 });

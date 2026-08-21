@@ -5,8 +5,8 @@ client = AsyncMongoMockClient()
 sys.modules['db'] = types.SimpleNamespace(db=client['t'], serialize_doc=lambda d: d)
 import ledger, revenue, crm, commission
 from datetime import datetime, timedelta, timezone
-TODAY = datetime.now(timezone.utc)
-def D(n):  # n days from now, so rates created 'now' are in force
+TODAY = datetime.strptime(ledger.gaming_day(datetime.now(timezone.utc)), '%Y-%m-%d')
+def D(n):  # n gaming days from now, so rates created 'now' are in force
     return (TODAY + timedelta(days=n)).strftime('%Y-%m-%d')
 
 PASS = FAIL = 0

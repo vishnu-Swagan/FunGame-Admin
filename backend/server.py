@@ -37,6 +37,7 @@ import routes_game_settlement
 import routes_payments
 import financial_wallet
 from payment_providers import load_payment_provider
+from transactions import run_game_transaction
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 
 _WORKER_ID = f'{os.getpid()}-{uuid.uuid4().hex[:6]}'
+_GAMEPLAY_READY = False
+_GAMEPLAY_READINESS_LOCK = asyncio.Lock()
 
 
 async def _hold_keepalive_lock():
@@ -127,8 +130,22 @@ async def _core_indexes():
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
     await db.roulette_rounds.create_index('round_number', unique=True)
+    # Historical rows may predate bet ids or contain an explicit null. A sparse
+    # unique index still indexes null, so multiple legacy nulls can make index
+    # creation fail. Restrict uniqueness to the string ids written by current
+    # routes; old rows remain settleable and startup remains safe.
+    await db.roulette_bets.create_index(
+        'id', unique=True,
+        partialFilterExpression={'id': {'$type': 'string'}},
+        name='roulette_bet_id_unique_string',
+    )
     await db.roulette_bets.create_index([('user_id', 1), ('round_number', 1), ('status', 1)])
     await db.live_outcomes.create_index([('slug', 1), ('round_number', 1)], unique=True)
+    await db.live_bets.create_index(
+        'id', unique=True,
+        partialFilterExpression={'id': {'$type': 'string'}},
+        name='live_bet_id_unique_string',
+    )
     await db.live_bets.create_index([('user_id', 1), ('slug', 1), ('status', 1)])
     await db.live_bets.create_index([('slug', 1), ('round_number', 1)])
     await db.aviator_rounds.create_index('round_number', unique=True)
@@ -140,6 +157,50 @@ async def _core_indexes():
         partialFilterExpression={'active': True},
         name='aviator_one_active_bet_per_panel',
     )
+
+
+async def _prepare_gameplay_core():
+    """Verify the indexes and Mongo transactions required by chip gameplay.
+
+    The public health endpoint must not report a deploy healthy when every bet
+    mutation would immediately fail closed. Startup records the result and a
+    later health probe retries preparation, allowing recovery from a transient
+    database outage without weakening the gate.
+    """
+    global _GAMEPLAY_READY
+    async with _GAMEPLAY_READINESS_LOCK:
+        if _GAMEPLAY_READY:
+            return
+        try:
+            await _core_indexes()
+            await _probe_gameplay_transaction()
+        except Exception:
+            _GAMEPLAY_READY = False
+            raise
+        _GAMEPLAY_READY = True
+
+
+async def _probe_gameplay_transaction():
+    """Exercise a real session-bound read so health reflects bet capability."""
+    async def transaction_probe(session):
+        await db.system_config.find_one({'key': 'main'}, session=session)
+
+    await run_game_transaction(client, transaction_probe)
+
+
+async def _audit_legacy_blackjack_hands():
+    pending = await db.blackjack_games.count_documents({
+        'status': 'done',
+        'finalized_at': {'$exists': False},
+    })
+    if pending:
+        logger.warning(
+            'Blackjack legacy reconciliation required for %d completed hand(s); '
+            'new deals for those users remain fail-closed',
+            pending,
+        )
+    else:
+        logger.info('Blackjack legacy reconciliation audit clean')
 
 
 @asynccontextmanager
@@ -165,6 +226,7 @@ async def lifespan(app: FastAPI):
                          name, type(e).__name__, e)
 
     await step('seed', run_seed())
+    await step('audit:blackjack-legacy-hands', _audit_legacy_blackjack_hands())
 
     try:
         cfg = await db.system_config.find_one({'key': 'main'})
@@ -181,7 +243,7 @@ async def lifespan(app: FastAPI):
     await step('indexes:commission', commission.ensure_indexes())
     await step('indexes:payouts', payouts.ensure_indexes())
     await step('indexes:compliance', compliance.ensure_indexes())
-    await step('indexes:core', _core_indexes())
+    await step('gameplay:core-readiness', _prepare_gameplay_core())
     # Disabled by default; this creates no collection or index until the
     # separately reviewed Supabase game-settlement bridge is explicitly enabled.
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
@@ -250,13 +312,35 @@ async def health():
         raise HTTPException(
             status_code=503, detail='Aviator configuration unavailable'
         ) from exc
+    try:
+        await db.command('ping')
+        if not _GAMEPLAY_READY:
+            await _prepare_gameplay_core()
+        else:
+            # Transaction support is a runtime dependency, not only a startup
+            # property. Revalidate it so a topology/configuration change cannot
+            # leave health green while all bet mutations fail closed.
+            await _probe_gameplay_transaction()
+    except Exception as exc:
+        logger.error('gameplay readiness check failed: %s', type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'GAMEPLAY_NOT_READY',
+                'message': 'Gameplay services are not ready.',
+            },
+        ) from exc
     financial = financial_wallet.financial_status()
     if financial_wallet.financial_flags_requested() and not financial['ready']:
         raise HTTPException(
             status_code=503,
             detail={'code': 'FINANCIAL_NOT_READY', 'message': 'Financial services are not ready.'},
         )
-    return {'status': 'ok', 'financial_ready': bool(financial['ready'])}
+    return {
+        'status': 'ok',
+        'gameplay_ready': True,
+        'financial_ready': bool(financial['ready']),
+    }
 
 
 api_router.include_router(routes_auth.router)

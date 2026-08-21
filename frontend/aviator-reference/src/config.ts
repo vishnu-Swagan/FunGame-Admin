@@ -7,21 +7,21 @@ const canonicalProductionHosts = new Set([
   "www.chakri.casino",
   "play.chakri.casino",
   "crm.chakri.casino",
+  "mydgp.casino",
+  "www.mydgp.casino",
   "fungame-web.onrender.com",
 ]);
 
-export const apiOriginsForRuntime = (configuredUrl: string, hostname: string) => Array.from(
-  new Set([
-    configuredUrl,
-    ...(canonicalProductionHosts.has(String(hostname || "").trim().toLowerCase())
-      ? [
-          "https://api.chakri.casino",
-          "https://chakri-casino-api.onrender.com",
-          "https://fungame-api.onrender.com",
-        ]
-      : []),
-  ].filter(Boolean)),
-);
+export const apiOriginsForRuntime = (configuredUrl: string, hostname: string) => {
+  const isCanonicalProduction = canonicalProductionHosts.has(
+    String(hostname || "").trim().toLowerCase(),
+  );
+  // Never let a live Aviator session cross between API hosts/ledgers. Preview,
+  // staging, and local builds remain pinned to their explicitly configured API.
+  return isCanonicalProduction
+    ? ["https://api.chakri.casino"]
+    : Array.from(new Set([configuredUrl].filter(Boolean)));
+};
 
 const knownApiUrls = apiOriginsForRuntime(configuredApiUrl, window.location.hostname);
 

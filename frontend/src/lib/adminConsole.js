@@ -17,6 +17,8 @@ const canonicalProductionHosts = new Set([
   "www.chakri.casino",
   "play.chakri.casino",
   "crm.chakri.casino",
+  "mydgp.casino",
+  "www.mydgp.casino",
   // This is the currently deployed Render-hosted player application.
   "fungame-web.onrender.com",
 ]);
@@ -38,11 +40,12 @@ export const ADMIN_LOGOUT_PATH = IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/welcome
 // verified branded API instead of relying on a historical Render hostname.
 export function apiOriginForRuntime(
   defaultBackendUrl,
-  isAdminConsole = IS_ADMIN_CONSOLE,
+  _isAdminConsole = IS_ADMIN_CONSOLE,
   hostname = runtimeHostname,
 ) {
-  const canonicalCrm = String(hostname || "").trim().toLowerCase() === "crm.chakri.casino";
-  return isAdminConsole && canonicalCrm ? "https://api.chakri.casino" : defaultBackendUrl;
+  return isCanonicalProductionHost(hostname)
+    ? "https://api.chakri.casino"
+    : defaultBackendUrl;
 }
 
 // A staging/preview build is also compiled with NODE_ENV=production. Runtime
@@ -59,13 +62,11 @@ export function apiAlternatesForRuntime(
   configuredBackendUrl,
   hostname = runtimeHostname,
 ) {
-  const candidates = [primaryBackendUrl, configuredBackendUrl];
   if (isCanonicalProductionHost(hostname)) {
-    candidates.push(
-      "https://api.chakri.casino",
-      "https://chakri-casino-api.onrender.com",
-      "https://fungame-api.onrender.com",
-    );
+    // A player session must never migrate between ledgers. Historical Render
+    // service names can be healthy while carrying different data or code, so
+    // canonical production hosts have exactly one allowed API origin.
+    return ["https://api.chakri.casino"];
   }
-  return [...new Set(candidates.filter(Boolean))];
+  return [...new Set([primaryBackendUrl, configuredBackendUrl].filter(Boolean))];
 }

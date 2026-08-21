@@ -24,7 +24,7 @@ describe("isAdminConsoleHost", () => {
     )).toBe("https://api.chakri.casino");
     expect(apiOriginForRuntime(
       "https://player-api.example", false, "chakri.casino",
-    )).toBe("https://player-api.example");
+    )).toBe("https://api.chakri.casino");
   });
 
   it("never points a staging or localhost build at production APIs", () => {
@@ -40,13 +40,14 @@ describe("isAdminConsoleHost", () => {
     )).toEqual([stagingApi]);
   });
 
-  it("keeps canonical production financial routing and failover explicit", () => {
+  it("pins every canonical production request to one ledger", () => {
     expect(isCanonicalProductionHost("fungame-web.onrender.com")).toBe(true);
+    expect(isCanonicalProductionHost("mydgp.casino")).toBe(true);
     expect(financialApiOriginForRuntime(
       "https://configured.example", "chakri.casino",
     )).toBe("https://api.chakri.casino");
     expect(apiAlternatesForRuntime(
       "https://configured.example", "https://configured.example", "chakri.casino",
-    )).toContain("https://fungame-api.onrender.com");
+    )).toEqual(["https://api.chakri.casino"]);
   });
 });
