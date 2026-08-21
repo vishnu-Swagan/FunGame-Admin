@@ -307,7 +307,11 @@ async def _start_round(room: dict, category: dict, session):
     category = _freeze_category(room.get("category_snapshot") or category)
     kwargs = _kwargs(session)
     seats = await db.rummy_seats.find(
-        {"room_id": room["id"], "status": {"$in": list(ACTIVE_SEAT_STATES)}},
+        {
+            "room_id": room["id"],
+            "status": {"$in": list(ACTIVE_SEAT_STATES)},
+            "user_id": {"$type": "string"},
+        },
         {"_id": 0}, **kwargs,
     ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
     if len(seats) != rummy.MAX_PLAYERS:
@@ -353,7 +357,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
         {"room_id": room["id"], "round_id": room.get("round_id")},
         {"_id": 0}, **kwargs,
     ).to_list(rummy.MAX_PLAYERS) if room.get("round_id") else []
-    hand_by_user = {hand["user_id"]: hand for hand in hands}
+    hand_by_user = {hand["user_id"]: hand for hand in hands if hand.get("user_id")}
     request_hand = hand_by_user.get(requester_id)
     requester_seat = next((seat for seat in seats if seat.get("user_id") == requester_id), None)
     category = await _room_category(room, session)
@@ -368,7 +372,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
 
     seat_rows = []
     for seat_index in range(rummy.MAX_PLAYERS):
-        seat = next((item for item in seats if item["seat_index"] == seat_index), None)
+        seat = next((item for item in seats if item.get("seat_index") == seat_index and item.get("user_id")), None)
         if not seat:
             seat_rows.append({"seatIndex": seat_index, "status": "EMPTY", "cardCount": 0})
             continue
@@ -459,6 +463,39 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         existing_seat, existing_room = await _latest_membership(user["id"], session)
         if existing_seat and existing_room and existing_room.get("state") not in ("ROUND_SETTLED", "CANCELLED"):
             if existing_room.get("mode") == body.mode:
+                if body.mode == "PRACTICE" and existing_room.get("state") == "WAITING_FOR_PLAYERS":
+                    real_seats = await db.rummy_seats.find({
+                        "room_id": existing_room["id"],
+                        "is_bot": {"$ne": True},
+                        "user_id": {"$type": "string"},
+                    }, {"_id": 0}, **kwargs).to_list(rummy.MAX_PLAYERS)
+                    if len(real_seats) == 1 and real_seats[0].get("user_id") == user["id"]:
+                        category = await _room_category(existing_room, session)
+                        await db.rummy_seats.delete_many({
+                            "room_id": existing_room["id"],
+                            "$or": [{"is_bot": True}, {"user_id": {"$exists": False}}],
+                        }, **kwargs)
+                        occupied = {int(real_seats[0]["seat_index"])}
+                        free = [index for index in range(rummy.MAX_PLAYERS) if index not in occupied]
+                        now_epoch = _epoch()
+                        await db.rummy_seats.insert_many([
+                            {
+                                "room_id": existing_room["id"],
+                                "user_id": f"BOT:{existing_room['id']}:{bot_number}",
+                                "seat_index": seat_index,
+                                "display_name": BOT_NAMES[bot_number - 1],
+                                "avatar": ("sun", "moon", "gem", "spade")[bot_number - 1],
+                                "is_bot": True, "status": "ACTIVE",
+                                "entry_chips": int(category["entryChips"]),
+                                "wallet_stake_chips": 0,
+                                "turns_taken": 0, "missed_turns": 0,
+                                "joined_at": _now_iso(), "last_seen_at": _now_iso(),
+                                "last_seen_epoch": now_epoch,
+                            }
+                            for bot_number, seat_index in enumerate(free, start=1)
+                        ], **kwargs)
+                        existing_room["seat_count"] = rummy.MAX_PLAYERS
+                        existing_room = await _start_round(existing_room, category, session)
                 return await _public_state(existing_room, user["id"], session)
             if existing_room.get("state") != "WAITING_FOR_PLAYERS":
                 _fail(409, "RUMMY_MODE_SWITCH_BLOCKED", "Finish or leave the current Rummy round before changing mode.")

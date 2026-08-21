@@ -529,6 +529,7 @@ def test_public_projection_contains_only_requesters_private_hand():
     seats = [
         {"room_id": "room-1", "user_id": "player-1", "seat_index": 0, "display_name": "You", "status": "ACTIVE", "is_bot": False},
         {"room_id": "room-1", "user_id": "player-2", "seat_index": 1, "display_name": "Rival", "status": "ACTIVE", "is_bot": False},
+        {"room_id": "room-1", "seat_index": 4, "status": "EMPTY"},
     ]
     hands = [
         {"room_id": "room-1", "round_id": "round-1", "user_id": "player-1", "seat_index": 0, "cards": own, "groups": [], "drawn": False},
@@ -555,3 +556,4 @@ def test_public_projection_contains_only_requesters_private_hand():
     assert all(card["id"] not in encoded for card in opponent)
     assert "seedReveal" not in payload["shuffleProof"]
     assert len(payload["seats"]) == 5
+    assert payload["seats"][4] == {"seatIndex": 4, "status": "EMPTY", "cardCount": 0}
