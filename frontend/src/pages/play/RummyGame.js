@@ -122,7 +122,7 @@ function CategoryLobby({ categories, balance, busy, onJoin, onExit }) {
     <main className="rummy-lobby" data-testid="rummy-category-lobby">
       <header className="rummy-lobby-head">
         <button type="button" onClick={onExit} aria-label="Back to Rummy details"><ArrowLeft /></button>
-        <img src="/game-art/rummy.png" alt="Rummy" />
+        <img className="rummy-lobby-logo" src="/game-brand/rummy-lobby-logo.png" alt="Rummy" />
         <div><Coins /><b>{formatChips(balance)}</b><span>chips</span></div>
       </header>
       <section className="rummy-lobby-copy">

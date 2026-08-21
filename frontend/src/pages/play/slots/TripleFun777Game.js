@@ -223,7 +223,7 @@ export default function TripleFun777Game({ game }) {
           data-testid="slot777-cabinet"
         >
           <img
-            src="/game-art/triple-fun.png"
+            src="/game-art/triple-fun-cabinet.png"
             alt="777 Triple Fun slot machine"
             draggable={false}
             className="absolute inset-0 h-full w-full object-contain select-none pointer-events-none"

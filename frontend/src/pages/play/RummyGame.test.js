@@ -84,3 +84,11 @@ test("state polling is recursive, abortable and never interval-overlaps", () => 
   expect(source).toContain("new AbortController()");
   expect(source).toContain("pollAbortRef.current?.abort()");
 });
+
+test("the Rummy lobby uses its dedicated wide wordmark instead of stretching the catalog card", () => {
+  const source = fs.readFileSync(path.join(__dirname, "RummyGame.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
+  expect(source).toContain('/game-brand/rummy-lobby-logo.png');
+  expect(source).toContain('className="rummy-lobby-logo"');
+  expect(css).toContain(".rummy-lobby-logo");
+});
