@@ -33,6 +33,7 @@ export default function AppShell() {
      so the app wordmark, balance header, navigation and safe-area padding must
      not consume playable table space. */
   const onPlay = /\/games\/[^/]+\/play$/.test(location.pathname);
+  const onHome = location.pathname === "/home";
   const playSlug = location.pathname.match(/^\/games\/([^/]+)\/play$/)?.[1];
   const fullscreenGame = FULLSCREEN_GAME_SLUGS.has(playSlug);
 
@@ -89,7 +90,7 @@ export default function AppShell() {
       ro?.disconnect();
       window.removeEventListener("orientationchange", set);
     };
-  }, [fullscreenGame]);
+  }, [fullscreenGame, onHome]);
 
   // Online/offline
   useEffect(() => {
@@ -124,38 +125,40 @@ export default function AppShell() {
       <BrandBoot />
       <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(96px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
         {/* Header */}
-        <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
-          <div className="flex items-center justify-between gap-3">
-            <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
-              <BrandWordmark logoClassName="h-12 w-12" />
-            </button>
-            <div className="flex items-center gap-2">
-              <button
-                data-testid="chip-balance-amount"
-                onClick={() => navigate("/chips")}
-                aria-label={`Chip balance ${formatChips(user?.chip_balance)}`}
-                className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 pl-2.5 pr-3 py-1.5 min-h-[36px] hover:bg-primary/15 transition-[background-color] duration-150"
-              >
-                <Coins className="h-4 w-4 text-primary" />
-                <span className="tabular-nums text-sm font-bold text-primary">{formatChips(user?.chip_balance)}</span>
+        {!onHome && (
+          <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
+            <div className="flex items-center justify-between gap-3">
+              <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
+                <BrandWordmark logoClassName="h-12 w-12" />
               </button>
-              <button
-                data-testid="header-notifications-button"
-                onClick={() => navigate("/notifications")}
-                aria-label={`Notifications, ${unread} unread`}
-                className="relative h-9 w-9 min-h-[36px] flex items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-[background-color] duration-150"
-              >
-                <Bell className="h-4 w-4 text-white/85" />
-                {unread > 0 && (
-                  <span data-testid="notification-unread-badge" className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-0.5 rounded-full bg-[hsl(var(--magenta))] text-[9px] font-bold text-white flex items-center justify-center">
-                    {unread > 9 ? "9+" : unread}
-                  </span>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  data-testid="chip-balance-amount"
+                  onClick={() => navigate("/chips")}
+                  aria-label={`Chip balance ${formatChips(user?.chip_balance)}`}
+                  className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 pl-2.5 pr-3 py-1.5 min-h-[36px] hover:bg-primary/15 transition-[background-color] duration-150"
+                >
+                  <Coins className="h-4 w-4 text-primary" />
+                  <span className="tabular-nums text-sm font-bold text-primary">{formatChips(user?.chip_balance)}</span>
+                </button>
+                <button
+                  data-testid="header-notifications-button"
+                  onClick={() => navigate("/notifications")}
+                  aria-label={`Notifications, ${unread} unread`}
+                  className="relative h-9 w-9 min-h-[36px] flex items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-[background-color] duration-150"
+                >
+                  <Bell className="h-4 w-4 text-white/85" />
+                  {unread > 0 && (
+                    <span data-testid="notification-unread-badge" className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-0.5 rounded-full bg-[hsl(var(--magenta))] text-[9px] font-bold text-white flex items-center justify-center">
+                      {unread > 9 ? "9+" : unread}
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-          <Disclaimer className="mt-1.5" />
-        </header>
+            <Disclaimer className="mt-1.5" />
+          </header>
+        )}
 
         {/* Offline banner */}
         {!online && (
@@ -171,7 +174,7 @@ export default function AppShell() {
           </div>
         )}
 
-        <main className={onPlay ? "" : "pt-4"}>
+        <main className={onPlay || onHome ? "" : "pt-4"}>
           <Outlet />
         </main>
       </div>

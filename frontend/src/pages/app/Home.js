@@ -1,6 +1,5 @@
-import { useRef, useEffect } from "react";
+import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useReducedMotion } from "framer-motion";
 import { ChevronRight, Play, ArrowUpRight, Spade, Dices, CircleDot, Rocket } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGames } from "@/lib/useGames";
@@ -10,7 +9,6 @@ import { useAuth } from "@/context/AuthContext";
 import { usePlayersOnline } from "@/lib/liveActivity";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 import { sfx } from "@/lib/sound";
-import { BrandWordmark } from "@/components/Brand";
 import { GameArt } from "@/components/GameArt";
 import { isGameEnabled } from "@/lib/gameAvailability";
 
@@ -44,86 +42,73 @@ const HeroSparks = () => (
   </div>
 );
 
-/** Cinematic video hero — a full-width 16:9 banner of the looping casino
-    footage (so the whole neon sign stays visible, not cropped), with the
-    CHAKRI.CASINO brand + live count overlaid on top and the headline + CTAs in a
-    panel below. Auto-plays muted (autoplay policy); the sound cue fires on
-    first tap. Falls back to the poster still for reduced-motion. */
-function VideoHero({ navigate, userName }) {
-  const reduced = useReducedMotion();
+/** The Home route is the brand stage. Utility chrome is intentionally removed
+    above it in AppShell so the first viewport belongs to the royal lockup. */
+function RoyalBrandHero({ navigate, userName }) {
   const online = usePlayersOnline("lobby");
   const soundFired = useRef(false);
-  const videoRef = useRef(null);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (v && !reduced) v.play().catch(() => {}); // some browsers need explicit play()
-  }, [reduced]);
 
   const firstTouch = () => { if (soundFired.current) return; soundFired.current = true; sfx.heroRise && sfx.heroRise(); };
 
   return (
-    <div className="-mx-4 -mt-4" data-testid="home-hero" onPointerDown={firstTouch}>
-      <div className="relative overflow-hidden rounded-b-[26px] border-b-2 border-primary/25 shadow-[0_22px_54px_rgba(0,0,0,0.55)]">
-        {/* full 16:9 video banner — the whole CASINO sign stays visible */}
-        <div className="relative w-full bg-[#05070f]" style={{ aspectRatio: "16 / 9" }}>
-          {reduced ? (
-            <img src="/hero/casino-hero.jpg" alt="Casino" className="absolute inset-0 h-full w-full object-cover" />
-          ) : (
-            <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" autoPlay muted loop playsInline preload="auto" poster="/hero/casino-hero.jpg" aria-hidden="true">
-              <source src="/hero/casino-hero.mp4" type="video/mp4" />
-            </video>
-          )}
-          {/* light top grade + fade into the panel */}
-          <div aria-hidden className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(6,8,16,0.5) 0%, transparent 24%, transparent 60%, rgba(5,7,15,0.95) 100%)" }} />
-          <div aria-hidden className="fg-scanlines absolute inset-0 pointer-events-none opacity-12" />
-          {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)" }} />}
-          {!reduced && <HeroSparks />}
-          {/* brand + live floor */}
-          <div className="fg-safe-top absolute inset-x-0 top-0 px-4 pt-3 flex items-center justify-between">
-            <BrandWordmark logoClassName="h-16 w-16 drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
-            <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/45 px-2.5 py-1 backdrop-blur-sm">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[hsl(var(--emerald))]" />
-              </span>
-              <span className="tabular-nums text-[11px] font-bold text-[hsl(var(--emerald))]">{online.toLocaleString()}</span>
-              <span className="font-gaming text-[9px] tracking-wider text-white/55 uppercase">online</span>
-            </span>
-          </div>
-        </div>
+    <section className="-mx-4 md:-mx-6" data-testid="home-hero" onPointerDown={firstTouch} aria-labelledby="royal-floor-welcome">
+      <div className="fg-royal-hero-shell rounded-b-[38px] p-[6px] pt-0">
+        <div className="fg-royal-hero-core fg-safe-top relative isolate overflow-hidden rounded-b-[32px] px-5 pb-8 pt-6 text-center">
+          <div aria-hidden className="fg-royal-orbit" />
+          <div aria-hidden className="fg-scanlines absolute inset-0 opacity-[0.12]" />
+          <HeroSparks />
 
-        {/* headline + CTAs panel */}
-        <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(180deg, #05070f, #0a0e1a)" }}>
-          <p className="font-gaming text-[10px] tracking-[0.4em] uppercase mb-1 text-primary">◆ Welcome to the floor</p>
-          <h1 className="font-tech font-black uppercase text-white leading-[0.92] tracking-tight text-[2rem]" style={{ textShadow: "0 0 30px rgba(255,199,64,0.25)" }}>
-            Real casino <span style={{ color: "#ffd447" }}>real thrill</span>
-          </h1>
-          <div className="mt-3 flex items-center gap-2.5">
+          <div className="relative z-[2] flex justify-center">
+            <p id="royal-floor-welcome" className="fg-floor-welcome inline-flex items-center gap-2 rounded-full px-5 py-2.5 font-gaming text-xs font-black uppercase tracking-[0.24em] sm:text-sm">
+              <span aria-hidden>◆</span> Welcome to the floor <span aria-hidden>◆</span>
+            </p>
+          </div>
+
+          <img
+            src="/chakri-casino-wordmark.png"
+            alt="CHAKRI.CASINO — Play in gold"
+            className="fg-royal-wordmark relative z-[2] mx-[-9%] mt-4 block h-auto w-[118%] max-w-none select-none"
+            draggable="false"
+            decoding="async"
+          />
+
+          <div className="relative z-[2] -mt-1">
+            <p className="font-display text-[1.7rem] leading-none tracking-tight text-[#fff3cb] sm:text-3xl">Royal tables. Real excitement.</p>
+            <p className="mx-auto mt-2 max-w-[34rem] text-sm leading-relaxed text-white/52">Your private chip-play casino floor, crafted for rich tables and fast rounds.</p>
+          </div>
+
+          <div className="relative z-[2] mt-5 flex flex-col items-center gap-3">
             <button
               data-testid="home-hero-play"
               onClick={() => { sfx.chip && sfx.chip(); navigate("/games"); }}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground font-gaming font-bold text-sm tracking-wide uppercase px-6 py-3 min-h-[48px] cursor-pointer shadow-[0_8px_24px_rgba(255,199,64,0.4)] hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="group inline-flex min-h-[58px] items-center gap-4 rounded-full bg-gradient-to-b from-[#ffe9a3] via-[#e6b94f] to-[#ad6e13] py-1.5 pl-6 pr-1.5 font-gaming text-sm font-black uppercase tracking-[0.12em] text-[#201305] shadow-[0_16px_40px_rgba(173,110,19,0.34),inset_0_1px_0_rgba(255,255,255,0.8)] transition-[transform,filter] duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 hover:brightness-110 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
-              <Play className="h-4 w-4 fill-current" /> Play now
+              Enter the casino
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-[#241706]/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:scale-105">
+                <Play className="h-4 w-4 fill-current" strokeWidth={1.5} />
+              </span>
             </button>
             <button
               data-testid="home-hero-browse"
               onClick={() => navigate("/games")}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/25 bg-white/5 text-white font-gaming font-semibold text-sm tracking-wide uppercase px-4 py-3 min-h-[48px] cursor-pointer hover:bg-white/12 active:scale-[0.98] transition-[background-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="border-b border-[#e6b94f]/45 pb-1 font-gaming text-[11px] font-semibold uppercase tracking-[0.2em] text-[#f1d787]/75 transition-[color,transform] duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-px hover:text-[#ffe8a6]"
             >
-              All games <ChevronRight className="h-4 w-4" />
+              View all royal games
             </button>
           </div>
+
+          <div className="relative z-[2] mx-auto mt-6 flex w-fit items-center gap-3 rounded-full bg-black/25 px-4 py-2 text-[10px] uppercase tracking-[0.16em] text-white/46">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[hsl(var(--emerald))] opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[hsl(var(--emerald))]" />
+            </span>
+            <strong className="tabular-nums text-white/82">{online.toLocaleString()}</strong> players on the floor
+          </div>
+
+          <p className="relative z-[2] mt-4 font-gaming text-[9px] uppercase tracking-[0.18em] text-white/28">Welcome back, {userName}</p>
         </div>
       </div>
-
-      {/* greeting beneath the splash */}
-      <div className="px-4 pt-4">
-        <p className="font-gaming text-[10px] tracking-[0.3em] text-white/40 uppercase">Welcome back, player</p>
-        <h2 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-[#ffe9ad] to-primary bg-clip-text text-transparent">{userName}</h2>
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -139,8 +124,7 @@ export default function Home() {
 
   return (
     <PageTransition className="space-y-6">
-      {/* Cinematic video hero */}
-      <VideoHero navigate={navigate} userName={user?.display_name || "Player"} />
+      <RoyalBrandHero navigate={navigate} userName={user?.display_name || "Player"} />
 
       {/* Live floor ticker */}
       <LiveActivityBar slug="chakri-lobby" />
