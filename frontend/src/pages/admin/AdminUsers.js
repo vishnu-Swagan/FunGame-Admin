@@ -67,6 +67,17 @@ export default function AdminUsers() {
     setRejectNote("");
   };
 
+  const approve = async (user) => {
+    const review = registrationReview(user);
+    if (review.manualReview) {
+      const confirmed = window.confirm(
+        `Confirm you manually verified ${review.contact} before activating gameplay?`,
+      );
+      if (!confirmed) return;
+    }
+    await act(user.id, "approve");
+  };
+
   return (
     <PageTransition className="space-y-4">
       <h1 className="text-2xl font-bold tracking-tight">Users</h1>
@@ -126,6 +137,9 @@ export default function AdminUsers() {
                           {u.username ? " · " : ""}
                           {review.contact}
                         </p>
+                        {review.manualReview && (
+                          <p className="text-[10px] text-amber-300 truncate">Manual check · DOB {u.date_of_birth || "missing"}</p>
+                        )}
                       </div>
                     </div>
                   </TableCell>
@@ -169,10 +183,10 @@ export default function AdminUsers() {
                           size="sm"
                           disabled={busyId === u.id || !review.approvalReady}
                           title={!review.approvalReady ? "Accepted terms and a submitted eligible profile are required; non-manual accounts also require contact verification" : undefined}
-                          onClick={() => act(u.id, "approve")}
+                          onClick={() => approve(u)}
                           className="h-8 rounded-lg text-xs font-bold bg-[hsl(var(--emerald))] text-black hover:brightness-110"
                         >
-                          <UserCheck className="h-3.5 w-3.5 mr-1" /> {u.status === "PENDING" ? "Approve" : "Reactivate"}
+                          <UserCheck className="h-3.5 w-3.5 mr-1" /> {u.status === "PENDING" ? (review.manualReview ? "Verify & approve" : "Approve") : "Reactivate"}
                         </Button>
                       )}
                       {u.status === "PENDING" && (

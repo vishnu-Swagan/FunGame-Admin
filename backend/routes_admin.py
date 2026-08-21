@@ -5,6 +5,7 @@ import secrets
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
@@ -214,6 +215,14 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
     empty = {'total_deposits': 0, 'winning_chips': 0, 'loss_chips': 0}
     for u in users:
         u['stats'] = stats.get(u.get('id'), empty)
+        if (u.get('registration_source') == 'SELF_SERVICE'
+                and u.get('activation_mode') == ADMIN_REVIEW_ACTIVATION_MODE
+                and u.get('manual_contact_reviewed') is not True):
+            # Response-only aliases keep an already-open, older CRM bundle from
+            # approving contacts it cannot see during the API/frontend rollout.
+            # The database continues to keep these values provisional.
+            u['email'] = u.get('pending_email') or u.get('email')
+            u['phone'] = u.get('pending_phone') or u.get('phone')
     return {'users': serialize_doc(users)}
 
 
@@ -236,6 +245,39 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 ADMIN_REVIEW_PENDING, ADMIN_REVIEW_APPROVED,
             )
         )
+        manual_email = None
+        manual_phone = None
+        if manual_review_registration:
+            try:
+                email_identity = normalize_identity(
+                    user.get('pending_email') or user.get('email'),
+                )
+                phone_identity = normalize_identity(
+                    user.get('pending_phone') or user.get('phone'),
+                )
+                if email_identity.channel != 'EMAIL' or phone_identity.channel != 'SMS':
+                    raise ValueError('Submitted contacts use the wrong channels')
+                manual_email = email_identity.value
+                manual_phone = phone_identity.value
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail={
+                    'code': 'MANUAL_CONTACT_INVALID',
+                    'message': 'Both submitted contacts must be valid before approval.',
+                }) from exc
+            clash = await db.users.find_one({
+                'id': {'$ne': user_id},
+                '$or': [
+                    {'email': manual_email}, {'email_normalized': manual_email},
+                    {'phone': manual_phone}, {'phone_normalized': manual_phone},
+                    {'status': 'PENDING', 'pending_email': manual_email},
+                    {'status': 'PENDING', 'pending_phone': manual_phone},
+                ],
+            }, **kwargs)
+            if clash:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'MANUAL_CONTACT_CONFLICT',
+                    'message': 'An approved account already uses this email or mobile number.',
+                })
         if self_service:
             verified_contact = bool(
                 user.get('contact_verified')
@@ -283,6 +325,12 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
         }
         if manual_review_registration:
             approval_updates.update({
+                'email': manual_email,
+                'email_normalized': manual_email,
+                'phone': manual_phone,
+                'phone_normalized': manual_phone,
+                'primary_identity': manual_phone,
+                'primary_identity_channel': 'PHONE',
                 'manual_contact_reviewed': True,
                 'manual_contact_reviewed_at': approved_at,
                 'manual_contact_reviewed_by': admin['id'],
@@ -301,13 +349,21 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 'accepted_terms': True,
                 'submitted_at': user.get('submitted_at'),
             })
-        updated = await db.users.find_one_and_update(
-            approval_query,
-            {'$set': approval_updates,
-             '$unset': {'rejection_reason': ''}},
-            return_document=ReturnDocument.AFTER,
-            **kwargs,
-        )
+        unset_fields = {'rejection_reason': ''}
+        if manual_review_registration:
+            unset_fields.update({'pending_email': '', 'pending_phone': ''})
+        try:
+            updated = await db.users.find_one_and_update(
+                approval_query,
+                {'$set': approval_updates, '$unset': unset_fields},
+                return_document=ReturnDocument.AFTER,
+                **kwargs,
+            )
+        except DuplicateKeyError as exc:
+            raise HTTPException(status_code=409, detail={
+                'code': 'MANUAL_CONTACT_CONFLICT',
+                'message': 'An approved account already uses this email or mobile number.',
+            }) from exc
         if not updated:
             raise HTTPException(status_code=409, detail='Account state changed; retry approval')
         if not was_approved_before:

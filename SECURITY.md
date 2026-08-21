@@ -50,6 +50,7 @@ Therefore:
 | **Single active session per login** | `routes_auth.py` | A login elsewhere invalidates the old token |
 | **Purpose-bound OTP verification** | `backend/otp_service.py`, `backend/routes_auth.py` | Email/phone registration and password-reset challenges expire, limit attempts and cannot be reused for another purpose |
 | **Fail-closed OTP capabilities** | `backend/routes_auth.py`, auth UI | Registration channels are offered only when their global provider configuration is ready; production mock delivery is rejected |
+| **Provisional administrator-reviewed contacts** | `backend/routes_auth.py`, `backend/routes_admin.py` | No-OTP applications cannot reserve login identities; contacts become login fields only after explicit operator approval |
 | **Account lock and opaque auth errors** | `backend/routes_auth.py` | Unknown accounts pay the same bcrypt cost, repeated failures lock known accounts, and OTP/account state is not exposed publicly |
 | **Financial feature gates** | `backend/financial_wallet.py`, hosting environment | Provider, deposits, withdrawals, auto-payout and gameplay-wallet integration fail closed independently |
 | **Encrypted payout details** | `backend/financial_wallet.py` | Raw bank details use authenticated encryption at rest and routine responses expose masked values only |

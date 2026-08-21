@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg, routeForUser } from "@/lib/api";
-import { loginVerificationRecovery, normalizeAuthCapabilities, normalizeContactChannel } from "@/lib/authCapabilities";
+import { loginVerificationRecovery, normalizeAuthCapabilities, normalizeContactChannel, useAuthCapabilities } from "@/lib/authCapabilities";
 import { useAuth } from "@/context/AuthContext";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
@@ -14,11 +14,14 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
+  const { capabilities } = useAuthCapabilities();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sessionNotice, setSessionNotice] = useState("");
+  const passwordResetAvailable = capabilities.email_password_reset
+    || capabilities.phone_password_reset;
 
   useEffect(() => {
     const reason = localStorage.getItem("fg_logout_reason");
@@ -47,14 +50,14 @@ export default function Login() {
       if (["EMAIL_NOT_VERIFIED", "CONTACT_NOT_VERIFIED"].includes(detail?.code)) {
         try {
           const { data: capabilityData } = await api.get("/auth/capabilities");
-          const capabilities = normalizeAuthCapabilities(capabilityData);
-          const recovery = loginVerificationRecovery(capabilities, detail?.channel, identifier);
+          const latestCapabilities = normalizeAuthCapabilities(capabilityData);
+          const recovery = loginVerificationRecovery(latestCapabilities, detail?.channel, identifier);
           const requestedChannel = normalizeContactChannel(detail?.channel, identifier);
-          toast.info(`Please verify your ${requestedChannel === "PHONE" ? "mobile number" : "email"} first`);
           if (!recovery) {
-            toast.info(`Verification by ${requestedChannel === "PHONE" ? "mobile" : "email"} is temporarily unavailable.`);
+            toast.info(`Verification by ${requestedChannel === "PHONE" ? "mobile" : "email"} is temporarily unavailable. Contact an administrator.`);
             return;
           }
+          toast.info(`Please verify your ${requestedChannel === "PHONE" ? "mobile number" : "email"} first`);
           const { data } = await api.post("/auth/resend-otp", recovery.body);
           navigate("/verify", { state: { channel: recovery.channel, identifier: recovery.contact, destinationMasked: data?.destination_masked, resendAfter: data?.resend_after_seconds } });
         } catch (verificationError) {
@@ -121,9 +124,15 @@ export default function Login() {
         </Button>
       </form>
       <div className="mt-5 flex items-center justify-between text-sm">
-        <Link data-testid="login-forgot-link" to="/forgot-password" className="text-white/60 hover:text-white/85">
-          Forgot password?
-        </Link>
+        {passwordResetAvailable ? (
+          <Link data-testid="login-forgot-link" to="/forgot-password" className="text-white/60 hover:text-white/85">
+            Forgot password?
+          </Link>
+        ) : capabilities.manual_admin_review ? (
+          <span data-testid="login-manual-recovery-note" className="text-xs text-white/50">
+            Contact an administrator for password reset.
+          </span>
+        ) : <span />}
         <Link to="/register" className="text-white/60 hover:text-white/85">Create account</Link>
       </div>
     </AuthShell>

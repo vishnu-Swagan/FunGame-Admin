@@ -29,12 +29,23 @@ the full runbook in `docs/PAYMENT-GATEWAY-INTEGRATION.md` is complete. A browser
 return must never credit chips; only a verified provider event or authenticated
 reconciliation may do so.
 
-Production registration also remains intentionally closed while
-`OTP_EMAIL_ADAPTER` and `OTP_SMS_ADAPTER` are disabled. Configure at least one
-real delivery adapter, its provider credentials, `OTP_PEPPER` and
-`OTP_EXPOSE_DEV_CODE=false` before advertising self-service sign-up. The public
-app reads `/api/auth/capabilities` and disables unavailable channels instead of
-claiming that a code was sent.
+Temporary administrator-reviewed registration accepts both contacts without
+sending an email/SMS code. It creates a zero-chip `PENDING` application whose
+contacts stay provisional until the operator selects **Verify & approve**:
+
+```dotenv
+REGISTRATION_MODE=ADMIN_REVIEW
+OTP_EMAIL_ADAPTER=disabled
+OTP_SMS_ADAPTER=disabled
+OTP_EXPOSE_DEV_CODE=false
+```
+
+Keep a unique `OTP_PEPPER` in Render even while delivery is disabled: password
+login rate limits use it. Approval atomically claims the submitted contacts,
+records the operator decision, activates gameplay, and grants the existing
+welcome play-chip bonus. Restore contact OTP later by switching
+`REGISTRATION_MODE=PHONE_OTP` only after the SMS adapter and credentials are
+configured and tested. Administrator MFA is separate and is not changed here.
 
 ## The failure mode to know about
 

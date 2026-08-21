@@ -44,6 +44,7 @@ from otp_service import (
     normalize_identity,
     prepare_challenge_verification,
     registration_storage_ready,
+    require_configured_pepper,
     require_identity_indexes,
     require_registration_readiness,
     require_registration_transactions,
@@ -178,9 +179,10 @@ def _user_public(user: dict) -> dict:
         'previous_email', 'password_failed_attempts', 'locked_until',
     ):
         public.pop(key, None)
-    # Phone registrations carry a unique compatibility address because older
-    # routes still expect an email key.  It is never presented as user data.
-    if str(public.get('email') or '').endswith('.phone.invalid'):
+    # Phone registrations and provisional manual applications carry unique
+    # compatibility addresses for the legacy non-sparse email index. They are
+    # never presented as user data.
+    if str(public.get('email') or '').endswith(('.phone.invalid', '.manual.invalid')):
         public['email'] = None
     return public
 
@@ -308,6 +310,10 @@ async def authentication_capabilities():
     manual_storage_ready = False
     if mode == ADMIN_REVIEW_ACTIVATION_MODE:
         try:
+            # Manual applicants authenticate with a password after approval;
+            # the persistent login limiter therefore still requires its
+            # production pepper even though no contact OTP is issued.
+            require_configured_pepper()
             await require_identity_indexes()
             await require_registration_transactions()
             await crm.require_registration_attribution_readiness()
@@ -316,10 +322,11 @@ async def authentication_capabilities():
             manual_storage_ready = False
 
     otp_storage_ready = await registration_storage_ready()
-    if otp_storage_ready:
-        otp_storage_ready = await crm.registration_attribution_ready()
     email_otp_ready = otp_storage_ready and delivery_adapter_ready('EMAIL')
     phone_otp_ready = otp_storage_ready and delivery_adapter_ready('SMS')
+    otp_registration_ready = (
+        otp_storage_ready and await crm.registration_attribution_ready()
+    )
 
     if mode == ADMIN_REVIEW_ACTIVATION_MODE:
         return {
@@ -327,6 +334,8 @@ async def authentication_capabilities():
             'email_registration': manual_storage_ready,
             'phone_registration': manual_storage_ready,
             'phone_verification_required': False,
+            'email_contact_verification': email_otp_ready,
+            'phone_contact_verification': phone_otp_ready,
             'email_password_reset': email_otp_ready,
             'phone_password_reset': phone_otp_ready,
             'verification_required': False,
@@ -335,12 +344,14 @@ async def authentication_capabilities():
         }
 
     return {
-        'registration_enabled': mode == PHONE_OTP_ACTIVATION_MODE and phone_otp_ready,
+        'registration_enabled': mode == PHONE_OTP_ACTIVATION_MODE and otp_registration_ready and phone_otp_ready,
         # Email can be collected on the phone-registration form, but is not a
         # registration identity and never receives an activation challenge.
         'email_registration': False,
-        'phone_registration': mode == PHONE_OTP_ACTIVATION_MODE and phone_otp_ready,
+        'phone_registration': mode == PHONE_OTP_ACTIVATION_MODE and otp_registration_ready and phone_otp_ready,
         'phone_verification_required': True,
+        'email_contact_verification': email_otp_ready,
+        'phone_contact_verification': phone_otp_ready,
         # Legacy verified-email accounts may still use their existing recovery
         # channel. New self-service accounts are activated only by phone OTP.
         'email_password_reset': email_otp_ready,
@@ -534,6 +545,7 @@ async def _register_for_admin_review(body: RegisterRequest):
     the chosen credential, while the operator's approval controls activation.
     """
     try:
+        require_configured_pepper()
         await require_identity_indexes()
         await require_registration_transactions()
         await crm.require_registration_attribution_readiness()
@@ -590,13 +602,11 @@ async def _register_for_admin_review(body: RegisterRequest):
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
 
-    # Hash before account lookup so a duplicate and a new registration incur
-    # the same expensive password work. The candidate hash is discarded on a
-    # collision and can never overwrite an existing credential.
+    # Password work happens before persistence so every application pays the
+    # same cost. Submitted contacts remain provisional and intentionally do not
+    # reserve another player's login identity before an operator approves them.
     password_hash = await asyncio.to_thread(hash_password, body.password)
     email_identity = normalize_identity(str(body.email))
-    phone_existing = await _find_identity_user(identity)
-    email_existing = await _find_identity_user(email_identity)
     public_request_id = str(uuid.uuid4())
     response = {
         'message': (
@@ -608,7 +618,17 @@ async def _register_for_admin_review(body: RegisterRequest):
         'review_required': True,
         'verification_required': False,
     }
-    if phone_existing or email_existing:
+    existing = await db.users.find_one({'$or': [
+        {'email_normalized': email_identity.value},
+        {'email': email_identity.value},
+        {'phone_normalized': identity.value},
+        {'phone': identity.value},
+        {'status': 'PENDING', 'pending_email': email_identity.value},
+        {'status': 'PENDING', 'pending_phone': identity.value},
+    ]})
+    if existing:
+        # Keep the public response opaque while preventing retries with either
+        # submitted contact from filling the finite administrator review queue.
         return response
 
     user_id = str(uuid.uuid4())
@@ -619,18 +639,17 @@ async def _register_for_admin_review(body: RegisterRequest):
         'status': 'PENDING',
         'registration_source': 'SELF_SERVICE',
         'activation_mode': ADMIN_REVIEW_ACTIVATION_MODE,
-        'primary_identity': identity.value,
-        'primary_identity_channel': 'PHONE',
         'contact_verification_status': ADMIN_REVIEW_PENDING,
         'manual_contact_reviewed': False,
         'identity_verified': False,
         'contact_verified': False,
         'email_verified': False,
         'phone_verified': False,
-        'email': email_identity.value,
-        'email_normalized': email_identity.value,
-        'phone': identity.value,
-        'phone_normalized': identity.value,
+        # The compatibility address satisfies the legacy unique email index;
+        # only approval atomically promotes pending contacts to login fields.
+        'email': f'application-{user_id}@account.manual.invalid',
+        'pending_email': email_identity.value,
+        'pending_phone': identity.value,
         'password_hash': password_hash,
         'password_set_at': created_at,
         'password_failed_attempts': 0,
@@ -668,7 +687,8 @@ async def _register_for_admin_review(body: RegisterRequest):
     try:
         await _run_auth_transaction(create_account)
     except DuplicateKeyError:
-        # Exact same response shape and work factor as the pre-read collision.
+        # A simultaneous duplicate provisional contact or a vanishingly
+        # unlikely generated placeholder collision stays intentionally opaque.
         return response
     return response
 

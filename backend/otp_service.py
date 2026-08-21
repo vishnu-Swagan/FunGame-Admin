@@ -45,8 +45,16 @@ OTP_VERIFY_WINDOW_SECONDS = 15 * 60
 
 _EMAIL_IDENTITY_INDEX = 'users_email_normalized_unique'
 _PHONE_IDENTITY_INDEX = 'users_phone_normalized_unique'
+_PENDING_EMAIL_INDEX = 'users_pending_email_review_unique'
+_PENDING_PHONE_INDEX = 'users_pending_phone_review_unique'
 _EMAIL_IDENTITY_PARTIAL = {'email_normalized': {'$type': 'string'}}
 _PHONE_IDENTITY_PARTIAL = {'phone_normalized': {'$type': 'string'}}
+_PENDING_EMAIL_PARTIAL = {
+    'status': 'PENDING', 'pending_email': {'$type': 'string'},
+}
+_PENDING_PHONE_PARTIAL = {
+    'status': 'PENDING', 'pending_phone': {'$type': 'string'},
+}
 _INDEX_OPTION_UNSPECIFIED = object()
 
 
@@ -224,9 +232,56 @@ async def ensure_identity_indexes(*, database=None) -> None:
         {
             '_id': 0, 'id': 1, 'email': 1, 'phone': 1,
             'email_normalized': 1, 'phone_normalized': 1,
+            'role': 1, 'status': 1, 'registration_source': 1,
+            'activation_mode': 1, 'manual_contact_reviewed': 1,
+            'pending_email': 1, 'pending_phone': 1,
         },
     )
     async for user in users:
+        legacy_manual_application = bool(
+            user.get('role') == 'PLAYER'
+            and user.get('status') in ('PENDING', 'REJECTED')
+            and user.get('registration_source') == 'SELF_SERVICE'
+            and user.get('activation_mode') == 'ADMIN_REVIEW'
+            and user.get('manual_contact_reviewed') is not True
+            and not (user.get('pending_email') and user.get('pending_phone'))
+        )
+        if legacy_manual_application and user.get('id'):
+            try:
+                email_identity = normalize_identity(
+                    user.get('email_normalized') or user.get('email'),
+                )
+                phone_identity = normalize_identity(
+                    user.get('phone_normalized') or user.get('phone'),
+                )
+                if email_identity.channel != 'EMAIL' or phone_identity.channel != 'SMS':
+                    raise ValueError('Manual-review contacts use the wrong channels')
+            except ValueError:
+                # Invalid legacy data stays untouched and therefore cannot be
+                # silently approved by the new manual-contact path.
+                continue
+            await database.users.update_one(
+                {
+                    'id': user['id'],
+                    'status': user.get('status'),
+                    'activation_mode': 'ADMIN_REVIEW',
+                    'manual_contact_reviewed': {'$ne': True},
+                },
+                {
+                    '$set': {
+                        'email': f"application-{user['id']}@account.manual.invalid",
+                        'pending_email': email_identity.value,
+                        'pending_phone': phone_identity.value,
+                    },
+                    '$unset': {
+                        'email_normalized': '', 'phone': '',
+                        'phone_normalized': '', 'primary_identity': '',
+                        'primary_identity_channel': '',
+                    },
+                },
+            )
+            continue
+
         updates = {}
         email = user.get('email')
         if email and not str(email).endswith('.phone.invalid') and not user.get('email_normalized'):
@@ -254,6 +309,20 @@ async def ensure_identity_indexes(*, database=None) -> None:
         'phone_normalized', unique=True,
         partialFilterExpression=_PHONE_IDENTITY_PARTIAL,
         name=_PHONE_IDENTITY_INDEX,
+    )
+    # Provisional contacts do not become login identities until approval, but
+    # the review queue still needs database-enforced deduplication. Restricting
+    # these guards to PENDING rows releases the contact after rejection and
+    # avoids racing two simultaneous public submissions past a pre-read.
+    await database.users.create_index(
+        'pending_email', unique=True,
+        partialFilterExpression=_PENDING_EMAIL_PARTIAL,
+        name=_PENDING_EMAIL_INDEX,
+    )
+    await database.users.create_index(
+        'pending_phone', unique=True,
+        partialFilterExpression=_PENDING_PHONE_PARTIAL,
+        name=_PENDING_PHONE_INDEX,
     )
 
 
@@ -287,6 +356,8 @@ def _identity_indexes_valid(indexes: dict) -> bool:
     requirements = (
         (_EMAIL_IDENTITY_INDEX, [('email_normalized', 1)], _EMAIL_IDENTITY_PARTIAL),
         (_PHONE_IDENTITY_INDEX, [('phone_normalized', 1)], _PHONE_IDENTITY_PARTIAL),
+        (_PENDING_EMAIL_INDEX, [('pending_email', 1)], _PENDING_EMAIL_PARTIAL),
+        (_PENDING_PHONE_INDEX, [('pending_phone', 1)], _PENDING_PHONE_PARTIAL),
     )
     return all(
         _index_matches(indexes.get(name), keys, unique=True, partial=partial)
@@ -329,7 +400,7 @@ def _otp_indexes_valid(challenges: dict, rate_limits: dict) -> bool:
 
 
 async def require_identity_indexes(*, database=None) -> None:
-    """Fail registration closed unless both exact normalized guards exist."""
+    """Fail registration closed unless normalized and review guards exist."""
     if database is None:
         database = db
     try:

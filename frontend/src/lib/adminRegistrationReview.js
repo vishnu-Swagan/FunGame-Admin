@@ -3,7 +3,7 @@ export function registrationReview(user = {}) {
   const manualReview = selfService && user.activation_mode === "ADMIN_REVIEW";
   const phonePrimary = user.primary_identity_channel === "PHONE";
   const contact = manualReview
-    ? [user.phone, user.email].filter(Boolean).join(" · ")
+    ? [user.pending_phone || user.phone, user.pending_email || user.email].filter(Boolean).join(" · ")
     : phonePrimary ? user.phone : user.email;
   const channelVerified = phonePrimary ? user.phone_verified : user.email_verified;
   const contactVerified = Boolean(user.contact_verified && channelVerified);
@@ -20,7 +20,7 @@ export function registrationReview(user = {}) {
   return {
     selfService,
     sourceLabel: selfService ? "Self-service" : "Operator-provisioned",
-    contactLabel: manualReview ? "Contacts" : phonePrimary ? "Mobile" : "Email",
+    contactLabel: manualReview ? "Admin contact check" : phonePrimary ? "Mobile" : "Email",
     contact: contact || "—",
     contactVerified,
     manualReview,
@@ -30,7 +30,7 @@ export function registrationReview(user = {}) {
       ? "verified"
       : manualReviewApproved
         ? "admin approved; OTP pending"
-        : manualReview
+          : manualReview
           ? "awaiting admin review"
           : verificationDeferred ? "OTP deferred" : "not verified",
     termsAccepted,

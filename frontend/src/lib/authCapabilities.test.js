@@ -8,9 +8,22 @@ import {
 } from "./authCapabilities";
 
 test("auth capabilities fail closed for missing, malformed or inconsistent responses", () => {
-  expect(normalizeAuthCapabilities()).toEqual({ registration_enabled: false, email_registration: false, phone_registration: false, phone_verification_required: true, manual_admin_review: false, registration_mode: "PHONE_OTP", verification_required: true });
+  const closed = {
+    registration_enabled: false,
+    email_registration: false,
+    phone_registration: false,
+    email_contact_verification: false,
+    phone_contact_verification: false,
+    email_password_reset: false,
+    phone_password_reset: false,
+    phone_verification_required: true,
+    manual_admin_review: false,
+    registration_mode: "PHONE_OTP",
+    verification_required: true,
+  };
+  expect(normalizeAuthCapabilities()).toEqual(closed);
   expect(normalizeAuthCapabilities({ registration_enabled: true, email_registration: "yes", phone_registration: false }))
-    .toEqual({ registration_enabled: false, email_registration: false, phone_registration: false, phone_verification_required: true, manual_admin_review: false, registration_mode: "PHONE_OTP", verification_required: true });
+    .toEqual(closed);
 });
 
 test("the client never accepts a no-OTP capability downgrade", () => {
@@ -18,12 +31,36 @@ test("the client never accepts a no-OTP capability downgrade", () => {
     registration_enabled: true,
     email_registration: true,
     phone_registration: true,
+    email_contact_verification: false,
+    phone_contact_verification: false,
+    email_password_reset: false,
+    phone_password_reset: false,
     verification_required: false,
   })).toMatchObject({ registration_enabled: true, verification_required: true, registration_mode: "PHONE_OTP" });
   expect(normalizeAuthCapabilities({
     registration_enabled: true,
     email_registration: true,
   })).toMatchObject({ registration_enabled: false, verification_required: true });
+});
+
+test("manual registration does not hide independent recovery and legacy verification", () => {
+  const capabilities = normalizeAuthCapabilities({
+    registration_enabled: true,
+    email_registration: true,
+    phone_registration: true,
+    verification_required: false,
+    manual_admin_review: true,
+    registration_mode: "ADMIN_REVIEW",
+    email_contact_verification: true,
+    phone_contact_verification: false,
+    email_password_reset: true,
+    phone_password_reset: false,
+  });
+  expect(capabilities.email_password_reset).toBe(true);
+  expect(loginVerificationRecovery(capabilities, "EMAIL", "Old@Example.com")).toMatchObject({
+    channel: "EMAIL",
+    contact: "old@example.com",
+  });
 });
 
 test("manual admin review is accepted only when the server names the mode and both contacts are ready", () => {
@@ -38,6 +75,10 @@ test("manual admin review is accepted only when the server names the mode and bo
     registration_enabled: true,
     email_registration: true,
     phone_registration: true,
+    email_contact_verification: false,
+    phone_contact_verification: false,
+    email_password_reset: false,
+    phone_password_reset: false,
     phone_verification_required: false,
     verification_required: false,
     manual_admin_review: true,

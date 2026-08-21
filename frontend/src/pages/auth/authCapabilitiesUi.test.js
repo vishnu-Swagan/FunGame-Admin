@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import Register from "./Register";
+import Login from "./Login";
 import VerifyEmail from "./VerifyEmail";
 import Welcome from "./Welcome";
 
@@ -78,6 +79,10 @@ test("registration clearly labels manual approval without claiming an OTP", () =
   const screen = render(Register);
   expect(screen.querySelector('[data-testid="register-verification-copy"]').textContent).toMatch(/No verification code is sent.*administrator must approve/i);
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').textContent).toMatch(/Create account for review/);
+
+  const login = render(Login);
+  expect(login.querySelector('[data-testid="login-forgot-link"]')).toBeNull();
+  expect(login.querySelector('[data-testid="login-manual-recovery-note"]')).not.toBeNull();
 });
 
 test("registration stays fail-closed without rendering the removed unavailable banner", () => {

@@ -5,6 +5,10 @@ const CLOSED_CAPABILITIES = Object.freeze({
   registration_enabled: false,
   email_registration: false,
   phone_registration: false,
+  email_contact_verification: false,
+  phone_contact_verification: false,
+  email_password_reset: false,
+  phone_password_reset: false,
   verification_required: true,
   registration_mode: "PHONE_OTP",
 });
@@ -21,6 +25,10 @@ export function normalizeAuthCapabilities(value) {
       registration_enabled: registrationEnabled,
       email_registration: registrationEnabled,
       phone_registration: registrationEnabled,
+      email_contact_verification: value?.email_contact_verification === true,
+      phone_contact_verification: value?.phone_contact_verification === true,
+      email_password_reset: value?.email_password_reset === true,
+      phone_password_reset: value?.phone_password_reset === true,
       phone_verification_required: false,
       verification_required: false,
       manual_admin_review: true,
@@ -33,6 +41,14 @@ export function normalizeAuthCapabilities(value) {
     // data and is never exposed as a registration/activation channel.
     email_registration: false,
     phone_registration: phone,
+    email_contact_verification: value?.email_contact_verification == null
+      ? false
+      : value.email_contact_verification === true,
+    phone_contact_verification: value?.phone_contact_verification == null
+      ? phone
+      : value.phone_contact_verification === true,
+    email_password_reset: value?.email_password_reset === true,
+    phone_password_reset: value?.phone_password_reset === true,
     phone_verification_required: true,
     verification_required: true,
     manual_admin_review: false,
@@ -43,6 +59,19 @@ export function normalizeAuthCapabilities(value) {
 export function registrationChannelAvailable(capabilities, channel) {
   if (!capabilities?.registration_enabled) return false;
   return channel === "PHONE" ? capabilities.phone_registration === true : capabilities.email_registration === true;
+}
+
+export function contactVerificationChannelAvailable(capabilities, channel) {
+  const explicit = channel === "PHONE"
+    ? capabilities?.phone_contact_verification
+    : capabilities?.email_contact_verification;
+  // Older PHONE_OTP deployments advertised the same readiness through the
+  // registration fields, so retain that safe rolling-deploy fallback.
+  return explicit === true || (
+    explicit == null
+    && capabilities?.verification_required === true
+    && registrationChannelAvailable(capabilities, channel)
+  );
 }
 
 export function normalizeContactChannel(channel, identifier = "") {
@@ -64,19 +93,17 @@ export function isValidE164Phone(identifier) {
 }
 
 export function verificationChannelState(capabilities, channel, issuedChallenge = false) {
-  const deliveryAvailable = capabilities?.verification_required === true
-    && registrationChannelAvailable(capabilities, channel);
+  const deliveryAvailable = contactVerificationChannelAvailable(capabilities, channel);
   return {
     deliveryAvailable,
     verificationAvailable: Boolean(issuedChallenge || deliveryAvailable),
-    anyChannelAvailable: ["EMAIL", "PHONE"].some((key) => registrationChannelAvailable(capabilities, key)),
+    anyChannelAvailable: ["EMAIL", "PHONE"].some((key) => contactVerificationChannelAvailable(capabilities, key)),
   };
 }
 
 export function loginVerificationRecovery(capabilities, detailChannel, identifier) {
-  if (capabilities?.verification_required !== true) return null;
   const channel = normalizeContactChannel(detailChannel, identifier);
-  if (!registrationChannelAvailable(capabilities, channel)) return null;
+  if (!contactVerificationChannelAvailable(capabilities, channel)) return null;
   const contact = normalizeContactIdentifier(channel, identifier);
   return {
     channel,

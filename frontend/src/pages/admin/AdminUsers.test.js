@@ -82,7 +82,7 @@ test("a complete manual-review registration is approval-ready without pretending
     submitted_at: "2026-08-21T09:00:00Z",
     status: "PENDING",
   })).toMatchObject({
-    contactLabel: "Contacts",
+    contactLabel: "Admin contact check",
     contact: "+919876543210 · player@example.com",
     contactVerified: false,
     manualReview: true,

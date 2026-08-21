@@ -44,6 +44,16 @@ services:
         value: "https://chakri.casino,https://www.chakri.casino,https://play.chakri.casino,https://mydgp.casino,https://www.mydgp.casino,https://chakri-casino.onrender.com,https://fungame-web.onrender.com"
       - key: APP_ENV
         value: production                            # production requires live-only account flows
+      - key: REGISTRATION_MODE
+        value: ADMIN_REVIEW                          # temporary: admin approval replaces contact OTP activation
+      - key: OTP_PEPPER
+        sync: false                                  # secret used by persistent auth rate-limit hashes
+      - key: OTP_EMAIL_ADAPTER
+        value: disabled
+      - key: OTP_SMS_ADAPTER
+        value: disabled
+      - key: OTP_EXPOSE_DEV_CODE
+        value: "false"
       - key: EMAIL_PROVIDER
         value: disabled                              # configure resend, sendgrid, or smtp before enabling recovery email
       - key: CRON_SECRET
