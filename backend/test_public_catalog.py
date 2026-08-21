@@ -77,7 +77,7 @@ async def main():
     assert payload['count'] == 3
     assert [game['slug'] for game in payload['games']] == ['aviator', 'blackjack', 'bingo']
     assert payload['games'][0]['artwork_url'] == 'https://fungame-web.onrender.com/game-art/aviator.png'
-    assert payload['games'][1]['artwork_url'] is None
+    assert payload['games'][1]['artwork_url'] == 'https://fungame-web.onrender.com/game-art/blackjack.png'
     assert payload['games'][2]['status'] == 'COMING_SOON'
     assert 'internal_provider_key' not in payload['games'][0]
     assert 'password_hash' not in str(payload)

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, UserPlus, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale, ArrowDownToLine, ArrowUpFromLine, Webhook, BookOpenCheck, ScrollText, SlidersHorizontal } from "lucide-react";
+import { LayoutDashboard, Users, HandCoins, Gamepad2, Megaphone, Settings, LogOut, Smartphone, MessagesSquare, ShieldCheck, Network, Calculator, Banknote, Scale, ArrowDownToLine, ArrowUpFromLine, Webhook, BookOpenCheck, ScrollText, SlidersHorizontal } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
@@ -9,8 +9,7 @@ import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
 
 const NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
-  { to: "/admin/signups", label: "Create User", icon: UserPlus, testId: "admin-nav-signups" },
-  { to: "/admin/users", label: "Users", icon: Users, testId: "admin-nav-users" },
+  { to: "/admin/users?status=PENDING", label: "Users", icon: Users, testId: "admin-nav-users" },
   { to: "/admin/kyc", label: "KYC Review", icon: ShieldCheck, permission: ADMIN_PERMISSIONS.KYC_VIEW, testId: "admin-nav-kyc" },
   { to: "/admin/chip-requests", label: "Chip Requests", icon: HandCoins, testId: "admin-nav-chip-requests" },
   { to: "/admin/deposits", label: "Deposits", icon: ArrowDownToLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-deposits" },

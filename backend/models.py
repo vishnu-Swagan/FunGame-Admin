@@ -14,6 +14,13 @@ def _consistent_identity_values(*values):
         raise ValueError('Identity fields must refer to the same email address or phone number')
 
 
+def _bcrypt_password_size(value):
+    """Reject passwords bcrypt cannot represent without truncation."""
+    if value is not None and len(str(value).encode('utf-8')) > 72:
+        raise ValueError('Password must not exceed 72 UTF-8 bytes')
+    return value
+
+
 class RegisterRequest(BaseModel):
     # ``email`` stays for existing clients; new clients may use the neutral
     # ``identity`` field or an E.164 ``phone`` value.
@@ -26,6 +33,8 @@ class RegisterRequest(BaseModel):
     date_of_birth: Optional[str] = None
     country: Optional[str] = Field(default=None, max_length=64)
     password: str = Field(min_length=8, max_length=128)
+
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
 
     @model_validator(mode='after')
     def exactly_one_identity(self):
@@ -87,6 +96,8 @@ class AdminSignupApprove(BaseModel):
     starting_chips: int = Field(default=1000, ge=0, le=1_000_000)
     note: Optional[str] = Field(default=None, max_length=280)
 
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
+
     @field_validator('username')
     @classmethod
     def valid_username(cls, v):
@@ -126,6 +137,8 @@ class VerifyEmailRequest(BaseModel):
     # password supplied before OTP proof is deliberately never persisted.
     password: str = Field(min_length=8, max_length=128)
 
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
+
     @model_validator(mode='after')
     def verification_identity(self):
         _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
@@ -155,6 +168,8 @@ class LoginRequest(BaseModel):
     phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
     password: str = Field(min_length=1, max_length=128)
 
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
+
     @model_validator(mode='after')
     def login_identity(self):
         _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
@@ -183,6 +198,8 @@ class ResetPasswordRequest(BaseModel):
     code: str = Field(pattern=r'^\d{6}$')
     new_password: str = Field(min_length=8, max_length=128)
 
+    _password_bytes = field_validator('new_password')(_bcrypt_password_size)
+
     @model_validator(mode='after')
     def reset_identity(self):
         _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
@@ -192,6 +209,8 @@ class ResetPasswordRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)
+
+    _password_bytes = field_validator('current_password', 'new_password')(_bcrypt_password_size)
 
 
 # ---------- Onboarding ----------
@@ -301,6 +320,8 @@ class AdminSetPassword(BaseModel):
     """Admin-initiated password reset for an existing account."""
     password: str = Field(min_length=8, max_length=128)
 
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
+
 
 class ReturnChipsRequestCreate(BaseModel):
     """Player asks the operator to return chips to the admin. Chips stay in the
@@ -350,6 +371,8 @@ class DistributorLogin(BaseModel):
     # Left optional so the operator can have one generated rather than inventing
     # (and then emailing) a weak one.
     password: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+    _password_bytes = field_validator('password')(_bcrypt_password_size)
 
 
 class LimitSet(BaseModel):

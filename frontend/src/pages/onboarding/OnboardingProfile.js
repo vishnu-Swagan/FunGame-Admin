@@ -103,8 +103,8 @@ export default function OnboardingProfile() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dob">Date of birth <span className="text-white/40">(optional)</span></Label>
-              <Input id="dob" data-testid="onboarding-dob-input" type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+              <Label htmlFor="dob">Date of birth</Label>
+              <Input id="dob" data-testid="onboarding-dob-input" type="date" required max={new Date().toISOString().slice(0, 10)} value={dob} onChange={(e) => setDob(e.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
             </div>
             <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5 cursor-pointer">
               <Checkbox data-testid="onboarding-terms-checkbox" checked={terms} onCheckedChange={(v) => setTerms(!!v)} className="mt-0.5" />

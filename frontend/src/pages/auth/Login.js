@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg, routeForUser } from "@/lib/api";
+import { loginVerificationRecovery, normalizeAuthCapabilities, normalizeContactChannel } from "@/lib/authCapabilities";
 import { useAuth } from "@/context/AuthContext";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
@@ -43,17 +44,20 @@ export default function Login() {
     } catch (err) {
       const detail = err?.response?.data?.detail;
       if (["EMAIL_NOT_VERIFIED", "CONTACT_NOT_VERIFIED"].includes(detail?.code)) {
-        const channel = detail?.channel || (identifier.includes("@") ? "EMAIL" : "PHONE");
-        toast.info(`Please verify your ${channel === "PHONE" ? "mobile number" : "email"} first`);
         try {
-          const { data } = await api.post("/auth/resend-otp", {
-            channel,
-            identifier,
-            email: identifier,
-          });
-          navigate("/verify", { state: { channel, identifier, resendAfter: data?.resend_after_seconds } });
-        } catch (_e) {
-          navigate("/verify", { state: { channel, identifier } });
+          const { data: capabilityData } = await api.get("/auth/capabilities");
+          const capabilities = normalizeAuthCapabilities(capabilityData);
+          const recovery = loginVerificationRecovery(capabilities, detail?.channel, identifier);
+          const requestedChannel = normalizeContactChannel(detail?.channel, identifier);
+          toast.info(`Please verify your ${requestedChannel === "PHONE" ? "mobile number" : "email"} first`);
+          if (!recovery) {
+            toast.info(`Verification by ${requestedChannel === "PHONE" ? "mobile" : "email"} is temporarily unavailable.`);
+            return;
+          }
+          const { data } = await api.post("/auth/resend-otp", recovery.body);
+          navigate("/verify", { state: { channel: recovery.channel, identifier: recovery.contact, destinationMasked: data?.destination_masked, resendAfter: data?.resend_after_seconds } });
+        } catch (verificationError) {
+          toast.error(errMsg(verificationError));
         }
       } else {
         toast.error(errMsg(err));

@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { api, errMsg } from "@/lib/api";
+import { registrationReview } from "@/lib/adminRegistrationReview";
 import { PageTransition, UserStatusBadge, EmptyState, formatChips, timeAgo, AvatarBadge } from "@/components/common";
 
 const FILTERS = ["PENDING", "ACTIVE", "SUSPENDED", "REJECTED", "ALL"];
@@ -40,11 +41,17 @@ export default function AdminUsers() {
     load(filter);
   }, [filter, load]);
 
+  useEffect(() => {
+    const requested = searchParams.get("status") || "PENDING";
+    const nextFilter = FILTERS.includes(requested) ? requested : "PENDING";
+    setFilter((current) => current === nextFilter ? current : nextFilter);
+  }, [searchParams]);
+
   const act = async (userId, action, body = {}) => {
     setBusyId(userId);
     try {
-      await api.post(`/admin/users/${userId}/${action}`, body);
-      toast.success(`User ${action}d`);
+      const { data } = await api.post(`/admin/users/${userId}/${action}`, body);
+      toast.success(data?.message || (action === "approve" ? "User approved" : action === "reject" ? "User rejected" : "User updated"));
       await load(filter);
     } catch (e) {
       toast.error(errMsg(e));
@@ -92,6 +99,8 @@ export default function AdminUsers() {
             <TableHeader>
               <TableRow className="border-white/10 hover:bg-transparent">
                 <TableHead className="text-white/50">Player</TableHead>
+                <TableHead className="text-white/50">Registration</TableHead>
+                <TableHead className="text-white/50">Review readiness</TableHead>
                 <TableHead className="text-white/50">Country</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
                 <TableHead className="text-white/50 text-right">Chips</TableHead>
@@ -103,7 +112,9 @@ export default function AdminUsers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
+              {users.map((u) => {
+                const review = registrationReview(u);
+                return (
                 <TableRow key={u.id} data-testid="admin-user-row" className="border-white/5 hover:bg-white/5">
                   <TableCell>
                     <div className="flex items-center gap-2.5">
@@ -113,9 +124,25 @@ export default function AdminUsers() {
                         <p className="text-[11px] text-white/45 truncate">
                           {u.username ? <span className="text-primary/85 font-semibold">@{u.username}</span> : null}
                           {u.username ? " · " : ""}
-                          {u.email}
+                          {review.contact}
                         </p>
                       </div>
+                    </div>
+                  </TableCell>
+                  <TableCell data-testid="admin-user-registration-source">
+                    <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${review.selfService ? "border-sky-400/30 bg-sky-400/10 text-sky-300" : "border-white/10 bg-white/5 text-white/55"}`}>
+                      {review.sourceLabel}
+                    </span>
+                  </TableCell>
+                  <TableCell data-testid="admin-user-review-readiness">
+                    <div className="space-y-1 text-[11px] leading-tight">
+                      <p className={review.contactVerified ? "text-emerald-300" : "text-red-300"}>
+                        {review.contactLabel}: {review.contactVerified ? "verified" : "not verified"}
+                      </p>
+                      <p className={review.submitted ? "text-white/65" : "text-amber-300"}>
+                        {review.submitted ? `Submitted ${timeAgo(u.submitted_at)}` : "Not submitted"}
+                      </p>
+                      {review.selfService && <p className={review.termsAccepted ? "text-white/50" : "text-amber-300"}>Terms: {review.termsAccepted ? "accepted" : "missing"}</p>}
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-white/70">{u.country || "—"}</TableCell>
@@ -137,7 +164,8 @@ export default function AdminUsers() {
                         <Button
                           data-testid="admin-approve-user-button"
                           size="sm"
-                          disabled={busyId === u.id}
+                          disabled={busyId === u.id || !review.approvalReady}
+                          title={!review.approvalReady ? "Contact verification, accepted terms and onboarding submission are required" : undefined}
                           onClick={() => act(u.id, "approve")}
                           className="h-8 rounded-lg text-xs font-bold bg-[hsl(var(--emerald))] text-black hover:brightness-110"
                         >
@@ -171,7 +199,8 @@ export default function AdminUsers() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </div>

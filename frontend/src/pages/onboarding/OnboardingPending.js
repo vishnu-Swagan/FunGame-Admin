@@ -32,6 +32,7 @@ export default function OnboardingPending() {
   };
 
   useEffect(() => {
+    checkStatus(false);
     const t = setInterval(() => checkStatus(false), 10000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps

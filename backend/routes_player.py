@@ -5,6 +5,7 @@ import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query, Response
+from pymongo import ReturnDocument
 from db import db, serialize_doc
 from models import (OnboardingProfileRequest, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
@@ -36,11 +37,45 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO'):
+def _allow_nontransactional_auth_tests() -> bool:
+    return (
+        (os.environ.get('APP_ENV') or '').strip().lower() == 'test'
+        and (os.environ.get('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS') or '').strip().lower() == 'true'
+    )
+
+
+async def _run_onboarding_transaction(callback):
+    """Commit onboarding state and its user notification as one unit."""
+    try:
+        session_cm = await db.client.start_session()
+    except Exception as exc:
+        if (_allow_nontransactional_auth_tests()
+                and isinstance(exc, (AttributeError, NotImplementedError))):
+            return await callback(None)
+        logger.error('Onboarding transaction unavailable: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'ACCOUNT_TRANSACTIONS_UNAVAILABLE',
+            'message': 'Onboarding is temporarily unavailable.',
+        }) from exc
+    try:
+        async with session_cm as session:
+            return await session.with_transaction(callback)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error('Onboarding transaction failed: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'ACCOUNT_TRANSACTIONS_UNAVAILABLE',
+            'message': 'Onboarding is temporarily unavailable.',
+        }) from exc
+
+
+async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO', *, session=None):
+    kwargs = {'session': session} if session is not None else {}
     await db.notifications.insert_one({
         'id': str(uuid.uuid4()), 'user_id': user_id, 'title': title, 'body': body,
         'type': ntype, 'read': False, 'created_at': _now(),
-    })
+    }, **kwargs)
 
 
 # ---------- System config (public for logged-out screens too) ----------
@@ -58,11 +93,29 @@ async def system_config():
 
 
 # ---------- Onboarding ----------
+def _onboarding_state_conflict(current: dict | None):
+    if not current or current.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail='Player onboarding is required')
+    if current.get('status') in ('ACTIVE', 'SUSPENDED'):
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'Account review has already changed this profile.',
+        })
+    raise HTTPException(status_code=409, detail={
+        'code': 'ACCOUNT_STATE_CHANGED',
+        'message': 'Account state changed. Refresh and try again.',
+    })
+
+
 @router.post('/onboarding/profile')
 async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depends(get_current_user)):
-    if not (user.get('contact_verified') or user.get('email_verified')):
+    if user.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail='Player onboarding is required')
+    if not (user.get('contact_verified') or user.get('email_verified')
+            or user.get('phone_verified')):
         raise HTTPException(status_code=403, detail='Verify your contact method first')
-    if user.get('status') in ('ACTIVE', 'SUSPENDED'):
+    allowed_statuses = ('VERIFIED', 'PROFILE_SUBMITTED', 'PENDING', 'REJECTED')
+    if user.get('status') not in allowed_statuses:
         raise HTTPException(status_code=400, detail='Onboarding already completed')
     # Country and date of birth are entered here, so this is where market and
     # age are decided — the earliest point the answer can be known, and the
@@ -73,29 +126,72 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
         body.country, body.date_of_birth or user.get('date_of_birth'), require_dob=False)
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
-    await db.users.update_one({'id': user['id']}, {'$set': {
-        'display_name': body.display_name.strip(),
-        'country': body.country.strip(),
-        'date_of_birth': body.date_of_birth,
-        'avatar': body.avatar,
-        'accepted_terms': True,
-        'status': 'PROFILE_SUBMITTED',
-    }})
-    updated = await db.users.find_one({'id': user['id']})
+    updated = await db.users.find_one_and_update(
+        {
+            'id': user['id'],
+            'role': 'PLAYER',
+            'status': user.get('status'),
+            '$or': [
+                {'contact_verified': True},
+                {'email_verified': True},
+                {'phone_verified': True},
+            ],
+        },
+        {'$set': {
+            'display_name': body.display_name.strip(),
+            'country': body.country.strip(),
+            'date_of_birth': body.date_of_birth,
+            'avatar': body.avatar,
+            'accepted_terms': True,
+            'status': 'PROFILE_SUBMITTED',
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        _onboarding_state_conflict(await db.users.find_one({'id': user['id']}))
     return {'message': 'Profile saved. Review and submit for approval.', 'user': serialize_doc(updated)}
 
 
 @router.post('/onboarding/submit')
 async def onboarding_submit(user: dict = Depends(get_current_user)):
-    if not (user.get('contact_verified') or user.get('email_verified')):
+    if user.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail='Player onboarding is required')
+    if not (user.get('contact_verified') or user.get('email_verified')
+            or user.get('phone_verified')):
         raise HTTPException(status_code=403, detail='Verify your contact method first')
     if user.get('status') == 'ACTIVE':
         raise HTTPException(status_code=400, detail='Already approved')
     if user.get('status') not in ('PROFILE_SUBMITTED', 'PENDING', 'REJECTED'):
         raise HTTPException(status_code=400, detail='Complete your profile first')
-    await db.users.update_one({'id': user['id']}, {'$set': {'status': 'PENDING', 'submitted_at': _now()}})
-    await _notify(user['id'], 'Onboarding submitted', 'Your profile is under review. You will be notified once an operator approves your account.', 'ONBOARDING')
-    updated = await db.users.find_one({'id': user['id']})
+    async def commit_submission(session):
+        kwargs = {'session': session} if session is not None else {}
+        updated = await db.users.find_one_and_update(
+            {
+                'id': user['id'],
+                'role': 'PLAYER',
+                'status': user.get('status'),
+                '$or': [
+                    {'contact_verified': True},
+                    {'email_verified': True},
+                    {'phone_verified': True},
+                ],
+            },
+            {'$set': {'status': 'PENDING', 'submitted_at': _now()}},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            _onboarding_state_conflict(await db.users.find_one(
+                {'id': user['id']}, **kwargs,
+            ))
+        await _notify(
+            user['id'], 'Onboarding submitted',
+            'Your profile is under review. You will be notified once an operator approves your account.',
+            'ONBOARDING', session=session,
+        )
+        return updated
+
+    updated = await _run_onboarding_transaction(commit_submission)
     return {'message': 'Submitted for review. An operator will approve your account shortly.', 'user': serialize_doc(updated)}
 
 
@@ -151,10 +247,7 @@ async def public_game_catalog(response: Response):
             'status': game.get('status'),
             'featured': bool(game.get('featured', False)),
             'order': display_order,
-            # Blackjack currently has no published thumbnail in the player
-            # application.  Null is honest and lets clients use their branded
-            # text fallback instead of repeatedly requesting a known 404.
-            'artwork_url': None if slug == 'blackjack' else f'{GAME_ART_BASE_URL}/{slug}.png',
+            'artwork_url': f'{GAME_ART_BASE_URL}/{slug}.png',
             'updated_at': game.get('updated_at'),
         })
 

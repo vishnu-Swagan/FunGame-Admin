@@ -27,9 +27,12 @@ export default function OnboardingReview() {
     }
   };
 
+  const usesPhone = user?.primary_identity_channel === "PHONE";
+  const contactLabel = usesPhone ? "Mobile" : "Email";
+  const contactValue = usesPhone ? user?.phone : user?.email;
   const rows = [
     { label: "Display name", value: user?.display_name },
-    { label: "Email", value: user?.email },
+    { label: contactLabel, value: contactValue },
     { label: "Country", value: user?.country },
     { label: "Date of birth", value: user?.date_of_birth || "Not provided" },
   ];
@@ -55,7 +58,7 @@ export default function OnboardingReview() {
               <AvatarBadge avatarKey={user?.avatar} size={56} />
               <div>
                 <p className="font-bold text-lg">{user?.display_name}</p>
-                <p className="text-xs text-white/55">{user?.email}</p>
+                <p className="text-xs text-white/55">{contactValue}</p>
               </div>
             </div>
             <div className="mt-5 space-y-3">

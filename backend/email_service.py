@@ -7,6 +7,7 @@ never logged or returned to a player-facing client.
 import os
 import asyncio
 import logging
+import ssl
 
 logger = logging.getLogger('email')
 
@@ -108,7 +109,7 @@ class EmailService:
                 return {'sent': False, 'provider': 'sendgrid', 'error': 'not_configured'}
             message = Mail(from_email=sender, to_emails=to_email, subject=subject, plain_text_content=body)
             sg = SendGridAPIClient(api_key)
-            resp = sg.send(message)
+            resp = await asyncio.to_thread(sg.send, message)
             return {'sent': 200 <= resp.status_code < 300, 'provider': 'sendgrid'}
         except Exception as e:
             logger.error(f'SendGrid send failed: {type(e).__name__}')
@@ -131,10 +132,17 @@ class EmailService:
             msg['Subject'] = subject
             msg['From'] = sender
             msg['To'] = to_email
-            with smtplib.SMTP(host, port) as server:
-                server.starttls()
-                server.login(username, password)
-                server.sendmail(sender, [to_email], msg.as_string())
+
+            def send_sync():
+                tls_context = ssl.create_default_context()
+                with smtplib.SMTP(host, port, timeout=10) as server:
+                    server.ehlo()
+                    server.starttls(context=tls_context)
+                    server.ehlo()
+                    server.login(username, password)
+                    server.sendmail(sender, [to_email], msg.as_string())
+
+            await asyncio.to_thread(send_sync)
             return {'sent': True, 'provider': 'smtp'}
         except Exception as e:
             logger.error(f'SMTP send failed: {type(e).__name__}')

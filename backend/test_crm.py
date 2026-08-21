@@ -2,6 +2,7 @@
 import asyncio, os, sys, types
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mongomock_motor import AsyncMongoMockClient
+from pymongo.errors import DuplicateKeyError
 
 client = AsyncMongoMockClient()
 sys.modules['db'] = types.SimpleNamespace(db=client['test'], serialize_doc=lambda d: d)
@@ -15,6 +16,7 @@ def T(name, cond):
     else: FAIL += 1
 
 async def main():
+    await crm.ensure_indexes()
     # --- code folding: confusables must collapse, both ways ---
     T("O folds to 0",            crm.normalise_code('abcO') == 'ABC0')
     T("I and L fold to 1",       crm.normalise_code('aIbL') == 'A1B1')
@@ -53,6 +55,12 @@ async def main():
         await client['test'].users.insert_one({'id': uid, 'role': 'PLAYER'})
     a = await crm.attribute_user('u-known', 'NRTH1')
     T("known code attributes",   a['distributor_id'] == d['id'] and a['source'] == 'CODE')
+    duplicate_active = None
+    try:
+        await crm.attribute_user('u-known', 'NRTH1')
+    except DuplicateKeyError as exc:
+        duplicate_active = exc
+    T("active attribution is uniquely guarded", duplicate_active is not None)
     b = await crm.attribute_user('u-none', None)
     T("no code goes to house",   b['distributor_id'] == h1['id'] and b['source'] == 'NO_CODE')
     c = await crm.attribute_user('u-bad', 'ZZZZ9')
@@ -77,6 +85,8 @@ async def main():
     try: await crm.attribute_user('ghost', 'NRTH1')
     except ValueError as e: missing = str(e)
     T("unknown user is refused, not ignored", missing is not None)
+    T("registration attribution readiness is exact",
+      await crm.registration_attribution_ready())
 
     print(f"\n  {PASS} passed, {FAIL} failed")
     return FAIL

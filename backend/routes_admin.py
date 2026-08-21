@@ -30,6 +30,7 @@ import payouts
 from game_access import assert_admin_status_change_allowed
 from otp_service import normalize_identity
 import os
+from pymongo import ReturnDocument
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -52,24 +53,80 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO'):
+def _allow_nontransactional_auth_tests() -> bool:
+    return (
+        (os.environ.get('APP_ENV') or '').strip().lower() == 'test'
+        and (os.environ.get('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS') or '').strip().lower() == 'true'
+    )
+
+
+async def _run_account_transaction(callback):
+    """Commit approval state, welcome credit and notification atomically."""
+    try:
+        session_cm = await db.client.start_session()
+    except Exception as exc:
+        if (_allow_nontransactional_auth_tests()
+                and isinstance(exc, (AttributeError, NotImplementedError))):
+            return await callback(None)
+        logger.error('Account transaction unavailable: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'ACCOUNT_TRANSACTIONS_UNAVAILABLE',
+            'message': 'Account approval is temporarily unavailable.',
+        }) from exc
+    try:
+        async with session_cm as session:
+            return await session.with_transaction(callback)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error('Account transaction failed: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'ACCOUNT_TRANSACTIONS_UNAVAILABLE',
+            'message': 'Account approval is temporarily unavailable.',
+        }) from exc
+
+
+async def _notify(user_id: str, title: str, body: str, ntype: str = 'INFO', *, session=None):
+    kwargs = {'session': session} if session is not None else {}
     await db.notifications.insert_one({
         'id': str(uuid.uuid4()), 'user_id': user_id, 'title': title, 'body': body,
         'type': ntype, 'read': False, 'created_at': _now(),
-    })
+    }, **kwargs)
 
 
-async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None):
+async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *, session=None):
     """Server-authoritative chip credit with ledger entry."""
+    kwargs = {'session': session} if session is not None else {}
     result = await db.users.find_one_and_update(
-        {'id': user_id}, {'$inc': {'chip_balance': amount}}, return_document=True,
+        {'id': user_id}, {'$inc': {'chip_balance': amount}},
+        return_document=ReturnDocument.AFTER, **kwargs,
     )
     balance_after = result.get('chip_balance', 0) if result else 0
     await db.chip_transactions.insert_one({
         'id': str(uuid.uuid4()), 'user_id': user_id, 'type': 'CREDIT', 'amount': amount,
         'balance_after': balance_after, 'note': note, 'ref': ref, 'created_at': _now(),
-    })
+    }, **kwargs)
     return balance_after
+
+
+def _require_player_credential_target(user: dict) -> None:
+    """Keep player-management routes from becoming admin takeover routes.
+
+    Administrator credentials are changed only through the authenticated
+    self-service flow, which verifies the account's current password.  These
+    operator endpoints therefore fail closed for every non-player role,
+    including the caller's own administrator account.
+    """
+    if user.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail={
+            'code': 'CREDENTIAL_TARGET_FORBIDDEN',
+            'message': (
+                'Player-management credential actions cannot modify '
+                'administrator or partner accounts. Administrators must use '
+                'the authenticated self-service flow for their own password; '
+                'identity changes require a separately authorized recovery process.'
+            ),
+        })
 
 
 # ---------- Dashboard ----------
@@ -146,59 +203,112 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
 
 @router.post('/users/{user_id}/approve')
 async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict = Depends(require_admin)):
-    user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'})
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-    if user.get('status') == 'ACTIVE':
-        raise HTTPException(status_code=400, detail='User already active')
-    if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
-        raise HTTPException(status_code=400, detail='User has not submitted onboarding yet')
-    self_service = user.get('registration_source') == 'SELF_SERVICE'
-    if self_service:
-        if not user.get('contact_verified') or not (
-                user.get('email_verified') or user.get('phone_verified')):
-            raise HTTPException(status_code=403, detail={
-                'code': 'CONTACT_NOT_VERIFIED',
-                'message': 'The player must verify their registration contact before approval.',
-            })
-        country_code = compliance.normalise_country(user.get('country'))
-        if not country_code or country_code == compliance.UNKNOWN:
-            raise HTTPException(status_code=403, detail={
-                'code': 'COUNTRY_UNKNOWN',
-                'message': 'A recognized country or jurisdiction is required before approval.',
-            })
-    # Self-service accounts require a DOB at approval.  Older accounts and
-    # accounts provisioned directly by an operator retain their historic review
-    # path so this release does not retroactively lock them out.
-    ok, code, message = await compliance.check_eligibility(
-        user.get('country'), user.get('date_of_birth'),
-        require_dob=self_service,
-    )
-    if not ok:
-        raise HTTPException(status_code=403, detail=(
-            f'{message} This account cannot be approved under the current '
-            f'compliance settings ({code}).'))
-    was_approved_before = user.get('approved_at') is not None
-    await db.users.update_one({'id': user_id}, {'$set': {'status': 'ACTIVE', 'approved_at': _now()}, '$unset': {'rejection_reason': ''}})
-    if not was_approved_before:
-        await _credit_chips(user_id, WELCOME_BONUS, 'Welcome play chips — approval bonus')
-        await _notify(user_id, 'Account approved!', f'Welcome to Chakri.Casino! Your account is approved and {WELCOME_BONUS} welcome play chips were added.', 'APPROVAL')
-    else:
-        await _notify(user_id, 'Account reactivated', 'Your Chakri.Casino account has been reactivated.', 'APPROVAL')
-    updated = await db.users.find_one({'id': user_id}, {'_id': 0, 'password_hash': 0})
+    async def commit_approval(session):
+        kwargs = {'session': session} if session is not None else {}
+        user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'}, **kwargs)
+        if not user:
+            raise HTTPException(status_code=404, detail='User not found')
+        if user.get('status') == 'ACTIVE':
+            raise HTTPException(status_code=400, detail='User already active')
+        if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
+            raise HTTPException(status_code=400, detail='User has not submitted onboarding yet')
+        self_service = user.get('registration_source') == 'SELF_SERVICE'
+        if self_service:
+            if not user.get('contact_verified') or not (
+                    user.get('email_verified') or user.get('phone_verified')):
+                raise HTTPException(status_code=403, detail={
+                    'code': 'CONTACT_NOT_VERIFIED',
+                    'message': 'The player must verify their registration contact before approval.',
+                })
+            if user.get('accepted_terms') is not True:
+                raise HTTPException(status_code=403, detail={
+                    'code': 'TERMS_NOT_ACCEPTED',
+                    'message': 'The player must accept the account terms before approval.',
+                })
+            if not user.get('submitted_at') and not user.get('approved_at'):
+                raise HTTPException(status_code=403, detail={
+                    'code': 'ONBOARDING_NOT_SUBMITTED',
+                    'message': 'The player must complete and submit their profile before approval.',
+                })
+            country_code = compliance.normalise_country(user.get('country'))
+            if not country_code or country_code == compliance.UNKNOWN:
+                raise HTTPException(status_code=403, detail={
+                    'code': 'COUNTRY_UNKNOWN',
+                    'message': 'A recognized country or jurisdiction is required before approval.',
+                })
+        ok, code, message = await compliance.check_eligibility(
+            user.get('country'), user.get('date_of_birth'), require_dob=self_service,
+        )
+        if not ok:
+            raise HTTPException(status_code=403, detail=(
+                f'{message} This account cannot be approved under the current '
+                f'compliance settings ({code}).'))
+
+        was_approved_before = user.get('approved_at') is not None
+        approved_at = _now()
+        updated = await db.users.find_one_and_update(
+            {'id': user_id, 'role': 'PLAYER', 'status': user.get('status')},
+            {'$set': {'status': 'ACTIVE', 'approved_at': approved_at},
+             '$unset': {'rejection_reason': ''}},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail='Account state changed; retry approval')
+        if not was_approved_before:
+            await _credit_chips(
+                user_id, WELCOME_BONUS, 'Welcome play chips — approval bonus',
+                ref=f'account-approval:{user_id}', session=session,
+            )
+            await _notify(
+                user_id, 'Account approved!',
+                f'Welcome to Chakri.Casino! Your account is approved and {WELCOME_BONUS} welcome play chips were added.',
+                'APPROVAL', session=session,
+            )
+        else:
+            await _notify(
+                user_id, 'Account reactivated',
+                'Your Chakri.Casino account has been reactivated.',
+                'APPROVAL', session=session,
+            )
+        return await db.users.find_one(
+            {'id': user_id}, {'_id': 0, 'password_hash': 0}, **kwargs,
+        )
+
+    updated = await _run_account_transaction(commit_approval)
     return {'message': 'User approved', 'user': serialize_doc(updated)}
 
 
 @router.post('/users/{user_id}/reject')
 async def reject_user(user_id: str, body: AdminUserAction, admin: dict = Depends(require_admin)):
-    user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'})
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-    if user.get('status') != 'PENDING':
-        raise HTTPException(status_code=400, detail='Only pending users can be rejected')
     reason = (body.note if body else None) or 'Onboarding requirements not met'
-    await db.users.update_one({'id': user_id}, {'$set': {'status': 'REJECTED', 'rejection_reason': reason}})
-    await _notify(user_id, 'Onboarding update', f'Your onboarding was not approved. Reason: {reason}', 'REJECTION')
+
+    async def commit_rejection(session):
+        kwargs = {'session': session} if session is not None else {}
+        updated = await db.users.find_one_and_update(
+            {'id': user_id, 'role': 'PLAYER', 'status': 'PENDING'},
+            {'$set': {'status': 'REJECTED', 'rejection_reason': reason}},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            current = await db.users.find_one(
+                {'id': user_id, 'role': 'PLAYER'}, **kwargs,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail='User not found')
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player is no longer pending review.',
+            })
+        await _notify(
+            user_id, 'Onboarding update',
+            f'Your onboarding was not approved. Reason: {reason}',
+            'REJECTION', session=session,
+        )
+        return updated
+
+    await _run_account_transaction(commit_rejection)
     return {'message': 'User rejected'}
 
 
@@ -216,12 +326,17 @@ async def suspend_user(user_id: str, body: AdminUserAction = None, admin: dict =
 
 @router.post('/users/{user_id}/reset-password')
 async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict = Depends(require_admin)):
-    """Admin sets a new password for an account and forces re-login on all devices.
-    Replaces self-service email-code resets (no verification code is ever exposed)."""
+    """Reset a player's password and force re-login on all devices.
+
+    Administrator accounts are deliberately excluded. An administrator changes
+    their own password through ``/auth/change-password``, which requires the
+    current password, and cannot use this route against another administrator.
+    """
     user = await db.users.find_one({'id': user_id})
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
-    await db.users.update_one({'id': user_id}, {
+    _require_player_credential_target(user)
+    result = await db.users.update_one({'id': user_id, 'role': 'PLAYER'}, {
         '$set': {
             'password_hash': hash_password(body.password),
             # revoke every outstanding session/token
@@ -229,6 +344,11 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
         },
         '$unset': {'reset_code_hash': '', 'reset_expires_at': ''},
     })
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'The player account changed while the password reset was being applied.',
+        })
     await _notify(user_id, 'Password changed', 'An administrator reset your Chakri.Casino password. Please log in with your new password.', 'INFO')
     logger.info(f'admin {admin.get("email")} reset password for user {user_id}')
     return {'message': 'Password reset. The user must log in again with the new password.'}
@@ -907,24 +1027,26 @@ async def night_run(request: Request):
 
 @router.post('/users/{user_id}/email')
 async def admin_change_email(user_id: str, body: AdminSetEmail, admin: dict = Depends(require_admin)):
-    """Change the address an account signs in with.
+    """Change the address a player signs in with.
 
     The address IS the login here, so this is a change of identity rather than of
     a profile field: every outstanding session is revoked, the same as a password
     reset, or a device holding a token would keep the access the change was meant
-    to move.
+    to move. Administrator and partner identities cannot be changed through this
+    player-management route.
     """
     email = normalize_identity(body.email).value
     user = await db.users.find_one({'id': user_id})
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
+    _require_player_credential_target(user)
     clash = await db.users.find_one({
         'id': {'$ne': user_id},
         '$or': [{'email': email}, {'email_normalized': email}],
     })
     if clash:
         raise HTTPException(status_code=409, detail='Another account already uses that email')
-    await db.users.update_one({'id': user_id}, {'$set': {
+    result = await db.users.update_one({'id': user_id, 'role': 'PLAYER'}, {'$set': {
         'email': email,
         'email_normalized': email,
         'email_verified': True,
@@ -933,6 +1055,11 @@ async def admin_change_email(user_id: str, body: AdminSetEmail, admin: dict = De
         'email_changed_by': admin['id'],
         'active_session_id': f'revoked-{uuid.uuid4()}',
     }})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'The player account changed while the email update was being applied.',
+        })
     logger.info(f'admin {admin.get("email")} changed email for {user_id}: {user.get("email")} -> {email}')
     return {'message': f'Login email changed to {email}. All sessions for that account were signed out.',
             'previous_email': user.get('email'), 'email': email}

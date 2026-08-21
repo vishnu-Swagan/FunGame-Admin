@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, Mail, Smartphone } from "lucide-react";
+import { Mail, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
-import { registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
+import { isValidE164Phone, normalizeContactIdentifier, registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
 const CHANNELS = [
@@ -33,7 +33,7 @@ export default function Register() {
   }, [capabilities, capabilitiesLoading, channel]);
 
   const selectedChannelAvailable = registrationChannelAvailable(capabilities, channel);
-  const registrationAvailable = capabilities.registration_enabled;
+  const registrationAvailable = CHANNELS.some(({ key }) => registrationChannelAvailable(capabilities, key));
 
   const submit = async (event) => {
     event.preventDefault();
@@ -42,12 +42,12 @@ export default function Register() {
     }
     if (password.length < 8) return toast.error("Password must be at least 8 characters");
     if (password !== confirm) return toast.error("Passwords do not match");
-    if (channel === "PHONE" && !/^\+[1-9]\d{6,14}$/.test(identifier.replace(/[\s-]/g, ""))) {
+    if (channel === "PHONE" && !isValidE164Phone(identifier)) {
       return toast.error("Enter your mobile number with country code, for example +919876543210");
     }
     setBusy(true);
     try {
-      const normalized = channel === "PHONE" ? identifier.replace(/[\s-]/g, "") : identifier.trim().toLowerCase();
+      const normalized = normalizeContactIdentifier(channel, identifier);
       const { data } = await api.post("/auth/register", {
         channel,
         identifier: normalized,
@@ -94,8 +94,6 @@ export default function Register() {
             </button>;
         })}
       </div>
-
-      {!capabilitiesLoading && !registrationAvailable && <div data-testid="registration-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><span><strong>Registration is temporarily unavailable.</strong> Email and mobile verification delivery are not currently ready. Please try again later.</span></div>}
 
       <form onSubmit={submit} className="space-y-4">
         <Field label="Full name" htmlFor="reg-name">

@@ -2,6 +2,7 @@
 import time
 import logging
 import hashlib
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 from pymongo.errors import DuplicateKeyError
@@ -31,10 +32,22 @@ _last_prune = [time.time()]
 
 
 def _client_ip(request) -> str:
-    xff = request.headers.get('x-forwarded-for')
-    if xff:
-        return xff.split(',')[0].strip()
-    return request.client.host if request.client else 'unknown'
+    """Use the address authenticated by the ASGI server's proxy middleware.
+
+    Every HTTP header is caller-controlled at the application boundary unless
+    the server has already accepted it from a configured trusted proxy. Uvicorn
+    exposes that trusted result as ``request.client``; reading Cloudflare or
+    forwarding headers again here would let a direct Render request forge a new
+    rate-limit bucket on every attempt.
+    """
+    raw = str(request.client.host if request.client else '').strip()
+    if raw.startswith('[') and raw.endswith(']'):
+        raw = raw[1:-1]
+    try:
+        return ipaddress.ip_address(raw).compressed
+    except ValueError:
+        pass
+    return 'unknown'
 
 
 def _prune(now: float):
@@ -87,13 +100,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         limit, window = rule
         now = time.time()
-        key = f'{_client_ip(request)}|{prefix}'
+        client_ip = _client_ip(request)
+        key = f'{client_ip}|{prefix}'
         dq = _hits[key]
         while dq and now - dq[0] > window:
             dq.popleft()
         if len(dq) >= limit:
             retry = int(window - (now - dq[0])) + 1
-            logger.warning(f'rate limit hit ip={_client_ip(request)} path={path}')
+            logger.warning('rate limit hit path=%s', path)
             return JSONResponse(
                 status_code=429,
                 content={'detail': 'Too many attempts. Please slow down and try again later.'},
@@ -101,7 +115,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
         try:
             allowed = await _consume_persistent_ip_limit(
-                _client_ip(request), prefix, limit, window, now,
+                client_ip, prefix, limit, window, now,
             )
         except Exception as exc:  # authentication controls fail closed
             logger.error('persistent auth rate limiter unavailable: %s', type(exc).__name__)

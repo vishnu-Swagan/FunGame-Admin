@@ -52,7 +52,6 @@ import AccountClosed from "@/pages/system/AccountClosed";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
-import AdminSignups from "@/pages/admin/AdminSignups";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
 import AdminGames from "@/pages/admin/AdminGames";
 import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
@@ -102,7 +101,7 @@ function AdminConsoleApp() {
           <Route path={ADMIN_LOGIN_PATH} element={<PublicOnly><AdminLogin /></PublicOnly>} />
           <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
             <Route index element={<AdminDashboard />} />
-            <Route path="signups" element={<AdminSignups />} />
+            <Route path="signups" element={<Navigate to="/admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
             <Route path="kyc" element={<RequirePermission permission={ADMIN_PERMISSIONS.KYC_VIEW}><AdminKyc /></RequirePermission>} />

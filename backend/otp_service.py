@@ -43,6 +43,12 @@ OTP_ISSUE_WINDOW_SECONDS = 60 * 60
 OTP_VERIFY_LIMIT = 12
 OTP_VERIFY_WINDOW_SECONDS = 15 * 60
 
+_EMAIL_IDENTITY_INDEX = 'users_email_normalized_unique'
+_PHONE_IDENTITY_INDEX = 'users_phone_normalized_unique'
+_EMAIL_IDENTITY_PARTIAL = {'email_normalized': {'$type': 'string'}}
+_PHONE_IDENTITY_PARTIAL = {'phone_normalized': {'$type': 'string'}}
+_INDEX_OPTION_UNSPECIFIED = object()
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -158,6 +164,19 @@ def _pepper() -> bytes:
     return (os.environ.get('JWT_SECRET') or 'chakri-development-otp-pepper').encode('utf-8')
 
 
+def require_configured_pepper() -> None:
+    """Require an explicit strong OTP secret before advertising registration.
+
+    ``_pepper`` retains its development fallback for isolated legacy helpers,
+    but a public registration capability must never be opened by that fallback.
+    """
+    configured = (os.environ.get('OTP_PEPPER') or '').strip()
+    if len(configured) < 32:
+        raise OtpConfigurationError(
+            'OTP_PEPPER must be explicitly configured with at least 32 characters',
+        )
+
+
 def _hmac_hex(value: str) -> str:
     return hmac.new(_pepper(), value.encode('utf-8'), hashlib.sha256).hexdigest()
 
@@ -226,32 +245,167 @@ async def ensure_identity_indexes(*, database=None) -> None:
         if updates and user.get('id'):
             await database.users.update_one({'id': user['id']}, {'$set': updates})
 
-    string_partial_email = {'email_normalized': {'$type': 'string'}}
-    string_partial_phone = {'phone_normalized': {'$type': 'string'}}
     await database.users.create_index(
         'email_normalized', unique=True,
-        partialFilterExpression=string_partial_email,
-        name='users_email_normalized_unique',
+        partialFilterExpression=_EMAIL_IDENTITY_PARTIAL,
+        name=_EMAIL_IDENTITY_INDEX,
     )
     await database.users.create_index(
         'phone_normalized', unique=True,
-        partialFilterExpression=string_partial_phone,
-        name='users_phone_normalized_unique',
+        partialFilterExpression=_PHONE_IDENTITY_PARTIAL,
+        name=_PHONE_IDENTITY_INDEX,
+    )
+
+
+def _index_matches(spec: dict | None, keys: list[tuple[str, int]], *,
+                   unique=_INDEX_OPTION_UNSPECIFIED,
+                   partial=_INDEX_OPTION_UNSPECIFIED,
+                   ttl=_INDEX_OPTION_UNSPECIFIED,
+                   sparse=_INDEX_OPTION_UNSPECIFIED) -> bool:
+    if not spec or list(spec.get('key') or []) != keys:
+        return False
+    if (unique is not _INDEX_OPTION_UNSPECIFIED
+            and bool(spec.get('unique', False)) is not unique):
+        return False
+    if (partial is not _INDEX_OPTION_UNSPECIFIED
+            and spec.get('partialFilterExpression') != partial):
+        return False
+    if (ttl is not _INDEX_OPTION_UNSPECIFIED
+            and spec.get('expireAfterSeconds') != ttl):
+        return False
+    if (sparse is not _INDEX_OPTION_UNSPECIFIED
+            and bool(spec.get('sparse', False)) is not sparse):
+        return False
+    return True
+
+
+def _has_matching_index(indexes: dict, keys: list[tuple[str, int]], **options) -> bool:
+    return any(_index_matches(spec, keys, **options) for spec in indexes.values())
+
+
+def _identity_indexes_valid(indexes: dict) -> bool:
+    requirements = (
+        (_EMAIL_IDENTITY_INDEX, [('email_normalized', 1)], _EMAIL_IDENTITY_PARTIAL),
+        (_PHONE_IDENTITY_INDEX, [('phone_normalized', 1)], _PHONE_IDENTITY_PARTIAL),
+    )
+    return all(
+        _index_matches(indexes.get(name), keys, unique=True, partial=partial)
+        for name, keys, partial in requirements
+    )
+
+
+def _otp_indexes_valid(challenges: dict, rate_limits: dict) -> bool:
+    required_challenge_indexes = (
+        (
+            [('id', 1)],
+            {'unique': True, 'partial': None, 'ttl': None, 'sparse': False},
+        ),
+        (
+            [('expires_at', 1)],
+            {'unique': False, 'partial': None, 'ttl': 0, 'sparse': False},
+        ),
+        (
+            [('identity_hash', 1), ('purpose', 1)],
+            {
+                'unique': True, 'partial': {'active': True},
+                'ttl': None, 'sparse': False,
+            },
+        ),
+        (
+            [('user_id', 1), ('purpose', 1), ('created_at', -1)],
+            {'unique': False, 'partial': None, 'ttl': None, 'sparse': False},
+        ),
+    )
+    return (
+        all(
+            _has_matching_index(challenges, keys, **options)
+            for keys, options in required_challenge_indexes
+        )
+        and _has_matching_index(
+            rate_limits, [('expires_at', 1)], unique=False, partial=None,
+            ttl=0, sparse=False,
+        )
     )
 
 
 async def require_identity_indexes(*, database=None) -> None:
-    """Fail registration closed unless both normalized unique guards exist."""
+    """Fail registration closed unless both exact normalized guards exist."""
     if database is None:
         database = db
     try:
         indexes = await database.users.index_information()
     except Exception as exc:
         raise OtpConfigurationError('Registration identity checks are unavailable') from exc
-    for name in ('users_email_normalized_unique', 'users_phone_normalized_unique'):
-        spec = indexes.get(name) or {}
-        if not spec.get('unique') or not spec.get('partialFilterExpression'):
-            raise OtpConfigurationError('Registration identity checks are unavailable')
+    if not _identity_indexes_valid(indexes):
+        raise OtpConfigurationError('Registration identity checks are unavailable')
+
+
+async def require_otp_indexes(*, database=None) -> None:
+    """Validate every index relied on for one-use, expiry and rate limiting."""
+    if database is None:
+        database = db
+    try:
+        challenges = await database.otp_challenges.index_information()
+        rate_limits = await database.auth_rate_limits.index_information()
+    except Exception as exc:
+        raise OtpConfigurationError('Verification storage checks are unavailable') from exc
+
+    if not _otp_indexes_valid(challenges, rate_limits):
+        raise OtpConfigurationError('Verification storage checks are unavailable')
+
+
+def _allow_nontransactional_auth_tests() -> bool:
+    return (
+        (os.environ.get('APP_ENV') or '').strip().lower() == 'test'
+        and (os.environ.get('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS') or '').strip().lower() == 'true'
+    )
+
+
+async def require_registration_transactions(*, database=None) -> None:
+    """Verify that Mongo can execute the OTP/account atomicity contract.
+
+    Merely opening a session is insufficient: standalone Mongo deployments
+    allow sessions but reject the first transactional statement.  The read is
+    deliberately side-effect free and catches that deployment error before the
+    public API advertises registration as available.
+    """
+    if database is None:
+        database = db
+    try:
+        session_cm = await database.client.start_session()
+        async with session_cm as session:
+            async def probe(active_session):
+                await database.users.find_one(
+                    {'_id': '__registration_transaction_probe__'},
+                    {'_id': 1},
+                    session=active_session,
+                )
+
+            await session.with_transaction(probe)
+    except Exception as exc:
+        if _allow_nontransactional_auth_tests() and isinstance(
+                exc, (AttributeError, NotImplementedError)):
+            return
+        raise OtpConfigurationError(
+            'Registration transactions are unavailable',
+        ) from exc
+
+
+async def require_registration_readiness(*, database=None) -> None:
+    """Fail closed unless secrets, indexes and transaction support are exact."""
+    require_configured_pepper()
+    await require_identity_indexes(database=database)
+    await require_otp_indexes(database=database)
+    await require_registration_transactions(database=database)
+
+
+async def registration_storage_ready(*, database=None) -> bool:
+    """Silent public-readiness predicate; detailed failures stay server-side."""
+    try:
+        await require_registration_readiness(database=database)
+    except Exception:
+        return False
+    return True
 
 
 async def consume_persistent_limit(action: str, subject: str, *, limit: int,
@@ -521,9 +675,18 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
     return response
 
 
-async def verify_challenge(identity: Identity, code: str, purpose: str, *,
-                           challenge_id: str | None = None, database=None,
-                           now: datetime | None = None) -> dict:
+async def prepare_challenge_verification(
+    identity: Identity, code: str, purpose: str, *,
+    challenge_id: str | None = None, database=None,
+    now: datetime | None = None,
+) -> dict:
+    """Validate one code without consuming a correct challenge yet.
+
+    Invalid-attempt accounting intentionally happens before any account
+    transaction so a rejected transaction cannot roll back the brute-force
+    counter. A caller can then consume the returned challenge in the same Mongo
+    transaction as its account mutation.
+    """
     if database is None:
         database = db
     now = now or _now()
@@ -573,6 +736,20 @@ async def verify_challenge(identity: Identity, code: str, purpose: str, *,
             raise OtpError('OTP_LOCKED', 'Too many invalid verification attempts.', status_code=423)
         raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
 
+    return challenge
+
+
+async def consume_prepared_challenge(
+    challenge: dict, identity: Identity, code: str, purpose: str, *,
+    database=None, now: datetime | None = None, session=None,
+) -> dict:
+    """CAS-consume a prepared challenge, optionally inside a caller transaction."""
+    if database is None:
+        database = db
+    now = now or _now()
+    identity_hash = _identity_hash(identity)
+    supplied_hash = _code_hash(challenge['id'], purpose, str(code).strip())
+    session_kwargs = {'session': session} if session is not None else {}
     result = await database.otp_challenges.update_one(
         {
             'id': challenge['id'],
@@ -587,11 +764,26 @@ async def verify_challenge(identity: Identity, code: str, purpose: str, *,
         {'$set': {
             'status': 'VERIFIED', 'active': False,
             'verified_at': now, 'updated_at': now,
-        }},
+        }}, **session_kwargs,
     )
     if result.modified_count != 1:
         raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
-    challenge['status'] = 'VERIFIED'
-    challenge['active'] = False
-    challenge['verified_at'] = now
-    return challenge
+    return {
+        **challenge,
+        'status': 'VERIFIED',
+        'active': False,
+        'verified_at': now,
+    }
+
+
+async def verify_challenge(identity: Identity, code: str, purpose: str, *,
+                           challenge_id: str | None = None, database=None,
+                           now: datetime | None = None) -> dict:
+    """Validate and one-use consume a challenge without an account mutation."""
+    prepared = await prepare_challenge_verification(
+        identity, code, purpose, challenge_id=challenge_id,
+        database=database, now=now,
+    )
+    return await consume_prepared_challenge(
+        prepared, identity, code, purpose, database=database, now=now,
+    )

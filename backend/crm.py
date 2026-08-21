@@ -29,14 +29,25 @@ import uuid
 from datetime import datetime, timezone
 
 from db import db
+from pymongo.errors import DuplicateKeyError
 
 HOUSE_CODE = 'HOUSE'
+ACTIVE_ATTRIBUTION_INDEX = 'player_attribution_active_user_unique'
+ACTIVE_ATTRIBUTION_PARTIAL = {'active': True}
 
 # 0/O and 1/I/L are the same character to someone reading a code off a screen or
 # hearing it over a phone, and a mistyped code silently pays the wrong person.
 _CONFUSABLE = str.maketrans({'O': '0', 'I': '1', 'L': '1'})
 _CODE_OK = re.compile(r'^[A-Z0-9]{4,12}$')
 _RESERVED = {'HOUSE', 'ADMIN', 'NULL', 'NONE', 'TEST', 'SYSTEM', 'CHAKRI'}
+
+
+class CrmConfigurationError(RuntimeError):
+    """A fail-closed CRM invariant required before accepting registrations."""
+
+
+def _session_kwargs(session):
+    return {'session': session} if session is not None else {}
 
 
 def now_iso():
@@ -65,14 +76,15 @@ def code_is_available(code):
 
 # ---------------------------------------------------------------- distributors
 
-async def ensure_house_account():
+async def ensure_house_account(*, session=None):
     """The fallback distributor. Created once, never deleted, never paid.
 
     Its commission rate is zero: house players earn nobody a commission, and
     making that explicit is safer than leaving the engine to infer it from a
     missing row.
     """
-    existing = await db.distributors.find_one({'code': HOUSE_CODE})
+    kwargs = _session_kwargs(session)
+    existing = await db.distributors.find_one({'code': HOUSE_CODE}, **kwargs)
     if existing:
         return existing
     doc = {
@@ -88,8 +100,22 @@ async def ensure_house_account():
         'created_by': 'system',
         'note': 'Players who arrived without a referral code.',
     }
-    await db.distributors.insert_one(doc)
-    await set_rate(doc['id'], 0, 'system', note='House account earns no commission')
+    try:
+        await db.distributors.insert_one(doc, **kwargs)
+    except DuplicateKeyError:
+        # Concurrent startup workers can race the unique distributor-code
+        # index. A transaction must propagate the error so its caller retries;
+        # outside a transaction the winning row is safe to reuse.
+        if session is not None:
+            raise
+        existing = await db.distributors.find_one({'code': HOUSE_CODE})
+        if existing:
+            return existing
+        raise
+    await set_rate(
+        doc['id'], 0, 'system', note='House account earns no commission',
+        session=session,
+    )
     return doc
 
 
@@ -123,7 +149,8 @@ async def create_distributor(name, code, rate_bps, created_by, email=None,
     return doc
 
 
-async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=None):
+async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=None,
+                   *, session=None):
     """Open a new rate period and close the one before it.
 
     Closing the previous row rather than overwriting it is the whole point: a
@@ -134,9 +161,11 @@ async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=N
     if not 0 <= rate_bps <= 10000:
         raise ValueError('Commission must be between 0 and 100 percent')
     start = effective_from or now_iso()
+    kwargs = _session_kwargs(session)
     await db.distributor_rates.update_many(
         {'distributor_id': distributor_id, 'effective_to': None},
         {'$set': {'effective_to': start}},
+        **kwargs,
     )
     row = {
         'id': str(uuid.uuid4()),
@@ -148,7 +177,7 @@ async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=N
         'set_at': now_iso(),
         'note': note,
     }
-    await db.distributor_rates.insert_one(row)
+    await db.distributor_rates.insert_one(row, **kwargs)
     return row
 
 
@@ -183,7 +212,7 @@ async def rate_on_detailed(distributor_id, when_iso):
 
 # ----------------------------------------------------------------- attribution
 
-async def resolve_code(raw):
+async def resolve_code(raw, *, session=None):
     """A typed code to the distributor that owns it, or the house account.
 
     An unknown code is NOT an error at signup. Rejecting the registration
@@ -193,20 +222,23 @@ async def resolve_code(raw):
     """
     code = normalise_code(raw)
     if code:
-        dist = await db.distributors.find_one({'code': code, 'status': 'ACTIVE'})
+        dist = await db.distributors.find_one(
+            {'code': code, 'status': 'ACTIVE'}, **_session_kwargs(session),
+        )
         if dist:
             return dist, code, 'CODE'
-    house = await ensure_house_account()
+    house = await ensure_house_account(session=session)
     return house, code, ('UNKNOWN_CODE' if raw else 'NO_CODE')
 
 
-async def attribute_user(user_id, raw_code, actor='system'):
+async def attribute_user(user_id, raw_code, actor='system', *, session=None):
     """Bind a player to a distributor. Called once, when the account is created.
 
     Returns the attribution document so the caller can store the ids on the user
     row for cheap querying, while the audit trail lives here.
     """
-    dist, code, source = await resolve_code(raw_code)
+    kwargs = _session_kwargs(session)
+    dist, code, source = await resolve_code(raw_code, session=session)
     doc = {
         'id': str(uuid.uuid4()),
         'user_id': user_id,
@@ -218,12 +250,12 @@ async def attribute_user(user_id, raw_code, actor='system'):
         'attributed_by': actor,
         'active': True,
     }
-    await db.player_attribution.insert_one(doc)
+    await db.player_attribution.insert_one(doc, **kwargs)
     res = await db.users.update_one({'id': user_id}, {'$set': {
         'distributor_id': dist['id'],
         'distributor_code': dist['code'],
         'referral_code_typed': code,
-    }})
+    }}, **kwargs)
     # If the user row is not there, the attribution row exists but nothing on the
     # player points at a distributor — and every report that filters by
     # distributor_id silently drops that player. Better to fail here, where the
@@ -350,5 +382,38 @@ async def ensure_indexes():
     await db.distributors.create_index('user_id', sparse=True)
     await db.distributor_rates.create_index([('distributor_id', 1), ('effective_from', -1)])
     await db.player_attribution.create_index([('user_id', 1), ('active', 1)])
+    await db.player_attribution.create_index(
+        [('user_id', 1)],
+        unique=True,
+        partialFilterExpression=ACTIVE_ATTRIBUTION_PARTIAL,
+        name=ACTIVE_ATTRIBUTION_INDEX,
+    )
     await db.player_attribution.create_index('distributor_id')
     await db.users.create_index('distributor_id')
+
+
+async def require_registration_attribution_readiness() -> None:
+    """Require the exact invariant that keeps every player singly attributed."""
+    try:
+        indexes = await db.player_attribution.index_information()
+        spec = indexes.get(ACTIVE_ATTRIBUTION_INDEX) or {}
+        house = await db.distributors.find_one({
+            'code': HOUSE_CODE, 'status': 'ACTIVE', 'is_house': True,
+        })
+    except Exception as exc:
+        raise CrmConfigurationError('CRM registration storage is unavailable') from exc
+    if (
+        list(spec.get('key') or []) != [('user_id', 1)]
+        or spec.get('unique') is not True
+        or spec.get('partialFilterExpression') != ACTIVE_ATTRIBUTION_PARTIAL
+        or not house
+    ):
+        raise CrmConfigurationError('CRM registration invariants are unavailable')
+
+
+async def registration_attribution_ready() -> bool:
+    try:
+        await require_registration_attribution_readiness()
+    except Exception:
+        return False
+    return True

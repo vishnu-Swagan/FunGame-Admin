@@ -29,19 +29,23 @@ os.environ['JWT_SECRET'] = 'test-only-jwt-secret-with-at-least-32-characters'
 os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
 os.environ['OTP_SMS_ADAPTER'] = 'mock'
 os.environ['OTP_EXPOSE_DEV_CODE'] = 'true'
+os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
 
 import otp_service
 import auth_utils
 import compliance
+import crm
 import routes_auth
 import routes_admin
 import routes_compliance
+import routes_player
 from models import (
     AgeVerify,
     AdminExclusion,
     AdminUserAction,
     ComplianceConfigUpdate,
     LoginRequest,
+    OnboardingProfileRequest,
     RegisterRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
@@ -75,10 +79,60 @@ async def main():
     await otp_service.ensure_identity_indexes(database=database)
     await otp_service.require_identity_indexes(database=database)
     await otp_service.ensure_indexes(database=database)
+    await crm.ensure_indexes()
+    await crm.ensure_house_account()
+    await crm.require_registration_attribution_readiness()
     capabilities = await routes_auth.authentication_capabilities()
     assert capabilities['registration_enabled'] is True
     assert capabilities['email_registration'] is True
     assert capabilities['phone_registration'] is True
+
+    # Public capability discovery requires an explicit pepper and every exact
+    # identity/OTP index, not merely a configured delivery adapter.
+    pepper = os.environ.pop('OTP_PEPPER')
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
+    os.environ['OTP_PEPPER'] = pepper
+    await database.users.drop_index('users_phone_normalized_unique')
+    await database.users.create_index(
+        'phone_normalized', name='users_phone_normalized_unique', unique=False,
+        partialFilterExpression={'phone_normalized': {'$type': 'string'}},
+    )
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
+    await database.users.drop_index('users_phone_normalized_unique')
+    await otp_service.ensure_identity_indexes(database=database)
+    await database.otp_challenges.drop_index('id_1')
+    await database.otp_challenges.create_index(
+        'id', unique=True,
+        partialFilterExpression={'id': {'$type': 'string'}},
+    )
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
+    await database.otp_challenges.drop_index('id_1')
+    await otp_service.ensure_indexes(database=database)
+    await database.otp_challenges.drop_index('expires_at_1')
+    await database.otp_challenges.create_index('expires_at', expireAfterSeconds=60)
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
+    await expect_http_error(
+        routes_auth.register(RegisterRequest(
+            channel='EMAIL', identifier='missing-index@example.com',
+            email='missing-index@example.com', password='Strong-Password-10',
+            full_name='Missing Index', date_of_birth='1990-01-01', country='India',
+        )),
+        503, 'OTP_UNAVAILABLE',
+    )
+    assert await database.users.count_documents({
+        'email_normalized': 'missing-index@example.com',
+    }) == 0
+    await database.otp_challenges.drop_index('expires_at_1')
+    await otp_service.ensure_indexes(database=database)
+    await database.player_attribution.drop_index(crm.ACTIVE_ATTRIBUTION_INDEX)
+    await database.player_attribution.create_index(
+        [('user_id', 1)], name=crm.ACTIVE_ATTRIBUTION_INDEX, unique=False,
+        partialFilterExpression=crm.ACTIVE_ATTRIBUTION_PARTIAL,
+    )
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is False
+    await database.player_attribution.drop_index(crm.ACTIVE_ATTRIBUTION_INDEX)
+    await crm.ensure_indexes()
+    assert (await routes_auth.authentication_capabilities())['registration_enabled'] is True
 
     # Partial normalized indexes protect both identity channels.
     await database.users.insert_one({
@@ -94,8 +148,9 @@ async def main():
         pass
     await database.users.delete_many({})
 
-    # Real registration contract: UI aliases, contact verification and PENDING
-    # review state. Contact OTP must never grant KYC identity verification.
+    # Real registration contract: UI aliases and contact verification. The
+    # contact-pending row moves to VERIFIED/profile setup, never directly to
+    # operator review. Contact OTP must never grant KYC identity verification.
     registration = await routes_auth.register(RegisterRequest(
         channel='EMAIL', identifier='player@example.com', email='player@example.com',
         password='Attacker-Planted-9', full_name='Player One',
@@ -128,6 +183,58 @@ async def main():
     assert player['status'] == 'PENDING'
     assert player['identity_verified'] is False
     assert 'password_hash' not in player
+    assert player['distributor_code'] == crm.HOUSE_CODE
+    assert await database.player_attribution.count_documents({
+        'user_id': player['id'], 'active': True,
+    }) == 1
+
+    # Registration and CRM attribution live in the same transaction callback:
+    # an attribution failure must roll the newly inserted account back rather
+    # than leave a login-capable but CRM-invisible player.
+    original_auth_runner = routes_auth._run_auth_transaction
+    original_attribute_user = crm.attribute_user
+    failed_registration_ids = []
+
+    async def failing_attribution(user_id, raw_code, actor='system', *, session=None):
+        failed_registration_ids.append(user_id)
+        await database.player_attribution.insert_one({
+            'id': f'partial-{user_id}', 'user_id': user_id, 'active': True,
+        })
+        raise RuntimeError('simulated attribution failure')
+
+    async def rollback_test_transaction(callback):
+        try:
+            return await callback(None)
+        except Exception as exc:
+            for failed_id in failed_registration_ids:
+                await database.users.delete_many({'id': failed_id})
+                await database.player_attribution.delete_many({'user_id': failed_id})
+            raise HTTPException(status_code=503, detail={
+                'code': 'AUTH_TEMPORARILY_UNAVAILABLE',
+                'message': 'Authentication is temporarily unavailable.',
+            }) from exc
+
+    routes_auth._run_auth_transaction = rollback_test_transaction
+    crm.attribute_user = failing_attribution
+    try:
+        await expect_http_error(
+            routes_auth.register(RegisterRequest(
+                channel='EMAIL', identifier='crm-failure@example.com',
+                email='crm-failure@example.com', password='CRM-Failure-Password-9',
+                full_name='CRM Failure', date_of_birth='1990-01-01', country='India',
+            )),
+            503, 'AUTH_TEMPORARILY_UNAVAILABLE',
+        )
+    finally:
+        routes_auth._run_auth_transaction = original_auth_runner
+        crm.attribute_user = original_attribute_user
+    assert await database.users.count_documents({
+        'email_normalized': 'crm-failure@example.com',
+    }) == 0
+    for failed_id in failed_registration_ids:
+        assert await database.player_attribution.count_documents({
+            'user_id': failed_id,
+        }) == 0
 
     stored = await database.otp_challenges.find_one({'id': registration['challenge_id']})
     assert 'code' not in stored
@@ -147,7 +254,8 @@ async def main():
     assert player['contact_verified'] is True
     assert player['email_verified'] is True
     assert player['identity_verified'] is False
-    assert player['status'] == 'PENDING'
+    assert player['status'] == 'VERIFIED'
+    assert verification['user']['status'] == 'VERIFIED'
 
     # Verified, unknown and locked challenge state all use the same opaque
     # invalid-code contract. A verified contact must never be an existence
@@ -192,6 +300,92 @@ async def main():
     assert login['access_token']
     assert 'active_session_id' not in login['user']
 
+    # Accounts contact-verified before the state-machine fix are repaired on
+    # login so they reach profile/terms rather than remaining stuck in review.
+    await database.users.insert_one({
+        'id': 'legacy-contact-verified', 'role': 'PLAYER', 'status': 'PENDING',
+        'registration_source': 'SELF_SERVICE',
+        'email_verified': True, 'email': 'legacy-verified@example.com',
+        'email_normalized': 'legacy-verified@example.com',
+        'primary_identity': 'legacy-verified@example.com',
+        'password_hash': auth_utils.hash_password('Legacy-Password-9'),
+    })
+    repaired_login = await routes_auth.login(LoginRequest(
+        identifier='legacy-verified@example.com', email='legacy-verified@example.com',
+        password='Legacy-Password-9',
+    ))
+    assert repaired_login['user']['status'] == 'VERIFIED'
+    repaired = await database.users.find_one({'id': 'legacy-contact-verified'})
+    assert repaired['status'] == 'VERIFIED' and repaired['contact_verified'] is True
+
+    # Historical operator-provisioned ACTIVE players can still log in when the
+    # verification columns did not exist yet. The successful password check
+    # repairs the missing flags once; self-service or explicitly-false rows
+    # remain fail-closed.
+    await database.users.insert_one({
+        'id': 'legacy-operator-active', 'role': 'PLAYER', 'status': 'ACTIVE',
+        'email': 'legacy-operator@example.com',
+        'email_normalized': 'legacy-operator@example.com',
+        'username': 'GK7654321',
+        'password_hash': auth_utils.hash_password('Legacy-Operator-Password-9'),
+    })
+    operator_login = await routes_auth.login(LoginRequest(
+        identifier='GK7654321', email='GK7654321',
+        password='Legacy-Operator-Password-9',
+    ))
+    assert operator_login['access_token']
+    operator_row = await database.users.find_one({'id': 'legacy-operator-active'})
+    assert operator_row['email_verified'] is True
+    assert operator_row['contact_verified'] is True
+    assert operator_row['contact_verification_repair'] == 'LEGACY_OPERATOR_ACTIVE'
+
+    for legacy_id, email, extra in (
+        ('legacy-self-service-active', 'legacy-self@example.com', {
+            'registration_source': 'SELF_SERVICE',
+        }),
+        ('legacy-explicit-false', 'legacy-false@example.com', {
+            'email_verified': False,
+        }),
+    ):
+        await database.users.insert_one({
+            'id': legacy_id, 'role': 'PLAYER', 'status': 'ACTIVE',
+            'email': email, 'email_normalized': email,
+            'password_hash': auth_utils.hash_password('Legacy-Denied-Password-9'),
+            **extra,
+        })
+        await expect_http_error(routes_auth.login(LoginRequest(
+            identifier=email, email=email, password='Legacy-Denied-Password-9',
+        )), 403, 'CONTACT_NOT_VERIFIED')
+
+    await database.users.insert_one({
+        'id': 'legacy-repair-race', 'role': 'PLAYER', 'status': 'ACTIVE',
+        'email': 'legacy-race@example.com',
+        'email_normalized': 'legacy-race@example.com',
+        'password_hash': auth_utils.hash_password('Legacy-Race-Password-9'),
+    })
+    users_collection_type = type(database.users)
+    original_login_update = users_collection_type.find_one_and_update
+
+    async def explicit_verification_wins(collection, query, update, *args, **kwargs):
+        if (query.get('id') == 'legacy-repair-race'
+                and query.get('contact_verified') == {'$exists': False}):
+            await database.users.update_one(
+                {'id': 'legacy-repair-race'}, {'$set': {'email_verified': False}},
+            )
+        return await original_login_update(collection, query, update, *args, **kwargs)
+
+    users_collection_type.find_one_and_update = explicit_verification_wins
+    try:
+        await expect_http_error(routes_auth.login(LoginRequest(
+            identifier='legacy-race@example.com', email='legacy-race@example.com',
+            password='Legacy-Race-Password-9',
+        )), 403, 'CONTACT_NOT_VERIFIED')
+    finally:
+        users_collection_type.find_one_and_update = original_login_update
+    raced_legacy = await database.users.find_one({'id': 'legacy-repair-race'})
+    assert raced_legacy['email_verified'] is False
+    assert not raced_legacy.get('contact_verified')
+
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
         password='Phone-Password-9', full_name='Phone Player',
@@ -225,6 +419,26 @@ async def main():
         ),
         'OTP_INVALID',
     )
+
+    race_registration = await routes_auth.register(RegisterRequest(
+        channel='EMAIL', identifier='race@example.com', email='race@example.com',
+        password='Race-Password-9', full_name='Race Player',
+        date_of_birth='1990-01-01', country='India',
+    ))
+    race_request = VerifyEmailRequest(
+        channel='EMAIL', identifier='race@example.com', email='race@example.com',
+        code=race_registration['dev_code'], password='Race-Owner-Password-9',
+    )
+    race_results = await asyncio.gather(
+        routes_auth.verify_contact(race_request),
+        routes_auth.verify_contact(race_request),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(value, dict) for value in race_results) == 1
+    race_errors = [value for value in race_results if isinstance(value, HTTPException)]
+    assert len(race_errors) == 1 and race_errors[0].detail['code'] == 'OTP_INVALID'
+    race_player = await database.users.find_one({'email_normalized': 'race@example.com'})
+    assert race_player['status'] == 'VERIFIED' and race_player['contact_verified'] is True
 
     # Phone registration returns PHONE publicly while retaining SMS internally.
     phone_user = {'id': 'phone-user'}
@@ -362,13 +576,26 @@ async def main():
         full_name='Under Age', email='new-underage@example.com',
         phone='+919111222244', date_of_birth='2020-01-01', country='India',
     )
+    os.environ['LEGACY_SIGNUP_REQUESTS_ENABLED'] = 'true'
     existing_eligibility = await expect_http_error(
         routes_auth.signup_request(existing_signup), 403,
     )
     new_eligibility = await expect_http_error(
         routes_auth.signup_request(new_signup), 403,
     )
+    os.environ.pop('LEGACY_SIGNUP_REQUESTS_ENABLED', None)
     assert existing_eligibility.detail == new_eligibility.detail
+    retired_signup = SignupRequestCreate(
+        full_name='Eligible Player', email='legacy-retired@example.com',
+        phone='+919111222255', date_of_birth='1990-01-01', country='India',
+    )
+    await expect_http_error(
+        routes_auth.signup_request(retired_signup), 410,
+        'LEGACY_REGISTRATION_DISABLED',
+    )
+    assert await database.signup_requests.count_documents({
+        'email': 'legacy-retired@example.com',
+    }) == 0
 
     # A provider failure during resend cannot invalidate the previously
     # delivered, unexpired code.
@@ -409,8 +636,118 @@ async def main():
         challenge_id=resilient['challenge_id'], database=database,
     )
 
-    # Self-service admin approval refuses unverified contact, unknown country,
-    # and missing DOB before any chips or account status can change.
+    # Stale onboarding requests cannot overwrite an approval that has already
+    # made the persisted row ACTIVE.
+    profile_race_id = 'onboarding-profile-race'
+    await database.users.insert_one({
+        'id': profile_race_id, 'role': 'PLAYER', 'status': 'ACTIVE',
+        'contact_verified': True, 'email_verified': True,
+        'country': 'India', 'date_of_birth': '1990-01-01',
+    })
+    stale_profile_user = {
+        'id': profile_race_id, 'role': 'PLAYER', 'status': 'PENDING',
+        'contact_verified': True, 'email_verified': True,
+        'country': 'India', 'date_of_birth': '1990-01-01',
+    }
+    await expect_http_error(routes_player.onboarding_profile(
+        OnboardingProfileRequest(
+            display_name='Race Player', country='India',
+            date_of_birth='1990-01-01', avatar='star', accepted_terms=True,
+        ),
+        stale_profile_user,
+    ), 409, 'ACCOUNT_STATE_CHANGED')
+    assert (await database.users.find_one({'id': profile_race_id}))['status'] == 'ACTIVE'
+
+    submit_race_id = 'onboarding-submit-race'
+    await database.users.insert_one({
+        'id': submit_race_id, 'role': 'PLAYER', 'status': 'ACTIVE',
+        'contact_verified': True, 'email_verified': True,
+        'accepted_terms': True,
+    })
+    stale_submit_user = {
+        'id': submit_race_id, 'role': 'PLAYER', 'status': 'PROFILE_SUBMITTED',
+        'contact_verified': True, 'email_verified': True,
+        'accepted_terms': True,
+    }
+    await expect_http_error(
+        routes_player.onboarding_submit(stale_submit_user),
+        409, 'ACCOUNT_STATE_CHANGED',
+    )
+    assert (await database.users.find_one({'id': submit_race_id}))['status'] == 'ACTIVE'
+    assert await database.notifications.count_documents({
+        'user_id': submit_race_id, 'type': 'ONBOARDING',
+    }) == 0
+
+    # Submission status and its under-review notification execute inside the
+    # same transaction callback, so an approval cannot be interposed between
+    # those writes.
+    atomic_submit_id = 'onboarding-submit-atomic'
+    await database.users.insert_one({
+        'id': atomic_submit_id, 'role': 'PLAYER', 'status': 'PROFILE_SUBMITTED',
+        'contact_verified': True, 'email_verified': True,
+        'accepted_terms': True,
+    })
+    original_onboarding_runner = routes_player._run_onboarding_transaction
+    original_player_notify = routes_player._notify
+    inside_submission_transaction = {'value': False}
+
+    async def observing_onboarding_runner(callback):
+        inside_submission_transaction['value'] = True
+        try:
+            return await callback(None)
+        finally:
+            inside_submission_transaction['value'] = False
+
+    async def observing_player_notify(*args, **kwargs):
+        assert inside_submission_transaction['value'] is True
+        return await original_player_notify(*args, **kwargs)
+
+    routes_player._run_onboarding_transaction = observing_onboarding_runner
+    routes_player._notify = observing_player_notify
+    try:
+        submitted = await routes_player.onboarding_submit({
+            'id': atomic_submit_id, 'role': 'PLAYER',
+            'status': 'PROFILE_SUBMITTED', 'contact_verified': True,
+            'email_verified': True, 'accepted_terms': True,
+        })
+    finally:
+        routes_player._run_onboarding_transaction = original_onboarding_runner
+        routes_player._notify = original_player_notify
+    assert submitted['user']['status'] == 'PENDING'
+    assert await database.notifications.count_documents({
+        'user_id': atomic_submit_id, 'type': 'ONBOARDING',
+    }) == 1
+
+    reject_race_id = 'onboarding-reject-race'
+    await database.users.insert_one({
+        'id': reject_race_id, 'role': 'PLAYER', 'status': 'PENDING',
+    })
+    original_account_runner = routes_admin._run_account_transaction
+
+    async def approval_wins_reject_race(callback):
+        await database.users.update_one(
+            {'id': reject_race_id}, {'$set': {'status': 'ACTIVE'}},
+        )
+        return await callback(None)
+
+    routes_admin._run_account_transaction = approval_wins_reject_race
+    try:
+        await expect_http_error(
+            routes_admin.reject_user(
+                reject_race_id, AdminUserAction(note='stale rejection'),
+                {'id': 'admin-1', 'role': 'ADMIN', 'status': 'ACTIVE'},
+            ),
+            409, 'ACCOUNT_STATE_CHANGED',
+        )
+    finally:
+        routes_admin._run_account_transaction = original_account_runner
+    assert (await database.users.find_one({'id': reject_race_id}))['status'] == 'ACTIVE'
+    assert await database.notifications.count_documents({
+        'user_id': reject_race_id, 'type': 'REJECTION',
+    }) == 0
+
+    # Self-service admin approval cannot bypass contact verification, accepted
+    # terms, profile submission, jurisdiction, or age review.
     await database.users.insert_one({
         'id': 'approval-user', 'role': 'PLAYER', 'status': 'PENDING',
         'registration_source': 'SELF_SERVICE', 'contact_verified': False,
@@ -422,7 +759,22 @@ async def main():
         403, 'CONTACT_NOT_VERIFIED',
     )
     await database.users.update_one({'id': 'approval-user'}, {'$set': {
-        'contact_verified': True, 'phone_verified': True, 'country': 'unknown place',
+        'contact_verified': True, 'phone_verified': True,
+    }})
+    await expect_http_error(
+        routes_admin.approve_user('approval-user', AdminUserAction(), admin),
+        403, 'TERMS_NOT_ACCEPTED',
+    )
+    await database.users.update_one({'id': 'approval-user'}, {'$set': {
+        'accepted_terms': True,
+    }})
+    await expect_http_error(
+        routes_admin.approve_user('approval-user', AdminUserAction(), admin),
+        403, 'ONBOARDING_NOT_SUBMITTED',
+    )
+    await database.users.update_one({'id': 'approval-user'}, {'$set': {
+        'submitted_at': datetime.now(timezone.utc).isoformat(),
+        'country': 'unknown place',
     }})
     await expect_http_error(
         routes_admin.approve_user('approval-user', AdminUserAction(), admin),
@@ -435,6 +787,21 @@ async def main():
         routes_admin.approve_user('approval-user', AdminUserAction(), admin), 403,
     )
     assert 'AGE_UNKNOWN' in str(age_error.detail)
+    await database.users.update_one({'id': 'approval-user'}, {'$set': {
+        'date_of_birth': '1990-01-01',
+    }})
+    approved = await routes_admin.approve_user(
+        'approval-user', AdminUserAction(), admin,
+    )
+    assert approved['user']['status'] == 'ACTIVE'
+    assert approved['user']['chip_balance'] == routes_admin.WELCOME_BONUS
+    await expect_http_error(
+        routes_admin.approve_user('approval-user', AdminUserAction(), admin), 400,
+    )
+    assert await database.chip_transactions.count_documents({
+        'user_id': 'approval-user',
+        'ref': 'account-approval:approval-user',
+    }) == 1
 
     # Play-chip operation remains backward-compatible. If real-money mode is
     # explicitly enabled later, every game dependency fails closed on age,
@@ -658,6 +1025,24 @@ async def main():
         assert '32 bytes' in str(exc)
     finally:
         os.environ['JWT_SECRET'] = strong_jwt_secret
+
+    class NoSessionClient:
+        async def start_session(self):
+            raise NotImplementedError('transactions unavailable')
+
+    async def should_not_run(_session):
+        raise AssertionError('non-transactional production callback ran')
+
+    auth_database = routes_auth.db
+    routes_auth.db = types.SimpleNamespace(client=NoSessionClient())
+    try:
+        await expect_http_error(
+            routes_auth._run_auth_transaction(should_not_run),
+            503, 'AUTH_TEMPORARILY_UNAVAILABLE',
+        )
+    finally:
+        routes_auth.db = auth_database
+
     production_capabilities = await routes_auth.authentication_capabilities()
     assert production_capabilities['registration_enabled'] is False
     assert production_capabilities['email_registration'] is False

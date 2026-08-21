@@ -1,5 +1,7 @@
 """Authentication routes with email/mobile identities and one-use OTPs."""
+import asyncio
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -33,14 +35,16 @@ from otp_service import (
     RESET_PASSWORD,
     VERIFY_CONTACT,
     Identity,
+    consume_prepared_challenge,
     consume_persistent_limit,
     delivery_adapter_ready,
     identity_query,
     issue_challenge,
     masked_destination,
     normalize_identity,
-    require_identity_indexes,
-    verify_challenge,
+    prepare_challenge_verification,
+    registration_storage_ready,
+    require_registration_readiness,
 )
 
 
@@ -148,14 +152,74 @@ def _user_public(user: dict) -> dict:
     return public
 
 
-async def _find_identity_user(identity: Identity):
-    return await db.users.find_one(identity_query(identity))
+async def _find_identity_user(identity: Identity, *, session=None):
+    kwargs = {'session': session} if session is not None else {}
+    return await db.users.find_one(identity_query(identity), **kwargs)
 
 
 def _identity_is_verified(user: dict, identity: Identity) -> bool:
     # KYC/identity verification is a separate financial control.  Only the
     # channel-specific OTP flag proves ownership of this contact method.
     return bool(user.get(identity.verified_field))
+
+
+def _self_service_needs_profile(user: dict) -> bool:
+    """Repair the pre-profile state without reopening submitted applications."""
+    return bool(
+        user.get('registration_source') == 'SELF_SERVICE'
+        and user.get('status') == 'PENDING'
+        and not user.get('submitted_at')
+    )
+
+
+def _legacy_operator_contact_repair_allowed(user: dict, primary: Identity | None) -> bool:
+    """Permit only historical operator-created ACTIVE rows missing the schema.
+
+    Explicit false flags are never repaired, and SELF_SERVICE registrations
+    always retain the OTP ownership requirement.
+    """
+    return bool(
+        primary
+        and user.get('role') == 'PLAYER'
+        and user.get('status') == 'ACTIVE'
+        and user.get('registration_source') != 'SELF_SERVICE'
+        and all(field not in user for field in (
+            'contact_verified', 'email_verified', 'phone_verified',
+        ))
+    )
+
+
+def _allow_nontransactional_auth_tests() -> bool:
+    return (
+        (os.environ.get('APP_ENV') or '').strip().lower() == 'test'
+        and (os.environ.get('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS') or '').lower() == 'true'
+    )
+
+
+async def _run_auth_transaction(callback):
+    """Commit OTP consumption and its account mutation as one Mongo unit."""
+    try:
+        session_cm = await db.client.start_session()
+    except Exception as exc:
+        if (_allow_nontransactional_auth_tests()
+                and isinstance(exc, (AttributeError, NotImplementedError))):
+            return await callback(None)
+        logger.error('Authentication transactions unavailable: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'AUTH_TEMPORARILY_UNAVAILABLE',
+            'message': 'Authentication is temporarily unavailable.',
+        }) from exc
+    try:
+        async with session_cm as session:
+            return await session.with_transaction(callback)
+    except (DuplicateKeyError, OtpError, HTTPException):
+        raise
+    except Exception as exc:  # never consume an OTP outside the transaction
+        logger.error('Authentication transaction failed: %s', type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            'code': 'AUTH_TEMPORARILY_UNAVAILABLE',
+            'message': 'Authentication is temporarily unavailable.',
+        }) from exc
 
 
 async def _issue_or_raise(user: dict, identity: Identity, purpose: str) -> dict:
@@ -175,8 +239,11 @@ def _raise_public_code_error(exc: OtpError, message: str) -> None:
 @router.get('/capabilities')
 async def authentication_capabilities():
     """Expose global channel readiness without leaking any account state."""
-    email_ready = delivery_adapter_ready('EMAIL')
-    phone_ready = delivery_adapter_ready('SMS')
+    storage_ready = await registration_storage_ready()
+    if storage_ready:
+        storage_ready = await crm.registration_attribution_ready()
+    email_ready = storage_ready and delivery_adapter_ready('EMAIL')
+    phone_ready = storage_ready and delivery_adapter_ready('SMS')
     return {
         'registration_enabled': email_ready or phone_ready,
         'email_registration': email_ready,
@@ -191,9 +258,12 @@ async def register(body: RegisterRequest):
     """Create a pending player account with an email or E.164 phone login."""
     identity = _request_identity(body)
     try:
-        await require_identity_indexes()
+        await require_registration_readiness()
+        await crm.require_registration_attribution_readiness()
     except OtpConfigurationError as exc:
         _raise_otp(exc)
+    except crm.CrmConfigurationError as exc:
+        _raise_otp(OtpConfigurationError(str(exc)))
     # Availability is global per channel and is checked before any existence
     # lookup, so a disabled provider produces the same response for every
     # contact. Runtime provider failures remain opaque below.
@@ -211,7 +281,7 @@ async def register(body: RegisterRequest):
     # Match the bcrypt cost of a new registration, but do not persist a
     # caller-chosen password before contact ownership has been proved. The
     # verifier commits their password atomically with the OTP below.
-    hash_password(body.password)
+    await asyncio.to_thread(hash_password, body.password)
     existing = await _find_identity_user(identity)
     if existing:
         # Registration is never a resend endpoint. Returning the same opaque
@@ -259,17 +329,20 @@ async def register(body: RegisterRequest):
         # into ``email``.  It is unique, non-routable and hidden publicly.
         user['email'] = f'phone-{user_id}@account.phone.invalid'
 
+    async def create_account(session):
+        kwargs = {'session': session} if session is not None else {}
+        await db.users.insert_one(user, **kwargs)
+        await crm.attribute_user(
+            user['id'], None, actor='self-registration', session=session,
+        )
+        return await db.users.find_one({'id': user['id']}, **kwargs)
+
     try:
-        await db.users.insert_one(user)
+        user = await _run_auth_transaction(create_account)
     except DuplicateKeyError:
         # A concurrent registration won the unique normalized-identity race.
         # Do not branch on its verification/challenge state publicly.
         return {'message': GENERIC_REGISTER_MESSAGE, **_dummy_challenge(identity)}
-
-    try:
-        await crm.attribute_user(user['id'], None, actor='self-registration')
-    except Exception as exc:  # attribution must not orphan an otherwise valid login
-        logger.warning('Registration attribution deferred: %s', type(exc).__name__)
 
     try:
         challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
@@ -284,7 +357,12 @@ async def register(body: RegisterRequest):
 
 @router.post('/signup-request')
 async def signup_request(body: SignupRequestCreate):
-    """Legacy admin-review request retained for already deployed clients."""
+    """Retired no-OTP registration path, opt-in only during migration."""
+    if (os.environ.get('LEGACY_SIGNUP_REQUESTS_ENABLED') or '').strip().lower() != 'true':
+        raise HTTPException(status_code=410, detail={
+            'code': 'LEGACY_REGISTRATION_DISABLED',
+            'message': 'Use verified email or phone registration.',
+        })
     email = body.email.lower().strip()
     phone = normalize_identity(body.phone)
     # Evaluate eligibility before checking whether either identity exists.
@@ -333,51 +411,66 @@ async def verify_contact(body: VerifyEmailRequest):
     # Hash before challenge/account branching for uniform work. Only the
     # successful one-use OTP path is allowed to commit this verifier-owned
     # password, preventing pre-registration password planting.
-    verifier_password_hash = hash_password(body.password)
+    verifier_password_hash = await asyncio.to_thread(hash_password, body.password)
     try:
-        verified = await verify_challenge(
+        prepared = await prepare_challenge_verification(
             identity, body.code.strip(), VERIFY_CONTACT,
             challenge_id=_challenge_id(body),
         )
     except OtpError as exc:
         _raise_public_code_error(exc, 'The verification code is invalid or expired.')
-    user = await _find_identity_user(identity)
-    if (not user or user.get('role') != 'PLAYER'
-            or _identity_is_verified(user, identity)
-            or verified.get('user_id') != user.get('id')):
-        _raise_otp(OtpError('OTP_INVALID', 'The verification code is invalid or expired.'))
-
-    contact_field = identity.verified_field
-    verified_at = _now().isoformat()
-    updates = {
-        contact_field: True,
-        'contact_verified': True,
-        'contact_verified_at': verified_at,
-        'primary_identity': identity.value,
-        'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
-        'password_hash': verifier_password_hash,
-        'password_set_at': verified_at,
-        'password_failed_attempts': 0,
-    }
-    result = await db.users.update_one({
-        'id': user['id'], contact_field: {'$ne': True},
-    }, {
-        '$set': updates,
-        '$unset': {
-            'verification_code_hash': '', 'verification_expires_at': '',
-            'locked_until': '',
-        },
-    })
-    if result.modified_count != 1:
-        _raise_otp(OtpError('OTP_INVALID', 'The verification code is invalid or expired.'))
     session_id = str(uuid.uuid4())
-    await db.users.update_one(
-        {'id': user['id']}, {'$set': {'active_session_id': session_id}}
-    )
-    user = await db.users.find_one({'id': user['id']})
+
+    async def commit_verification(session):
+        verified = await consume_prepared_challenge(
+            prepared, identity, body.code.strip(), VERIFY_CONTACT,
+            database=db, session=session,
+        )
+        user = await _find_identity_user(identity, session=session)
+        if (not user or user.get('role') != 'PLAYER'
+                or _identity_is_verified(user, identity)
+                or verified.get('user_id') != user.get('id')):
+            raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+
+        contact_field = identity.verified_field
+        verified_at = _now().isoformat()
+        updates = {
+            contact_field: True,
+            'contact_verified': True,
+            'contact_verified_at': verified_at,
+            'primary_identity': identity.value,
+            'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+            'password_hash': verifier_password_hash,
+            'password_set_at': verified_at,
+            'password_failed_attempts': 0,
+            'active_session_id': session_id,
+        }
+        if _self_service_needs_profile(user):
+            updates['status'] = 'VERIFIED'
+        kwargs = {'session': session} if session is not None else {}
+        updated = await db.users.find_one_and_update(
+            {'id': user['id'], contact_field: {'$ne': True}},
+            {
+                '$set': updates,
+                '$unset': {
+                    'verification_code_hash': '', 'verification_expires_at': '',
+                    'locked_until': '',
+                },
+            },
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        return updated
+
+    try:
+        user = await _run_auth_transaction(commit_verification)
+    except OtpError as exc:
+        _raise_public_code_error(exc, 'The verification code is invalid or expired.')
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {
-        'message': 'Contact verified. Your account is pending operator review.',
+        'message': 'Contact verified. Complete your profile to continue.',
         'access_token': token,
         'user': _user_public(user),
     }
@@ -437,7 +530,8 @@ async def login(body: LoginRequest):
             'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'},
         })
     now = _now()
-    password_ok = verify_password(
+    password_ok = await asyncio.to_thread(
+        verify_password,
         body.password,
         user.get('password_hash', DUMMY_PASSWORD_HASH) if user else DUMMY_PASSWORD_HASH,
     )
@@ -469,6 +563,8 @@ async def login(body: LoginRequest):
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=403, detail='Administrator access is disabled')
+    player_contact_verified = False
+    legacy_operator_repair = False
     if user.get('role') == 'PLAYER':
         primary = contact_identity
         if primary is None:
@@ -476,8 +572,12 @@ async def login(body: LoginRequest):
                 primary = normalize_identity(user.get('primary_identity') or user.get('email'))
             except ValueError:
                 primary = None
-        verified = bool(primary and _identity_is_verified(user, primary))
-        if not verified:
+        player_contact_verified = bool(primary and _identity_is_verified(user, primary))
+        if (not player_contact_verified
+                and _legacy_operator_contact_repair_allowed(user, primary)):
+            player_contact_verified = True
+            legacy_operator_repair = True
+        if not player_contact_verified:
             channel = (
                 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
             )
@@ -488,13 +588,53 @@ async def login(body: LoginRequest):
             })
 
     session_id = str(uuid.uuid4())
-    await db.users.update_one({'id': user['id']}, {'$set': {
+    login_updates = {
         'active_session_id': session_id,
         'last_login_at': _now().isoformat(),
         'password_failed_attempts': 0,
-    }, '$unset': {'locked_until': ''}})
+    }
+    if _self_service_needs_profile(user) and player_contact_verified:
+        # Repair accounts verified before the profile state transition shipped.
+        login_updates['status'] = 'VERIFIED'
+        login_updates['contact_verified'] = True
+    if legacy_operator_repair:
+        repaired_at = _now().isoformat()
+        login_updates.update({
+            primary.verified_field: True,
+            'contact_verified': True,
+            'contact_verified_at': repaired_at,
+            'primary_identity': primary.value,
+            'primary_identity_channel': 'PHONE' if primary.channel == 'SMS' else 'EMAIL',
+            'contact_verification_repaired_at': repaired_at,
+            'contact_verification_repair': 'LEGACY_OPERATOR_ACTIVE',
+        })
+    login_query = {'id': user['id']}
+    if legacy_operator_repair:
+        # The compatibility repair is itself a CAS: a concurrent explicit
+        # verification decision or account-state change must win, never be
+        # overwritten by a stale legacy login.
+        login_query.update({
+            'role': 'PLAYER',
+            'status': 'ACTIVE',
+            'registration_source': {'$ne': 'SELF_SERVICE'},
+            'contact_verified': {'$exists': False},
+            'email_verified': {'$exists': False},
+            'phone_verified': {'$exists': False},
+        })
+    user = await db.users.find_one_and_update(
+        login_query,
+        {'$set': login_updates, '$unset': {'locked_until': ''}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not user:
+        if legacy_operator_repair:
+            raise HTTPException(status_code=403, detail={
+                'code': 'CONTACT_NOT_VERIFIED',
+                'message': 'Verify your contact method before logging in.',
+                'channel': 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL',
+            })
+        raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     token = create_access_token(user['id'], user['role'], session_id=session_id)
-    user['active_session_id'] = session_id
     return {'access_token': token, 'user': _user_public(user)}
 
 
@@ -532,38 +672,62 @@ async def forgot_password(body: ForgotPasswordRequest):
 @router.post('/reset-password')
 async def reset_password(body: ResetPasswordRequest):
     identity = _request_identity(body)
+    password_hash = await asyncio.to_thread(hash_password, body.new_password)
     try:
-        verified = await verify_challenge(
+        prepared = await prepare_challenge_verification(
             identity, body.code.strip(), RESET_PASSWORD,
             challenge_id=_challenge_id(body),
         )
     except OtpError as exc:
         _raise_public_code_error(exc, 'The reset request is invalid or expired.')
-    user = await _find_identity_user(identity)
-    if (not user or user.get('role') != 'PLAYER'
-            or not _identity_is_verified(user, identity)
-            or verified.get('user_id') != user.get('id')):
-        _raise_otp(OtpError('OTP_INVALID', 'The reset request is invalid or expired.'))
-    await db.users.update_one({'id': user['id']}, {
-        '$set': {
-            'password_hash': hash_password(body.new_password),
-            'password_changed_at': _now().isoformat(),
-            'active_session_id': f'revoked-{uuid.uuid4()}',
-            'password_failed_attempts': 0,
-        },
-        '$unset': {
-            'reset_code_hash': '', 'reset_expires_at': '', 'locked_until': '',
-        },
-    })
+
+    async def commit_reset(session):
+        verified = await consume_prepared_challenge(
+            prepared, identity, body.code.strip(), RESET_PASSWORD,
+            database=db, session=session,
+        )
+        user = await _find_identity_user(identity, session=session)
+        if (not user or user.get('role') != 'PLAYER'
+                or not _identity_is_verified(user, identity)
+                or verified.get('user_id') != user.get('id')):
+            raise OtpError('OTP_INVALID', 'The reset request is invalid or expired.')
+        kwargs = {'session': session} if session is not None else {}
+        updated = await db.users.find_one_and_update(
+            {'id': user['id']},
+            {
+                '$set': {
+                    'password_hash': password_hash,
+                    'password_changed_at': _now().isoformat(),
+                    'active_session_id': f'revoked-{uuid.uuid4()}',
+                    'password_failed_attempts': 0,
+                },
+                '$unset': {
+                    'reset_code_hash': '', 'reset_expires_at': '', 'locked_until': '',
+                },
+            },
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            raise OtpError('OTP_INVALID', 'The reset request is invalid or expired.')
+        return updated
+
+    try:
+        await _run_auth_transaction(commit_reset)
+    except OtpError as exc:
+        _raise_public_code_error(exc, 'The reset request is invalid or expired.')
     return {'message': 'Password reset. Please log in with your new password.'}
 
 
 @router.post('/change-password')
 async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
-    if not verify_password(body.current_password, user.get('password_hash', '')):
+    if not await asyncio.to_thread(
+        verify_password, body.current_password, user.get('password_hash', ''),
+    ):
         raise HTTPException(status_code=400, detail='Current password is incorrect')
+    new_password_hash = await asyncio.to_thread(hash_password, body.new_password)
     await db.users.update_one({'id': user['id']}, {'$set': {
-        'password_hash': hash_password(body.new_password),
+        'password_hash': new_password_hash,
         'password_changed_at': _now().isoformat(),
         'active_session_id': f'revoked-{uuid.uuid4()}',
     }})
