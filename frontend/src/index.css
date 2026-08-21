@@ -210,6 +210,43 @@ summary:focus-visible {
         radial-gradient(600px 220px at 55% 0%, rgba(255, 199, 64, 0.10), transparent 60%);
 }
 
+/* Route signatures: each main destination keeps the same obsidian-and-gold
+   brand language while using a different composition and interaction model. */
+.fg-home-spotlight {
+    background: #08090d;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 22px 54px rgba(0,0,0,.42);
+}
+.fg-home-spotlight::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(255,212,71,.22);
+    box-shadow: inset 0 -34px 70px rgba(0,0,0,.35);
+    pointer-events: none;
+}
+.fg-floor-door {
+    background:
+        linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018)),
+        radial-gradient(120px 90px at 100% 0%, rgba(255,199,64,.10), transparent 72%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 14px 30px rgba(0,0,0,.24);
+}
+.fg-games-index {
+    background:
+        radial-gradient(320px 180px at 100% 0%, rgba(255,199,64,.16), transparent 70%),
+        repeating-linear-gradient(115deg, transparent 0 24px, rgba(255,255,255,.018) 24px 25px),
+        linear-gradient(155deg, #11131c, #08090e 72%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 18px 46px rgba(0,0,0,.32);
+}
+.fg-search-command {
+    background:
+        radial-gradient(240px 90px at 50% -20%, rgba(255,199,64,.13), transparent 72%),
+        rgba(255,255,255,.035);
+}
+.fg-search-result {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.18);
+}
+
 /* Game key-art container */
 .game-art {
     position: relative;

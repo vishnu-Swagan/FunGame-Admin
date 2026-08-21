@@ -1,7 +1,7 @@
 import { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { ChevronRight, Play } from "lucide-react";
+import { ChevronRight, Play, ArrowUpRight, Spade, Dices, CircleDot, Rocket } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGames } from "@/lib/useGames";
 import { GameCard } from "@/components/GameCard";
@@ -11,8 +11,15 @@ import { usePlayersOnline } from "@/lib/liveActivity";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 import { sfx } from "@/lib/sound";
 import { BrandWordmark } from "@/components/Brand";
+import { GameArt } from "@/components/GameArt";
+import { isGameEnabled } from "@/lib/gameAvailability";
 
-const CATEGORY_ORDER = ["Cards", "Slots", "Wheel", "Numbers", "Dice", "Crash", "Board"];
+const FLOOR_DOORS = [
+  { name: "Cards", icon: Spade, copy: "Classic tables" },
+  { name: "Crash", icon: Rocket, copy: "Fast rounds" },
+  { name: "Dice", icon: Dices, copy: "Instant picks" },
+  { name: "Wheel", icon: CircleDot, copy: "Live spins" },
+];
 
 const Rail = ({ children }) => (
   <div className="fg-rail flex gap-3 overflow-x-auto -mx-4 px-4 pb-1">{children}</div>
@@ -125,9 +132,10 @@ export default function Home() {
   const { user } = useAuth();
   const { games, favorites, recent, loading, toggleFavorite } = useGames();
 
-  const featured = games.filter((g) => g.featured);
+  const featured = games.filter((g) => g.featured).slice(0, 6);
   const recentGames = recent.map((slug) => games.find((g) => g.slug === slug)).filter(Boolean);
   const favoriteGames = favorites.map((slug) => games.find((g) => g.slug === slug)).filter(Boolean);
+  const spotlight = recentGames.find(isGameEnabled) || featured.find(isGameEnabled) || games.find(isGameEnabled);
 
   return (
     <PageTransition className="space-y-6">
@@ -145,6 +153,59 @@ export default function Home() {
         </div>
       ) : (
         <>
+          {/* A single personal recommendation gives Home a purpose beyond listing everything. */}
+          {spotlight && (
+            <section data-testid="home-spotlight">
+              <SectionTitle className="mb-3">Your table is ready</SectionTitle>
+              <button
+                onClick={() => navigate(`/games/${spotlight.slug}`)}
+                className="fg-home-spotlight group relative isolate w-full min-h-[224px] overflow-hidden rounded-[26px] text-left focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label={`Return to ${spotlight.name}`}
+              >
+                <GameArt game={spotlight} className="absolute inset-0 h-full w-full rounded-[26px]" glyphSize="text-7xl" />
+                <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-[#07080d] via-[#07080de6] to-transparent" />
+                <div className="relative z-10 flex min-h-[224px] max-w-[68%] flex-col justify-end p-5">
+                  <p className="font-gaming text-[10px] uppercase tracking-[0.28em] text-primary">Picked from your floor</p>
+                  <h3 className="mt-1 font-display text-3xl leading-none text-white">{spotlight.name}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-white/62">{spotlight.tagline || `Return to the ${spotlight.category.toLowerCase()} table.`}</p>
+                  <span className="mt-4 inline-flex w-fit items-center gap-1.5 border-b border-primary/70 pb-1 font-gaming text-xs font-bold uppercase tracking-wider text-primary">
+                    Open table <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                  </span>
+                </div>
+              </button>
+            </section>
+          )}
+
+          {/* Home is a concierge: four doors, not the complete catalog. */}
+          <section data-testid="home-floor-doors">
+            <SectionTitle
+              action={
+                <button onClick={() => navigate("/games")} className="flex items-center text-xs font-semibold text-primary hover:underline focus-visible:ring-2 focus-visible:ring-primary rounded">
+                  Enter lobby <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              }
+            >
+              Choose a room
+            </SectionTitle>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {FLOOR_DOORS.map(({ name, icon: Icon, copy }, index) => {
+                const count = games.filter((game) => game.category === name).length;
+                return (
+                  <button
+                    key={name}
+                    onClick={() => navigate(`/games?category=${encodeURIComponent(name)}`)}
+                    className="fg-floor-door group relative min-h-[118px] overflow-hidden rounded-[20px] border border-white/10 p-4 text-left transition-[transform,border-color] duration-200 hover:-translate-y-0.5 hover:border-primary/45 active:scale-[0.985]"
+                  >
+                    <span className="font-gaming text-[10px] uppercase tracking-[0.22em] text-white/42">Room 0{index + 1}</span>
+                    <Icon className="absolute right-3 top-3 h-9 w-9 text-primary/55 transition-transform duration-300 group-hover:rotate-6 group-hover:scale-110" strokeWidth={1.4} />
+                    <span className="mt-5 block font-display text-xl text-white">{name}</span>
+                    <span className="mt-0.5 block text-xs text-white/48">{copy} · {count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
           {/* Featured */}
           <section>
             <SectionTitle
@@ -208,24 +269,6 @@ export default function Home() {
               </div>
             </section>
           )}
-
-          {/* Category rails */}
-          {CATEGORY_ORDER.map((cat) => {
-            const inCat = games.filter((g) => g.category === cat);
-            if (inCat.length === 0) return null;
-            return (
-              <section key={cat} data-testid={`home-category-rail-${cat.toLowerCase()}`}>
-                <SectionTitle>{cat}</SectionTitle>
-                <div className="mt-3">
-                  <Rail>
-                    {inCat.map((g) => (
-                      <GameCard key={g.slug} game={g} size="rail" isFavorite={favorites.includes(g.slug)} onToggleFavorite={toggleFavorite} />
-                    ))}
-                  </Rail>
-                </div>
-              </section>
-            );
-          })}
 
           {games.length === 0 && <EmptyState title="No games available" subtitle="Check back soon — the lobby is being stocked." />}
         </>
