@@ -278,6 +278,28 @@ class BlackjackAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.database.rows['chip_transactions'][0]['amount'], 20)
         self.assertTrue(all(session is not None for _, _, session in self.database.mutations))
 
+    async def test_proven_legacy_dealer_blackjack_done_false_allows_next_deal(self):
+        legacy = _game(
+            status='done', dealer=[[14, 'S'], [13, 'H']], total_payout=0,
+        )
+        # The legacy dealer-blackjack path settled outcomes and history without
+        # flipping the non-natural player's presentation flag to done.
+        legacy['hands'][0].update(done=False, outcome='LOSE', payout=0)
+        self.database.seed('blackjack_games', legacy)
+        self.database.seed('game_rounds', _settled_round(legacy))
+
+        result = await route.bj_deal(
+            route.DealBody(hands=[route.HandBet(bet=20)]),
+            user={'id': 'player-1'},
+        )
+
+        self.assertEqual(result['status'], 'player_turn')
+        self.assertEqual(result['balance'], 80)
+        self.assertNotEqual(self.database.rows['blackjack_games'][0]['id'], legacy['id'])
+        self.assertEqual(len(self.database.rows['game_rounds']), 1)
+        self.assertEqual(len(self.database.rows['chip_transactions']), 1)
+        self.assertEqual(self.database.rows['chip_transactions'][0]['kind'], ledger.STAKE)
+
     async def test_ambiguous_legacy_partial_finalization_is_preserved(self):
         legacy = _game(status='done', total_payout=40)
         self.database.seed('blackjack_games', legacy)
@@ -306,6 +328,7 @@ class BlackjackAtomicityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_legacy_round_with_different_outcome_does_not_unlock_hand(self):
         legacy = _game(status='done', total_payout=40)
+        legacy['hands'][0]['done'] = False
         mismatched = _settled_round(legacy)
         mismatched['outcome'] = copy.deepcopy(mismatched['outcome'])
         mismatched['outcome']['dealer'] = 'A♠7♦'

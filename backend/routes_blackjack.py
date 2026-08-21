@@ -175,8 +175,7 @@ async def _acknowledge_legacy_finalization(g, session):
             or not g.get('dealer') or not g.get('hands')):
         return False
     if any(
-        not h.get('done') or not h.get('cards') or h.get('outcome') is None
-        or 'payout' not in h
+        not h.get('cards') or h.get('outcome') is None or 'payout' not in h
         for h in g['hands']
     ):
         return False
