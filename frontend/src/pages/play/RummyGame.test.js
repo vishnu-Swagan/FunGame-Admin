@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import fs from "fs";
 import path from "path";
-import { nextRummyPollDelay, PlayerSeat } from "./RummyGame";
+import { nextRummyPollDelay, PlayerSeat, RummyCard, RummyTable } from "./RummyGame";
 
 
 jest.mock("react-router-dom", () => ({ useNavigate: () => jest.fn() }), { virtual: true });
@@ -35,6 +35,16 @@ function renderSeat(seat, viewerSeatIndex, timer = null) {
   return { container, root };
 }
 
+function renderNode(node) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(node);
+  });
+  return { container, root };
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -52,6 +62,41 @@ test("opponents retain hidden backs and only the active seat renders the one cou
   expect(container.querySelector(".rummy-card-back")).not.toBeNull();
   expect(container.querySelectorAll(".rummy-only-timer")).toHaveLength(1);
   expect(container.querySelector(".rummy-only-timer")?.textContent).toBe("19");
+  act(() => root.unmount());
+});
+
+test("a missing card never crashes the shared card renderer", () => {
+  const { container, root } = renderNode(<RummyCard card={null} compact />);
+  expect(container.childElementCount).toBe(0);
+  act(() => root.unmount());
+});
+
+test("the waiting table renders before the server chooses a wild joker", () => {
+  const state = {
+    state: "WAITING_FOR_PLAYERS",
+    mode: "LIVE",
+    roundId: null,
+    balance: 1000,
+    seats: [],
+    closedDeckCount: 0,
+    openDiscard: null,
+    wildJoker: null,
+    currentSeat: null,
+    privateState: null,
+    result: null,
+  };
+  const { container, root } = renderNode(
+    <RummyTable
+      game={{ slug: "rummy" }}
+      state={state}
+      busy={false}
+      reconnecting={false}
+      sendAction={jest.fn()}
+      onExit={jest.fn()}
+    />,
+  );
+  expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
+  expect(container.querySelector(".rummy-wild .rummy-card-back")).not.toBeNull();
   act(() => root.unmount());
 });
 
