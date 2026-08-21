@@ -444,7 +444,7 @@
 .rummy-table {
   background-image:
     radial-gradient(ellipse at 50% 35%, rgba(18,143,90,.18), rgba(0,37,23,.4) 83%),
-    url("/game-art/rummy-felt.jpg"),
+    var(--rummy-felt-art),
     radial-gradient(ellipse at 50% 34%, #15935c, #087148 48%, #03422c 100%);
   background-size: 100% 100%, cover, 100% 100%;
   background-position: center;
@@ -459,7 +459,7 @@
   display: block;
   border: 2px solid #e5c66f;
   border-radius: 50%;
-  background-image: url("/game-art/rummy-avatar-atlas.jpg");
+  background-image: var(--rummy-avatar-art);
   background-size: 400% 200%;
   background-position: var(--avatar-x, 0%) var(--avatar-y, 0%);
   background-repeat: no-repeat;
@@ -472,7 +472,7 @@
 .rummy-card-back {
   overflow: hidden;
   border-color: #f2e4b9;
-  background: #5f1021 url("/game-art/rummy-card-back.jpg") center / cover no-repeat;
+  background: #5f1021 var(--rummy-card-back-art) center / cover no-repeat;
   box-shadow: inset 0 0 0 2px #d7af53, inset 0 0 12px rgba(0,0,0,.2), 0 7px 13px rgba(0,0,0,.5);
 }
 .rummy-card-back i { display: none; }

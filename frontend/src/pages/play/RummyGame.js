@@ -18,6 +18,11 @@ const SUITS = {
 const uuid = () => globalThis.crypto?.randomUUID?.() || `rummy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const RUMMY_POLL_MS = 900;
 const RUMMY_POLL_MAX_MS = 8000;
+const RUMMY_ART = {
+  "--rummy-felt-art": "url('/game-art/rummy-felt.jpg')",
+  "--rummy-avatar-art": "url('/game-art/rummy-avatar-atlas.jpg')",
+  "--rummy-card-back-art": "url('/game-art/rummy-card-back.jpg')",
+};
 
 export function nextRummyPollDelay(previousDelay, succeeded) {
   if (succeeded) return RUMMY_POLL_MS;
@@ -271,7 +276,7 @@ function RummyTable({ game, state, busy, reconnecting, sendAction, onExit }) {
       : `${seats.find((seat) => seat.seatIndex === state.currentSeat)?.displayName || "Player"}'s turn`;
 
   return (
-    <main className="rummy-game" data-testid="rummy-live-table" data-state={state.state} data-mode={state.mode}>
+    <main className="rummy-game" style={RUMMY_ART} data-testid="rummy-live-table" data-state={state.state} data-mode={state.mode}>
       <header className="rummy-game-head">
         <button type="button" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
         <div className="rummy-brand-lockup"><span className="rummy-brand-monogram" aria-hidden>R</span><span><b>RUMMY</b><small>13-CARD CLASSIC</small></span></div>

@@ -432,7 +432,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 /* Login exactly follows the separate CRM's split workspace composition. */
 .crm-login-page { display: grid; min-height: 100dvh; grid-template-columns: minmax(430px, 1fr) minmax(560px, 1.08fr); background: #f4f5f7; color: var(--ink); font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
 .crm-login-brand-panel { position: relative; display: flex; min-height: 100dvh; flex-direction: column; justify-content: space-between; overflow: hidden; padding: 58px 60px 36px; isolation: isolate; background: #0c1016; color: #f5f7fa; }
-.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: -4% -12% -4% -2%; background: url("/chakri-roulette-brand.png") center 32% / min(880px, 115%) auto no-repeat; content: ""; opacity: .56; filter: saturate(.72) contrast(1.06); transform: scale(1.13); }
+.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: -4% -12% -4% -2%; background: var(--crm-login-art) center 32% / min(880px, 115%) auto no-repeat; content: ""; opacity: .56; filter: saturate(.72) contrast(1.06); transform: scale(1.13); }
 .crm-login-brand-panel::after { position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgb(8 12 18 / 36%), rgb(8 12 18 / 5%)), linear-gradient(180deg, rgb(8 12 18 / 12%), rgb(8 12 18 / 28%)); content: ""; }
 .crm-login-brand-lockup { display: flex; align-items: center; gap: 12px; }
 .crm-login-mark { display: grid; width: 50px; height: 50px; place-items: center; overflow: hidden; border-radius: 14px; background: #f0eee9; box-shadow: 0 8px 22px rgb(0 0 0 / 28%); }

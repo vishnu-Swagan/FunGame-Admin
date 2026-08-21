@@ -77,7 +77,7 @@ export default function AdminLogin() {
 
   return (
     <main className="crm-login-page" data-testid="admin-login">
-      <section className="crm-login-brand-panel" aria-label="Chakri platform">
+      <section className="crm-login-brand-panel" aria-label="Chakri platform" style={{ "--crm-login-art": "url('/chakri-roulette-brand.png')" }}>
         <div className="crm-login-brand-lockup">
           <span className="crm-login-mark"><img src="/chakri-app-icon-192.png" alt="" /></span>
           <div>
