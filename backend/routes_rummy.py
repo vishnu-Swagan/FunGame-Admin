@@ -443,7 +443,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
 
 async def _latest_membership(user_id: str, session=None):
     seat = await db.rummy_seats.find_one(
-        {"user_id": user_id, "status": {"$in": ["ACTIVE", "RECONNECTING", "DROPPED", "WON", "LOST"]}},
+        {"user_id": user_id, "status": {"$in": list(ACTIVE_SEAT_STATES)}},
         {"_id": 0}, sort=[("joined_at", -1)], **_kwargs(session),
     )
     if not seat:
@@ -467,6 +467,17 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
 
     async def join_transaction(session):
         kwargs = _kwargs(session)
+        # Older rounds kept this sparse lock after a player had already
+        # dropped. Retire those stale locks before matchmaking so leaving a
+        # Practice table can never block an immediate Live join (or vice versa).
+        await db.rummy_seats.update_many(
+            {
+                "user_id": user["id"],
+                "status": {"$in": ["DROPPED", "LEFT", "CANCELLED", "WON", "LOST"]},
+            },
+            {"$unset": {"active_user_key": ""}},
+            **kwargs,
+        )
         existing_seat, existing_room = await _latest_membership(user["id"], session)
         if existing_seat and existing_room and existing_room.get("state") not in ("ROUND_SETTLED", "CANCELLED"):
             if existing_room.get("mode") == body.mode:
@@ -852,7 +863,10 @@ async def _sweep_presence(room: dict, session) -> bool:
                     "room_id": room["id"], "user_id": seat["user_id"],
                     "status": seat["status"],
                 },
-                {"$set": updates}, **kwargs,
+                {
+                    "$set": updates,
+                    **({"$unset": {"active_user_key": ""}} if updates.get("status") == "DROPPED" else {}),
+                }, **kwargs,
             )
             if result.modified_count == 1:
                 transitions.append((seat, updates))
@@ -944,7 +958,10 @@ async def _advance_one_automatic(room_id: str, requester_id: str):
                 )
                 await db.rummy_seats.update_one(
                     {"room_id": room_id, "user_id": seat["user_id"]},
-                    {"$set": {"status": "DROPPED", "drop_points": points}}, **kwargs,
+                    {
+                        "$set": {"status": "DROPPED", "drop_points": points},
+                        "$unset": {"active_user_key": ""},
+                    }, **kwargs,
                 )
                 active = await _active_seats(room_id, session)
                 if len(active) <= 1:
@@ -1335,11 +1352,14 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
                     category = await _room_category(room, session)
                     await db.rummy_seats.update_one(
                         {"room_id": room_id, "user_id": user["id"]},
-                        {"$set": {
-                            "status": "DROPPED",
-                            "drop_points": int(category.get("invalidDeclarationPoints", 80)),
-                            "invalid_declaration": validation["code"],
-                        }},
+                        {
+                            "$set": {
+                                "status": "DROPPED",
+                                "drop_points": int(category.get("invalidDeclarationPoints", 80)),
+                                "invalid_declaration": validation["code"],
+                            },
+                            "$unset": {"active_user_key": ""},
+                        },
                         **kwargs,
                     )
                     active = await _active_seats(room_id, session)
@@ -1365,7 +1385,10 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
                 )
                 await db.rummy_seats.update_one(
                     {"room_id": room_id, "user_id": user["id"]},
-                    {"$set": {"status": "DROPPED", "drop_points": points, "dropped_at": _now_iso()}}, **kwargs,
+                    {
+                        "$set": {"status": "DROPPED", "drop_points": points, "dropped_at": _now_iso()},
+                        "$unset": {"active_user_key": ""},
+                    }, **kwargs,
                 )
                 active = await _active_seats(room_id, session)
                 if len(active) <= 1:
