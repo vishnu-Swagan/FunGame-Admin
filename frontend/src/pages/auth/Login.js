@@ -38,8 +38,9 @@ export default function Login() {
       // `email` keeps older API deployments compatible during the rollout.
       const { data } = await api.post("/auth/login", { identifier, email: identifier, password });
       if (data.user.role === "ADMIN") {
-        toast.info("Administrators sign in on the dedicated operator console.");
-        window.location.assign("https://crm.chakri.casino/admin/login");
+        login(data.access_token, data.user);
+        toast.success("Operator workspace opened.");
+        navigate("/admin/dashboard", { replace: true });
         return;
       }
       login(data.access_token, data.user);

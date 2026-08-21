@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -95,6 +96,20 @@ class RummyAction(BaseModel):
         return canonical
 
 
+class RummyChatCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: str = Field(min_length=1, max_length=180)
+
+    @field_validator("body")
+    @classmethod
+    def clean_body(cls, value):
+        cleaned = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f]", " ", value)).strip()
+        if not cleaned:
+            raise ValueError("message cannot be empty")
+        return cleaned
+
+
 class CategoryPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +144,9 @@ async def ensure_rummy_core():
     await db.rummy_seats.create_index("active_user_key", unique=True, sparse=True)
     await db.rummy_hands.create_index([("room_id", 1), ("round_id", 1), ("user_id", 1)], unique=True)
     await db.rummy_actions.create_index([("room_id", 1), ("user_id", 1), ("action_id", 1)], unique=True)
+    await db.rummy_chat.create_index("id", unique=True)
+    await db.rummy_chat.create_index([("room_id", 1), ("created_at", -1)])
+    await db.rummy_chat.create_index("created_at", expireAfterSeconds=86_400, name="rummy_chat_24h")
     await db.rummy_categories.create_index("id", unique=True)
     await db.game_rounds.create_index(
         [("slug", 1), ("round_id", 1), ("user_id", 1)],
@@ -329,7 +347,7 @@ async def _start_round(room: dict, category: dict, session):
 async def _public_state(room: dict, requester_id: str, session=None):
     kwargs = _kwargs(session)
     seats = await db.rummy_seats.find(
-        {"room_id": room["id"]}, {"_id": 0}, **kwargs,
+        {"room_id": room["id"]}, {"_id": 0, "user_id": 0, "room_id": 0, "round_id": 0}, **kwargs,
     ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
     hands = await db.rummy_hands.find(
         {"room_id": room["id"], "round_id": room.get("round_id")},
@@ -340,6 +358,10 @@ async def _public_state(room: dict, requester_id: str, session=None):
     requester_seat = next((seat for seat in seats if seat.get("user_id") == requester_id), None)
     category = await _room_category(room, session)
     user = await db.users.find_one({"id": requester_id}, {"_id": 0, "chip_balance": 1}, **kwargs)
+    chat_rows = await db.rummy_chat.find(
+        {"room_id": room["id"]}, {"_id": 0}, **kwargs,
+    ).sort("created_at", -1).to_list(40)
+    chat_rows.reverse()
     remaining = None
     if room.get("state") == "TURN_ACTIVE" and room.get("turn_deadline"):
         remaining = max(0.0, round(float(room["turn_deadline"]) - _epoch(), 3))
@@ -403,6 +425,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
         "closedDeckCount": len(room.get("closed_deck", [])),
         "openDiscard": top_discard, "wildJoker": room.get("wild_joker"),
         "privateState": private, "result": room.get("result"),
+        "chat": serialize_doc(chat_rows),
         "shuffleProof": proof, "balance": int((user or {}).get("chip_balance", 0)),
     }
 
@@ -435,7 +458,30 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         kwargs = _kwargs(session)
         existing_seat, existing_room = await _latest_membership(user["id"], session)
         if existing_seat and existing_room and existing_room.get("state") not in ("ROUND_SETTLED", "CANCELLED"):
-            return await _public_state(existing_room, user["id"], session)
+            if existing_room.get("mode") == body.mode:
+                return await _public_state(existing_room, user["id"], session)
+            if existing_room.get("state") != "WAITING_FOR_PLAYERS":
+                _fail(409, "RUMMY_MODE_SWITCH_BLOCKED", "Finish or leave the current Rummy round before changing mode.")
+            refund_amount = _waiting_refund_amount(existing_seat)
+            released = await db.rummy_seats.delete_one({
+                "room_id": existing_room["id"],
+                "user_id": user["id"],
+                "status": {"$in": list(ACTIVE_SEAT_STATES)},
+            }, **kwargs)
+            if released.deleted_count != 1:
+                _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat could not be released.")
+            if refund_amount:
+                await credit_chips(
+                    user["id"], refund_amount, "Rummy mode changed during matchmaking",
+                    ref=f"{existing_seat.get('stake_ref') or existing_room['id']}:refund",
+                    kind=ledger.REFUND, game="rummy", session=session,
+                )
+            existing_room.update({
+                "seat_count": max(0, int(existing_room.get("seat_count", 1)) - 1),
+                "version": int(existing_room.get("version", 0)) + 1,
+                "updated_at": _now_iso(),
+            })
+            await db.rummy_rooms.replace_one({"id": existing_room["id"]}, existing_room, **kwargs)
 
         current_category = await _category(body.categoryId, session)
 
@@ -1010,6 +1056,37 @@ async def rummy_room_state(room_id: str, user: dict = Depends(require_active_pla
             {"$set": {"last_seen_at": _now_iso(), "last_seen_epoch": _epoch()}},
         )
     return await _public_state(room, user["id"])
+
+
+@router.post("/games/rummy/rooms/{room_id}/chat")
+async def rummy_room_chat(room_id: str, body: RummyChatCreate, user: dict = Depends(require_active_player)):
+    """Post one short, room-scoped message retained for no more than 24 hours."""
+    await require_playable_game("rummy")
+    room, seat = await _load_membership(room_id, user["id"])
+    if room.get("state") == "CANCELLED":
+        _fail(409, "RUMMY_CHAT_CLOSED", "Chat is closed for this table.")
+    now = datetime.now(timezone.utc)
+    recent = await db.rummy_chat.count_documents({
+        "room_id": room_id,
+        "user_id": user["id"],
+        "created_at": {"$gte": now - timedelta(minutes=1)},
+    })
+    if recent >= 8:
+        _fail(429, "RUMMY_CHAT_RATE_LIMIT", "Please wait before sending another message.")
+    item = {
+        "id": str(uuid.uuid4()),
+        "room_id": room_id,
+        "round_id": room.get("round_id"),
+        "user_id": user["id"],
+        "seatIndex": int(seat["seat_index"]),
+        "displayName": seat.get("display_name") or "Player",
+        "avatar": seat.get("avatar") or "crown",
+        "body": body.body,
+        "created_at": now,
+    }
+    await db.rummy_chat.insert_one(copy.deepcopy(item))
+    public_item = {key: value for key, value in item.items() if key not in {"user_id", "room_id", "round_id"}}
+    return {"item": serialize_doc(public_item)}
 
 
 @router.post("/games/rummy/rooms/{room_id}/actions")

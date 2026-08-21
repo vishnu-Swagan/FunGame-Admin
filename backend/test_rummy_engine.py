@@ -144,6 +144,11 @@ def test_private_group_metadata_has_own_version_and_never_advances_room_version(
     assert other.expectedVersion == 17
 
 
+def test_table_chat_collapses_whitespace_and_removes_control_characters():
+    message = routes_rummy.RummyChatCreate(body="  Nice\n\tmove!\x00  ")
+    assert message.body == "Nice move!"
+
+
 def test_live_pot_conserves_the_five_immutable_seat_stakes():
     seats = [
         {
@@ -514,6 +519,7 @@ class _PrivacyDb:
         self.rummy_hands = _Collection(hands)
         self.rummy_categories = _Collection(categories)
         self.users = _Collection(users)
+        self.rummy_chat = _Collection([])
 
 
 def test_public_projection_contains_only_requesters_private_hand():

@@ -1,0 +1,13 @@
+{
+  "name": "chakri-rummy-motion-source",
+  "private": true,
+  "scripts": {
+    "render:still": "remotion still index.jsx RummyWinAtmosphere rummy-win-atmosphere.png --frame=48 --public-dir=../../frontend/public"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.515",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.515"
+  }
+}

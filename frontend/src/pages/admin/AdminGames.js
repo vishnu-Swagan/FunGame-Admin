@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { Star } from "lucide-react";
+import { Search, Star } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,6 +14,7 @@ const LIVE_STATUSES = ["COMING_SOON", "ENABLED", "MAINTENANCE"];
 export default function AdminGames() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -42,11 +43,34 @@ export default function AdminGames() {
     }
   };
 
+  const shownGames = games.filter((game) => {
+    const needle = query.trim().toLowerCase();
+    return !needle || [game.name, game.slug, game.category, game.status]
+      .some((value) => String(value || "").toLowerCase().includes(needle));
+  });
+
   return (
     <PageTransition className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Games</h1>
-        <p className="text-sm text-white/55 mt-1">{games.length} registered · only the ten reviewed games can be made live; the server enforces every play attempt.</p>
+      <div className="crm-page-header">
+        <div className="crm-page-header-copy">
+          <span className="crm-page-context">Platform</span>
+          <h1>Game catalog</h1>
+          <p>Manage the persisted single-provider catalog and operational availability.</p>
+        </div>
+        <div className="crm-page-actions"><span className="source-badge"><span className="source-indicator" />Live service</span></div>
+      </div>
+
+      <div className="crm-inline-notice">
+        <span className="source-indicator" />
+        <div><strong>Server-enforced availability</strong><p>Only reviewed games can be made live. Every locked-game play attempt is rejected by the API.</p></div>
+      </div>
+
+      <div className="crm-filter-bar">
+        <label className="crm-search-control">
+          <Search size={15} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, category, ID, or status" aria-label="Search games" />
+        </label>
+        <span className="crm-filter-count">{shownGames.length} of {games.length} games</span>
       </div>
 
       {loading ? (
@@ -64,7 +88,7 @@ export default function AdminGames() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {games.map((g) => (
+              {shownGames.map((g) => (
                 <TableRow key={g.slug} data-testid="admin-game-row" className="border-white/5 hover:bg-white/5">
                   <TableCell>
                     <div className="flex items-center gap-3">

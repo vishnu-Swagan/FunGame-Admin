@@ -1,5 +1,4 @@
 import "@/App.css";
-import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
@@ -85,13 +84,6 @@ function FallbackRedirect() {
   return <Navigate to={routeForUser(user)} replace />;
 }
 
-function OperatorConsoleRedirect() {
-  useEffect(() => {
-    window.location.replace("https://crm.chakri.casino/admin/login");
-  }, []);
-  return <LoadingScreen />;
-}
-
 function AdminConsoleApp() {
   return (
     <BrowserRouter>
@@ -101,6 +93,18 @@ function AdminConsoleApp() {
           <Route path={ADMIN_LOGIN_PATH} element={<PublicOnly><AdminLogin /></PublicOnly>} />
           <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
             <Route index element={<AdminDashboard />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="players" element={<AdminUsers />} />
+            <Route path="finance/deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="finance/withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="finance/transactions" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
+            <Route path="bonuses" element={<AdminChipRequests />} />
+            <Route path="games/catalog" element={<AdminGames />} />
+            <Route path="reports" element={<AdminCompliance />} />
+            <Route path="notifications" element={<AdminAnnouncements />} />
+            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
+            <Route path="monitoring" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
             <Route path="signups" element={<Navigate to="/admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
@@ -149,9 +153,44 @@ function PlayerApp() {
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
-          {/* Operator UI is isolated on the dedicated CRM origin. */}
-          <Route path="/gk-admin-portal" element={<OperatorConsoleRedirect />} />
-          <Route path="/admin/*" element={<OperatorConsoleRedirect />} />
+          {/* The Render-backed CRM is available on the same origin while the
+              separate Hostinger console remains independent. Every operator
+              route still passes through the admin and permission guards. */}
+          <Route path="/gk-admin-portal" element={<PublicOnly><AdminLogin /></PublicOnly>} />
+          <Route path="/admin/login" element={<Navigate to="/gk-admin-portal" replace />} />
+          <Route path="/admin" element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="players" element={<AdminUsers />} />
+            <Route path="finance/deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="finance/withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="finance/transactions" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
+            <Route path="bonuses" element={<AdminChipRequests />} />
+            <Route path="games/catalog" element={<AdminGames />} />
+            <Route path="reports" element={<AdminCompliance />} />
+            <Route path="notifications" element={<AdminAnnouncements />} />
+            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
+            <Route path="monitoring" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
+            <Route path="signups" element={<Navigate to="/admin/users?status=PENDING" replace />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="kyc" element={<RequirePermission permission={ADMIN_PERMISSIONS.KYC_VIEW}><AdminKyc /></RequirePermission>} />
+            <Route path="deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
+            <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
+            <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
+            <Route path="distributors" element={<AdminDistributors />} />
+            <Route path="commission" element={<AdminCommission />} />
+            <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="compliance" element={<AdminCompliance />} />
+            <Route path="support" element={<AdminSupport />} />
+            <Route path="games" element={<AdminGames />} />
+            <Route path="announcements" element={<AdminAnnouncements />} />
+            <Route path="settings" element={<AdminSettings />} />
+          </Route>
           <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
 
           {/* Onboarding */}

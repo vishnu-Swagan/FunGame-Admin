@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { UserCheck, UserX, Ban, RotateCcw, Users } from "lucide-react";
+import { UserCheck, UserX, Ban, RotateCcw, Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,6 +19,7 @@ export default function AdminUsers() {
   const initial = searchParams.get("status") || "PENDING";
   const [filter, setFilter] = useState(FILTERS.includes(initial) ? initial : "PENDING");
   const [users, setUsers] = useState([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectNote, setRejectNote] = useState("");
@@ -78,31 +79,50 @@ export default function AdminUsers() {
     await act(user.id, "approve");
   };
 
+  const shownUsers = users.filter((user) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return [user.id, user.display_name, user.username, user.email, user.phone, user.country]
+      .some((value) => String(value || "").toLowerCase().includes(needle));
+  });
+
   return (
     <PageTransition className="space-y-4">
-      <h1 className="text-2xl font-bold tracking-tight">Users</h1>
+      <div className="crm-page-header">
+        <div className="crm-page-header-copy">
+          <span className="crm-page-context">People</span>
+          <h1>Players</h1>
+          <p>Internal player management, wallet visibility, gaming activity, security, and audit history.</p>
+        </div>
+        <div className="crm-page-actions"><span className="source-badge"><span className="source-indicator" />Live service</span></div>
+      </div>
 
-      <div className="fg-rail flex gap-2 overflow-x-auto">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            data-testid={`admin-users-filter-${f.toLowerCase()}`}
-            onClick={() => {
-              setFilter(f);
-              setSearchParams(f === "ALL" ? {} : { status: f });
-            }}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 min-h-[36px] text-xs font-bold border transition-[background-color] duration-150 ${
-              filter === f ? "bg-primary text-primary-foreground border-primary" : "bg-white/5 text-white/65 border-white/10 hover:bg-white/10"
-            }`}
-          >
-            {f}
-          </button>
-        ))}
+      <div className="crm-filter-bar">
+        <label className="crm-search-control">
+          <Search size={15} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search ID, name, mobile, or email" aria-label="Search players" />
+        </label>
+        <div className="crm-filter-tabs" aria-label="Player status">
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              data-testid={`admin-users-filter-${f.toLowerCase()}`}
+              onClick={() => {
+                setFilter(f);
+                setSearchParams(f === "ALL" ? {} : { status: f });
+              }}
+              className={filter === f ? "active" : ""}
+            >
+              {f === "ALL" ? "All players" : f.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}
+            </button>
+          ))}
+        </div>
+        <span className="crm-filter-count">{shownUsers.length} loaded</span>
       </div>
 
       {loading ? (
         <div className="h-40 rounded-2xl fg-shimmer border border-white/5" />
-      ) : users.length === 0 ? (
+      ) : shownUsers.length === 0 ? (
         <EmptyState icon={Users} title={`No ${filter.toLowerCase()} users`} subtitle="They will appear here as players register and submit onboarding." />
       ) : (
         <div className="rounded-2xl border border-white/10 overflow-x-auto">
@@ -123,7 +143,7 @@ export default function AdminUsers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => {
+              {shownUsers.map((u) => {
                 const review = registrationReview(u);
                 return (
                 <TableRow key={u.id} data-testid="admin-user-row" className="border-white/5 hover:bg-white/5">

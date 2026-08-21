@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import fs from "fs";
 import path from "path";
-import { nextRummyPollDelay, PlayerSeat } from "./RummyGame";
+import { nextRummyPollDelay, PlayerSeat, RummyCard } from "./RummyGame";
 
 
 jest.mock("react-router-dom", () => ({ useNavigate: () => jest.fn() }), { virtual: true });
@@ -52,6 +52,14 @@ test("opponents retain hidden backs and only the active seat renders the one cou
   expect(container.querySelector(".rummy-card-back")).not.toBeNull();
   expect(container.querySelectorAll(".rummy-only-timer")).toHaveLength(1);
   expect(container.querySelector(".rummy-only-timer")?.textContent).toBe("19");
+  act(() => root.unmount());
+});
+
+test("an undealt wild joker renders a placeholder instead of crashing the table", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  act(() => root.render(<RummyCard card={null} compact />));
+  expect(container.querySelector(".rummy-card-placeholder")?.textContent).toBe("?");
   act(() => root.unmount());
 });
 
