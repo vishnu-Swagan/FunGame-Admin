@@ -30,7 +30,8 @@ function useSoundState() {
   return muted;
 }
 
-function RummyCard({ card, selected, raised, onSelect, onDragStart, compact = false }) {
+export function RummyCard({ card, selected, raised, onSelect, onDragStart, compact = false }) {
+  if (!card) return null;
   const joker = card?.printedJoker || card?.code === "PJ";
   const suit = SUITS[card?.suit];
   const rank = joker ? "J" : String(card?.code || "").slice(0, -1);
@@ -158,7 +159,7 @@ function Results({ result, onLobby }) {
   );
 }
 
-function RummyTable({ game, state, busy, reconnecting, sendAction, onExit }) {
+export function RummyTable({ game, state, busy, reconnecting, sendAction, onExit }) {
   const reducedMotion = useReducedMotion();
   const muted = useSoundState();
   const [selected, setSelected] = useState([]);
@@ -244,7 +245,7 @@ function RummyTable({ game, state, busy, reconnecting, sendAction, onExit }) {
           <div className="rummy-piles">
             <Deck label="CLOSED DECK" count={state.closedDeckCount} disabled={busy || !privateState?.canDraw} onClick={() => sendAction("DRAW_CLOSED")} />
             <Deck label="OPEN CARD" card={state.openDiscard} open disabled={busy || !privateState?.canDraw || !state.openDiscard} onClick={() => sendAction("DRAW_DISCARD")} />
-            <div className="rummy-wild"><RummyCard card={state.wildJoker} compact /><span>WILD JOKER</span></div>
+            <div className="rummy-wild">{state.wildJoker ? <RummyCard card={state.wildJoker} compact /> : <CardBack />}<span>WILD JOKER</span></div>
           </div>
         </div>
 
