@@ -106,7 +106,7 @@ export const GameIntro = ({ game }) => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <BrandWordmark logoClassName="h-24 w-24" />
+            <BrandWordmark logoClassName="h-auto w-[min(78vw,360px)]" />
           </motion.div>
 
           {/* soft radial glow behind the art */}

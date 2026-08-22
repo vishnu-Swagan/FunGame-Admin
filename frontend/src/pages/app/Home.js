@@ -74,7 +74,7 @@ function VideoHero({ navigate, userName }) {
           {!reduced && <HeroSparks />}
           {/* brand + live floor */}
           <div className="fg-safe-top absolute inset-x-0 top-0 px-4 pt-3 flex items-center justify-between">
-            <BrandWordmark logoClassName="h-16 w-16 drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
+            <BrandWordmark logoClassName="h-auto w-[clamp(140px,45vw,190px)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
             <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/45 px-2.5 py-1 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />

@@ -24,6 +24,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_LOGOUT_PATH } from "@/lib/adminConsole";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
+import { BrandWordmark } from "@/components/Brand";
 import "@/pages/admin/admin-crm.css";
 
 const NAV_GROUPS = [
@@ -166,11 +167,7 @@ export default function AdminLayout() {
 
       <aside className={`sidebar ${sidebarOpen ? "is-open" : ""}`} aria-label="Admin navigation">
         <div className="brand-lockup" data-testid="admin-logo">
-          <span className="brand-mark"><img src="/chakri-app-icon-192.png" alt="" /></span>
-          <span>
-            <strong>Chakri.casino</strong>
-            <small>Secure platform workspace</small>
-          </span>
+          <BrandWordmark logoClassName="admin-brand-logo" />
           <button type="button" className="sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}>
             <X size={18} />
           </button>

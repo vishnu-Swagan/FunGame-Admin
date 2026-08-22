@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Download, Laptop, Smartphone, X, Share, Plus } from "lucide-react";
+import { BrandWordmark } from "@/components/Brand";
 
 const STORAGE_KEY = "fg_app_install_prompt_dismissed";
 const DISMISS_FOR_MS = 7 * 24 * 60 * 60 * 1000;
@@ -198,7 +199,7 @@ export default function IosInstallHint() {
       aria-describedby="app-install-description app-install-instructions"
     >
       <div className="mx-auto max-w-[540px] rounded-2xl border border-primary/30 bg-[#12101a]/95 backdrop-blur-xl shadow-2xl p-3.5 flex items-start gap-3">
-        <img src="/chakri-app-icon-192.png" alt="" className="h-11 w-11 rounded-xl shrink-0" />
+        <BrandWordmark logoClassName="h-auto w-28" className="mt-1 shrink-0" />
         <div className="min-w-0 flex-1 text-sm">
           <p id="app-install-title" className="font-bold text-white">Use Chakri.Casino like an app</p>
           <p id="app-install-description" className="text-white/70 text-[13px] mt-0.5 leading-snug">

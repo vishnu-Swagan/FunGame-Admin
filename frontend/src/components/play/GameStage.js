@@ -8,6 +8,7 @@ import { BetDock } from "@/components/play/BetDock";
 import { ExtrasSheet } from "@/components/play/ExtrasSheet";
 import { FitToStage } from "@/components/play/FitToStage";
 import { useBettingAlarm } from "@/lib/useBettingAlarm";
+import { BrandWordmark } from "@/components/Brand";
 
 /**
  * `fit` scales the table down until it fits the stage, which is right for a
@@ -35,6 +36,7 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
             className="h-8 w-8 flex items-center justify-center rounded-full border border-white/10 bg-white/5 active:scale-95">
             <ArrowLeft className="h-4 w-4 text-white/85" />
           </button>
+          <BrandWordmark logoClassName="h-auto w-24" />
           <h1 className="flex-1 truncate font-display text-lg text-white">{game.name}</h1>
           <button data-testid="play-sound-toggle" onClick={toggleMuted} aria-label={muted ? "Unmute" : "Mute"}
             className={`h-8 w-8 flex items-center justify-center rounded-full border ${muted ? "border-white/10 bg-white/5" : "border-primary/35 bg-primary/10"}`}>

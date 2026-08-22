@@ -29,7 +29,7 @@ export default function Welcome() {
       <div className="relative z-[2] mx-auto max-w-[430px] px-6 min-h-dvh flex flex-col justify-between py-10">
         <div className="pt-10">
           <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-            <BrandWordmark logoClassName="h-44 w-44" className="mb-5" />
+            <BrandWordmark logoClassName="h-auto w-[min(88vw,380px)]" className="mb-5" />
             <h1 className="sr-only">CHAKRI.CASINO</h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
               Premium chip-based casino games in one glowing midnight lobby.

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { X, Volume2, VolumeX } from "lucide-react";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 import { fitDesignCanvas } from "@/lib/viewport";
+import { BrandWordmark } from "@/components/Brand";
 import "./arcade.css";
 
 /**
@@ -126,6 +127,7 @@ export const Cabinet = ({
         {/* Glass: a faint vignette and a sheen, so the art reads as something
             behind a screen rather than a flat page. */}
         <div className="cab-glass" aria-hidden="true" />
+        <BrandWordmark className="cab-brand-lockup" logoClassName="cab-brand-logo" />
         {children}
 
         {systemControls && (

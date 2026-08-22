@@ -5,6 +5,7 @@ import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import { fitDesignCanvas } from "@/lib/viewport";
+import { BrandWordmark } from "@/components/Brand";
 import "./pappuPictures.css";
 
 const SYMBOLS = [
@@ -425,7 +426,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
       <div className="pp-stage">
         <header className="pp-topbar">
           <button type="button" className="pp-round-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back to game details"><ChevronLeft /></button>
-          <span className="pp-live-pill"><i /> LIVE MODE</span>
+          <span className="pp-topbar-brand"><BrandWordmark logoClassName="pp-topbar-brand-logo" /><small><i />LIVE</small></span>
           <strong>₹{balance == null ? "…" : formatChips(balance)} <small>INR</small></strong>
           <button type="button" className="pp-sound-button" onClick={toggleMuted} aria-label={muted ? "Turn sound on" : "Mute sound"}>{muted ? <VolumeX /> : <Volume2 />}</button>
         </header>

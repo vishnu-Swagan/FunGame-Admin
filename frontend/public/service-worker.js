@@ -1,6 +1,6 @@
 // Installable app shell. API calls remain network-only because games and account
 // data are live; only the frontend shell and same-origin static assets are cached.
-const CACHE = 'chakri-shell-v4';
+const CACHE = 'chakri-shell-v5';
 const CORE_ASSETS = [
   '/',
   '/manifest.json',
@@ -13,7 +13,7 @@ const CORE_ASSETS = [
 ];
 
 const offlineDocument = () => new Response(
-  '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0B0B0F"><title>CHAKRI.CASINO</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0f;color:#fff;font:600 16px system-ui"><main style="text-align:center;padding:24px"><img src="/chakri-roulette-brand.png" width="160" height="160" alt="CHAKRI.CASINO"><p style="color:#aaa;font-weight:400">You are offline. Reconnect to continue playing live games.</p></main></body></html>',
+  '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0B0B0F"><title>CHAKRI.CASINO</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0f;color:#fff;font:600 16px system-ui"><main style="text-align:center;padding:24px"><img src="/chakri-roulette-brand.png" width="640" height="160" style="width:min(90vw,640px);height:auto" alt="CHAKRI.CASINO"><p style="color:#aaa;font-weight:400">You are offline. Reconnect to continue playing live games.</p></main></body></html>',
   { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
 );
 

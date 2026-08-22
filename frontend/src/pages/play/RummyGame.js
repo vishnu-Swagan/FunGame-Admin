@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { api, errCode, errMsg } from "@/lib/api";
 import { formatChips } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import "./rummy.css";
 
@@ -151,7 +152,7 @@ function CategoryLobby({ categories, balance, busy, onJoin, onExit }) {
           );
         })}
       </section>
-      <footer><ShieldCheck /> Virtual chips only · secure server shuffle · no cash or currency</footer>
+      <footer><BrandWordmark logoClassName="rummy-lobby-brand-logo" /><span><ShieldCheck /> Virtual chips only · secure server shuffle · no cash or currency</span></footer>
     </main>
   );
 }
@@ -279,7 +280,7 @@ function RummyTable({ game, state, busy, reconnecting, sendAction, onExit }) {
     <main className="rummy-game" style={RUMMY_ART} data-testid="rummy-live-table" data-state={state.state} data-mode={state.mode}>
       <header className="rummy-game-head">
         <button type="button" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
-        <div className="rummy-brand-lockup"><span className="rummy-brand-monogram" aria-hidden>R</span><span><b>RUMMY</b><small>13-CARD CLASSIC</small></span></div>
+        <BrandWordmark className="rummy-brand-lockup" logoClassName="rummy-brand-logo" />
         <div className="rummy-live-pill"><i />{state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"}</div>
         <div className="rummy-balance"><Coins /><b>{formatChips(state.balance)}</b><span>chips</span></div>
         <button type="button" className="rummy-chat-toggle" onClick={() => setChatOpen((open) => !open)} aria-label="Open table chat"><MessageCircle /></button>

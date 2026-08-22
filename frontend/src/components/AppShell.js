@@ -127,7 +127,7 @@ export default function AppShell() {
         <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
             <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
-              <BrandWordmark logoClassName="h-12 w-12" />
+              <BrandWordmark logoClassName="h-auto w-[clamp(118px,34vw,158px)]" />
             </button>
             <div className="flex items-center gap-2">
               <button

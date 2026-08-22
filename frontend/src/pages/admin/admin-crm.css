@@ -144,28 +144,13 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
   display: flex;
   min-height: 72px;
   align-items: center;
-  gap: 11px;
+  justify-content: space-between;
+  gap: 10px;
   padding: 14px 17px;
   border-bottom: 1px solid var(--sidebar-line);
 }
 
-.brand-mark {
-  display: grid;
-  width: 37px;
-  height: 37px;
-  flex: 0 0 37px;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 11px;
-  background: #eeece7;
-  box-shadow: 0 7px 18px rgb(0 0 0 / 16%);
-}
-
-.brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.brand-lockup > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
-.brand-lockup strong { overflow: hidden; font-size: 13.5px; font-weight: 680; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.brand-lockup small { color: var(--sidebar-muted); font-size: 11px; }
+.admin-brand-logo { display: block; width: 188px; max-width: 100%; height: auto; filter: drop-shadow(0 5px 12px rgb(0 0 0 / 24%)); }
 
 .sidebar-close {
   display: none;
@@ -432,14 +417,10 @@ button.metric-cell:hover { background: var(--surface-muted); }
 /* Login exactly follows the separate CRM's split workspace composition. */
 .crm-login-page { display: grid; min-height: 100dvh; grid-template-columns: minmax(430px, 1fr) minmax(560px, 1.08fr); background: #f4f5f7; color: var(--ink); font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
 .crm-login-brand-panel { position: relative; display: flex; min-height: 100dvh; flex-direction: column; justify-content: space-between; overflow: hidden; padding: 58px 60px 36px; isolation: isolate; background: #0c1016; color: #f5f7fa; }
-.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: -4% -12% -4% -2%; background: var(--crm-login-art) center 32% / min(880px, 115%) auto no-repeat; content: ""; opacity: .56; filter: saturate(.72) contrast(1.06); transform: scale(1.13); }
+.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: 0; background: radial-gradient(circle at 14% 22%, rgb(167 105 33 / 23%), transparent 34%), radial-gradient(circle at 88% 78%, rgb(113 21 34 / 18%), transparent 38%); content: ""; }
 .crm-login-brand-panel::after { position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgb(8 12 18 / 36%), rgb(8 12 18 / 5%)), linear-gradient(180deg, rgb(8 12 18 / 12%), rgb(8 12 18 / 28%)); content: ""; }
-.crm-login-brand-lockup { display: flex; align-items: center; gap: 12px; }
-.crm-login-mark { display: grid; width: 50px; height: 50px; place-items: center; overflow: hidden; border-radius: 14px; background: #f0eee9; box-shadow: 0 8px 22px rgb(0 0 0 / 28%); }
-.crm-login-mark img { width: 100%; height: 100%; object-fit: cover; }
-.crm-login-brand-lockup > div { display: grid; gap: 2px; }
-.crm-login-brand-lockup strong { font-size: 16px; font-weight: 720; letter-spacing: -.02em; }
-.crm-login-brand-lockup small { color: rgb(235 241 248 / 58%); font-size: 10px; }
+.crm-login-brand-lockup { display: flex; align-items: center; }
+.crm-login-brand-logo { display: block; width: min(330px, 68%); height: auto; filter: drop-shadow(0 10px 24px rgb(0 0 0 / 34%)); }
 .crm-login-statement { display: grid; max-width: 560px; gap: 18px; margin: auto 0; padding: 48px 0; }
 .crm-login-statement > span { color: #e58a9b; font-size: 10px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
 .crm-login-statement h1 { max-width: 560px; margin: 0; color: white !important; font-size: clamp(43px, 4.25vw, 66px); font-weight: 800; letter-spacing: -.065em; line-height: .91; text-wrap: balance; }
@@ -529,9 +510,8 @@ button.metric-cell:hover { background: var(--surface-muted); }
   .crm-login-page { grid-template-columns: 1fr; }
   .crm-login-brand-panel { display: none; }
   .crm-login-form-panel { min-height: 100dvh; padding: 25px 18px; }
-  .crm-mobile-login-mark { display: inline-flex; width: max-content; height: 38px; align-items: center; gap: 8px; padding: 0 12px; margin-bottom: 17px; border-radius: 9px; background: var(--crm-accent-soft); color: var(--crm-accent-ink); }
-  .crm-mobile-login-mark img { width: 25px; height: 25px; border-radius: 6px; }
-  .crm-mobile-login-mark strong { font-size: 14px; letter-spacing: -.01em; }
+  .crm-mobile-login-mark { display: inline-flex; width: max-content; align-items: center; padding: 7px 10px; margin-bottom: 17px; border: 1px solid var(--line); border-radius: 9px; background: #0c1016; }
+  .crm-mobile-brand-logo { display: block; width: 154px; height: auto; }
 }
 
 @media (max-width: 520px) {

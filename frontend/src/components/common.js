@@ -14,7 +14,7 @@ export const Disclaimer = ({ className = "" }) => (
 export const LoadingScreen = () => (
   <div className="min-h-dvh flex flex-col items-center justify-center bg-background gap-4" data-testid="loading-screen">
     <div className="h-12 w-12 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-    <BrandWordmark logoClassName="h-28 w-28" />
+    <BrandWordmark logoClassName="h-auto w-64" />
   </div>
 );
 

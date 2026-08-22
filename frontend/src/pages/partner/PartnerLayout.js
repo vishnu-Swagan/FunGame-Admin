@@ -34,7 +34,7 @@ export default function PartnerLayout() {
       <header data-testid="partner-topbar" className="sticky top-0 z-40 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl border-b border-border/60">
         <div className="mx-auto max-w-7xl px-4 md:px-6 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5" data-testid="partner-logo">
-            <BrandWordmark logoClassName="h-11 w-11" />
+            <BrandWordmark logoClassName="h-auto w-[clamp(118px,28vw,170px)]" />
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5">
               <Handshake className="h-3 w-3 text-emerald-400" />
               <span className="font-mono text-[9px] tracking-[0.2em] text-emerald-300 uppercase">Partner</span>

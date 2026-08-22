@@ -92,3 +92,10 @@ test("the Rummy lobby uses its dedicated wide wordmark instead of stretching the
   expect(source).toContain('className="rummy-lobby-logo"');
   expect(css).toContain(".rummy-lobby-logo");
 });
+
+test("the live Rummy table uses the shared Chakri brand lockup", () => {
+  const source = fs.readFileSync(path.join(__dirname, "RummyGame.js"), "utf8");
+  expect(source).toContain('import { BrandWordmark } from "@/components/Brand"');
+  expect(source).toContain('className="rummy-brand-lockup"');
+  expect(source).not.toContain('className="rummy-brand-monogram"');
+});

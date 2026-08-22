@@ -43,7 +43,7 @@ export const BrandBoot = () => {
             animate={{ scale: 1, rotate: 0, opacity: 1 }}
             transition={{ type: reduced ? "tween" : "spring", stiffness: 140, damping: 13, duration: reduced ? 0.3 : undefined }}
           >
-            <ChakriLogo className="h-56 w-56 sm:h-64 sm:w-64 drop-shadow-[0_0_42px_rgba(255,174,45,0.48)]" />
+            <ChakriLogo className="h-auto w-[min(90vw,720px)] drop-shadow-[0_0_42px_rgba(255,174,45,0.48)]" />
           </motion.div>
           <motion.p
             className="mt-2 font-gaming text-[11px] tracking-[0.45em] uppercase text-white/45"

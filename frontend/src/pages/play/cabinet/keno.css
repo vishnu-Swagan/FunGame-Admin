@@ -25,6 +25,9 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
+.keno-brand-logo { display: block; width: clamp(112px, 10vw, 170px); height: auto; filter: drop-shadow(0 3px 8px rgba(0,0,0,.65)); }
+.keno-live-mode > span { display: flex; align-items: center; gap: 4px; font-size: 8px; font-weight: 900; letter-spacing: .1em; }
+.keno-live-mode > span i { width: 6px; height: 6px; border-radius: 50%; background: #6cffab; box-shadow: 0 0 8px #6cffab; }
 
 .keno-shell button { touch-action: manipulation; }
 
@@ -140,8 +143,10 @@
   left: 50%;
   min-width: clamp(160px, 14vw, 270px);
   height: calc(100% - 5px);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   color: white;
   border: 2px solid #ffad32;
   border-top: 0;

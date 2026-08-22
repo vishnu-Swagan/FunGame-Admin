@@ -14,6 +14,7 @@ import {
 import { api, errMsg, routeForUser } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
+import { BrandWordmark } from "@/components/Brand";
 import "@/pages/admin/admin-crm.css";
 
 const WORKSPACES = [
@@ -77,13 +78,9 @@ export default function AdminLogin() {
 
   return (
     <main className="crm-login-page" data-testid="admin-login">
-      <section className="crm-login-brand-panel" aria-label="Chakri platform" style={{ "--crm-login-art": "url('/chakri-roulette-brand.png')" }}>
+      <section className="crm-login-brand-panel" aria-label="Chakri platform">
         <div className="crm-login-brand-lockup">
-          <span className="crm-login-mark"><img src="/chakri-app-icon-192.png" alt="" /></span>
-          <div>
-            <strong>Chakri.casino</strong>
-            <small>Secure platform workspace</small>
-          </div>
+          <BrandWordmark logoClassName="crm-login-brand-logo" />
         </div>
 
         <div className="crm-login-statement">
@@ -105,8 +102,7 @@ export default function AdminLogin() {
         <div className="crm-login-form-wrap">
           <header>
             <span className="crm-mobile-login-mark">
-              <img src="/chakri-app-icon-192.png" alt="" />
-              <strong>Chakri.casino</strong>
+              <BrandWordmark logoClassName="crm-mobile-brand-logo" />
             </span>
             <h2>Sign in</h2>
             <p>Choose the workspace assigned to your account.</p>

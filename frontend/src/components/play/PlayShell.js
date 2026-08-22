@@ -4,6 +4,7 @@ import { ArrowLeft, Coins, Volume2, VolumeX } from "lucide-react";
 import { Disclaimer, formatChips, timeAgo } from "@/components/common";
 import { isMuted, toggleMuted, onMuteChange } from "@/lib/sound";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
+import { BrandWordmark } from "@/components/Brand";
 
 /**
  * `compact` is for a table that already carries its own chrome. Roulette prints
@@ -34,6 +35,7 @@ export const PlayShell = ({ game, balance, compact = false, children }) => {
         >
           <ArrowLeft className="h-4 w-4 text-white/85" />
         </button>
+        <BrandWordmark logoClassName={`h-auto ${compact ? "w-24" : "w-[clamp(96px,26vw,128px)]"}`} />
         <h1 className={`font-display text-white flex-1 truncate ${compact ? "text-base" : "text-2xl"}`}>{game.name}</h1>
         <button
           data-testid="play-sound-toggle"

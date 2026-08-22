@@ -6,6 +6,7 @@ import { mountRoulette } from "@/pages/play/rouletteVip/engine";
 import { ROULETTE_PREVIEW_TIMING, roulettePreviewState } from "@/pages/play/rouletteVip/previewClock";
 import { isMuted, setMuted, onMuteChange } from "@/lib/sound";
 import { serverSyncedDeadline } from "@/lib/serverClock";
+import { BrandWordmark } from "@/components/Brand";
 import "@/pages/play/rouletteVip/styles.css";
 
 /** Server (bet_type, value) -> the engine's key, so chips land on the right spot. */
@@ -280,6 +281,7 @@ export default function RouletteGame({ game }) {
 
   return (
     <div className="roulette-fullscreen" data-testid="game-play-page">
+      <BrandWordmark className="standalone-game-brand" logoClassName="standalone-game-brand-logo" />
       {fatal ? (
         <div className="p-6 text-center text-sm text-white/70" data-testid="roulette-error">
           The table could not be loaded. {fatal}

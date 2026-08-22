@@ -8,6 +8,7 @@ import { formatChips } from "@/components/common";
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import { fitDesignCanvas } from "@/lib/viewport";
+import { BrandWordmark } from "@/components/Brand";
 import playerAvatar from "./sevenUpDownMascot.png";
 import "./sevenUpDown.css";
 
@@ -215,7 +216,7 @@ function CabinetShell({ game, children }) {
     <div className="j7-shell">
       <header className="j7-titlebar">
         <button type="button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back to game details"><ArrowLeft /></button>
-        <h1>{game.name}</h1>
+        <div className="j7-title-brand"><BrandWordmark logoClassName="j7-title-brand-logo" /><h1 className="sr-only">{game.name}</h1></div>
         <button type="button" onClick={toggleMuted} aria-label={muted ? "Unmute game sounds" : "Mute game sounds"}>
           {muted ? <VolumeX /> : <Volume2 />}
         </button>
