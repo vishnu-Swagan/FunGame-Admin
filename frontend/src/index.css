@@ -210,6 +210,102 @@ summary:focus-visible {
         radial-gradient(600px 220px at 55% 0%, rgba(255, 199, 64, 0.10), transparent 60%);
 }
 
+/* Home identity stage — an editorial-luxury, double-bezel composition. */
+.fg-royal-hero-shell {
+    background: linear-gradient(115deg, #70420a 0%, #f7db83 22%, #8b5615 48%, #ffe9a5 72%, #6d3d08 100%);
+    box-shadow: 0 26px 72px rgba(63, 36, 6, .48), inset 0 -1px 0 rgba(255, 244, 205, .44);
+}
+.fg-royal-hero-core {
+    min-height: clamp(31rem, 76dvh, 40rem);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background:
+        radial-gradient(80% 44% at 50% 32%, rgba(184, 40, 38, .24), transparent 72%),
+        radial-gradient(58% 38% at 50% 58%, rgba(255, 199, 64, .13), transparent 75%),
+        linear-gradient(152deg, #170d0d 0%, #070809 48%, #07130f 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.10), inset 0 -48px 90px rgba(0,0,0,.46);
+}
+.fg-royal-hero-core::before {
+    content: "";
+    position: absolute;
+    inset: -38%;
+    pointer-events: none;
+    opacity: .2;
+    background: repeating-conic-gradient(from 4deg at 50% 50%, rgba(255, 218, 128, .15) 0 1deg, transparent 1deg 11deg);
+    mask-image: radial-gradient(circle, #000 0 28%, transparent 66%);
+}
+.fg-royal-orbit {
+    position: absolute;
+    left: 50%;
+    top: 42%;
+    width: min(92vw, 35rem);
+    aspect-ratio: 1;
+    border: 1px solid rgba(238, 203, 116, .18);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 18px rgba(238, 203, 116, .025), 0 0 0 46px rgba(238, 203, 116, .018), inset 0 0 54px rgba(238, 203, 116, .05);
+}
+.fg-floor-welcome {
+    color: #2b1905;
+    background: linear-gradient(180deg, #fff0b0 0%, #d9a338 54%, #9a5d0a 100%);
+    border: 1px solid rgba(255, 242, 188, .8);
+    box-shadow: 0 8px 26px rgba(91, 48, 5, .4), inset 0 1px 0 rgba(255,255,255,.85), inset 0 -2px 4px rgba(83,41,0,.25);
+    text-shadow: 0 1px 0 rgba(255,255,255,.44);
+    animation: fg-royal-rise .8s cubic-bezier(.32,.72,0,1) both;
+}
+.fg-royal-wordmark {
+    mix-blend-mode: screen;
+    filter: drop-shadow(0 18px 30px rgba(0,0,0,.65)) drop-shadow(0 0 18px rgba(224,174,69,.18));
+    animation: fg-royal-rise 1s .08s cubic-bezier(.32,.72,0,1) both;
+}
+@keyframes fg-royal-rise {
+    from { opacity: 0; transform: translateY(1.25rem) scale(.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (max-width: 420px) {
+    .fg-royal-hero-core { min-height: 34rem; padding-inline: 1rem; }
+    .fg-floor-welcome { letter-spacing: .16em; }
+    .fg-royal-wordmark { width: 126%; margin-inline: -13%; }
+}
+
+/* Route signatures: each main destination keeps the same obsidian-and-gold
+   brand language while using a different composition and interaction model. */
+.fg-home-spotlight {
+    background: #08090d;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 22px 54px rgba(0,0,0,.42);
+}
+.fg-home-spotlight::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(255,212,71,.22);
+    box-shadow: inset 0 -34px 70px rgba(0,0,0,.35);
+    pointer-events: none;
+}
+.fg-floor-door {
+    background:
+        linear-gradient(145deg, rgba(255,255,255,.055), rgba(255,255,255,.018)),
+        radial-gradient(120px 90px at 100% 0%, rgba(255,199,64,.10), transparent 72%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 14px 30px rgba(0,0,0,.24);
+}
+.fg-games-index {
+    background:
+        radial-gradient(320px 180px at 100% 0%, rgba(255,199,64,.16), transparent 70%),
+        repeating-linear-gradient(115deg, transparent 0 24px, rgba(255,255,255,.018) 24px 25px),
+        linear-gradient(155deg, #11131c, #08090e 72%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 18px 46px rgba(0,0,0,.32);
+}
+.fg-search-command {
+    background:
+        radial-gradient(240px 90px at 50% -20%, rgba(255,199,64,.13), transparent 72%),
+        rgba(255,255,255,.035);
+}
+.fg-search-result {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.18);
+}
+
 /* Game key-art container */
 .game-art {
     position: relative;
