@@ -52,6 +52,28 @@ before changing the registration mode. Trial accounts can send only to verified
 test numbers; upgrade the Telesign account before accepting live customers.
 Administrator MFA is separate and is not changed here.
 
+The same Telesign credentials can expose the subscribed trust products, but
+each API call can still consume account balance. Roll them out independently:
+
+```dotenv
+TELESIGN_PLAN=self-service
+TELESIGN_INTELLIGENCE_MODE=observe
+TELESIGN_PHONE_ID_MODE=observe
+TELESIGN_CONTACT_ADDON_ENABLED=true
+TELESIGN_VERIFY_PLUS_ENABLED=true
+TELESIGN_ENGAGEMENT_SMS_ENABLED=false
+```
+
+Start Intelligence and Phone ID in `observe`, review the Admin risk evidence,
+then use `enforce` only after the operator has approved the false-positive and
+provider-outage behavior. Verify Plus is activated and thresholded in My
+Telesign; once declared true here, SMS Verify onboarding does not make a second
+paid Intelligence request. The Contact add-on response is intentionally reduced
+to completion status and standard phone metadata: provider-returned names,
+addresses and email addresses are never stored. Generic engagement SMS remains
+off until an approved sender, India DLT template and customer-consent workflow
+exist.
+
 ## The failure mode to know about
 
 A Docker service that does not deploy **keeps answering normally on its old

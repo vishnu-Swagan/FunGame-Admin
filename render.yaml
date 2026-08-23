@@ -56,6 +56,18 @@ services:
         sync: false                                  # Telesign account credential; configure in Render before enabling
       - key: TELESIGN_API_KEY
         sync: false                                  # secret; never commit or expose to the frontend
+      - key: TELESIGN_PLAN
+        value: self-service
+      - key: TELESIGN_INTELLIGENCE_MODE
+        value: disabled                              # observe first; enforce only after false-positive review
+      - key: TELESIGN_PHONE_ID_MODE
+        value: disabled                              # explicit paid-call gate
+      - key: TELESIGN_CONTACT_ADDON_ENABLED
+        value: "false"                               # contact PII is discarded even when enabled
+      - key: TELESIGN_VERIFY_PLUS_ENABLED
+        value: "false"                               # activate in My Telesign before declaring true
+      - key: TELESIGN_ENGAGEMENT_SMS_ENABLED
+        value: "false"                               # requires sender/compliance/consent workflow
       - key: OTP_EXPOSE_DEV_CODE
         value: "false"
       - key: EMAIL_PROVIDER
