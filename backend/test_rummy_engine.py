@@ -1303,6 +1303,17 @@ def test_overdue_live_matchmaking_refunds_then_starts_labelled_wallet_neutral_bo
             assert routes_rummy._settlement_amounts(
                 seats, winner_is_bot=False, mode=routes_rummy.BOT_TABLE_MODE,
             )["humanPayout"] == 0
+
+            # Reloaded clients only expose LIVE/PRACTICE choices. Choosing
+            # Practice resumes the authoritative wallet-neutral fallback.
+            resumed = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV1", mode="PRACTICE"),
+                {"id": "fallback-player", "display_name": "Fallback Player"},
+            )
+            assert resumed["roomId"] == joined["roomId"]
+            assert resumed["mode"] == routes_rummy.BOT_TABLE_MODE
+            assert resumed["walletNeutral"] is True
+            assert (await database.users.find_one({"id": "fallback-player"}))["chip_balance"] == 5000
         finally:
             (
                 routes_rummy.db, routes_rummy.run_game_transaction,

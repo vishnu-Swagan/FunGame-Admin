@@ -1272,8 +1272,17 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         )
         existing_seat, existing_room = await _latest_membership(user["id"], session)
         if existing_seat and existing_room and existing_room.get("state") not in ("ROUND_SETTLED", "CANCELLED"):
-            if existing_room.get("mode") == body.mode:
-                if body.mode == "PRACTICE" and existing_room.get("state") == "WAITING_FOR_PLAYERS":
+            if (
+                existing_room.get("mode") == body.mode
+                or (
+                    body.mode == "PRACTICE"
+                    and existing_room.get("mode") == BOT_TABLE_MODE
+                )
+            ):
+                if (
+                    existing_room.get("mode") == "PRACTICE"
+                    and existing_room.get("state") == "WAITING_FOR_PLAYERS"
+                ):
                     real_seats = await db.rummy_seats.find({
                         "room_id": existing_room["id"],
                         "is_bot": {"$ne": True},
