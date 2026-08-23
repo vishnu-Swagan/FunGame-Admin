@@ -45,7 +45,34 @@ login rate limits use it. Approval atomically claims the submitted contacts,
 records the operator decision, activates gameplay, and grants the existing
 welcome play-chip bonus. Restore contact OTP later by switching
 `REGISTRATION_MODE=PHONE_OTP` only after the SMS adapter and credentials are
-configured and tested. Administrator MFA is separate and is not changed here.
+configured and tested. For Telesign SMS Verify, store `TELESIGN_CUSTOMER_ID`
+and `TELESIGN_API_KEY` as Render secrets, set `OTP_SMS_ADAPTER=telesign`, keep
+`OTP_EXPOSE_DEV_CODE=false`, and prove delivery to an approved test number
+before changing the registration mode. Trial accounts can send only to verified
+test numbers; upgrade the Telesign account before accepting live customers.
+Administrator MFA is separate and is not changed here.
+
+The same Telesign credentials can expose the subscribed trust products, but
+each API call can still consume account balance. Roll them out independently:
+
+```dotenv
+TELESIGN_PLAN=self-service
+TELESIGN_INTELLIGENCE_MODE=observe
+TELESIGN_PHONE_ID_MODE=observe
+TELESIGN_CONTACT_ADDON_ENABLED=true
+TELESIGN_VERIFY_PLUS_ENABLED=true
+TELESIGN_ENGAGEMENT_SMS_ENABLED=false
+```
+
+Start Intelligence and Phone ID in `observe`, review the Admin risk evidence,
+then use `enforce` only after the operator has approved the false-positive and
+provider-outage behavior. Verify Plus is activated and thresholded in My
+Telesign; once declared true here, SMS Verify onboarding does not make a second
+paid Intelligence request. The Contact add-on response is intentionally reduced
+to completion status and standard phone metadata: provider-returned names,
+addresses and email addresses are never stored. Generic engagement SMS remains
+off until an approved sender, India DLT template and customer-consent workflow
+exist.
 
 ## The failure mode to know about
 

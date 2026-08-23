@@ -25,6 +25,7 @@ from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
 import compliance
+import telesign_service
 import revenue
 import commission
 import payouts
@@ -1005,6 +1006,34 @@ async def update_system(body: SystemConfigUpdate, admin: dict = Depends(require_
         await db.system_config.update_one({'key': 'main'}, {'$set': updates})
     cfg = await db.system_config.find_one({'key': 'main'}, {'_id': 0})
     return {'message': 'System config updated', 'config': serialize_doc(cfg)}
+
+
+@router.get('/telesign')
+async def get_telesign_status(admin: dict = Depends(require_admin)):
+    """Expose non-secret product readiness and local usage evidence."""
+    status = telesign_service.product_status()
+    screened_users = await db.users.count_documents({
+        'role': 'PLAYER', 'telesign_onboarding': {'$exists': True},
+    })
+    flagged_users = await db.users.count_documents({
+        'role': 'PLAYER',
+        '$or': [
+            {'telesign_onboarding.intelligence.risk.recommendation': {'$in': ['flag', 'block']}},
+            {'telesign_last_sign_in.risk.recommendation': {'$in': ['flag', 'block']}},
+        ],
+    })
+    verify_deliveries = await db.otp_challenges.count_documents({
+        'delivery_provider': 'telesign',
+    })
+    return {
+        **status,
+        'usage': {
+            'screened_players': screened_users,
+            'flagged_players': flagged_users,
+            'sms_verify_challenges': verify_deliveries,
+        },
+        'secrets_managed_by_host': True,
+    }
 
 
 # ---------- Distributors (CRM) ----------

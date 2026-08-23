@@ -27,6 +27,7 @@ from pymongo.errors import DuplicateKeyError
 
 from db import db
 from email_service import EmailService
+import telesign_service
 
 
 logger = logging.getLogger('otp')
@@ -553,6 +554,27 @@ class TwilioSmsAdapter:
             return {'sent': False, 'provider': 'twilio', 'error': type(exc).__name__}
 
 
+class TelesignSmsAdapter:
+    """Deliver an application-generated OTP through Telesign SMS Verify."""
+
+    VERIFY_SMS_URL = telesign_service.VERIFY_SMS_URL
+
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        try:
+            result = await telesign_service.send_verify_sms(
+                identity.value, code, purpose,
+            )
+            return {
+                'sent': True,
+                'provider': 'telesign',
+                'reference_id': result['reference_id'],
+            }
+        except telesign_service.TelesignServiceError as exc:
+            # Metadata only: the code, key and recipient never enter logs.
+            logger.error('Telesign OTP delivery failed: %s', exc.reason)
+            return {'sent': False, 'provider': 'telesign', 'error': exc.reason}
+
+
 class MockOtpAdapter:
     async def send(self, identity: Identity, code: str, purpose: str) -> dict:
         if _is_production():
@@ -577,6 +599,8 @@ def delivery_adapter(channel: str) -> OtpDeliveryAdapter:
         return EmailOtpAdapter()
     if channel == 'SMS' and adapter == 'twilio':
         return TwilioSmsAdapter()
+    if channel == 'SMS' and adapter == 'telesign':
+        return TelesignSmsAdapter()
     if adapter == 'disabled':
         return DisabledOtpAdapter()
     raise OtpConfigurationError(f'Unsupported {channel.lower()} OTP adapter')
@@ -614,6 +638,10 @@ def delivery_adapter_ready(channel: str) -> bool:
     if channel == 'SMS' and adapter == 'twilio':
         return all((os.environ.get(name) or '').strip() for name in (
             'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+        ))
+    if channel == 'SMS' and adapter == 'telesign':
+        return all((os.environ.get(name) or '').strip() for name in (
+            'TELESIGN_CUSTOMER_ID', 'TELESIGN_API_KEY',
         ))
     return False
 
@@ -718,13 +746,16 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         await _restore_previous_challenge(database, active, now)
         raise OtpConfigurationError('Verification delivery is temporarily unavailable')
 
+    delivery_fields = {
+        'delivery_provider': delivery.get('provider', 'unknown'),
+        'delivered_at': _now(),
+        'updated_at': _now(),
+    }
+    if delivery.get('reference_id'):
+        delivery_fields['delivery_reference_id'] = delivery['reference_id']
     await database.otp_challenges.update_one(
         {'id': challenge_id, 'active': True},
-        {'$set': {
-            'delivery_provider': delivery.get('provider', 'unknown'),
-            'delivered_at': _now(),
-            'updated_at': _now(),
-        }},
+        {'$set': delivery_fields},
     )
     public_channel = 'PHONE' if identity.channel == 'SMS' else 'EMAIL'
     destination = masked_destination(identity)

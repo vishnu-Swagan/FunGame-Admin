@@ -13,6 +13,7 @@ from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 import crm
 import compliance
+import telesign_service
 from avatar_service import deterministic_avatar_key
 from models import (
     ChangePasswordRequest,
@@ -94,6 +95,106 @@ def _registration_mode() -> str:
     if configured in (ADMIN_REVIEW_ACTIVATION_MODE, PHONE_OTP_ACTIVATION_MODE):
         return configured
     return 'DISABLED'
+
+
+def _telesign_mode(name: str) -> str:
+    value = (os.environ.get(name) or 'disabled').strip().lower()
+    return value if value in {'disabled', 'observe', 'enforce'} else 'disabled'
+
+
+def _telesign_flag(name: str) -> bool:
+    return (os.environ.get(name) or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+async def _telesign_onboarding_screen(
+    identity: Identity,
+    email: str | None,
+    *,
+    verify_plus_will_screen: bool,
+) -> dict | None:
+    """Collect non-PII onboarding signals without duplicating Verify Plus.
+
+    Intelligence includes standard Phone ID fields. A separate Phone ID call is
+    therefore made only when its Contact add-on was explicitly enabled. Contact
+    names, addresses and email addresses are discarded by the provider client.
+    """
+    result = {}
+    intelligence_mode = _telesign_mode('TELESIGN_INTELLIGENCE_MODE')
+    if intelligence_mode != 'disabled' and not verify_plus_will_screen:
+        try:
+            intelligence = await telesign_service.evaluate_phone(
+                identity.value,
+                'create',
+                email_address=email,
+            )
+        except telesign_service.TelesignServiceError as exc:
+            logger.error('Telesign onboarding Intelligence unavailable: %s', exc.reason)
+            if intelligence_mode == 'enforce':
+                raise HTTPException(status_code=503, detail={
+                    'code': 'ONBOARDING_RISK_UNAVAILABLE',
+                    'message': 'Account screening is temporarily unavailable.',
+                }) from exc
+        else:
+            result['intelligence'] = intelligence
+            if (intelligence_mode == 'enforce'
+                    and intelligence['risk']['recommendation'] == 'block'):
+                raise HTTPException(status_code=403, detail={
+                    'code': 'ONBOARDING_REVIEW_REQUIRED',
+                    'message': 'We could not complete registration. Contact support for help.',
+                })
+
+    phone_id_mode = _telesign_mode('TELESIGN_PHONE_ID_MODE')
+    contact_enabled = _telesign_flag('TELESIGN_CONTACT_ADDON_ENABLED')
+    # Intelligence already includes standard Phone ID data. Use the separate
+    # endpoint only for Contact, or when Intelligence is not running here.
+    phone_id_needed = phone_id_mode != 'disabled' and (
+        contact_enabled or intelligence_mode == 'disabled' or verify_plus_will_screen
+    )
+    if phone_id_needed:
+        try:
+            result['phone_id'] = await telesign_service.phone_id_contact(
+                identity.value,
+                include_contact=contact_enabled,
+            )
+        except telesign_service.TelesignServiceError as exc:
+            logger.error('Telesign onboarding Phone ID unavailable: %s', exc.reason)
+            if phone_id_mode == 'enforce':
+                raise HTTPException(status_code=503, detail={
+                    'code': 'PHONE_SCREENING_UNAVAILABLE',
+                    'message': 'Phone screening is temporarily unavailable.',
+                }) from exc
+    return result or None
+
+
+async def _telesign_sign_in_screen(user: dict) -> dict | None:
+    mode = _telesign_mode('TELESIGN_INTELLIGENCE_MODE')
+    phone = user.get('phone_normalized') or user.get('phone')
+    if mode == 'disabled' or not phone:
+        return None
+    try:
+        result = await telesign_service.evaluate_phone(
+            phone,
+            'sign-in',
+            account_id=user.get('id'),
+            email_address=user.get('email_normalized') or user.get('email'),
+        )
+    except telesign_service.TelesignServiceError as exc:
+        logger.error('Telesign sign-in Intelligence unavailable: %s', exc.reason)
+        if mode == 'enforce':
+            raise HTTPException(status_code=503, detail={
+                'code': 'SIGN_IN_RISK_UNAVAILABLE',
+                'message': 'Sign-in screening is temporarily unavailable.',
+            }) from exc
+        return None
+    if mode == 'enforce' and result['risk']['recommendation'] == 'block':
+        await db.users.update_one({'id': user['id']}, {'$set': {
+            'telesign_last_sign_in': {**result, 'screened_at': _now().isoformat()},
+        }})
+        raise HTTPException(status_code=403, detail={
+            'code': 'SIGN_IN_RISK_BLOCKED',
+            'message': 'This sign-in needs additional review. Contact support.',
+        })
+    return result
 
 
 def _now() -> datetime:
@@ -179,6 +280,7 @@ def _user_public(user: dict) -> dict:
     for key in (
         'active_session_id', 'email_normalized', 'phone_normalized',
         'previous_email', 'password_failed_attempts', 'locked_until',
+        'telesign_onboarding', 'telesign_last_sign_in',
     ):
         public.pop(key, None)
     # Phone registrations and provisional manual applications carry unique
@@ -418,6 +520,16 @@ async def _register_phone_otp(body: RegisterRequest):
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
 
+    verify_plus_will_screen = bool(
+        _telesign_flag('TELESIGN_VERIFY_PLUS_ENABLED')
+        and (os.environ.get('OTP_SMS_ADAPTER') or '').strip().lower() == 'telesign'
+    )
+    telesign_onboarding = await _telesign_onboarding_screen(
+        identity,
+        str(body.email) if body.email else None,
+        verify_plus_will_screen=verify_plus_will_screen,
+    )
+
     await asyncio.to_thread(hash_password, DUMMY_REGISTRATION_SECRET)
     email_identity = normalize_identity(str(body.email)) if body.email else None
     phone_existing = await _find_identity_user(identity)
@@ -491,6 +603,12 @@ async def _register_phone_otp(body: RegisterRequest):
         'accepted_terms_at': created_at,
         'created_at': created_at,
     }
+    if telesign_onboarding:
+        user['telesign_onboarding'] = {
+            **telesign_onboarding,
+            'screened_at': created_at,
+            'verify_plus_expected': verify_plus_will_screen,
+        }
     user['phone'] = identity.value
     user['phone_normalized'] = identity.value
     if email_identity:
@@ -605,6 +723,12 @@ async def _register_for_admin_review(body: RegisterRequest):
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
 
+    telesign_onboarding = await _telesign_onboarding_screen(
+        identity,
+        str(body.email),
+        verify_plus_will_screen=False,
+    )
+
     # Password work happens before persistence so every application pays the
     # same cost. Submitted contacts remain provisional and intentionally do not
     # reserve another player's login identity before an operator approves them.
@@ -679,6 +803,12 @@ async def _register_for_admin_review(body: RegisterRequest):
         'submitted_at': created_at,
         'created_at': created_at,
     }
+    if telesign_onboarding:
+        user['telesign_onboarding'] = {
+            **telesign_onboarding,
+            'screened_at': created_at,
+            'verify_plus_expected': False,
+        }
 
     async def create_account(session):
         kwargs = {'session': session} if session is not None else {}
@@ -1033,12 +1163,21 @@ async def login(body: LoginRequest):
                 'channel': channel,
             })
 
+    telesign_sign_in = None
+    if user.get('role') == 'PLAYER':
+        telesign_sign_in = await _telesign_sign_in_screen(user)
+
     session_id = str(uuid.uuid4())
     login_updates = {
         'active_session_id': session_id,
         'last_login_at': _now().isoformat(),
         'password_failed_attempts': 0,
     }
+    if telesign_sign_in:
+        login_updates['telesign_last_sign_in'] = {
+            **telesign_sign_in,
+            'screened_at': _now().isoformat(),
+        }
     if _self_service_needs_profile(user) and player_contact_verified:
         # Repair accounts verified before the profile state transition shipped.
         login_updates['status'] = 'VERIFIED'
