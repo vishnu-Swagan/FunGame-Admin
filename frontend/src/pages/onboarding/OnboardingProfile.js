@@ -8,7 +8,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { AVATARS, AvatarBadge, Disclaimer } from "@/components/common";
+import { Disclaimer } from "@/components/common";
+import { ProfileAvatar } from "@/components/ProfileAvatar";
+import { CARTOON_AVATARS, cartoonAvatarForKey } from "@/lib/profileAvatars";
 import { motion } from "framer-motion";
 import { BrandWordmark } from "@/components/Brand";
 
@@ -20,7 +22,9 @@ export default function OnboardingProfile() {
   const [displayName, setDisplayName] = useState(user?.display_name || "");
   const [country, setCountry] = useState(user?.country || "");
   const [dob, setDob] = useState(user?.date_of_birth || "");
-  const [avatar, setAvatar] = useState(user?.avatar || "star");
+  const [avatar, setAvatar] = useState(
+    cartoonAvatarForKey(user?.avatar)?.key || CARTOON_AVATARS[0].key,
+  );
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -70,18 +74,22 @@ export default function OnboardingProfile() {
 
           <form onSubmit={submit} className="mt-7 space-y-5">
             <div className="space-y-2">
-              <Label>Choose an avatar</Label>
-              <div data-testid="avatar-picker" className="grid grid-cols-6 gap-2">
-                {AVATARS.map((a) => (
+              <div className="flex items-center justify-between gap-3">
+                <Label>Choose your 3D avatar</Label>
+                <span className="text-[10px] font-semibold text-primary">60 royal characters</span>
+              </div>
+              <div data-testid="avatar-picker" className="grid max-h-64 grid-cols-6 gap-2 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
+                {CARTOON_AVATARS.map((item) => (
                   <button
-                    key={a.key}
+                    key={item.key}
                     type="button"
                     data-testid="avatar-picker-option"
-                    aria-label={`Avatar ${a.key}`}
-                    onClick={() => setAvatar(a.key)}
-                    className={`rounded-full p-0.5 transition-[box-shadow] duration-150 ${avatar === a.key ? "ring-2 ring-primary" : ""}`}
+                    aria-label={item.label}
+                    aria-pressed={avatar === item.key}
+                    onClick={() => setAvatar(item.key)}
+                    className={`aspect-square rounded-2xl border p-1 transition-[transform,border-color,background-color,box-shadow] duration-150 ${avatar === item.key ? "border-primary bg-primary/15 ring-2 ring-primary" : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-primary/35"}`}
                   >
-                    <AvatarBadge avatarKey={a.key} size={44} />
+                    <ProfileAvatar avatarKey={item.key} size={44} alt="" className="h-full w-full" />
                   </button>
                 ))}
               </div>

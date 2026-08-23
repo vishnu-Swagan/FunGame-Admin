@@ -13,6 +13,7 @@ from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 import crm
 import compliance
+from avatar_service import deterministic_avatar_key
 from models import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -27,6 +28,7 @@ from auth_utils import (
     create_access_token,
     get_current_user,
     hash_password,
+    maybe_upgrade_legacy_avatar,
     verify_password,
 )
 from otp_service import (
@@ -474,7 +476,8 @@ async def _register_phone_otp(body: RegisterRequest):
         'country': country,
         'country_code': country_code,
         'date_of_birth': body.date_of_birth,
-        'avatar': 'star',
+        'avatar': deterministic_avatar_key(identity.value),
+        'avatar_source': 'PRESET',
         'chip_balance': 0,
         'points_balance': 0,
         'favorites': [],
@@ -658,7 +661,8 @@ async def _register_for_admin_review(body: RegisterRequest):
         'country': country,
         'country_code': country_code,
         'date_of_birth': body.date_of_birth,
-        'avatar': 'star',
+        'avatar': deterministic_avatar_key(identity.value),
+        'avatar_source': 'PRESET',
         'chip_balance': 0,
         'points_balance': 0,
         'favorites': [],
@@ -1101,6 +1105,7 @@ async def login(body: LoginRequest):
                 'channel': 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL',
             })
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
+    user = await maybe_upgrade_legacy_avatar(user)
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {'access_token': token, 'user': _user_public(user)}
 

@@ -4,6 +4,7 @@ import {
   Star, Crown, Gem, Zap, Rocket, Sun, Moon, Heart, Spade, Club, Diamond, Dices, Coins,
 } from "lucide-react";
 import { BrandWordmark } from "@/components/Brand";
+import { cartoonAvatarForKey } from "@/lib/profileAvatars";
 
 export const Disclaimer = ({ className = "" }) => (
   <p data-testid="play-chips-disclaimer" className={`text-[11px] tracking-[0.18em] uppercase text-white/70 ${className}`}>
@@ -102,16 +103,29 @@ export const AVATARS = [
   { key: "dice", icon: Dices, from: "#0b8457", to: "#28e0a5" },
 ];
 
-export const AvatarBadge = ({ avatarKey = "star", size = 40, className = "" }) => {
+export const AvatarBadge = ({ avatarKey = "star", size = 40, className = "", testId = "avatar-badge" }) => {
   const preset = AVATARS.find((a) => a.key === avatarKey) || AVATARS[0];
+  const cartoon = cartoonAvatarForKey(avatarKey);
   const Icon = preset.icon;
   return (
     <div
-      data-testid="avatar-badge"
-      className={`rounded-full flex items-center justify-center border border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] ${className}`}
+      data-testid={testId}
+      className={`relative overflow-hidden rounded-full flex items-center justify-center border border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] ${className}`}
       style={{ width: size, height: size, background: `linear-gradient(140deg, ${preset.from}, ${preset.to})` }}
     >
       <Icon className="text-white drop-shadow" style={{ width: size * 0.5, height: size * 0.5 }} />
+      {cartoon && (
+        <img
+          key={cartoon.src}
+          src={cartoon.src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable="false"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(event) => { event.currentTarget.hidden = true; }}
+        />
+      )}
     </div>
   );
 };

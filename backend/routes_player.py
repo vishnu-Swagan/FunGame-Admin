@@ -1,15 +1,29 @@
 """Player routes: onboarding, games, chips, announcements, notifications, settings, system config."""
+import asyncio
 import os
 import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Query, Response
+from fastapi import APIRouter, HTTPException, Depends, File, Query, Response, UploadFile
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
-from models import (OnboardingProfileRequest, PlayerProfileUpdate, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
+from models import (OnboardingProfileRequest, PlayerAvatarSelection, PlayerProfileUpdate, ChipRequestCreate, SellChipsRequestCreate, SettingsUpdate,
                     ConvertRequest, ReturnChipsRequestCreate, SupportMessageCreate)
+from avatar_service import (
+    ALLOWED_UPLOAD_CONTENT_TYPES,
+    CARTOON_AVATAR_KEYS,
+    LEGACY_AVATAR_KEYS,
+    MAX_UPLOAD_BYTES,
+    PLAYER_AVATAR_KEYS,
+    AvatarImageError,
+    deterministic_avatar_key,
+    normalize_uploaded_avatar,
+    preset_asset_path,
+    upload_id_for_user,
+    uploaded_avatar_path,
+)
 from auth_utils import (
     check_maintenance_for_players,
     get_current_user,
@@ -27,6 +41,9 @@ import ledger
 
 logger = logging.getLogger('player')
 router = APIRouter(tags=['player'])
+
+_avatar_storage_ready = False
+_avatar_storage_lock = asyncio.Lock()
 
 PUBLIC_GAME_STATUSES = ('ENABLED', 'COMING_SOON', 'MAINTENANCE', 'UPDATE_REQUIRED')
 GAME_ART_BASE_URL = os.environ.get(
@@ -596,6 +613,251 @@ async def mark_all_read(user: dict = Depends(get_current_user)):
 
 
 # ---------- Settings / profile ----------
+def _require_active_profile_player(user: dict) -> None:
+    if user.get('role') != 'PLAYER' or user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail={
+            'code': 'ACTIVE_PLAYER_REQUIRED',
+            'message': 'An active player account is required.',
+        })
+
+
+def _avatar_profile_projection() -> dict:
+    return {
+        '_id': 0,
+        'display_name': 1,
+        'avatar': 1,
+        'avatar_source': 1,
+        'avatar_upload_id': 1,
+        'avatar_url': 1,
+        'profile_updated_at': 1,
+    }
+
+
+async def _ensure_avatar_storage() -> None:
+    """Create the public-id lookup once per API worker before first upload."""
+    global _avatar_storage_ready
+    if _avatar_storage_ready:
+        return
+    async with _avatar_storage_lock:
+        if _avatar_storage_ready:
+            return
+        try:
+            await db.avatar_uploads.create_index('id', unique=True)
+        except Exception as exc:
+            logger.error('Avatar upload storage is unavailable: %s', type(exc).__name__)
+            raise HTTPException(status_code=503, detail={
+                'code': 'AVATAR_STORAGE_UNAVAILABLE',
+                'message': 'Avatar uploads are temporarily unavailable.',
+            }) from exc
+        _avatar_storage_ready = True
+
+
+async def _restore_avatar_upload(user_id: str, previous: dict | None) -> None:
+    """Restore the bounded upload row after a failed profile-state change."""
+    try:
+        if previous:
+            await db.avatar_uploads.replace_one({'_id': user_id}, previous, upsert=True)
+        else:
+            await db.avatar_uploads.delete_one({'_id': user_id})
+    except Exception as exc:  # the users document still keeps the new row private
+        logger.error('Avatar upload rollback failed for %s: %s', user_id, type(exc).__name__)
+
+
+async def _select_preset_avatar(avatar: str, user: dict) -> dict:
+    _require_active_profile_player(user)
+    now = _now()
+    fresh = await db.users.find_one_and_update(
+        {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE'},
+        {
+            '$set': {
+                'avatar': avatar,
+                'avatar_source': 'PRESET',
+                'profile_updated_at': now,
+            },
+            '$unset': {
+                'avatar_upload_id': '',
+                'avatar_url': '',
+            },
+        },
+        projection=_avatar_profile_projection(),
+        return_document=ReturnDocument.AFTER,
+    )
+    if not fresh:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'The player account changed. Refresh and try again.',
+        })
+    # The users document is the source of truth for public visibility. Cleanup
+    # is best effort so a transient storage error cannot turn a successful
+    # profile update into a misleading API failure; at most one dormant row can
+    # exist because its Mongo _id is the user id.
+    try:
+        await db.avatar_uploads.delete_one({'_id': user['id']})
+    except Exception as exc:  # noqa: BLE001 - bounded orphan is not user-facing failure
+        logger.warning('Avatar upload cleanup failed for %s: %s', user['id'], type(exc).__name__)
+    return fresh
+
+
+@router.get('/profile/avatars')
+async def list_profile_avatars(user: dict = Depends(get_current_user)):
+    """Return the selectable local catalogue and current avatar descriptor."""
+    if user.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail='Player profile is required')
+    return {
+        'presets': [
+            {'key': key, 'asset_path': preset_asset_path(key)}
+            for key in CARTOON_AVATAR_KEYS
+        ],
+        # Older profiles remain valid and editable during the visual rollout.
+        'legacy_keys': sorted(LEGACY_AVATAR_KEYS),
+        'upload': {
+            'allowed_content_types': sorted(ALLOWED_UPLOAD_CONTENT_TYPES),
+            'max_bytes': MAX_UPLOAD_BYTES,
+            'output_content_type': 'image/webp',
+        },
+        'current': {
+            'key': user.get('avatar') or deterministic_avatar_key(user['id']),
+            'source': user.get('avatar_source') or 'PRESET',
+            'url': user.get('avatar_url'),
+        },
+    }
+
+
+@router.put('/profile/avatar')
+async def select_profile_avatar(
+        body: PlayerAvatarSelection,
+        user: dict = Depends(get_current_user)):
+    fresh = await _select_preset_avatar(body.avatar, user)
+    return {'message': 'Avatar updated.', 'profile': serialize_doc(fresh)}
+
+
+async def _read_avatar_upload(file: UploadFile) -> bytes:
+    content_type = str(file.content_type or '').split(';', 1)[0].strip().lower()
+    if content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail={
+            'code': 'AVATAR_FILE_TYPE_UNSUPPORTED',
+            'message': 'Upload a JPEG, PNG, or WebP image.',
+        })
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(min(64 * 1024, MAX_UPLOAD_BYTES + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail={
+                'code': 'AVATAR_FILE_TOO_LARGE',
+                'message': 'The avatar image must be 5 MB or smaller.',
+            })
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
+@router.post('/profile/avatar/upload')
+async def upload_profile_avatar(
+        file: UploadFile = File(...),
+        user: dict = Depends(get_current_user)):
+    """Normalize one player image and persist it in Mongo-backed storage."""
+    _require_active_profile_player(user)
+    try:
+        payload = await _read_avatar_upload(file)
+        normalized = await asyncio.to_thread(
+            normalize_uploaded_avatar, payload, file.content_type,
+        )
+    except AvatarImageError as exc:
+        raise HTTPException(status_code=422, detail={
+            'code': 'AVATAR_IMAGE_INVALID',
+            'message': str(exc),
+        }) from exc
+    finally:
+        await file.close()
+
+    await _ensure_avatar_storage()
+    upload_id = upload_id_for_user(user['id'])
+    avatar_url = (
+        f'{uploaded_avatar_path(upload_id)}'
+        f'?v={normalized["sha256"][:12]}'
+    )
+    now = _now()
+    previous = await db.avatar_uploads.find_one({'_id': user['id']})
+    upload_doc = {
+        '_id': user['id'],
+        'id': upload_id,
+        'user_id': user['id'],
+        'content': normalized['data'],
+        'content_type': normalized['content_type'],
+        'size': normalized['size'],
+        'width': normalized['width'],
+        'height': normalized['height'],
+        'sha256': normalized['sha256'],
+        'created_at': previous.get('created_at') if previous else now,
+        'updated_at': now,
+    }
+    await db.avatar_uploads.replace_one({'_id': user['id']}, upload_doc, upsert=True)
+
+    fallback_key = user.get('avatar')
+    if fallback_key not in PLAYER_AVATAR_KEYS:
+        fallback_key = deterministic_avatar_key(user['id'])
+    try:
+        fresh = await db.users.find_one_and_update(
+            {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE'},
+            {'$set': {
+                'avatar': fallback_key,
+                'avatar_source': 'UPLOAD',
+                'avatar_upload_id': upload_id,
+                # Relative to the canonical API origin. Clients already know that
+                # origin from their authenticated API configuration.
+                'avatar_url': avatar_url,
+                'profile_updated_at': now,
+            }},
+            projection=_avatar_profile_projection(),
+            return_document=ReturnDocument.AFTER,
+        )
+    except Exception:
+        await _restore_avatar_upload(user['id'], previous)
+        raise
+    if not fresh:
+        await _restore_avatar_upload(user['id'], previous)
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_STATE_CHANGED',
+            'message': 'The player account changed. Refresh and try again.',
+        })
+    return {
+        'message': 'Avatar image updated.',
+        'profile': serialize_doc(fresh),
+    }
+
+
+@router.get('/avatars/uploads/{upload_id}')
+async def uploaded_avatar(upload_id: str):
+    """Serve only an upload that is still selected by its owning player."""
+    try:
+        uploaded_avatar_path(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail='Avatar not found') from exc
+    row = await db.avatar_uploads.find_one({'id': upload_id})
+    if not row:
+        raise HTTPException(status_code=404, detail='Avatar not found')
+    owner = await db.users.find_one({
+        'id': row.get('user_id'),
+        'role': 'PLAYER',
+        'avatar_source': 'UPLOAD',
+        'avatar_upload_id': upload_id,
+    }, {'_id': 1})
+    if not owner:
+        raise HTTPException(status_code=404, detail='Avatar not found')
+    return Response(
+        content=bytes(row['content']),
+        media_type='image/webp',
+        headers={
+            'Cache-Control': 'public, max-age=300',
+            'ETag': f'"{row["sha256"]}"',
+            'X-Content-Type-Options': 'nosniff',
+        },
+    )
+
+
 @router.patch('/profile')
 async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_current_user)):
     """Edit only the public game identity of an active player.
@@ -604,17 +866,21 @@ async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_cur
     intentionally absent from the request model so this endpoint cannot become
     an identity, compliance or wallet mutation path.
     """
-    if user.get('role') != 'PLAYER' or user.get('status') != 'ACTIVE':
-        raise HTTPException(status_code=403, detail={
-            'code': 'ACTIVE_PLAYER_REQUIRED',
-            'message': 'An active player account is required.',
-        })
+    _require_active_profile_player(user)
     updates = body.model_dump(exclude_none=True)
+    if set(updates) == {'avatar'}:
+        fresh = await _select_preset_avatar(updates['avatar'], user)
+        return {'message': 'Game profile updated.', 'profile': serialize_doc(fresh)}
     updates['profile_updated_at'] = _now()
+    mongo_update = {'$set': updates}
+    choosing_preset = 'avatar' in updates
+    if choosing_preset:
+        updates['avatar_source'] = 'PRESET'
+        mongo_update['$unset'] = {'avatar_upload_id': '', 'avatar_url': ''}
     fresh = await db.users.find_one_and_update(
         {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE'},
-        {'$set': updates},
-        projection={'_id': 0, 'display_name': 1, 'avatar': 1, 'profile_updated_at': 1},
+        mongo_update,
+        projection=_avatar_profile_projection(),
         return_document=ReturnDocument.AFTER,
     )
     if not fresh:
@@ -622,6 +888,11 @@ async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_cur
             'code': 'ACCOUNT_STATE_CHANGED',
             'message': 'The player account changed. Refresh and try again.',
         })
+    if choosing_preset:
+        try:
+            await db.avatar_uploads.delete_one({'_id': user['id']})
+        except Exception as exc:  # noqa: BLE001 - see _select_preset_avatar
+            logger.warning('Avatar upload cleanup failed for %s: %s', user['id'], type(exc).__name__)
     return {'message': 'Game profile updated.', 'profile': serialize_doc(fresh)}
 
 

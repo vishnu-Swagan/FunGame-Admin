@@ -2,6 +2,7 @@
 import re
 from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator, model_validator
 from typing import Optional, List
+from avatar_service import PLAYER_AVATAR_KEYS
 
 
 # ---------- Auth ----------
@@ -248,11 +249,12 @@ class OnboardingProfileRequest(BaseModel):
             raise ValueError('You must accept the terms to continue')
         return v
 
-
-PLAYER_AVATAR_KEYS = frozenset({
-    'star', 'crown', 'gem', 'zap', 'rocket', 'sun',
-    'moon', 'heart', 'spade', 'club', 'diamond', 'dice',
-})
+    @field_validator('avatar')
+    @classmethod
+    def known_avatar(cls, value):
+        if value not in PLAYER_AVATAR_KEYS:
+            raise ValueError('Unknown avatar')
+        return value
 
 
 class PlayerProfileUpdate(BaseModel):
@@ -284,6 +286,20 @@ class PlayerProfileUpdate(BaseModel):
         if self.display_name is None and self.avatar is None:
             raise ValueError('Provide a display name or avatar')
         return self
+
+
+class PlayerAvatarSelection(BaseModel):
+    """Choose one public preset; uploaded images use the multipart endpoint."""
+    model_config = ConfigDict(extra='forbid')
+
+    avatar: str = Field(min_length=2, max_length=24)
+
+    @field_validator('avatar')
+    @classmethod
+    def known_avatar(cls, value):
+        if value not in PLAYER_AVATAR_KEYS:
+            raise ValueError('Unknown avatar')
+        return value
 
 
 # ---------- Chips / Points ----------

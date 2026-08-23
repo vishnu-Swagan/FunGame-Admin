@@ -8,17 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import re
+import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from auth_utils import require_active_player, require_admin
+from avatar_service import uploaded_avatar_path
 from db import client, db, serialize_doc
 from game_access import require_playable_game
 from ledger import InsufficientChips, credit_chips, debit_chips
@@ -36,10 +40,62 @@ RUMMY_STATES = frozenset({
 })
 ACTIVE_SEAT_STATES = ("ACTIVE", "RECONNECTING")
 BOT_NAMES = ("Mira", "Arjun", "Leela", "Kabir")
+BOT_TABLE_MODE = "BOT_TABLE"
+LIVE_MATCHMAKING_CYCLE_SECONDS = 180
+# Kept as a compatibility alias for older clients that render
+# ``fallbackStartsIn``.  New tables always use the scheduled cycle boundary.
+LIVE_BOT_FALLBACK_SECONDS = float(LIVE_MATCHMAKING_CYCLE_SECONDS)
 MAX_AUTOMATED_TURNS_PER_REQUEST = 12
 MAX_ROUND_TURNS = 100
 DEFAULT_RUMMY_SKILL_RATING = 500
 PRESENCE_STALE_SECONDS = 6
+MAX_GROUP_CARD_ID_LENGTH = 64
+CHAT_RECENT_LIMIT = 30
+CHAT_TEXT_MAX_LENGTH = 160
+CHAT_REQUEST_MAX_LENGTH = 240
+CHAT_RATE_WINDOW_SECONDS = 10
+CHAT_RATE_MAX_EVENTS = 5
+SUPPORT_RATE_WINDOW_SECONDS = 60
+BOT_LOGIC_VERSION = "fair-private-public-v3"
+PLAYER_EMOJI_REACTIONS = frozenset({
+    "smile", "laugh", "clap", "wow", "good-game", "thinking",
+})
+PLAYER_GIF_REACTIONS = frozenset({
+    "royal-clap", "crown-bounce", "card-dance", "victory-spark",
+})
+BOT_PROFILES = (
+    {
+        "id": "mira-orbit", "name": "Mira", "avatar": "avatar-26",
+        "personality": "warm strategist", "playStyle": "patient sequence builder",
+        "chatStyle": "encouraging", "signatureEmoji": "clap",
+    },
+    {
+        "id": "arjun-crest", "name": "Arjun", "avatar": "avatar-37",
+        "personality": "calm tactician", "playStyle": "balanced discard reader",
+        "chatStyle": "dry humour", "signatureEmoji": "thinking",
+    },
+    {
+        "id": "leela-gem", "name": "Leela", "avatar": "avatar-48",
+        "personality": "bold optimist", "playStyle": "tempo-conscious set hunter",
+        "chatStyle": "playful", "signatureEmoji": "laugh",
+    },
+    {
+        "id": "kabir-spade", "name": "Kabir", "avatar": "avatar-59",
+        "personality": "quiet closer", "playStyle": "low-point risk controller",
+        "chatStyle": "respectful", "signatureEmoji": "good-game",
+    },
+)
+BOT_SOCIAL_BEATS = (
+    {"eventType": "TEXT", "message": "Good luck, royals. Let us play a clean hand 👑"},
+    {"eventType": "EMOJI", "reactionId": "thinking"},
+    {"eventType": "GIF", "reactionId": "royal-clap"},
+    {"eventType": "TEXT", "message": "That card made the table interesting 😄"},
+    {
+        "eventType": "MUSIC_REQUEST", "reactionId": "palace-focus",
+        "message": "BOT atmosphere suggestion: Palace Focus instrumental.",
+    },
+    {"eventType": "EMOJI", "reactionId": "good-game"},
+)
 CATEGORY_SNAPSHOT_FIELDS = (
     "id", "displayName", "entryChips", "pointsValue", "minChipBalance",
     "maxChipBalance", "turnDurationSeconds", "skillRatingMin",
@@ -47,6 +103,16 @@ CATEGORY_SNAPSHOT_FIELDS = (
     "firstDropPoints", "middleDropPoints", "invalidDeclarationPoints",
     "maxPlayers", "enabled", "displayOrder", "accent",
 )
+
+# Unique seats, action ids, private hands and settlement rows are correctness
+# requirements, not optional optimisations.  The general application bootstrap
+# continues after an isolated startup failure, so Rummy also owns a fail-closed
+# in-process gate.  It opens only after every core index/category is prepared.
+_RUMMY_CORE_READY = False
+_RUMMY_CORE_ERROR = None
+_RUMMY_CORE_RETRY_AFTER = 0.0
+_RUMMY_CORE_LOCK = asyncio.Lock()
+RUMMY_CORE_RETRY_COOLDOWN_SECONDS = 3.0
 
 
 def _now_iso():
@@ -65,11 +131,85 @@ def _fail(status: int, code: str, message: str):
     raise HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
+def _public_uploaded_avatar_url(profile: dict) -> str | None:
+    """Resolve only API-owned, same-origin uploaded-avatar paths.
+
+    A public Rummy seat never echoes an arbitrary URL from a profile or seat
+    document. The opaque upload id is validated by ``uploaded_avatar_path``;
+    an optional content-hash version is retained only when it has the exact
+    shape written by the avatar upload endpoint.
+    """
+    if profile.get("avatar_source") != "UPLOAD":
+        return None
+    upload_id = str(profile.get("avatar_upload_id") or "")
+    try:
+        base_path = uploaded_avatar_path(upload_id)
+    except ValueError:
+        return None
+    stored_url = str(profile.get("avatar_url") or "")
+    version = re.fullmatch(
+        rf"{re.escape(base_path)}\?v=([a-f0-9]{{12}})", stored_url,
+    )
+    return f"{base_path}?v={version.group(1)}" if version else base_path
+
+
+def reset_rummy_core_readiness():
+    """Close the readiness gate, including between deterministic tests."""
+    global _RUMMY_CORE_READY, _RUMMY_CORE_ERROR, _RUMMY_CORE_RETRY_AFTER
+    _RUMMY_CORE_READY = False
+    _RUMMY_CORE_ERROR = None
+    _RUMMY_CORE_RETRY_AFTER = 0.0
+
+
+def _mark_rummy_core_ready_for_tests():
+    """Open the gate without touching MongoDB in a focused unit test."""
+    global _RUMMY_CORE_READY, _RUMMY_CORE_ERROR, _RUMMY_CORE_RETRY_AFTER
+    _RUMMY_CORE_READY = True
+    _RUMMY_CORE_ERROR = None
+    _RUMMY_CORE_RETRY_AFTER = 0.0
+
+
+async def _require_rummy_core_ready():
+    """Fail closed, but recover from a transient startup preparation failure.
+
+    Only one request retries the idempotent index/category preparation at a
+    time.  A short cooldown prevents a database outage from turning every
+    incoming request into another preparation attempt.
+    """
+    global _RUMMY_CORE_RETRY_AFTER
+    if _RUMMY_CORE_READY:
+        return
+    if time.monotonic() < _RUMMY_CORE_RETRY_AFTER:
+        _fail(
+            503,
+            "RUMMY_CORE_UNAVAILABLE",
+            "Rummy is temporarily unavailable while its secure table state is prepared.",
+        )
+    async with _RUMMY_CORE_LOCK:
+        if _RUMMY_CORE_READY:
+            return
+        if time.monotonic() < _RUMMY_CORE_RETRY_AFTER:
+            _fail(
+                503,
+                "RUMMY_CORE_UNAVAILABLE",
+                "Rummy is temporarily unavailable while its secure table state is prepared.",
+            )
+        try:
+            await ensure_rummy_core()
+        except Exception:
+            _RUMMY_CORE_RETRY_AFTER = time.monotonic() + RUMMY_CORE_RETRY_COOLDOWN_SECONDS
+            _fail(
+                503,
+                "RUMMY_CORE_UNAVAILABLE",
+                "Rummy is temporarily unavailable while its secure table state is prepared.",
+            )
+
+
 class JoinRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     categoryId: str = Field(default="LV1", pattern=r"^LV[1-5]$")
-    mode: Literal["LIVE", "PRACTICE"] = "LIVE"
+    mode: Literal["LIVE", "PRACTICE", "BOT_TABLE"] = "LIVE"
 
 
 class RummyAction(BaseModel):
@@ -89,7 +229,8 @@ class RummyAction(BaseModel):
         canonical = value.strip().upper()
         allowed = {
             "READY", "HEARTBEAT", "DRAW_CLOSED", "DRAW_DISCARD", "DISCARD",
-            "SORT", "GROUP", "UNGROUP", "DECLARE", "DROP", "RECONNECT", "LEAVE",
+            "SORT", "GROUP", "UNGROUP", "DECLARE", "DISCARD_AND_DECLARE",
+            "DROP", "RECONNECT", "LEAVE",
         }
         if canonical not in allowed:
             raise ValueError("unsupported Rummy action")
@@ -122,7 +263,9 @@ class CategoryPatch(BaseModel):
     skillRatingMin: Optional[int] = Field(default=None, ge=0, le=100_000)
     skillRatingMax: Optional[int] = Field(default=None, ge=1, le=100_000)
     reconnectAllowanceSeconds: Optional[int] = Field(default=None, ge=5, le=120)
-    practiceBotDifficulty: Optional[str] = Field(default=None, min_length=2, max_length=24)
+    practiceBotDifficulty: Optional[
+        Literal["guided", "standard", "strong", "expert", "royal"]
+    ] = None
     firstDropPoints: Optional[int] = Field(default=None, ge=0, le=80)
     middleDropPoints: Optional[int] = Field(default=None, ge=0, le=80)
     invalidDeclarationPoints: Optional[int] = Field(default=None, ge=0, le=80)
@@ -130,10 +273,74 @@ class CategoryPatch(BaseModel):
     displayOrder: Optional[int] = Field(default=None, ge=1, le=5)
 
 
-async def ensure_rummy_core():
+class RummyChatRequest(BaseModel):
+    """One bounded, idempotent table message or support request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requestId: str = Field(min_length=8, max_length=96, pattern=r"^[A-Za-z0-9:_-]+$")
+    eventType: Literal["TEXT", "EMOJI", "GIF", "HELP_DESK", "MUSIC_REQUEST"] = "TEXT"
+    message: Optional[str] = Field(default=None, max_length=CHAT_REQUEST_MAX_LENGTH)
+    reactionId: Optional[str] = Field(default=None, min_length=2, max_length=40)
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value):
+        if value is None:
+            return None
+        # Persist plain text only. Whitespace normalization also removes line
+        # breaks/control spacing that could be abused to imitate table chrome.
+        normalized = " ".join(str(value).split())
+        if any(ord(character) < 32 for character in normalized):
+            raise ValueError("message contains unsupported control characters")
+        if "<" in normalized or ">" in normalized:
+            raise ValueError("message must be plain text without markup")
+        return normalized
+
+    @field_validator("reactionId")
+    @classmethod
+    def normalize_reaction(cls, value):
+        return value.strip().lower() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_event_payload(self):
+        if self.eventType == "TEXT":
+            if not self.message:
+                raise ValueError("text messages cannot be empty")
+            if len(self.message) > CHAT_TEXT_MAX_LENGTH:
+                raise ValueError(f"text messages are limited to {CHAT_TEXT_MAX_LENGTH} characters")
+            if self.reactionId is not None:
+                raise ValueError("text messages do not accept a reaction id")
+        elif self.eventType == "EMOJI":
+            if self.reactionId not in PLAYER_EMOJI_REACTIONS:
+                raise ValueError("unsupported table emoji")
+            if self.message:
+                raise ValueError("emoji reactions do not accept message text")
+        elif self.eventType == "GIF":
+            if self.reactionId not in PLAYER_GIF_REACTIONS:
+                raise ValueError("unsupported table GIF")
+            if self.message:
+                raise ValueError("GIF reactions do not accept message text")
+        elif self.eventType == "HELP_DESK":
+            if not self.message or len(self.message) < 3:
+                raise ValueError("describe the help you need")
+            if self.reactionId is not None:
+                raise ValueError("help requests do not accept a reaction id")
+        elif self.eventType == "MUSIC_REQUEST":
+            if not self.message or not 2 <= len(self.message) <= 120:
+                raise ValueError("music requests must contain 2 to 120 characters")
+            if self.reactionId is not None:
+                raise ValueError("music requests do not accept a reaction id")
+        return self
+
+
+async def _ensure_rummy_core_unchecked():
     """Create Rummy indexes and the five idempotent centrally managed categories."""
     await db.rummy_rooms.create_index("id", unique=True)
     await db.rummy_rooms.create_index([("category_id", 1), ("mode", 1), ("state", 1), ("seat_count", 1)])
+    await db.rummy_rooms.create_index([
+        ("mode", 1), ("state", 1), ("scheduled_start_at_epoch", 1),
+    ])
     await db.rummy_seats.create_index([("room_id", 1), ("seat_index", 1)], unique=True)
     await db.rummy_seats.create_index(
         [("room_id", 1), ("user_id", 1)], unique=True,
@@ -148,6 +355,17 @@ async def ensure_rummy_core():
     await db.rummy_chat.create_index([("room_id", 1), ("created_at", -1)])
     await db.rummy_chat.create_index("created_at", expireAfterSeconds=86_400, name="rummy_chat_24h")
     await db.rummy_categories.create_index("id", unique=True)
+    await db.rummy_bot_profiles.create_index("id", unique=True)
+    await db.rummy_chat_events.create_index("id", unique=True)
+    await db.rummy_chat_events.create_index([
+        ("room_id", 1), ("sender_user_id", 1), ("client_request_id", 1),
+    ], unique=True, partialFilterExpression={"client_request_id": {"$type": "string"}})
+    await db.rummy_chat_events.create_index([("room_id", 1), ("created_epoch", -1)])
+    await db.rummy_chat_rate_limits.create_index("expires_at", expireAfterSeconds=0)
+    await db.rummy_support_requests.create_index("id", unique=True)
+    await db.rummy_support_requests.create_index([
+        ("user_id", 1), ("status", 1), ("created_epoch", -1),
+    ])
     await db.game_rounds.create_index(
         [("slug", 1), ("round_id", 1), ("user_id", 1)],
         unique=True,
@@ -167,6 +385,39 @@ async def ensure_rummy_core():
                 {"id": category["id"], field: {"$exists": False}},
                 {"$set": {field: int(category[field])}},
             )
+    for profile in BOT_PROFILES:
+        await db.rummy_bot_profiles.update_one(
+            {"id": profile["id"]},
+            {
+                "$set": {
+                    **copy.deepcopy(profile),
+                    "is_bot": True,
+                    "public_label": "BOT",
+                    "logic_version": BOT_LOGIC_VERSION,
+                    "updated_at": _now_iso(),
+                },
+                "$setOnInsert": {
+                    "rounds_completed": 0,
+                    "wins": 0,
+                    "turns_completed": 0,
+                    "created_at": _now_iso(),
+                },
+            },
+            upsert=True,
+        )
+
+
+async def ensure_rummy_core():
+    """Prepare every Rummy invariant, opening its public routes only on success."""
+    global _RUMMY_CORE_READY, _RUMMY_CORE_ERROR
+    reset_rummy_core_readiness()
+    try:
+        await _ensure_rummy_core_unchecked()
+    except Exception as exc:
+        _RUMMY_CORE_ERROR = f"{type(exc).__name__}: {exc}"
+        raise
+    _RUMMY_CORE_READY = True
+    _RUMMY_CORE_ERROR = None
 
 
 async def _categories(session=None):
@@ -250,6 +501,73 @@ def _iso_to_epoch(value) -> float:
         return 0.0
 
 
+def _next_live_start_epoch(now: float | None = None) -> float:
+    """Return the next shared three-minute matchmaking boundary.
+
+    The schedule depends only on server time. Category/room/player data cannot
+    move a boundary, which makes countdowns consistent across workers and
+    devices and gives every level a fresh opportunity every 180 seconds.
+    """
+    current = _epoch() if now is None else float(now)
+    cycle = LIVE_MATCHMAKING_CYCLE_SECONDS
+    return float(((int(current) // cycle) + 1) * cycle)
+
+
+def _scheduled_room_start_epoch(room: dict) -> float:
+    """Read the persisted boundary, with a safe rolling-deploy fallback."""
+    persisted = room.get("scheduled_start_at_epoch")
+    if persisted is not None:
+        return float(persisted)
+    legacy = room.get("fallback_at_epoch")
+    if legacy is not None:
+        return float(legacy)
+    created = _iso_to_epoch(room.get("created_at"))
+    return created + LIVE_MATCHMAKING_CYCLE_SECONDS if created else _next_live_start_epoch()
+
+
+def _live_cycle_metadata(category_id: str, start_epoch: float) -> dict:
+    start = float(start_epoch)
+    return {
+        "matchmaking_cycle_seconds": LIVE_MATCHMAKING_CYCLE_SECONDS,
+        "matchmaking_cycle_id": f"{category_id}:{int(start)}",
+        "scheduled_start_at_epoch": start,
+        "scheduled_start_at": datetime.fromtimestamp(start, tz=timezone.utc).isoformat(),
+    }
+
+
+def _public_matchmaking(room: dict, seat_count: int | None = None) -> dict:
+    origin_mode = room.get("requested_mode") or (
+        "LIVE" if room.get("fallback_from_live") else room.get("mode")
+    )
+    if origin_mode != "LIVE":
+        return {
+            "cycleSeconds": LIVE_MATCHMAKING_CYCLE_SECONDS,
+            "cycleId": None,
+            "scheduledStartAtEpoch": None,
+            "scheduledStartAt": None,
+            "startsIn": 0.0,
+            "missingSeats": 0,
+            "originMode": origin_mode,
+            "fallbackPolicy": None,
+        }
+    scheduled = _scheduled_room_start_epoch(room)
+    waiting = room.get("state") == "WAITING_FOR_PLAYERS"
+    count = int(room.get("seat_count", 0) if seat_count is None else seat_count)
+    return {
+        "cycleSeconds": int(room.get("matchmaking_cycle_seconds") or LIVE_MATCHMAKING_CYCLE_SECONDS),
+        "cycleId": room.get("matchmaking_cycle_id") or f"{room.get('category_id', 'LV')}:{int(scheduled)}",
+        "scheduledStartAtEpoch": scheduled,
+        "scheduledStartAt": room.get("scheduled_start_at")
+        or datetime.fromtimestamp(scheduled, tz=timezone.utc).isoformat(),
+        "startsIn": max(0.0, round(scheduled - _epoch(), 3)) if waiting else 0.0,
+        "missingSeats": max(0, rummy.MAX_PLAYERS - count) if waiting else 0,
+        "originMode": origin_mode,
+        "fallbackPolicy": (
+            "MISSING_SEATS_USE_LABELLED_FAIR_BOTS_AND_LIVE_STAKES_ARE_REFUNDED"
+        ),
+    }
+
+
 def _presence_transition(seat: dict, category: dict, now: float) -> dict | None:
     """Return the next persisted presence state, or ``None`` when unchanged."""
     if seat.get("is_bot") or seat.get("status") not in ACTIVE_SEAT_STATES:
@@ -288,8 +606,166 @@ async def _best_arrangement(cards: list[dict], wild_rank: int) -> dict:
     return await asyncio.to_thread(rummy.best_arrangement, cards, wild_rank)
 
 
-async def _choose_bot_discard(cards: list[dict], wild_rank: int) -> dict:
-    return await asyncio.to_thread(rummy.choose_bot_discard, cards, wild_rank)
+async def _choose_bot_discard(
+    cards: list[dict], wild_rank: int, difficulty: str = "expert",
+    forbidden_card_id: str | None = None,
+) -> dict:
+    return await asyncio.to_thread(
+        rummy.choose_bot_discard, cards, wild_rank, difficulty, forbidden_card_id,
+    )
+
+
+async def _choose_bot_draw_source(
+    cards: list[dict], open_discard: dict | None, wild_rank: int,
+    difficulty: str,
+) -> str:
+    return await asyncio.to_thread(
+        rummy.choose_bot_draw_source, cards, open_discard, wild_rank, difficulty,
+    )
+
+
+def _bot_think_delay_seconds(difficulty: str, entropy: int | None = None) -> float:
+    """Human-scale server delay; entropy affects timing only, never cards."""
+    bounds = {
+        "guided": (2.8, 5.0), "standard": (2.5, 4.5),
+        "strong": (2.1, 3.9), "expert": (1.8, 3.4), "royal": (1.6, 3.0),
+    }
+    low, high = bounds[rummy.bot_difficulty(difficulty)]
+    tick = secrets.randbelow(1001) if entropy is None else max(0, min(1000, int(entropy)))
+    return round(low + ((high - low) * tick / 1000), 3)
+
+
+def _bot_discard_delay_seconds(difficulty: str, entropy: int | None = None) -> float:
+    bounds = {
+        "guided": (1.2, 2.2), "standard": (1.1, 2.0),
+        "strong": (1.0, 1.8), "expert": (0.9, 1.6), "royal": (0.8, 1.5),
+    }
+    low, high = bounds[rummy.bot_difficulty(difficulty)]
+    tick = secrets.randbelow(1001) if entropy is None else max(0, min(1000, int(entropy)))
+    return round(low + ((high - low) * tick / 1000), 3)
+
+
+def _bot_profile_snapshot(category: dict, bot_number: int) -> dict:
+    """Freeze a transparent personality/experience contract onto one seat."""
+    profile = BOT_PROFILES[(max(1, int(bot_number)) - 1) % len(BOT_PROFILES)]
+    difficulty = rummy.bot_difficulty(category.get("practiceBotDifficulty"))
+    rating_by_level = {
+        "guided": 650, "standard": 1200, "strong": 1900,
+        "expert": 2600, "royal": 3400,
+    }
+    experience_by_level = {
+        "guided": "APPRENTICE", "standard": "SEASONED", "strong": "VETERAN",
+        "expert": "MASTER", "royal": "ROYAL_MASTER",
+    }
+    return {
+        **copy.deepcopy(profile),
+        "difficulty": difficulty,
+        "experienceBand": experience_by_level[difficulty],
+        "skillRating": rating_by_level[difficulty],
+        "logicVersion": BOT_LOGIC_VERSION,
+        "usesPrivateHandOnly": True,
+        "usesPublicDiscardOnly": True,
+        "outcomeControl": False,
+    }
+
+
+def _public_chat_event(event: dict) -> dict:
+    is_bot = bool(event.get("is_bot"))
+    return {
+        "id": event["id"],
+        "eventType": event["event_type"],
+        "message": event.get("message"),
+        "reactionId": event.get("reaction_id"),
+        "sender": {
+            "seatIndex": event.get("sender_seat_index"),
+            "playerId": event.get("masked_sender_id"),
+            "displayName": event.get("sender_name") or ("BOT" if is_bot else "Player"),
+            "isBot": is_bot,
+            "label": "BOT" if is_bot else "PLAYER",
+            "botLabel": event.get("bot_label") if is_bot else None,
+        },
+        "requestStatus": event.get("request_status"),
+        "visibility": event.get("visibility") or "TABLE",
+        "generatedAt": event.get("generated_at") or event.get("created_at"),
+        "createdAt": event.get("created_at"),
+        "createdEpoch": float(event.get("created_epoch") or 0),
+    }
+
+
+async def _recent_chat_events(room_id: str, session=None, limit: int = CHAT_RECENT_LIMIT):
+    collection = getattr(db, "rummy_chat_events", None)
+    if collection is None:
+        return []
+    rows = await collection.find(
+        {
+            "room_id": room_id,
+            "$or": [
+                {"visibility": "TABLE"},
+                {
+                    "visibility": {"$exists": False},
+                    "event_type": {"$nin": ["HELP_DESK", "MUSIC_REQUEST"]},
+                },
+            ],
+        },
+        {"_id": 0}, **_kwargs(session),
+    ).sort("created_epoch", -1).to_list(max(1, min(CHAT_RECENT_LIMIT, int(limit))))
+    return [_public_chat_event(row) for row in reversed(rows)]
+
+
+def _bot_social_beat(room: dict, seat: dict, phase: str) -> dict:
+    """Select social flavour from metadata only, never from cards/deck/outcome."""
+    key = (
+        f"{room.get('round_id')}:{room.get('turn_count', 0)}:"
+        f"{seat.get('seat_index')}:{phase}"
+    ).encode()
+    index = int(hashlib.sha256(key).hexdigest()[:8], 16) % len(BOT_SOCIAL_BEATS)
+    return copy.deepcopy(BOT_SOCIAL_BEATS[index])
+
+
+async def _emit_bot_chat_event(room: dict, seat: dict, phase: str, session=None):
+    """Persist one idempotent, explicitly-labelled automated table event."""
+    if not seat.get("is_bot"):
+        return None
+    beat = _bot_social_beat(room, seat, phase)
+    event_id = (
+        f"BOT_CHAT:{room.get('round_id') or room['id']}:"
+        f"{int(room.get('turn_count', 0))}:{int(seat['seat_index'])}:{phase}"
+    )
+    now_iso = _now_iso()
+    event = {
+        "id": event_id,
+        "room_id": room["id"],
+        "round_id": room.get("round_id"),
+        "event_type": beat["eventType"],
+        "message": beat.get("message"),
+        "reaction_id": beat.get("reactionId"),
+        "sender_user_id": seat["user_id"],
+        "masked_sender_id": rummy.masked_player_id(seat["user_id"]),
+        "sender_seat_index": int(seat["seat_index"]),
+        "sender_name": seat.get("display_name") or "BOT",
+        "is_bot": True,
+        "bot_label": seat.get("bot_label") or "BOT",
+        "visibility": "TABLE",
+        "request_status": (
+            "AUTOMATED_ATMOSPHERE_SUGGESTION"
+            if beat["eventType"] == "MUSIC_REQUEST" else None
+        ),
+        "generated_at": now_iso,
+        "created_at": now_iso,
+        "created_epoch": _epoch(),
+    }
+    try:
+        await db.rummy_chat_events.insert_one(copy.deepcopy(event), **_kwargs(session))
+    except DuplicateKeyError:
+        return None
+    return event
+
+
+async def _emit_round_opening_bot_chat(room: dict, seats: list[dict], session=None):
+    bot = next((seat for seat in seats if seat.get("is_bot")), None)
+    if bot:
+        return await _emit_bot_chat_event(room, bot, "ROUND_OPENING", session)
+    return None
 
 
 def _choose_indicator(deck: list[dict]):
@@ -311,6 +787,7 @@ async def _start_round(room: dict, category: dict, session):
             "room_id": room["id"],
             "status": {"$in": list(ACTIVE_SEAT_STATES)},
             "user_id": {"$type": "string"},
+            "seat_index": {"$in": list(range(rummy.MAX_PLAYERS))},
         },
         {"_id": 0}, **kwargs,
     ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
@@ -342,21 +819,127 @@ async def _start_round(room: dict, category: dict, session):
         "turn_count": 0, "closed_deck": deck, "discard_pile": [first_discard],
         "wild_joker": indicator, "wild_rank": int(indicator["rank"]),
         "shuffle_seed": proof.pop("seed"), "shuffle_proof": proof,
-        "started_at": now, "updated_at": now,
+        "started_at": now, "started_at_epoch": _epoch(),
+        "scheduled_started_at": now, "updated_at": now,
     })
     await db.rummy_rooms.replace_one({"id": room["id"]}, room, **kwargs)
+    await _emit_round_opening_bot_chat(room, seats, session)
     return room
+
+
+def _validated_groups(raw_groups, owned_card_ids, *, require_full: bool = False):
+    """Return a bounded exact card-id grouping or one stable client error.
+
+    ``actionPayload`` is intentionally an otherwise-open JSON object, so all
+    group-bearing actions share this validator before rules code sees the value.
+    That prevents malformed nesting/unhashable objects from escaping as a 500.
+    """
+    owned = set(owned_card_ids)
+    maximum_cards = max(rummy.HAND_SIZE, len(owned))
+    if not isinstance(raw_groups, list) or len(raw_groups) > maximum_cards:
+        _fail(422, "RUMMY_GROUP_FORMAT", "Groups must be a bounded list of card-id lists.")
+    normalized = []
+    flat = []
+    for group in raw_groups:
+        if not isinstance(group, list) or not group or len(group) > maximum_cards:
+            _fail(422, "RUMMY_GROUP_FORMAT", "Every group must be a non-empty bounded card-id list.")
+        normalized_group = []
+        for card_id in group:
+            if (
+                not isinstance(card_id, str)
+                or not card_id
+                or len(card_id) > MAX_GROUP_CARD_ID_LENGTH
+                or card_id != card_id.strip()
+            ):
+                _fail(422, "RUMMY_GROUP_FORMAT", "Every grouped card id must be a bounded string.")
+            normalized_group.append(card_id)
+            flat.append(card_id)
+        normalized.append(normalized_group)
+    if len(flat) > maximum_cards:
+        _fail(422, "RUMMY_GROUP_FORMAT", "A grouping contains too many cards.")
+    if len(flat) != len(set(flat)) or not set(flat).issubset(owned):
+        _fail(409, "RUMMY_GROUP_OWNERSHIP", "Groups can contain each owned card at most once.")
+    if require_full and (len(flat) != len(owned) or set(flat) != owned):
+        _fail(409, "RUMMY_GROUPS_INCOMPLETE", "Group every remaining card exactly once before declaring.")
+    return normalized
+
+
+def _persisted_group_state(hand: dict, wild_rank: int):
+    """Describe only the player's persisted arrangement, never a suggested one."""
+    cards = hand.get("cards", [])
+    owned_ids = {card["id"] for card in cards}
+    raw_groups = hand.get("groups", [])
+    try:
+        groups = _validated_groups(raw_groups, owned_ids)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return {
+            "groups": [], "labels": [], "declarableDiscardCardIds": [],
+            "validation": {
+                "valid": False,
+                "code": detail.get("code", "RUMMY_GROUP_FORMAT"),
+                "groups": [],
+            },
+        }
+
+    indexed = {card["id"]: card for card in cards}
+    labels = [
+        rummy.classify_group([indexed[card_id] for card_id in group], wild_rank)
+        for group in groups
+    ]
+    if len(cards) == rummy.HAND_SIZE:
+        validation = rummy.validate_declaration(cards, groups, wild_rank)
+        validation["groups"] = labels
+    else:
+        validation = {"valid": False, "code": "DISCARD_REQUIRED", "groups": labels}
+
+    declarable = []
+    if len(cards) == rummy.HAND_SIZE + 1 and hand.get("drawn"):
+        for candidate in cards:
+            candidate_id = candidate["id"]
+            if hand.get("draw_source") == "DISCARD" and hand.get("drawn_card_id") == candidate_id:
+                continue
+            remaining = [card for card in cards if card["id"] != candidate_id]
+            remaining_ids = {card["id"] for card in remaining}
+            candidate_groups = [
+                [card_id for card_id in group if card_id != candidate_id]
+                for group in groups
+            ]
+            candidate_groups = [group for group in candidate_groups if group]
+            try:
+                candidate_groups = _validated_groups(candidate_groups, remaining_ids, require_full=True)
+            except HTTPException:
+                continue
+            if rummy.validate_declaration(remaining, candidate_groups, wild_rank)["valid"]:
+                declarable.append(candidate_id)
+    return {
+        "groups": groups, "labels": labels,
+        "declarableDiscardCardIds": declarable,
+        "validation": validation,
+    }
 
 
 async def _public_state(room: dict, requester_id: str, session=None):
     kwargs = _kwargs(session)
     seats = await db.rummy_seats.find(
-        {"room_id": room["id"]}, {"_id": 0, "room_id": 0, "round_id": 0}, **kwargs,
-    ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
-    hands = await db.rummy_hands.find(
-        {"room_id": room["id"], "round_id": room.get("round_id")},
+        {
+            "room_id": room["id"],
+            "user_id": {"$type": "string"},
+            "seat_index": {"$in": list(range(rummy.MAX_PLAYERS))},
+        },
         {"_id": 0}, **kwargs,
-    ).to_list(rummy.MAX_PLAYERS) if room.get("round_id") else []
+    ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
+    valid_seat_pairs = [
+        {"user_id": seat["user_id"], "seat_index": seat["seat_index"]}
+        for seat in seats
+    ]
+    hands = await db.rummy_hands.find(
+        {
+            "room_id": room["id"], "round_id": room.get("round_id"),
+            "$or": valid_seat_pairs,
+        },
+        {"_id": 0}, **kwargs,
+    ).to_list(len(valid_seat_pairs)) if room.get("round_id") and valid_seat_pairs else []
     hand_by_user = {hand["user_id"]: hand for hand in hands if hand.get("user_id")}
     request_hand = hand_by_user.get(requester_id)
     requester_seat = next((seat for seat in seats if seat.get("user_id") == requester_id), None)
@@ -379,17 +962,25 @@ async def _public_state(room: dict, requester_id: str, session=None):
 
     seat_rows = []
     for seat_index in range(rummy.MAX_PLAYERS):
-        seat = next((item for item in seats if item.get("seat_index") == seat_index and item.get("user_id")), None)
+        seat = next((
+            item for item in seats
+            if item.get("seat_index") == seat_index and item.get("user_id")
+        ), None)
         if not seat:
             seat_rows.append({"seatIndex": seat_index, "status": "EMPTY", "cardCount": 0})
             continue
         hand = hand_by_user.get(seat["user_id"])
+        avatar_url = _public_uploaded_avatar_url(seat)
         seat_rows.append({
             "seatIndex": seat_index,
             "playerId": rummy.masked_player_id(seat["user_id"]),
             "displayName": seat.get("display_name") or ("Practice Bot" if seat.get("is_bot") else "Player"),
             "avatar": seat.get("avatar") or "crown",
+            "avatarUrl": avatar_url,
             "isBot": bool(seat.get("is_bot")),
+            "botDifficulty": seat.get("bot_difficulty") if seat.get("is_bot") else None,
+            "botLabel": seat.get("bot_label") if seat.get("is_bot") else None,
+            "botProfile": copy.deepcopy(seat.get("bot_profile")) if seat.get("is_bot") else None,
             "status": seat.get("status", "ACTIVE"),
             "cardCount": len(hand.get("cards", [])) if hand else 0,
             "active": room.get("state") == "TURN_ACTIVE" and room.get("current_seat") == seat_index,
@@ -399,6 +990,7 @@ async def _public_state(room: dict, requester_id: str, session=None):
     private = None
     if request_hand:
         arrangement = await _best_arrangement(request_hand["cards"], int(room["wild_rank"]))
+        exact_groups = _persisted_group_state(request_hand, int(room["wild_rank"]))
         owns_live_turn = (
             room.get("state") == "TURN_ACTIVE"
             and room.get("current_seat") == request_hand["seat_index"]
@@ -408,25 +1000,50 @@ async def _public_state(room: dict, requester_id: str, session=None):
         private = {
             "seatIndex": request_hand["seat_index"],
             "cards": request_hand["cards"],
-            "groups": request_hand.get("groups", []),
+            "groups": exact_groups["groups"],
+            "groupLabels": exact_groups["labels"],
+            "groupValidation": exact_groups["validation"],
+            "declarableDiscardCardIds": exact_groups["declarableDiscardCardIds"],
             "drawn": bool(request_hand.get("drawn")),
             "drawnCardId": request_hand.get("drawn_card_id"),
             "suggestedGroups": arrangement["groups"],
             "ungroupedCardIds": arrangement["ungroupedCardIds"],
             "points": arrangement["score"],
+            "dropPenaltyPoints": int(
+                category.get("firstDropPoints", 20)
+                if int((requester_seat or {}).get("turns_taken", 0)) == 0
+                else category.get("middleDropPoints", 40)
+            ),
             "canDraw": (
                 owns_live_turn and not request_hand.get("drawn")
             ),
             "canDiscard": (
                 owns_live_turn and bool(request_hand.get("drawn"))
             ),
-            "canDeclare": bool(owns_live_turn and arrangement["valid"] and not request_hand.get("drawn")),
+            "canDeclare": bool(
+                owns_live_turn
+                and not request_hand.get("drawn")
+                and exact_groups["validation"]["valid"]
+            ),
         }
 
     top_discard = room.get("discard_pile", [])[-1] if room.get("discard_pile") else None
     proof = copy.deepcopy(room.get("shuffle_proof", {}))
     if room.get("state") in ("ROUND_SETTLED", "CANCELLED"):
         proof["seedReveal"] = room.get("shuffle_seed")
+    fallback_remaining = None
+    if room.get("mode") == "LIVE" and room.get("state") == "WAITING_FOR_PLAYERS":
+        fallback_at = _scheduled_room_start_epoch(room)
+        fallback_remaining = max(0.0, round(fallback_at - _epoch(), 3))
+    bot_action = None
+    if room.get("bot_action_seat") is not None:
+        bot_action = {
+            "seatIndex": int(room["bot_action_seat"]),
+            "phase": room.get("bot_action_phase") or "THINKING",
+            "readyIn": max(0.0, round(float(room.get("bot_action_ready_at") or 0) - _epoch(), 3)),
+        }
+    matchmaking = _public_matchmaking(room, len(seats))
+    chat_events = await _recent_chat_events(room["id"], session)
     return {
         "roomId": room["id"], "roundId": room.get("round_id"),
         "mode": room["mode"], "state": room["state"], "version": room["version"],
@@ -437,6 +1054,14 @@ async def _public_state(room: dict, requester_id: str, session=None):
         "openDiscard": top_discard, "wildJoker": room.get("wild_joker"),
         "privateState": private, "result": room.get("result"),
         "chat": serialize_doc(public_chat_rows),
+        "walletNeutral": bool(room.get("wallet_neutral") or room.get("mode") in ("PRACTICE", BOT_TABLE_MODE)),
+        "fallbackStartsIn": fallback_remaining,
+        "scheduledStartAtEpoch": matchmaking["scheduledStartAtEpoch"],
+        "scheduledStartIn": matchmaking["startsIn"],
+        "matchmaking": matchmaking,
+        "botTableNotice": room.get("bot_table_notice"),
+        "botAction": bot_action,
+        "chatEvents": chat_events,
         "shuffleProof": proof, "balance": int((user or {}).get("chip_balance", 0)),
     }
 
@@ -454,15 +1079,69 @@ async def _latest_membership(user_id: str, session=None):
     return seat, room
 
 
+def _new_bot_seat(
+    room: dict, category: dict, seat_index: int, bot_number: int,
+    now_epoch: float | None = None,
+) -> dict:
+    """Build a complete, visibly labelled wallet-neutral bot seat."""
+    profile = _bot_profile_snapshot(category, bot_number)
+    difficulty = profile["difficulty"]
+    return {
+        "room_id": room["id"],
+        "user_id": f"BOT:{room['id']}:{seat_index}",
+        "seat_index": int(seat_index),
+        "display_name": f"{profile['name']} · BOT",
+        "avatar": profile["avatar"],
+        "is_bot": True,
+        "bot_difficulty": difficulty,
+        "bot_label": f"BOT · {difficulty.title()}",
+        "bot_profile_id": profile["id"],
+        "bot_profile": profile,
+        "bot_logic_version": BOT_LOGIC_VERSION,
+        "status": "ACTIVE",
+        "entry_chips": int(category["entryChips"]),
+        "wallet_stake_chips": 0,
+        "turns_taken": 0,
+        "missed_turns": 0,
+        "joined_at": _now_iso(),
+        "last_seen_at": _now_iso(),
+        "last_seen_epoch": _epoch() if now_epoch is None else float(now_epoch),
+    }
+
+
 @router.get("/games/rummy/categories")
 async def rummy_categories(user: dict = Depends(require_active_player)):
+    await _require_rummy_core_ready()
     await require_playable_game("rummy")
     rows = await _categories()
-    return {"categories": serialize_doc(rows), "maxPlayers": rummy.MAX_PLAYERS, "currency": None, "unit": "chips"}
+    next_start = _next_live_start_epoch()
+    schedule = {
+        "cycleSeconds": LIVE_MATCHMAKING_CYCLE_SECONDS,
+        "nextScheduledStartAtEpoch": next_start,
+        "nextScheduledStartAt": datetime.fromtimestamp(next_start, tz=timezone.utc).isoformat(),
+        "startsIn": max(0.0, round(next_start - _epoch(), 3)),
+    }
+    return {
+        "categories": serialize_doc([
+            {
+                **row,
+                "liveMatchmaking": {
+                    **schedule,
+                    "cycleId": f"{row['id']}:{int(next_start)}",
+                },
+            }
+            for row in rows
+        ]),
+        "liveMatchmaking": schedule,
+        "maxPlayers": rummy.MAX_PLAYERS,
+        "currency": None,
+        "unit": "chips",
+    }
 
 
 @router.post("/games/rummy/join")
 async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_player)):
+    await _require_rummy_core_ready()
     await require_playable_game("rummy")
 
     async def join_transaction(session):
@@ -486,30 +1165,27 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
                         "room_id": existing_room["id"],
                         "is_bot": {"$ne": True},
                         "user_id": {"$type": "string"},
+                        "seat_index": {"$in": list(range(rummy.MAX_PLAYERS))},
                     }, {"_id": 0}, **kwargs).to_list(rummy.MAX_PLAYERS)
                     if len(real_seats) == 1 and real_seats[0].get("user_id") == user["id"]:
                         category = await _room_category(existing_room, session)
+                        real_seat_index = int(real_seats[0]["seat_index"])
                         await db.rummy_seats.delete_many({
                             "room_id": existing_room["id"],
-                            "$or": [{"is_bot": True}, {"user_id": {"$exists": False}}],
+                            "$or": [
+                                {"user_id": {"$ne": user["id"]}},
+                                {"seat_index": {"$ne": real_seat_index}},
+                            ],
                         }, **kwargs)
-                        occupied = {int(real_seats[0]["seat_index"])}
-                        free = [index for index in range(rummy.MAX_PLAYERS) if index not in occupied]
+                        free = [
+                            index for index in range(rummy.MAX_PLAYERS)
+                            if index != real_seat_index
+                        ]
                         now_epoch = _epoch()
                         await db.rummy_seats.insert_many([
-                            {
-                                "room_id": existing_room["id"],
-                                "user_id": f"BOT:{existing_room['id']}:{bot_number}",
-                                "seat_index": seat_index,
-                                "display_name": BOT_NAMES[bot_number - 1],
-                                "avatar": ("sun", "moon", "gem", "spade")[bot_number - 1],
-                                "is_bot": True, "status": "ACTIVE",
-                                "entry_chips": int(category["entryChips"]),
-                                "wallet_stake_chips": 0,
-                                "turns_taken": 0, "missed_turns": 0,
-                                "joined_at": _now_iso(), "last_seen_at": _now_iso(),
-                                "last_seen_epoch": now_epoch,
-                            }
+                            _new_bot_seat(
+                                existing_room, category, seat_index, bot_number, now_epoch,
+                            )
                             for bot_number, seat_index in enumerate(free, start=1)
                         ], **kwargs)
                         existing_room["seat_count"] = rummy.MAX_PLAYERS
@@ -541,19 +1217,32 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         current_category = await _category(body.categoryId, session)
 
         room = None
+        scheduled_start = _next_live_start_epoch() if body.mode == "LIVE" else None
         if body.mode == "LIVE":
             room = await db.rummy_rooms.find_one(
                 {
                     "category_id": body.categoryId, "mode": "LIVE",
                     "state": "WAITING_FOR_PLAYERS", "seat_count": {"$lt": rummy.MAX_PLAYERS},
+                    "scheduled_start_at_epoch": scheduled_start,
                 }, {"_id": 0}, sort=[("created_at", 1)], **kwargs,
             )
         if not room:
+            created_epoch = _epoch()
+            schedule_metadata = (
+                _live_cycle_metadata(body.categoryId, scheduled_start)
+                if scheduled_start is not None else {}
+            )
             room = {
                 "id": str(uuid.uuid4()), "category_id": body.categoryId,
                 "category_snapshot": _freeze_category(current_category),
                 "mode": body.mode, "state": "WAITING_FOR_PLAYERS", "version": 0,
                 "seat_count": 0, "max_players": rummy.MAX_PLAYERS,
+                "requested_mode": body.mode,
+                **schedule_metadata,
+                "fallback_at_epoch": (
+                    scheduled_start
+                    if body.mode == "LIVE" else None
+                ),
                 "created_at": _now_iso(), "updated_at": _now_iso(),
             }
             await db.rummy_rooms.insert_one(copy.deepcopy(room), **kwargs)
@@ -596,7 +1285,11 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         seat = {
             "room_id": room["id"], "user_id": user["id"], "seat_index": seat_index,
             "active_user_key": user["id"],
-            "display_name": user.get("display_name") or "Player", "avatar": user.get("avatar") or "crown",
+            "display_name": current_user.get("display_name") or "Player",
+            "avatar": current_user.get("avatar") or "crown",
+            "avatar_source": current_user.get("avatar_source") or "PRESET",
+            "avatar_upload_id": current_user.get("avatar_upload_id"),
+            "avatar_url": _public_uploaded_avatar_url(current_user),
             "is_bot": False, "status": "ACTIVE", "entry_chips": int(category["entryChips"]),
             "wallet_stake_chips": wallet_stake,
             "turns_taken": 0, "missed_turns": 0, "stake_ref": stake_ref if wallet_stake else None,
@@ -605,21 +1298,21 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         await db.rummy_seats.insert_one(seat, **kwargs)
         room["seat_count"] = int(room.get("seat_count", 0)) + 1
 
-        if body.mode == "PRACTICE":
-            bots = []
-            for index, name in enumerate(BOT_NAMES, start=1):
-                bots.append({
-                    "room_id": room["id"], "user_id": f"BOT:{room['id']}:{index}",
-                    "seat_index": index, "display_name": name, "avatar": ("sun", "moon", "gem", "spade")[index - 1],
-                    "is_bot": True, "status": "ACTIVE", "entry_chips": int(category["entryChips"]),
-                    "wallet_stake_chips": 0,
-                    "turns_taken": 0, "missed_turns": 0,
-                    "joined_at": _now_iso(), "last_seen_at": _now_iso(), "last_seen_epoch": now_epoch,
-                })
+        if body.mode in ("PRACTICE", BOT_TABLE_MODE):
+            bots = [
+                _new_bot_seat(room, category, index, index, now_epoch)
+                for index in range(1, rummy.MAX_PLAYERS)
+            ]
             await db.rummy_seats.insert_many(bots, **kwargs)
             room["seat_count"] = rummy.MAX_PLAYERS
+            room["wallet_neutral"] = True
+            if body.mode == BOT_TABLE_MODE:
+                room["bot_table_notice"] = "Practice table · automated players labelled BOT · no wallet stake or payout"
 
-        if room["seat_count"] == rummy.MAX_PLAYERS:
+        live_waits_for_schedule = (
+            body.mode == "LIVE" and _epoch() < _scheduled_room_start_epoch(room)
+        )
+        if room["seat_count"] == rummy.MAX_PLAYERS and not live_waits_for_schedule:
             room = await _start_round(room, category, session)
         else:
             room["version"] = int(room.get("version", 0)) + 1
@@ -636,6 +1329,143 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
         if existing_seat and existing_room:
             return await _public_state(existing_room, user["id"])
         _fail(409, "RUMMY_ALREADY_SEATED", "This player already occupies a Rummy seat.")
+
+
+async def _activate_scheduled_room(room_id: str) -> bool:
+    """Start one due room, filling missing seats without economic ambiguity.
+
+    A complete five-human room remains LIVE and settles its fully funded pot.
+    An incomplete room first refunds *every* human reservation, then changes to
+    a visibly labelled wallet-neutral BOT_TABLE before bot seats or cards are
+    created. Thus no zero-stake bot can win a funded pot and no human can lose a
+    live stake to automation. Shuffle/deal remain the same secure random path.
+    """
+    async def mutate(session):
+        kwargs = _kwargs(session)
+        room = await db.rummy_rooms.find_one({"id": room_id}, {"_id": 0}, **kwargs)
+        if not room or room.get("mode") != "LIVE" or room.get("state") != "WAITING_FOR_PLAYERS":
+            return False
+        scheduled_start = _scheduled_room_start_epoch(room)
+        if _epoch() < scheduled_start:
+            return False
+
+        category = await _room_category(room, session)
+        humans = await db.rummy_seats.find(
+            {
+                "room_id": room_id,
+                "is_bot": {"$ne": True},
+                "status": {"$in": list(ACTIVE_SEAT_STATES)},
+            },
+            {"_id": 0}, **kwargs,
+        ).sort("seat_index", 1).to_list(rummy.MAX_PLAYERS)
+        if not humans:
+            room.update({
+                "state": "CANCELLED",
+                "cancel_reason": "Scheduled matchmaking contained no active players",
+                "current_seat": None,
+                "turn_deadline": None,
+                "settled_at": _now_iso(),
+                "version": int(room.get("version", 0)) + 1,
+                "updated_at": _now_iso(),
+            })
+            await db.rummy_rooms.replace_one({"id": room_id}, room, **kwargs)
+            return True
+        if len(humans) >= rummy.MAX_PLAYERS:
+            room.update({
+                "scheduled_started_at": _now_iso(),
+                "scheduled_start_at_epoch": scheduled_start,
+            })
+            await _start_round(room, category, session)
+            return True
+
+        refunded_total = 0
+        for seat in humans:
+            refund = _seat_wallet_stake_chips(seat)
+            if refund:
+                stake_ref = seat.get("stake_ref") or f"rummy-seat:{room_id}:{seat['user_id']}"
+                refund_ref = f"{stake_ref}:bot-fallback-refund"
+                await credit_chips(
+                    seat["user_id"], refund,
+                    "Rummy live matchmaking moved to a wallet-neutral bot table",
+                    ref=refund_ref, kind=ledger.REFUND, game="rummy", session=session,
+                )
+                refunded_total += refund
+                zeroed = await db.rummy_seats.update_one(
+                    {"room_id": room_id, "user_id": seat["user_id"], "wallet_stake_chips": refund},
+                    {"$set": {
+                        "wallet_stake_chips": 0,
+                        "fallback_refunded_chips": refund,
+                        "fallback_refund_ref": refund_ref,
+                        "fallback_refunded_at": _now_iso(),
+                    }},
+                    **kwargs,
+                )
+                if zeroed.modified_count != 1:
+                    _fail(409, "RUMMY_STAKE_CHANGED", "The reserved stake changed before bot fallback.")
+
+        occupied = {int(seat["seat_index"]) for seat in humans}
+        free = [index for index in range(rummy.MAX_PLAYERS) if index not in occupied]
+        bots = [
+            _new_bot_seat(room, category, seat_index, bot_number)
+            for bot_number, seat_index in enumerate(free, start=1)
+        ]
+        if bots:
+            await db.rummy_seats.insert_many(bots, **kwargs)
+        room.update({
+            "mode": BOT_TABLE_MODE,
+            "requested_mode": "LIVE",
+            "seat_count": rummy.MAX_PLAYERS,
+            "wallet_neutral": True,
+            "economic_mode": "WALLET_NEUTRAL",
+            "fallback_from_live": True,
+            "fallback_activated_at": _now_iso(),
+            "fallback_refunded_chips": refunded_total,
+            "matchmaking_filled_by_bots": len(bots),
+            "bot_table_notice": (
+                "Scheduled match · fair clearly labelled BOT players · "
+                "live stakes refunded · no wallet payout"
+            ),
+        })
+        await _start_round(room, category, session)
+        return True
+
+    return await run_game_transaction(client, mutate)
+
+
+async def _activate_live_bot_fallback(room_id: str, requester_id: str) -> bool:
+    """Member-authorized compatibility wrapper for request-driven polling."""
+    membership = await db.rummy_seats.find_one(
+        {"room_id": room_id, "user_id": requester_id}, {"_id": 0, "user_id": 1},
+    )
+    if not membership:
+        _fail(403, "RUMMY_NOT_A_MEMBER", "You do not occupy a seat at this table.")
+    return await _activate_scheduled_room(room_id)
+
+
+async def advance_due_rummy_matchmaking(limit: int = 50) -> dict:
+    """Background-safe sweep for due three-minute Rummy table starts."""
+    if not _RUMMY_CORE_READY:
+        return {"checked": 0, "started": 0}
+    now = _epoch()
+    rows = await db.rummy_rooms.find(
+        {
+            "mode": "LIVE",
+            "state": "WAITING_FOR_PLAYERS",
+            "$or": [
+                {"scheduled_start_at_epoch": {"$lte": now}},
+                {
+                    "scheduled_start_at_epoch": {"$exists": False},
+                    "fallback_at_epoch": {"$lte": now},
+                },
+            ],
+        },
+        {"_id": 0, "id": 1},
+    ).sort("scheduled_start_at_epoch", 1).to_list(max(1, min(100, int(limit))))
+    started = 0
+    for row in rows:
+        if await _activate_scheduled_room(row["id"]):
+            started += 1
+    return {"checked": len(rows), "started": started}
 
 
 async def _load_membership(room_id: str, user_id: str, session=None):
@@ -779,6 +1609,9 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
             "seatIndex": seat["seat_index"],
             "playerId": rummy.masked_player_id(seat["user_id"]),
             "displayName": seat.get("display_name") or "Player",
+            "isBot": bool(seat.get("is_bot")),
+            "botLabel": seat.get("bot_label") if seat.get("is_bot") else None,
+            "botProfile": copy.deepcopy(seat.get("bot_profile")) if seat.get("is_bot") else None,
             "status": "WON" if won else ("DROPPED" if seat.get("status") == "DROPPED" else "LOST"),
             "points": points, "chipDelta": (winner_payout if won else 0) - wallet_entry,
             "virtualEntryChips": entry,
@@ -792,6 +1625,29 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
             },
             **kwargs,
         )
+        if seat.get("is_bot") and seat.get("bot_profile_id"):
+            await db.rummy_bot_profiles.update_one(
+                {"id": seat["bot_profile_id"]},
+                {
+                    "$inc": {
+                        "rounds_completed": 1,
+                        "wins": 1 if won else 0,
+                        "turns_completed": int(seat.get("turns_taken", 0)),
+                    },
+                    "$set": {
+                        "is_bot": True,
+                        "public_label": "BOT",
+                        "logic_version": BOT_LOGIC_VERSION,
+                        "last_played_at": _now_iso(),
+                    },
+                    "$setOnInsert": {
+                        "name": seat.get("display_name") or "BOT",
+                        "created_at": _now_iso(),
+                    },
+                },
+                upsert=True,
+                **kwargs,
+            )
         if not seat.get("is_bot"):
             await db.game_rounds.insert_one({
                 "id": str(uuid.uuid4()), "round_id": room["round_id"],
@@ -934,6 +1790,40 @@ async def _advance_one_automatic(room_id: str, requester_id: str):
         timed_out = not seat.get("is_bot") and float(room.get("turn_deadline") or 0) <= _epoch()
         if not seat.get("is_bot") and not timed_out:
             return False
+        difficulty = (
+            rummy.bot_difficulty(seat.get("bot_difficulty"))
+            if seat.get("is_bot") else "expert"
+        )
+        if seat.get("is_bot"):
+            current_phase = (
+                room.get("bot_action_phase")
+                if int(room.get("bot_action_seat", -1)) == int(seat["seat_index"])
+                else None
+            )
+            if current_phase not in ("DRAWING", "DISCARDING"):
+                room.update({
+                    "bot_action_seat": int(seat["seat_index"]),
+                    "bot_action_phase": "DRAWING",
+                    "bot_action_ready_at": _epoch() + _bot_think_delay_seconds(difficulty),
+                    "version": original_version + 1,
+                    "updated_at": _now_iso(),
+                })
+                await _replace_room_cas(room, original_version, session)
+                await db.rummy_actions.insert_one({
+                    "room_id": room_id, "round_id": room.get("round_id"),
+                    "user_id": seat["user_id"], "action_id": f"BOT_THINK:{original_version}",
+                    "action_type": "BOT_THINK", "accepted": True,
+                    "version": room["version"], "created_at": _now_iso(),
+                }, **kwargs)
+                # Social timing is table metadata only. It never receives a
+                # hand, covered deck, opponent private state or settlement.
+                if (
+                    int(room.get("turn_count", 0)) + int(seat["seat_index"])
+                ) % 3 == 0:
+                    await _emit_bot_chat_event(room, seat, "TURN_THINKING", session)
+                return True
+            if float(room.get("bot_action_ready_at") or 0) > _epoch():
+                return False
         hand = await db.rummy_hands.find_one(
             {"room_id": room_id, "round_id": room["round_id"], "user_id": seat["user_id"]},
             {"_id": 0}, **kwargs,
@@ -981,15 +1871,50 @@ async def _advance_one_automatic(room_id: str, requester_id: str):
                 return True
 
         if not hand.get("drawn"):
-            if not await _replenish_closed_deck(room):
-                await _cancel_room(room, "The draw pile could not continue", session)
-                await _replace_room_cas(room, original_version, session)
-                return True
-            drawn = room["closed_deck"].pop()
+            draw_source = "CLOSED"
+            if seat.get("is_bot"):
+                open_discard = room.get("discard_pile", [])[-1] if room.get("discard_pile") else None
+                draw_source = await _choose_bot_draw_source(
+                    hand["cards"], open_discard, int(room["wild_rank"]), difficulty,
+                )
+            if draw_source == "DISCARD" and room.get("discard_pile"):
+                drawn = room["discard_pile"].pop()
+            else:
+                draw_source = "CLOSED"
+                if not await _replenish_closed_deck(room):
+                    await _cancel_room(room, "The draw pile could not continue", session)
+                    await _replace_room_cas(room, original_version, session)
+                    return True
+                drawn = room["closed_deck"].pop()
             hand["cards"].append(drawn)
-            hand.update({"drawn": True, "drawn_card_id": drawn["id"], "draw_source": "CLOSED"})
+            hand.update({
+                "drawn": True, "drawn_card_id": drawn["id"],
+                "draw_source": draw_source, "updated_at": _now_iso(),
+            })
+            if seat.get("is_bot"):
+                await db.rummy_hands.replace_one(
+                    {"room_id": room_id, "round_id": room["round_id"], "user_id": seat["user_id"]},
+                    hand, **kwargs,
+                )
+                room.update({
+                    "bot_action_phase": "DISCARDING",
+                    "bot_action_ready_at": _epoch() + _bot_discard_delay_seconds(difficulty),
+                    "version": original_version + 1,
+                    "updated_at": _now_iso(),
+                })
+                await _replace_room_cas(room, original_version, session)
+                await db.rummy_actions.insert_one({
+                    "room_id": room_id, "round_id": room.get("round_id"),
+                    "user_id": seat["user_id"], "action_id": f"BOT_DRAW:{original_version}",
+                    "action_type": f"BOT_DRAW_{draw_source}", "accepted": True,
+                    "version": room["version"], "created_at": _now_iso(),
+                }, **kwargs)
+                return True
 
-        discard = await _choose_bot_discard(hand["cards"], int(room["wild_rank"]))
+        forbidden = hand.get("drawn_card_id") if hand.get("draw_source") == "DISCARD" else None
+        discard = await _choose_bot_discard(
+            hand["cards"], int(room["wild_rank"]), difficulty, forbidden,
+        )
         hand["cards"] = [card for card in hand["cards"] if card["id"] != discard["id"]]
         hand.update({"drawn": False, "drawn_card_id": None, "draw_source": None, "updated_at": _now_iso()})
         room.setdefault("discard_pile", []).append(discard)
@@ -1002,6 +1927,9 @@ async def _advance_one_automatic(room_id: str, requester_id: str):
             {"$inc": {"turns_taken": 1}, "$set": {"last_action_at": _now_iso()}}, **kwargs,
         )
         arrangement = await _best_arrangement(hand["cards"], int(room["wild_rank"]))
+        room.pop("bot_action_seat", None)
+        room.pop("bot_action_phase", None)
+        room.pop("bot_action_ready_at", None)
         if arrangement["valid"]:
             await _settle_room(room, seat["user_id"], "VALID_DECLARATION", session)
         elif int(room.get("turn_count", 0)) + 1 >= MAX_ROUND_TURNS:
@@ -1019,7 +1947,7 @@ async def _advance_one_automatic(room_id: str, requester_id: str):
         await db.rummy_actions.insert_one({
             "room_id": room_id, "round_id": room.get("round_id"),
             "user_id": seat["user_id"], "action_id": f"AUTO:{original_version}",
-            "action_type": "BOT_TURN" if seat.get("is_bot") else "TIMEOUT_TURN",
+            "action_type": "BOT_DISCARD" if seat.get("is_bot") else "TIMEOUT_TURN",
             "accepted": True, "version": room["version"], "created_at": _now_iso(),
         }, **kwargs)
         return True
@@ -1083,9 +2011,9 @@ def _settlement_amounts(seats: list[dict], winner_is_bot: bool, mode: str | None
     """Build display and wallet pots only from immutable seat entries.
 
     In LIVE mode every seat belongs to a debited human, so the payout is
-    exactly the sum previously debited. Practice entries remain visible table
-    values but all wallet stakes and payouts are zero, so practice cannot mint
-    or consume usable chips.
+    exactly the sum previously debited. Practice and fallback bot-table entries
+    remain visible table values but every wallet stake and payout must be zero,
+    so a bot table cannot mint or consume usable chips.
     """
     if len(seats) != rummy.MAX_PLAYERS:
         _fail(409, "RUMMY_STAKE_INVALID", "A complete five-seat pot is required.")
@@ -1093,20 +2021,281 @@ def _settlement_amounts(seats: list[dict], winner_is_bot: bool, mode: str | None
     wallet_stakes = [_seat_wallet_stake_chips(seat) for seat in seats]
     pot = sum(stakes)
     real_stake_total = sum(wallet_stakes)
-    if mode == "LIVE" and real_stake_total != pot:
-        _fail(409, "RUMMY_STAKE_INVALID", "The live Rummy pot does not match its wallet debits.")
+    if mode == "LIVE":
+        if real_stake_total != pot:
+            _fail(409, "RUMMY_STAKE_INVALID", "The live Rummy pot does not match its wallet debits.")
+        human_payout = 0 if winner_is_bot else real_stake_total
+    elif mode in ("PRACTICE", BOT_TABLE_MODE):
+        if real_stake_total != 0:
+            _fail(409, "RUMMY_STAKE_INVALID", "A wallet-neutral Rummy table contains a wallet stake.")
+        human_payout = 0
+    else:
+        _fail(409, "RUMMY_MODE_INVALID", "The Rummy table mode cannot be settled.")
     return {
         "pot": pot,
-        "humanPayout": 0 if winner_is_bot else real_stake_total,
+        "humanPayout": human_payout,
         "seatStakeTotal": pot,
         "realStakeTotal": real_stake_total,
     }
 
 
-@router.get("/games/rummy/rooms/{room_id}/state")
-async def rummy_room_state(room_id: str, user: dict = Depends(require_active_player)):
+async def _apply_invalid_declaration(room, seat, validation, category, session):
+    """Apply the one configured invalid-declaration penalty and advance/settle."""
+    kwargs = _kwargs(session)
+    await db.rummy_seats.update_one(
+        {"room_id": room["id"], "user_id": seat["user_id"]},
+        {
+            "$set": {
+                "status": "DROPPED",
+                "drop_points": int(category.get("invalidDeclarationPoints", 80)),
+                "invalid_declaration": validation["code"],
+            },
+            "$unset": {"active_user_key": ""},
+        },
+        **kwargs,
+    )
+    room["last_declaration"] = {
+        "seatIndex": seat["seat_index"], "valid": False, "code": validation["code"],
+    }
+    active = await _active_seats(room["id"], session)
+    if len(active) <= 1:
+        winner = active[0]["user_id"] if active else None
+        if winner:
+            await _settle_room(room, winner, "INVALID_DECLARATION", session)
+        else:
+            await _cancel_room(room, "No player remained after an invalid declaration", session)
+        return
+    next_index = await _next_active_seat(room["id"], int(room["current_seat"]), session)
+    room.update({
+        "current_seat": next_index,
+        "turn_count": int(room.get("turn_count", 0)) + 1,
+        "turn_deadline": _epoch() + int(category["turnDurationSeconds"]),
+        "version": int(room["version"]) + 1,
+        "updated_at": _now_iso(),
+    })
+
+
+def _chat_rate_policy(event_type: str) -> tuple[str, int, int]:
+    if event_type == "HELP_DESK":
+        return "HELP_DESK", SUPPORT_RATE_WINDOW_SECONDS, 1
+    if event_type == "MUSIC_REQUEST":
+        return "MUSIC_REQUEST", SUPPORT_RATE_WINDOW_SECONDS, 1
+    return "TABLE_CHAT", CHAT_RATE_WINDOW_SECONDS, CHAT_RATE_MAX_EVENTS
+
+
+async def _claim_chat_rate_token(room_id: str, user_id: str, event_type: str):
+    """Atomically claim a fixed-window token outside gameplay transactions."""
+    scope, window, maximum = _chat_rate_policy(event_type)
+    now = _epoch()
+    bucket = int(now // window)
+    # Help/music requests enter one shared CRM inbox, so their abuse limit is
+    # global per account rather than bypassable by changing table/room ids.
+    limiter_room = "GLOBAL" if scope in ("HELP_DESK", "MUSIC_REQUEST") else room_id
+    limiter_id = f"{limiter_room}:{user_id}:{scope}:{bucket}"
+    expires_epoch = (bucket + 2) * window
+    try:
+        row = await db.rummy_chat_rate_limits.find_one_and_update(
+            {"_id": limiter_id},
+            {
+                "$setOnInsert": {
+                    "room_id": None if limiter_room == "GLOBAL" else room_id,
+                    "limiter_room": limiter_room,
+                    "user_id": user_id,
+                    "scope": scope,
+                    "bucket": bucket,
+                    "created_at": _now_iso(),
+                    "expires_at": datetime.fromtimestamp(expires_epoch, tz=timezone.utc),
+                },
+                "$inc": {"count": 1},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        row = await db.rummy_chat_rate_limits.find_one_and_update(
+            {"_id": limiter_id},
+            {"$inc": {"count": 1}},
+            return_document=ReturnDocument.AFTER,
+        )
+    if int((row or {}).get("count", maximum + 1)) > maximum:
+        retry_after = max(1, int(((bucket + 1) * window) - now) + 1)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "RUMMY_CHAT_RATE_LIMITED",
+                "message": "Please wait before sending another table request.",
+                "retryAfterSeconds": retry_after,
+            },
+        )
+
+
+async def _prior_player_chat(room_id: str, user_id: str, request_id: str):
+    return await db.rummy_chat_events.find_one(
+        {
+            "room_id": room_id,
+            "sender_user_id": user_id,
+            "client_request_id": request_id,
+        },
+        {"_id": 0},
+    )
+
+
+@router.get("/games/rummy/rooms/{room_id}/chat")
+async def rummy_table_chat(
+    room_id: str,
+    afterEpoch: float = Query(default=0.0, ge=0.0),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: dict = Depends(require_active_player),
+):
+    await _require_rummy_core_ready()
+    await require_playable_game("rummy")
+    await _load_membership(room_id, user["id"])
+    rows = await db.rummy_chat_events.find(
+        {
+            "room_id": room_id,
+            "created_epoch": {"$gt": float(afterEpoch)},
+            "$or": [
+                {"visibility": "TABLE"},
+                {
+                    "visibility": {"$exists": False},
+                    "event_type": {"$nin": ["HELP_DESK", "MUSIC_REQUEST"]},
+                },
+            ],
+        },
+        {"_id": 0},
+    ).sort("created_epoch", 1).to_list(limit)
+    return {
+        "events": [_public_chat_event(row) for row in rows],
+        "serverTimestamp": _epoch(),
+    }
+
+
+@router.post("/games/rummy/rooms/{room_id}/chat")
+async def rummy_table_chat_send(
+    room_id: str,
+    body: RummyChatRequest,
+    user: dict = Depends(require_active_player),
+):
+    await _require_rummy_core_ready()
     await require_playable_game("rummy")
     room, seat = await _load_membership(room_id, user["id"])
+    if body.eventType != "HELP_DESK" and (
+        seat.get("status") not in ACTIVE_SEAT_STATES
+        or room.get("state") not in ("WAITING_FOR_PLAYERS", "TURN_ACTIVE")
+    ):
+        _fail(409, "RUMMY_CHAT_CLOSED", "Table chat is closed for this completed seat.")
+    prior = await _prior_player_chat(room_id, user["id"], body.requestId)
+    if prior:
+        return {
+            "accepted": True,
+            "event": _public_chat_event(prior),
+            "requestStatus": prior.get("request_status"),
+        }
+
+    await _claim_chat_rate_token(room_id, user["id"], body.eventType)
+    fresh_user = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "email": 1, "display_name": 1},
+    )
+    user_email = (fresh_user or {}).get("email") or user.get("email")
+    user_display_name = (
+        (fresh_user or {}).get("display_name")
+        or user.get("display_name")
+        or seat.get("display_name")
+        or ((user_email or "Player").split("@")[0])
+    )
+    now_iso = _now_iso()
+    event = {
+        "id": str(uuid.uuid4()),
+        "room_id": room_id,
+        "round_id": room.get("round_id"),
+        "client_request_id": body.requestId,
+        "event_type": body.eventType,
+        "message": body.message,
+        "reaction_id": body.reactionId,
+        "sender_user_id": user["id"],
+        "masked_sender_id": rummy.masked_player_id(user["id"]),
+        "sender_seat_index": int(seat["seat_index"]),
+        "sender_name": seat.get("display_name") or "Player",
+        "is_bot": False,
+        "bot_label": None,
+        "visibility": (
+            "PRIVATE_REQUEST"
+            if body.eventType in ("HELP_DESK", "MUSIC_REQUEST") else "TABLE"
+        ),
+        "request_status": (
+            "SUBMITTED" if body.eventType in ("HELP_DESK", "MUSIC_REQUEST") else None
+        ),
+        "generated_at": now_iso,
+        "created_at": now_iso,
+        "created_epoch": _epoch(),
+    }
+    async def persist_chat(session):
+        kwargs = _kwargs(session)
+        await db.rummy_chat_events.insert_one(copy.deepcopy(event), **kwargs)
+        if body.eventType in ("HELP_DESK", "MUSIC_REQUEST"):
+            support_request = {
+                "id": event["id"],
+                "request_type": body.eventType,
+                "source": "RUMMY_TABLE",
+                "room_id": room_id,
+                "round_id": room.get("round_id"),
+                "user_id": user["id"],
+                "masked_user_id": rummy.masked_player_id(user["id"]),
+                "message": body.message,
+                "status": "SUBMITTED",
+                "automated_reply_created": False,
+                "created_at": now_iso,
+                "created_epoch": event["created_epoch"],
+            }
+            await db.rummy_support_requests.insert_one(support_request, **kwargs)
+            request_label = (
+                "Help Desk" if body.eventType == "HELP_DESK" else "Music Request"
+            )
+            await db.support_messages.insert_one({
+                "id": f"rummy-support:{event['id']}",
+                "user_id": user["id"],
+                "user_email": user_email,
+                "user_display_name": user_display_name,
+                "sender": "USER",
+                "body": (
+                    f"[Rummy · {request_label} · {room.get('category_id')} · "
+                    f"room {room_id}] {body.message}"
+                ),
+                "read_admin": False,
+                "read_user": True,
+                "source": "RUMMY_TABLE",
+                "request_type": body.eventType,
+                "rummy_room_id": room_id,
+                "rummy_round_id": room.get("round_id"),
+                "rummy_event_id": event["id"],
+                "created_at": now_iso,
+            }, **kwargs)
+
+    try:
+        await run_game_transaction(client, persist_chat)
+    except DuplicateKeyError:
+        prior = await _prior_player_chat(room_id, user["id"], body.requestId)
+        if prior:
+            return {
+                "accepted": True,
+                "event": _public_chat_event(prior),
+                "requestStatus": prior.get("request_status"),
+            }
+        raise
+
+    return {
+        "accepted": True,
+        "event": _public_chat_event(event),
+        "requestStatus": event.get("request_status"),
+    }
+
+
+@router.get("/games/rummy/rooms/{room_id}/state")
+async def rummy_room_state(room_id: str, user: dict = Depends(require_active_player)):
+    await _require_rummy_core_ready()
+    await require_playable_game("rummy")
+    room, seat = await _load_membership(room_id, user["id"])
+    await _activate_live_bot_fallback(room_id, user["id"])
     await _advance_automated(room_id, user["id"])
     room, seat = await _load_membership(room_id, user["id"])
     # A GET proves transport health, but deliberately does not bypass the
@@ -1152,6 +2341,7 @@ async def rummy_room_chat(room_id: str, body: RummyChatCreate, user: dict = Depe
 
 @router.post("/games/rummy/rooms/{room_id}/actions")
 async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(require_active_player)):
+    await _require_rummy_core_ready()
     await require_playable_game("rummy")
     if body.roomId != room_id:
         _fail(400, "RUMMY_ROOM_MISMATCH", "The action room does not match the route.")
@@ -1259,7 +2449,10 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
             if not hand:
                 _fail(409, "RUMMY_HAND_UNAVAILABLE", "Your private hand could not be restored.")
             owns_turn = int(room.get("current_seat", -1)) == int(seat["seat_index"])
-            turn_actions = {"DRAW_CLOSED", "DRAW_DISCARD", "DISCARD", "DECLARE"}
+            turn_actions = {
+                "DRAW_CLOSED", "DRAW_DISCARD", "DISCARD", "DECLARE",
+                "DISCARD_AND_DECLARE",
+            }
             if action in turn_actions and _turn_deadline_expired(room):
                 _fail(409, "RUMMY_TURN_EXPIRED", "That turn deadline has passed. Refresh the table.")
             if action in turn_actions and not owns_turn:
@@ -1326,12 +2519,8 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
                 changed = True
             elif action in ("GROUP", "UNGROUP"):
                 groups = body.actionPayload.get("groups", []) if action == "GROUP" else []
-                if not isinstance(groups, list) or any(not isinstance(group, list) for group in groups):
-                    _fail(422, "RUMMY_GROUP_FORMAT", "Groups must be lists of card ids.")
                 owned = {card["id"] for card in hand["cards"]}
-                flat = [str(card_id) for group in groups for card_id in group]
-                if len(flat) != len(set(flat)) or not set(flat).issubset(owned):
-                    _fail(409, "RUMMY_GROUP_OWNERSHIP", "Groups can contain each owned card at most once.")
+                groups = _validated_groups(groups, owned)
                 hand = _apply_private_groups(hand, groups)
                 private_changed = True
             elif action == "SORT":
@@ -1339,10 +2528,52 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
                 # The acknowledgement is idempotent but authoritative cards and
                 # the room version remain unchanged.
                 code = "SORT_LOCAL_ONLY"
+            elif action == "DISCARD_AND_DECLARE":
+                if not hand.get("drawn") or len(hand.get("cards", [])) != rummy.HAND_SIZE + 1:
+                    _fail(409, "RUMMY_DRAW_REQUIRED", "Draw one card before discarding and declaring.")
+                card_id = body.actionPayload.get("cardId")
+                if not isinstance(card_id, str) or not card_id:
+                    _fail(422, "RUMMY_CARD_FORMAT", "Choose one owned card to discard.")
+                card = next((item for item in hand["cards"] if item["id"] == card_id), None)
+                if not card:
+                    _fail(409, "RUMMY_CARD_NOT_OWNED", "That card is not in your hand.")
+                if hand.get("draw_source") == "DISCARD" and hand.get("drawn_card_id") == card_id:
+                    _fail(409, "RUMMY_PICK_DISCARD_LOOP", "A picked open card cannot be returned immediately.")
+                remaining = [item for item in hand["cards"] if item["id"] != card_id]
+                groups = _validated_groups(
+                    body.actionPayload.get("groups"),
+                    {item["id"] for item in remaining},
+                )
+                validation = rummy.validate_declaration(remaining, groups, int(room["wild_rank"]))
+                hand.update({
+                    "cards": remaining, "groups": groups, "drawn": False,
+                    "drawn_card_id": None, "draw_source": None, "updated_at": _now_iso(),
+                })
+                room.setdefault("discard_pile", []).append(card)
+                await db.rummy_hands.replace_one(
+                    {"room_id": room_id, "round_id": room["round_id"], "user_id": user["id"]},
+                    hand, **kwargs,
+                )
+                await db.rummy_seats.update_one(
+                    {"room_id": room_id, "user_id": user["id"]},
+                    {"$inc": {"turns_taken": 1}, "$set": {"last_action_at": _now_iso()}},
+                    **kwargs,
+                )
+                if validation["valid"]:
+                    await _settle_room(room, user["id"], "VALID_DECLARATION", session)
+                    code = "VALID_DECLARATION"
+                else:
+                    category = await _room_category(room, session)
+                    await _apply_invalid_declaration(room, seat, validation, category, session)
+                    code = validation["code"]
+                changed = True
             elif action == "DECLARE":
                 if hand.get("drawn") or len(hand.get("cards", [])) != rummy.HAND_SIZE:
                     _fail(409, "RUMMY_DISCARD_BEFORE_DECLARE", "Discard to thirteen cards before declaring.")
-                groups = body.actionPayload.get("groups") or hand.get("groups", [])
+                groups = _validated_groups(
+                    body.actionPayload.get("groups", hand.get("groups", [])),
+                    {item["id"] for item in hand["cards"]},
+                )
                 validation = rummy.validate_declaration(hand["cards"], groups, int(room["wild_rank"]))
                 if validation["valid"]:
                     hand["groups"] = groups
@@ -1350,30 +2581,7 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
                     code = "VALID_DECLARATION"
                 else:
                     category = await _room_category(room, session)
-                    await db.rummy_seats.update_one(
-                        {"room_id": room_id, "user_id": user["id"]},
-                        {
-                            "$set": {
-                                "status": "DROPPED",
-                                "drop_points": int(category.get("invalidDeclarationPoints", 80)),
-                                "invalid_declaration": validation["code"],
-                            },
-                            "$unset": {"active_user_key": ""},
-                        },
-                        **kwargs,
-                    )
-                    active = await _active_seats(room_id, session)
-                    if len(active) <= 1:
-                        winner = active[0]["user_id"] if active else await _lowest_score_player(room, session)
-                        await _settle_room(room, winner, "INVALID_DECLARATION", session)
-                    else:
-                        next_index = await _next_active_seat(room_id, int(room["current_seat"]), session)
-                        room.update({
-                            "current_seat": next_index,
-                            "turn_deadline": _epoch() + int(category["turnDurationSeconds"]),
-                            "version": original_version + 1, "updated_at": _now_iso(),
-                            "last_declaration": {"seatIndex": seat["seat_index"], "valid": False, "code": validation["code"]},
-                        })
+                    await _apply_invalid_declaration(room, seat, validation, category, session)
                     code = validation["code"]
                 changed = True
             elif action in ("DROP", "LEAVE"):
