@@ -30,6 +30,7 @@ from auth_utils import (
     get_current_user,
     hash_password,
     maybe_upgrade_legacy_avatar,
+    public_user,
     verify_password,
 )
 from otp_service import (
@@ -273,22 +274,6 @@ def _opaque_registration_response(identity: Identity) -> dict:
         'verification_required': True,
         **_dummy_challenge(identity),
     }
-
-
-def _user_public(user: dict) -> dict:
-    public = serialize_doc(user)
-    for key in (
-        'active_session_id', 'email_normalized', 'phone_normalized',
-        'previous_email', 'password_failed_attempts', 'locked_until',
-        'telesign_onboarding', 'telesign_last_sign_in',
-    ):
-        public.pop(key, None)
-    # Phone registrations and provisional manual applications carry unique
-    # compatibility addresses for the legacy non-sparse email index. They are
-    # never presented as user data.
-    if str(public.get('email') or '').endswith(('.phone.invalid', '.manual.invalid')):
-        public['email'] = None
-    return public
 
 
 async def _find_identity_user(identity: Identity, *, session=None):
@@ -991,7 +976,7 @@ async def verify_contact(body: VerifyEmailRequest):
             else 'Contact verified. Complete your profile to continue.'
         ),
         'access_token': token,
-        'user': _user_public(user),
+        'user': public_user(user),
     }
 
 
@@ -1052,9 +1037,10 @@ async def login(body: LoginRequest):
     if contact_identity:
         user = await _find_identity_user(contact_identity)
     else:
-        user = await db.users.find_one({
-            'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'},
-        })
+        user = await db.users.find_one({'$or': [
+            {'username_key': ident.casefold()},
+            {'username': {'$regex': f'^{re.escape(ident)}$', '$options': 'i'}},
+        ]})
     now = _now()
     password_ok = await asyncio.to_thread(
         verify_password,
@@ -1101,8 +1087,24 @@ async def login(body: LoginRequest):
                     'locked_until': (now + timedelta(seconds=PASSWORD_LOCK_SECONDS)).isoformat(),
                 }})
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
+    if body.login_surface and user.get('role') != body.login_surface:
+        # This check is deliberately after password verification (no role
+        # enumeration) and before any session write (no cross-surface logout).
+        raise HTTPException(status_code=403, detail={
+            'code': 'LOGIN_SURFACE_MISMATCH',
+            'message': 'This account cannot sign in from this login page.',
+        })
     if user.get('role') == 'ADMIN' and user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=403, detail='Administrator access is disabled')
+    if user.get('role') == 'DISTRIBUTOR':
+        dist = await db.distributors.find_one(
+            {'user_id': user['id']}, {'_id': 0, 'status': 1},
+        )
+        if user.get('status') != 'ACTIVE' or not dist or dist.get('status') != 'ACTIVE':
+            raise HTTPException(status_code=403, detail={
+                'code': 'DISTRIBUTOR_LOGIN_DISABLED',
+                'message': 'This partner login is disabled. Please contact the operator.',
+            })
     player_contact_verified = False
     phone_self_service = False
     manual_review_account = False
@@ -1226,9 +1228,30 @@ async def login(body: LoginRequest):
             'email_verified': {'$exists': False},
             'phone_verified': {'$exists': False},
         })
+    elif user.get('role') == 'DISTRIBUTOR':
+        # Credential resets revoke the previous session and replace the hash.
+        # Bind the eventual session write to the exact state whose password was
+        # checked so an in-flight old-password request cannot win afterwards.
+        login_query.update({
+            'role': 'DISTRIBUTOR',
+            'status': 'ACTIVE',
+            'password_hash': user.get('password_hash'),
+            'active_session_id': user.get('active_session_id'),
+        })
+    login_unsets = {'locked_until': ''}
+    if user.get('role') == 'ADMIN':
+        # A completed step-up belongs to one exact signed-in session. A newer
+        # login must never inherit the previous device's short trust window.
+        login_unsets.update({
+            'mfa_verified_at': '',
+            'reauthenticated_at': '',
+            'admin_step_up_completed_at': '',
+            'admin_step_up_password_verified_at': '',
+            'admin_step_up_session_id': '',
+        })
     user = await db.users.find_one_and_update(
         login_query,
-        {'$set': login_updates, '$unset': {'locked_until': ''}},
+        {'$set': login_updates, '$unset': login_unsets},
         return_document=ReturnDocument.AFTER,
     )
     if not user:
@@ -1244,9 +1267,25 @@ async def login(body: LoginRequest):
                 'channel': 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL',
             })
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
+    if user.get('role') == 'DISTRIBUTOR':
+        current_dist = await db.distributors.find_one({
+            'user_id': user['id'], 'status': 'ACTIVE',
+        }, {'_id': 0, 'id': 1})
+        if not current_dist:
+            # The distributor was disabled between the password check and the
+            # session commit. Invalidate the just-created session before
+            # returning so no token is minted against stale partner state.
+            await db.users.update_one(
+                {'id': user['id'], 'active_session_id': session_id},
+                {'$set': {'active_session_id': f'revoked-{uuid.uuid4()}'}},
+            )
+            raise HTTPException(status_code=403, detail={
+                'code': 'DISTRIBUTOR_LOGIN_DISABLED',
+                'message': 'This partner login is disabled. Please contact the operator.',
+            })
     user = await maybe_upgrade_legacy_avatar(user)
     token = create_access_token(user['id'], user['role'], session_id=session_id)
-    return {'access_token': token, 'user': _user_public(user)}
+    return {'access_token': token, 'user': public_user(user)}
 
 
 @router.post('/logout')
@@ -1332,19 +1371,48 @@ async def reset_password(body: ResetPasswordRequest):
 
 @router.post('/change-password')
 async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    original_hash = user.get('password_hash', '')
     if not await asyncio.to_thread(
-        verify_password, body.current_password, user.get('password_hash', ''),
+        verify_password, body.current_password, original_hash,
     ):
         raise HTTPException(status_code=400, detail='Current password is incorrect')
+    if await asyncio.to_thread(
+        verify_password, body.new_password, original_hash,
+    ):
+        raise HTTPException(status_code=400, detail={
+            'code': 'NEW_PASSWORD_MUST_DIFFER',
+            'message': 'Choose a new password that is different from the temporary password.',
+        })
+    if user.get('role') == 'DISTRIBUTOR' and (
+        len(body.new_password) < 12 or not body.new_password.strip()
+    ):
+        raise HTTPException(status_code=400, detail={
+            'code': 'DISTRIBUTOR_PASSWORD_TOO_WEAK',
+            'message': 'Partner passwords must contain at least 12 characters and cannot be blank.',
+        })
     new_password_hash = await asyncio.to_thread(hash_password, body.new_password)
-    await db.users.update_one({'id': user['id']}, {'$set': {
+    query = {
+        'id': user['id'],
+        'role': user.get('role'),
+        'password_hash': original_hash,
+        'active_session_id': user.get('active_session_id'),
+    }
+    if user.get('status') is not None:
+        query['status'] = user.get('status')
+    result = await db.users.update_one(query, {'$set': {
         'password_hash': new_password_hash,
         'password_changed_at': _now().isoformat(),
+        'password_change_required': False,
         'active_session_id': f'revoked-{uuid.uuid4()}',
     }})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'CREDENTIALS_CHANGED',
+            'message': 'Credentials changed in another session. Sign in again and retry.',
+        })
     return {'message': 'Password changed successfully. Please log in again.'}
 
 
 @router.get('/me')
 async def me(user: dict = Depends(get_current_user)):
-    return {'user': _user_public(user)}
+    return {'user': public_user(user)}

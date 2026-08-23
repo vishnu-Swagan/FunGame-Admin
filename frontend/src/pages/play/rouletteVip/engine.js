@@ -2010,7 +2010,7 @@ export function mountRoulette(root, opts) {
     const body = $('menubody');
     body.replaceChildren();
     $('menusheet').querySelector('h3').textContent =
-      { history: 'Game history', payouts: 'Payouts & limits', how: 'How to play' }[view] || 'Menu';
+      { history: 'Game history', payouts: 'Chip returns & limits', how: 'How to play' }[view] || 'Menu';
 
     if (view === 'history') {
       const sec = el('div', 'sheetsec');
@@ -2053,7 +2053,7 @@ export function mountRoulette(root, opts) {
       });
       body.appendChild(kv);
       body.appendChild(el('p', 'sthint',
-        'Payouts are shown before a bet is placed. Play-chip returns are rounded to whole chips.'));
+        'Chip returns are shown before a bet is placed and are rounded to whole chips.'));
       body.appendChild(backRow());
       return;
     }
@@ -2102,7 +2102,7 @@ export function mountRoulette(root, opts) {
     row('star', 'Favourite bets', slots.filter(Boolean).length + ' saved', () => { renderFav(); openSheet('favsheet'); });
     row('auto', 'Autoplay', autoLeft > 0 ? autoLeft + ' rounds left' : 'off', () => { renderAuto(); openSheet('autosheet'); });
     row('hist', 'Game history', '', () => renderMenu('history'));
-    row('coin', 'Payouts & limits', '', () => renderMenu('payouts'));
+    row('coin', 'Chip returns & limits', '', () => renderMenu('payouts'));
     row('help', 'How to play', '', () => renderMenu('how'));
     row('chat', 'Live support', '', () => toast('Support is in the app menu, outside the table'));
 
@@ -2455,7 +2455,7 @@ export function mountRoulette(root, opts) {
       const staked = settled.total_bet, payout = settled.payout || 0;
       if (payout > 0) {
         const net = payout - staked;
-        const parts = [document.createTextNode('PAID '), goldSpan(fmt(payout))];
+        const parts = [document.createTextNode('CHIPS RETURNED '), goldSpan(fmt(payout))];
         const n = document.createElement('span');
         n.className = net >= 0 ? 'netup' : 'netdown';
         n.textContent = (net >= 0 ? '  net +' : '  net ') + fmt(net);

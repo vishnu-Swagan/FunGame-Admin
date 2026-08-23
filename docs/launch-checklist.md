@@ -1,10 +1,10 @@
 # Chakri.Casino staging and production launch checklist
 
-Product: Chakri.Casino player web app, operator CRM, ten reviewed play-chip games, and an installable PWA.
+Product: Chakri.Casino player web app, same-origin operator/distributor portal at <code>chakri.casino/Admin</code>, ten reviewed virtual-chip games, and an installable PWA.
 
 Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, and chip ledger.
 
-Deployment decision: **Case D — production-only today.** Render watches <code>main</code> with automatic deployment, but there is no staging service, branch preview, staging database, or staging deployment workflow that can be proven.
+Deployment decision: **manual promotion only.** The reviewed Blueprint now disables service auto-deploys, but the Render Dashboard and Blueprint Auto Sync must still be verified off before merging because dashboard state is authoritative until a reviewed manual sync.
 
 Recommended path: create an isolated manual staging stack inside the existing Render workspace, validate one release branch there, and only then promote the same reviewed commit to production. Do not use the production MongoDB database for staging.
 
@@ -15,8 +15,8 @@ Expected incremental cost:
 - Staging player and CRM static sites: **$0/month** on Render, subject to workspace build and bandwidth limits.
 - Staging API web service: **$0/month** on Render Free, subject to shared free-instance hours, cold starts, bandwidth, and build-minute limits. It is a test target, not a reliable production tier.
 - Staging MongoDB: **Atlas M0 at $0/month** if available and within its limits; recommended fallback **Atlas Flex at approximately $8–30/month**, depending on usage.
-- Production night cron: at least **$1/month plus run time**. Render does not support <code>plan: free</code> for cron jobs, so the current Blueprint declaration is invalid.
-- Production phone OTP: Twilio SMS is usage-priced. Confirm current India destination, carrier, sender-registration, and tax charges in the Twilio console before enabling it.
+- Production night cron: at least **$1/month plus run time** if reintroduced. Render does not support <code>plan: free</code> for cron jobs, so the invalid declaration is excluded from the reviewed Blueprint until a paid plan and working command are approved.
+- Production phone OTP and screening: Telesign products are usage-priced. Preserve the existing account capabilities and operating modes during migration; review destination, carrier, sender-registration, consent, and tax charges in My Telesign before changing or expanding use.
 - Existing production Render, Hostinger, domain, and database charges are not included because their current account plans are not recorded in the repository.
 
 Legend:
@@ -33,26 +33,26 @@ Legend:
 | --- | --- | --- |
 | GitHub | Public repository, default branch <code>main</code>, no Actions workflow, no branch protection | A push to <code>main</code> has no GitHub release gate |
 | Render API | Production deployment is <code>fungame-api.onrender.com</code>; <code>api.chakri.casino</code> points to it | Do not rename or replace it during staging |
-| Render player app | Production deployment is <code>fungame-web.onrender.com</code> | Create a separate staging static site with no production domains |
-| Public apex | <code>chakri.casino</code> serves a separate Next-based marketing site | Do not upload the React game build here |
-| Operator CRM | <code>crm.chakri.casino</code> is hosted by Hostinger | Validate an isolated Render CRM build before any Hostinger upload |
+| Render player/admin upstream | Production deployment is <code>fungame-web.onrender.com</code> | Keep it as the preserved upstream; deploy API first, then this exact matching build |
+| Public apex | <code>chakri.casino</code> serves the Sites application and owns the canonical <code>/Admin</code> reverse proxy | Do not attach the apex or <code>www</code> to the Render static service |
+| Legacy operator CRM | <code>crm.chakri.casino</code> is hosted by Hostinger | Keep it unchanged as a rollback/reference surface until <code>/Admin</code> parity is signed off |
 | Intended play host | <code>play.chakri.casino</code> currently has no DNS record | Connect it only after production promotion is approved |
 | Database | FastAPI uses Motor/MongoDB and production <code>DB_NAME=fungame</code> | Staging must use a separate cluster or database and credentials |
 | Supabase | Two visible projects are named Production; this repo is not linked to either | Do not use either as an improvised staging target |
 | Payments | All five financial switches are off and the provider integration is fail-closed | Keep real-money deposit and withdrawal unavailable |
-| Cron | Blueprint declares a free cron plan and a hostname that is not the live API | Keep staging cron disabled; repair and price production cron separately |
+| Cron | The invalid free cron has been removed from the Blueprint; an existing dashboard service is not deleted by that source change | Keep it disabled until a paid plan, working command, idempotency dry run, spend ceiling, and owner are approved |
 
-## Current account-access mode — administrator review
+## Current account-access mode — Telesign phone OTP
 
-The temporary production mode is <code>REGISTRATION_MODE=ADMIN_REVIEW</code>. Registration requires full name, recognized country, valid adult date of birth, accepted terms, a unique valid email, a unique E.164 mobile number, and a confirmed password. It creates one zero-chip <code>PENDING</code> player with immutable CRM attribution. No verification code is generated or claimed; <code>email_verified</code>, <code>phone_verified</code>, and <code>contact_verified</code> remain false. A correct password still cannot create a session until an administrator explicitly approves the account. Approval is recorded as <code>contact_verification_status=ADMIN_APPROVED</code> without pretending that either contact was OTP-verified.
+A read-only production capabilities check on 2026-08-23 reports <code>REGISTRATION_MODE=PHONE_OTP</code>, phone registration and phone password reset ready, phone verification required, and email registration/recovery unavailable. The Blueprint therefore preserves <code>REGISTRATION_MODE</code> and every Telesign operating mode with <code>sync: false</code>; a code migration must not switch the live identity policy.
 
-- [ ] 🤖 **Validate the administrator-review registration boundary** — 20 minutes. Confirm both normalized contact guards, password hashing, eligibility and terms checks, generic collision responses, zero starting chips, exact CRM attribution, pending-login refusal, and explicit atomic admin approval. Cost: **$0**.
+- [ ] 🤖 **Validate the phone-OTP registration boundary without sending a message** — 20 minutes. Use local/staging provider fixtures to confirm normalized E.164 identity, one-use hashed challenges, expiry, resend/attempt limits, transaction-bound account creation and immutable CRM attribution. Keep <code>OTP_EXPOSE_DEV_CODE=false</code> in production. Cost: **$0**.
 
-  > Prompt: “Test ADMIN_REVIEW registration with controlled identities. Verify no OTP challenge, delivery call, dev code or pre-approval session is created; wrong credentials remain generic; correct credentials return ACCOUNT_PENDING_REVIEW; both contact flags stay false after approval; approved_by/manual review fields identify the operator; and only the approved account can log in and reach gameplay. Do not enable deposits or withdrawals.”
+  > Prompt: “Test PHONE_OTP registration with controlled fixtures. Verify an account and attribution commit only after the correct one-use code, failed delivery creates no account/session, password setup follows verification, wrong credentials remain generic, and provider keys, codes and full recipients never enter responses or logs. Do not call Telesign or mutate production.”
 
-  **You'll know it worked when:** capabilities advertise <code>registration_mode=ADMIN_REVIEW</code> and <code>verification_required=false</code>, the complete application appears once in the Render-backed operator user queue, and only an explicit approval changes it to <code>ACTIVE</code>.
+  **You'll know it worked when:** the fixture suite passes and the read-only production capabilities response remains <code>registration_mode=PHONE_OTP</code>, <code>phone_registration=true</code>, <code>phone_password_reset=true</code>, and <code>email_registration=false</code> before and after release.
 
-- [ ] 🤝 **Inventory historical activation modes before launch** — 15 minutes. Existing phone-OTP and deferred rows are not rewritten or silently treated as administrator-reviewed. Count and plan their migration separately. Cost: **$0**.
+- [ ] 🤝 **Inventory historical activation modes before launch** — 15 minutes. Existing administrator-reviewed, phone-OTP, and deferred rows are not rewritten or silently reclassified. Count and plan any reconciliation separately. Cost: **$0**.
 
 ## Phase 0 — stop accidental production changes
 
@@ -81,6 +81,20 @@ The temporary production mode is <code>REGISTRATION_MODE=ADMIN_REVIEW</code>. Re
   > Prompt: “Audit render.yaml against the verified live services fungame-api and fungame-web, the separate apex marketing site, Hostinger CRM, and api.chakri.casino. Prepare a minimal patch for review that does not rename production services or DB_NAME, does not claim domains hosted elsewhere, keeps every real-money flag false, and fixes the cron declaration by removing it until approved or using a valid paid cron plan. The cron API target must be the verified production API. Validate the YAML locally. Do not sync Render, commit, push, deploy, or touch DNS.”
 
   **You'll know it worked when:** the proposed diff contains no production rename, no Hostinger or marketing-domain takeover, no <code>plan: free</code> cron, and passes Blueprint/YAML validation.
+
+- [ ] 🤖 **Prove TeleSign configuration continuity by variable name only** — 10 minutes. Compare the Render environment-variable names with the source contract below. Do not read, copy, export, screenshot, or log any value. The Blueprint uses <code>sync: false</code> for these existing dashboard-managed settings so a code migration cannot silently disable or retune the live account:
+
+  <code>OTP_SMS_ADAPTER</code>, <code>TELESIGN_CUSTOMER_ID</code>, <code>TELESIGN_API_KEY</code>, <code>TELESIGN_PLAN</code>, <code>TELESIGN_INTELLIGENCE_MODE</code>, <code>TELESIGN_PHONE_ID_MODE</code>, <code>TELESIGN_CONTACT_ADDON_ENABLED</code>, <code>TELESIGN_VERIFY_PLUS_ENABLED</code>, and <code>TELESIGN_ENGAGEMENT_SMS_ENABLED</code>.
+
+  > Prompt: “Compare only TeleSign environment-variable names and the authenticated Admin readiness booleans before and after the release. Do not reveal values, send an SMS, call a paid screening product, change My Telesign, or edit Render. Stop if a variable name disappears or a readiness mode changes unexpectedly.”
+
+  **You'll know it worked when:** the authenticated <code>/api/admin/telesign</code> readiness response has the same expected product modes after the API deploy, no secret appears in output, and provider usage counters do not increase from this check.
+
+- [ ] 🤖 **Run the data-preserving CRM index preflight** — 15 minutes. Against a staging copy or a read-only production snapshot, count duplicate non-null values for distributor <code>user_id</code>, distributor <code>login_username_key</code>, user <code>username_key</code>, and active player attribution by <code>user_id</code>. Record counts only; never print login IDs, contacts, notes, tokens, or customer rows. Do not delete, merge, rename, or backfill a record automatically.
+
+  > Prompt: “Run aggregate-only duplicate checks for the four new/existing unique CRM invariants on a staging copy or read-only snapshot. Return collection name, invariant name, duplicate-group count, and affected-row count only. Do not show values or documents and do not write to MongoDB. If any count is nonzero, stop the release and prepare a separately reviewed reconciliation plan.”
+
+  **You'll know it worked when:** all duplicate counts are zero, additive index creation succeeds without changing documents, and <code>/api/health</code> returns <code>crm_ready=true</code>. A <code>CRM_NOT_READY</code> response is a release stop, not permission to weaken the index.
 
 - [ ] 🧑 **Approve the production cron cost or leave it disabled** — 5 minutes. In Render, open the workspace menu → **Billing** to confirm a payment method and spend limit. Then open the proposed <code>chakri-casino-night</code> service settings. Choose a valid paid instance only after staging verifies the endpoint; otherwise leave the cron service uncreated or suspended. Cost: **minimum $1/month plus runtime** if enabled, **$0** if disabled.
 
@@ -174,7 +188,7 @@ The temporary production mode is <code>REGISTRATION_MODE=ADMIN_REVIEW</code>. Re
 
 ## Phase 4 — test complete user journeys in staging
 
-- [ ] 🤝 **Test login and administrator-reviewed registration** — 20 minutes. In a private window, submit one controlled profile, confirm pre-approval login is refused, approve it from the staging operator queue, then sign in with both the email and E.164 mobile number. Do not use a customer's contact details. Cost: **$0**.
+- [ ] 🤝 **Test login and phone-OTP registration in staging** — 20 minutes. Use a staging-only delivery fixture or one separately approved test destination. Confirm failed/incorrect verification creates no usable account, successful verification creates one attributed account, password setup completes, and login uses the verified E.164 mobile number. Do not use a customer's contact details or the production provider. Cost: **$0 with fixtures**.
 
   **You'll know it worked when:** the pending account has zero chips and no verified-contact flags, appears in the operator queue, cannot authenticate before approval, and can authenticate only after the recorded operator decision.
 
@@ -210,13 +224,13 @@ The temporary production mode is <code>REGISTRATION_MODE=ADMIN_REVIEW</code>. Re
 
   **You'll know it worked when:** one draft PR contains the complete release evidence and is not mergeable by accident.
 
-## Phase 5 — restore phone OTP after the provider is approved
+## Phase 5 — preserve and validate the existing Telesign integration
 
-The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVIEW</code> until the live-delivery checks below pass. Then set <code>REGISTRATION_MODE=PHONE_OTP</code>; the retained OTP route and provider controls become active without rewriting existing administrator-reviewed accounts.
+The Telesign account and product configuration already exist, and production already advertises <code>PHONE_OTP</code>. This release preserves the Render-managed names and modes; it does not copy secrets, retune a product, switch registration mode, or send a message.
 
-- [ ] 🧑 **Configure the approved production SMS route** — 30–60 minutes plus provider approval. For Telesign, upgrade the trial account, complete sender/India messaging-registration requirements, and enter <code>TELESIGN_CUSTOMER_ID</code> plus <code>TELESIGN_API_KEY</code> directly in the production Render API secret fields. Set <code>OTP_SMS_ADAPTER=telesign</code> and <code>OTP_EXPOSE_DEV_CODE=false</code>. Twilio remains available as an alternative using its three existing secret fields. Keep <code>OTP_EMAIL_ADAPTER=disabled</code> for new-account activation. Cost: usage-priced; confirm current destination, carrier and sender charges with the selected provider.
+- [ ] 🧑 **Verify the existing production SMS route without changing it** — 15 minutes. In Render, confirm the variable names exist and <code>OTP_EXPOSE_DEV_CODE=false</code>; in the authenticated Admin Telesign panel, confirm only the expected readiness flags and modes. Do not reveal values, send an SMS, call a paid product, or alter My Telesign during the code migration. Cost: **$0 expected for readiness-only checks**.
 
-  **You'll know it worked when:** a designated test mobile receives one real code, no code or provider secret appears in API responses/logs, and capabilities advertise phone registration only while the provider is ready.
+  **You'll know it worked when:** the same expected Telesign products remain ready after deploy, no provider usage counter increases from the migration check, and no secret or recipient appears in output.
 
 - [ ] 🤖 **Prove SMS failure closes registration** — 15 minutes. Before the live test, validate staging with the SMS adapter disabled and with invalid non-secret fixture configuration. Do not intentionally break production credentials. Cost: **$0**.
 
@@ -224,7 +238,7 @@ The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVI
 
 - [ ] 🤖 **Run live-delivery safety tests without exposing OTPs** — 20 minutes.
 
-  > Prompt: “After the operator configures Twilio directly in Render, test one controlled phone registration and phone password reset. Verify OTP expiry is 15 minutes, resend cooldown and attempt limits work, codes are hashed at rest, optional email remains unverified, and logs contain neither code nor full recipient. Do not request or display provider keys or OTP values.”
+  > Prompt: “After the operator separately approves one Telesign live-delivery test, test one controlled phone registration and phone password reset. Verify OTP expiry is 15 minutes, resend cooldown and attempt limits work, codes are hashed at rest, optional email remains unverified, and logs contain neither code nor full recipient. Do not request or display provider keys or OTP values.”
 
   **You'll know it worked when:** both controlled messages arrive, each challenge is one-use, and the redacted audit contains no sensitive value.
 
@@ -274,11 +288,11 @@ The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVI
 
   **You'll know it worked when:** the production player site serves the reviewed asset hashes and communicates with the healthy production API.
 
-- [ ] 🤝 **Publish the reviewed operator build to Hostinger** — 20–40 minutes. First have the agent create and checksum an admin-only production build. In Hostinger hPanel choose **Websites → Manage** for <code>crm.chakri.casino</code> → **Files → File Manager**, locate the displayed subdomain document root, and download a backup. Upload the reviewed build only after confirming its checksum; do not replace the apex marketing site. Cost: no incremental cost on the existing Hostinger plan.
+- [ ] 🤝 **Cut over the canonical same-origin Admin portal** — 20–40 minutes. After the matching API and Render frontend commits pass their gates, publish the reviewed Sites version that maps <code>chakri.casino/Admin</code> to that preserved Render upstream. Verify uppercase <code>/Admin</code> and lowercase redirect behavior. Do not upload to, overwrite, delete, or reconfigure <code>crm.chakri.casino</code>; it remains the rollback/reference surface until parity is signed off. Cost: no expected incremental cost on the existing hosts.
 
-  > Prompt: “Build the admin-only React bundle from the approved production SHA with REACT_APP_ADMIN_CONSOLE=true, REACT_APP_ADMIN_CONSOLE_HOSTS=crm.chakri.casino, REACT_APP_BACKEND_URL=https://api.chakri.casino, and source maps disabled. Produce a file manifest and SHA-256 checksums. Do not upload, access Hostinger, include secrets, or modify the player build.”
+  > Prompt: “Verify the reviewed Sites version proxies only the explicit same-origin Admin/player asset allowlist to the matching Render frontend commit, strips upstream service-worker registration, forwards no browser authorization or cookies to the presentation upstream, adds noindex headers on Admin pages, and rejects state-changing proxy methods. Publish only after the API and Render frontend are healthy. Do not change Hostinger, DNS, or the legacy CRM.”
 
-  **You'll know it worked when:** <code>crm.chakri.casino/admin/login</code> serves the checksum-matched admin bundle, player routes are unavailable there, and API calls use <code>api.chakri.casino</code>.
+  **You'll know it worked when:** <code>chakri.casino/Admin/login</code> serves the reviewed operator login, admin and distributor requests use <code>api.chakri.casino</code>, lower-case <code>/admin</code> redirects canonically, and the unchanged legacy CRM still works as a rollback reference.
 
 - [ ] 🧑 **Connect <code>play.chakri.casino</code> only if it is the approved player URL** — 10 minutes plus DNS propagation. In the Render production static service open **Settings → Custom Domains → Add Custom Domain**, enter <code>play.chakri.casino</code>, then at the DNS provider add the exact CNAME target Render displays. Do not change apex, <code>www</code>, <code>crm</code>, or <code>api</code>. Cost: normally **$0 within included domains**, or **$0.25/month** if it exceeds the current Render workspace allowance.
 
@@ -302,7 +316,7 @@ The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVI
 
   **You'll know it worked when:** Atlas shows a recent recoverable backup or an approved backup plan, plus active alert recipients and thresholds.
 
-- [ ] 🧑 **Set hosting and provider spend limits** — 10 minutes. In Render open workspace **Billing → Spend Limit/Usage**, in Atlas open **Billing → Budgets & Alerts**, in Resend open **Billing**, and in Twilio, if used, open **Billing → Usage Triggers**. Enter the approved monthly ceilings and operator email. Cost: **$0 to configure**.
+- [ ] 🧑 **Set hosting and provider spend limits** — 10 minutes. In Render open workspace **Billing → Spend Limit/Usage**, in Atlas open **Billing → Budgets & Alerts**, in Resend open **Billing**, and in My Telesign review the account billing/usage controls and alerts. Enter the approved monthly ceilings and operator email where supported. Cost: **$0 to configure**.
 
   **You'll know it worked when:** every billable provider has a written monthly ceiling and sends a test notification to the responsible operator.
 
@@ -327,10 +341,10 @@ The provider rollout is a future change. Keep <code>REGISTRATION_MODE=ADMIN_REVI
 Chakri.Casino is launched only when all of the following are true:
 
 1. The exact production commit passed automated checks and all staging user journeys.
-2. The API, player site, and CRM expose that reviewed build on their intended hosts.
+2. The API and Render upstream expose the reviewed commit, <code>chakri.casino/Admin</code> exposes the matching same-origin portal, and the legacy CRM remains unchanged as rollback/reference.
 3. Production MongoDB remained isolated from staging and has a recovery plan.
-4. Email signup works through a real provider, or unavailable channels are honestly disabled.
-5. Every payment and withdrawal switch remains false until a separately approved real-money launch.
+4. Phone-OTP signup/reset remain ready, email channels remain honestly unavailable, and no migration check sends an unsolicited message.
+5. Every payment and withdrawal switch remains false for this virtual-chip-only product.
 6. The invalid cron declaration is removed or replaced with an approved paid, tested cron.
 7. A real phone and desktop complete the controlled production smoke test.
 8. Rollback IDs, owners, spend limits, and monitoring are recorded.
@@ -345,4 +359,4 @@ If any gate fails, stop. Roll back the affected application service to its recor
 - [Google Cloud API-key rotation](https://docs.cloud.google.com/docs/authentication/api-keys)
 - [Google Tenor API usage and key management](https://developers.google.com/tenor/guides/quickstart)
 - [Resend transactional-email pricing](https://resend.com/pricing)
-- [Twilio SMS pricing for India](https://www.twilio.com/en-us/sms/pricing/in)
+- [Telesign SMS Verify API](https://developer.telesign.com/enterprise/docs/sms-verify-api)

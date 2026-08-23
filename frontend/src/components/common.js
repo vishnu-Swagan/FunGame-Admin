@@ -8,7 +8,7 @@ import { cartoonAvatarForKey } from "@/lib/profileAvatars";
 
 export const Disclaimer = ({ className = "" }) => (
   <p data-testid="play-chips-disclaimer" className={`text-[11px] tracking-[0.18em] uppercase text-white/70 ${className}`}>
-    CHIP-BASED PLAY · 18+ · PLAY RESPONSIBLY
+    VIRTUAL CHIPS ONLY · NO CASH VALUE · 18+ · PLAY RESPONSIBLY
   </p>
 );
 

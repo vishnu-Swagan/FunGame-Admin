@@ -175,7 +175,7 @@ function useJiliSoundState() {
 }
 
 function useCabinetScale(stageRef) {
-  const measure = () => {
+  const measure = useCallback(() => {
     if (typeof window === "undefined") return 1;
     const stage = stageRef.current;
     const width = stage?.clientWidth || window.visualViewport?.width || window.innerWidth;
@@ -187,7 +187,7 @@ function useCabinetScale(stageRef) {
       designHeight: 884,
       maxScale: 1,
     }).scale;
-  };
+  }, [stageRef]);
   const [scale, setScale] = useState(measure);
   useLayoutEffect(() => {
     const resize = () => setScale(measure());
@@ -205,7 +205,7 @@ function useCabinetScale(stageRef) {
       window.visualViewport?.removeEventListener("resize", resize);
       window.visualViewport?.removeEventListener("scroll", resize);
     };
-  }, [stageRef]);
+  }, [measure, stageRef]);
   return scale;
 }
 
@@ -425,7 +425,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
               {realWinners.map((winner, index) => (
                 <div className="j7-winner" key={winner.id || index}>
                   <img src={winnerAvatar(winner, index)} alt="" aria-hidden="true" />
-                  <small>{winner.name}<b>₹ {formatChips(winner.payout)}</b></small>
+                  <small>{winner.name}<b>{formatChips(winner.payout)} chips</b></small>
                 </div>
               ))}
             </div>
@@ -473,12 +473,12 @@ function SevenUpDownTable({ game, live, demo = false }) {
           </div>
 
           <div className="j7-money-line">
-            <span>Balance <b>₹{balance === null ? "…" : formatChips(balance)}</b></span>
-            <span>Your Bet <b>₹{formatChips(myTotal)}</b></span>
+            <span>Balance <b>{balance === null ? "…" : formatChips(balance)} chips</b></span>
+            <span>Your Bet <b>{formatChips(myTotal)} chips</b></span>
           </div>
 
           <footer className="j7-tools">
-            <div className="j7-player-card"><img src={playerAvatar} alt="Player" /><small>{demo ? "3164954_erg_INR" : "PLAYER"}</small></div>
+            <div className="j7-player-card"><img src={playerAvatar} alt="Player" /><small>{demo ? "3164954_CHIPS" : "PLAYER"}</small></div>
             <ToolButton label="again" icon={<RotateCcw />} onClick={() => replay("again")} disabled={!betting || busy || !repeatRef.current.length} />
             <div className="j7-chip-picker">
               {chipMenu && <div className="j7-chip-menu">

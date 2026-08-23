@@ -73,6 +73,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "_core_indexes", indexes),
             patch.object(server, "run_game_transaction", new_callable=AsyncMock) as transaction,
             patch.object(game_engines, "aviator_return_factor", return_value=0.945),
+            patch.object(server, "_require_crm_readiness", new_callable=AsyncMock),
             patch.object(server.financial_wallet, "financial_status", return_value={"ready": False}),
             patch.object(server.financial_wallet, "financial_flags_requested", return_value=False),
         ):
@@ -103,6 +104,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "_core_indexes", indexes),
             patch.object(server, "run_game_transaction", side_effect=run_transaction),
             patch.object(game_engines, "aviator_return_factor", return_value=0.945),
+            patch.object(server, "_require_crm_readiness", new_callable=AsyncMock),
             patch.object(server.financial_wallet, "financial_status", return_value={"ready": True}),
             patch.object(server.financial_wallet, "financial_flags_requested", return_value=False),
         ):
@@ -118,7 +120,10 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         database.command.assert_awaited_once_with("ping")
         self.assertEqual(
             response,
-            {"status": "ok", "gameplay_ready": True, "financial_ready": True},
+            {
+                "status": "ok", "gameplay_ready": True,
+                "crm_ready": True, "financial_ready": True,
+            },
         )
         self.assertTrue(server._GAMEPLAY_READY)
 
@@ -134,6 +139,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=RuntimeError("transactions unavailable"),
             ) as transaction_probe,
             patch.object(game_engines, "aviator_return_factor", return_value=0.945),
+            patch.object(server, "_require_crm_readiness", new_callable=AsyncMock),
             patch.object(server.financial_wallet, "financial_status", return_value={"ready": False}),
             patch.object(server.financial_wallet, "financial_flags_requested", return_value=False),
         ):
@@ -144,6 +150,41 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.detail["code"], "GAMEPLAY_NOT_READY")
         database.command.assert_awaited_once_with("ping")
         transaction_probe.assert_awaited_once_with()
+
+    async def test_health_returns_503_when_crm_identity_indexes_are_unavailable(self):
+        database = self._database()
+        server._GAMEPLAY_READY = True
+
+        with (
+            patch.object(server, "db", database),
+            patch.object(server, "_probe_gameplay_transaction", new_callable=AsyncMock),
+            patch.object(
+                server, "_require_crm_readiness", new_callable=AsyncMock,
+                side_effect=RuntimeError("distributor identity index unavailable"),
+            ),
+            patch.object(game_engines, "aviator_return_factor", return_value=0.945),
+            patch.object(server.financial_wallet, "financial_status", return_value={"ready": False}),
+            patch.object(server.financial_wallet, "financial_flags_requested", return_value=False),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await server.health()
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "CRM_NOT_READY")
+
+    async def test_retired_copy_migration_preserves_announcements_and_notifications(self):
+        database = SimpleNamespace(
+            system_config=SimpleNamespace(update_one=AsyncMock()),
+            announcements=SimpleNamespace(update_many=AsyncMock()),
+            notifications=SimpleNamespace(update_many=AsyncMock()),
+        )
+
+        with patch.object(server, "db", database):
+            await server._retire_nocash_wording_migration()
+
+        database.system_config.update_one.assert_awaited_once()
+        database.announcements.update_many.assert_not_awaited()
+        database.notifications.update_many.assert_not_awaited()
 
 
 if __name__ == "__main__":

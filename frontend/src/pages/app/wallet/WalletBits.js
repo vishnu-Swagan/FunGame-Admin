@@ -1,4 +1,4 @@
-import { Coins, Gift, Hourglass, Landmark, WalletCards } from "lucide-react";
+import { Coins, Gift, Hourglass, WalletCards } from "lucide-react";
 import { formatChips } from "@/components/common";
 import { statusTone, userWithdrawalStatus } from "@/lib/walletUtils";
 
@@ -18,23 +18,22 @@ export function PaymentStatus({ status, playerFriendly = false }) {
 export function WalletBalanceCard({ wallet }) {
   const items = [
     { label: "Available", value: wallet.available_chips, icon: Coins, accent: "text-primary" },
-    { label: "Withdrawable", value: wallet.withdrawable_chips, icon: Landmark, accent: "text-emerald-300" },
-    { label: "Held", value: wallet.held_chips, icon: Hourglass, accent: "text-sky-300" },
+    { label: "In play", value: wallet.held_chips, icon: Hourglass, accent: "text-sky-300" },
     { label: "Bonus", value: wallet.bonus_chips, icon: Gift, accent: "text-fuchsia-300" },
   ];
   return (
     <section className="relative overflow-hidden rounded-2xl border border-primary/30 bg-card/65 p-5 shadow-[0_20px_55px_rgba(0,0,0,.4)]">
       <div className="fg-aurora absolute inset-0 pointer-events-none" />
       <div className="relative">
-        <p className="text-[11px] font-semibold tracking-[.18em] uppercase text-white/45">Chakri wallet</p>
+        <p className="text-[11px] font-semibold tracking-[.18em] uppercase text-white/45">Virtual-chip balance</p>
         <div className="mt-2 flex items-center gap-3">
           <span className="flex h-11 w-11 items-center justify-center rounded-full border border-primary/45 bg-primary/15"><WalletCards className="h-5 w-5 text-primary" /></span>
           <div>
-            <p className="text-xs text-white/50">Playable chips</p>
+            <p className="text-xs text-white/50">Available play chips</p>
             <p data-testid="wallet-available-balance" className="tabular-nums text-4xl font-extrabold text-primary">{formatChips(wallet.available_chips)}</p>
           </div>
         </div>
-        <div className="mt-5 grid grid-cols-3 gap-2">
+        <div className="mt-5 grid grid-cols-2 gap-2">
           {items.slice(1).map(({ label, value, icon: Icon, accent }) => (
             <div key={label} className="rounded-xl border border-white/10 bg-black/15 p-3 min-w-0">
               <Icon className={`h-4 w-4 ${accent}`} />

@@ -114,16 +114,13 @@ async def _financial_worker():
         await asyncio.sleep(3)
 
 
-async def _migrate_nocash_wording():
-    await db.announcements.update_many({}, [{'$set': {'body': {
-        '$replaceAll': {
-            'input': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}},
-            'find': 'have no cash value and ', 'replacement': ''}}}}])
-    await db.notifications.update_many(
-        {'body': {'$regex': 'NO CASH VALUE'}},
-        [{'$set': {'body': {'$replaceAll': {'input': '$body', 'find': ' PLAY CHIPS — NO CASH VALUE.', 'replacement': ''}}}}])
-    await db.system_config.update_one({'key': 'main'}, {'$set': {'nocash_wording_stripped': True}})
-    logger.info('Stripped legacy no-cash-value wording from existing announcements/notifications')
+async def _retire_nocash_wording_migration():
+    """Retire the former broad copy rewrite without touching operator content."""
+    await db.system_config.update_one({'key': 'main'}, {'$set': {
+        'nocash_wording_stripped': True,
+        'nocash_wording_migration_retired': True,
+    }})
+    logger.info('Retired legacy no-cash wording migration; existing content preserved')
 
 
 async def _core_indexes():
@@ -189,6 +186,18 @@ async def _probe_gameplay_transaction():
     await run_game_transaction(client, transaction_probe)
 
 
+async def _require_crm_readiness():
+    """Require the additive indexes used by registration and partner logins.
+
+    Startup deliberately does not rewrite legacy identities to make a unique
+    index fit. If production contains a collision, the new release must remain
+    unready while the previous deploy stays available; reporting green and then
+    returning 503 only from distributor/admin mutations would hide the problem.
+    """
+    await crm.require_portal_identity_readiness()
+    await crm.require_registration_attribution_readiness()
+
+
 async def _audit_legacy_blackjack_hands():
     pending = await db.blackjack_games.count_documents({
         'status': 'done',
@@ -236,7 +245,7 @@ async def lifespan(app: FastAPI):
         cfg = None
 
     if cfg and not cfg.get('nocash_wording_stripped'):
-        await step('migrate:nocash_wording', _migrate_nocash_wording())
+        await step('migrate:nocash_wording', _retire_nocash_wording_migration())
 
     await step('indexes:crm', crm.ensure_indexes())
     await step('crm:house_account', crm.ensure_house_account())
@@ -332,6 +341,17 @@ async def health():
                 'message': 'Gameplay services are not ready.',
             },
         ) from exc
+    try:
+        await _require_crm_readiness()
+    except Exception as exc:
+        logger.error('CRM readiness check failed: %s', type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'CRM_NOT_READY',
+                'message': 'Registration and partner services are not ready.',
+            },
+        ) from exc
     financial = financial_wallet.financial_status()
     if financial_wallet.financial_flags_requested() and not financial['ready']:
         raise HTTPException(
@@ -341,6 +361,7 @@ async def health():
     return {
         'status': 'ok',
         'gameplay_ready': True,
+        'crm_ready': True,
         'financial_ready': bool(financial['ready']),
     }
 

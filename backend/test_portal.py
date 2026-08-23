@@ -54,11 +54,19 @@ async def main():
     south = await crm.create_distributor('Southern Agents', 'STH22', 3000, 'admin')
 
     # --- provisioning ---------------------------------------------------
-    user = await crm.attach_login(north['id'], 'north@example.com', 'hashed', 'admin')
-    T("login id is the referral code",  user['username'] == 'NRTH1')
+    user = await crm.attach_login(
+        north['id'], 'north@example.com', 'hashed', 'admin',
+        username='north.partner', must_change_password=True,
+    )
+    T("login id is independent from referral code", user['username'] == 'north.partner')
     T("role is DISTRIBUTOR",            user['role'] == 'DISTRIBUTOR')
     T("no wallet on the account",       user.get('chip_balance') == 0)
     T("no email round trip needed",     user['email_verified'] is True)
+    T("temporary login requires password change", user['password_change_required'] is True)
+    T("temporary login cannot open the portal",
+      await raises(auth_utils.require_distributor(user), 'password'))
+    await db.users.update_one({'id': user['id']}, {'$set': {'password_change_required': False}})
+    user = await db.users.find_one({'id': user['id']})
 
     house = await db.distributors.find_one({'code': 'HOUSE'})
     T("house gets no portal login",
@@ -89,6 +97,19 @@ async def main():
     T("suspension closes the portal now",
       await raises(auth_utils.require_distributor(after), 'suspended'))
     await db.distributors.update_one({'id': north['id']}, {'$set': {'status': 'ACTIVE'}})
+
+    # DISABLED is a first-class CRM state. The central status function also
+    # closes the login session so no already-issued token survives the change.
+    await db.users.update_one({'id': after['id']}, {'$set': {'active_session_id': 'second-live-session'}})
+    await crm.set_distributor_status(north['id'], 'DISABLED', 'admin')
+    disabled_user = await db.users.find_one({'id': after['id']})
+    T("disabled status revokes the session",
+      disabled_user['status'] == 'DISABLED'
+      and disabled_user['active_session_id'].startswith('revoked-'))
+    T("disabled login cannot use the portal",
+      await raises(auth_utils.require_distributor(disabled_user), 'disabled'))
+    await crm.set_distributor_status(north['id'], 'ACTIVE', 'admin')
+    after = await db.users.find_one({'id': after['id']})
 
     stranger = {'id': 'nobody', 'role': 'DISTRIBUTOR'}
     T("an unlinked login is refused",

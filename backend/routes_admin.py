@@ -1,16 +1,21 @@
 """Admin routes: user approvals, chip requests, games, announcements, system config."""
+import asyncio
+import csv
+import io
+import re
 import uuid
 import string
 import secrets
 import logging
-from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
 from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AnnouncementUpdate, GameUpdate, SystemConfigUpdate,
                     AdminSignupApprove, AdminCreateUser, AdminPointsAdjust, AdminSetPassword, SupportMessageCreate,
                     DistributorCreate,
+                    DistributorUpdate,
                     DistributorRate,
                     DistributorStatus,
                     DistributorLogin,
@@ -19,8 +24,12 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     PayoutAction,
                     PayoutPaid,
                     ClawbackCreate,
-                    AdminSetEmail)
-from auth_utils import require_admin, hash_password, require_legacy_chip_mutation_allowed
+                    AdminSetEmail,
+                    AdminStepUpStart,
+                    AdminStepUpVerify)
+from auth_utils import (require_admin, hash_password, verify_password,
+                        require_legacy_chip_mutation_allowed,
+                        require_recent_admin_step_up)
 from ledger import debit_chips, InsufficientChips
 import ledger
 import crm
@@ -30,7 +39,19 @@ import revenue
 import commission
 import payouts
 from game_access import assert_admin_status_change_allowed
-from otp_service import normalize_identity
+from otp_service import (
+    ADMIN_STEP_UP,
+    OTP_TTL_SECONDS,
+    OtpConfigurationError,
+    OtpError,
+    consume_prepared_challenge,
+    consume_persistent_limit,
+    issue_challenge,
+    normalize_identity,
+    prepare_challenge_verification,
+    require_configured_pepper,
+    require_otp_indexes,
+)
 from avatar_service import deterministic_avatar_key
 import os
 from pymongo import ReturnDocument
@@ -57,6 +78,157 @@ def _issue_password():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _admin_permissions(admin: dict) -> set[str]:
+    """Canonical grants with a compatibility path for pre-RBAC admin rows."""
+    if 'admin_permissions' in admin:
+        values = admin.get('admin_permissions') or []
+    elif 'permissions' in admin:
+        values = admin.get('permissions') or []
+    else:
+        # Existing installations predate granular distributor grants.  Keep
+        # those active admins working until their record is migrated; an
+        # explicitly present empty canonical list still means revoked.
+        return {'DISTRIBUTORS_VIEW', 'DISTRIBUTORS_MANAGE', 'DISTRIBUTORS_CREDENTIALS'}
+    return {str(value).strip().upper() for value in values if value}
+
+
+def _require_distributor_permission(admin: dict, permission: str) -> None:
+    is_super = str(admin.get('admin_role') or '').upper() == 'SUPER_ADMIN'
+    if not is_super and permission not in _admin_permissions(admin):
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_PERMISSION_REQUIRED',
+            'message': f'Missing permission: {permission}.',
+        })
+    # Credential issuance and login-identity changes are trust decisions. A
+    # named grant or Super Admin role never bypasses the existing fail-closed
+    # MFA plus password re-authentication ceremony.
+    if permission == 'DISTRIBUTORS_CREDENTIALS':
+        require_recent_admin_step_up(admin)
+
+
+async def _require_distributor_identity_ready() -> None:
+    try:
+        await crm.require_portal_identity_readiness()
+    except crm.CrmConfigurationError as exc:
+        raise HTTPException(status_code=503, detail={
+            'code': 'DISTRIBUTOR_IDENTITY_NOT_READY',
+            'message': 'Partner Login ID storage is not ready. No credentials were changed.',
+        }) from exc
+
+
+def _distributor_audit_snapshot(distributor: dict | None) -> dict:
+    """Retain operational evidence without copying contact data or credentials."""
+    distributor = distributor or {}
+    return {
+        'code': distributor.get('code'),
+        'name': distributor.get('name'),
+        'status': distributor.get('status'),
+        'login_configured': bool(distributor.get('user_id')),
+        'email_present': bool(distributor.get('email')),
+        'phone_present': bool(distributor.get('phone')),
+        'note_present': bool(distributor.get('note')),
+    }
+
+
+async def _audit_distributor(admin: dict, action: str, distributor_id: str,
+                             *, before=None, after=None, metadata=None,
+                             session=None) -> None:
+    kwargs = {'session': session} if session is not None else {}
+    await db.admin_audit.insert_one({
+        'id': str(uuid.uuid4()),
+        'actor_id': admin['id'],
+        'action': action,
+        'target_type': 'DISTRIBUTOR',
+        'target_id': distributor_id,
+        'before': _distributor_audit_snapshot(before),
+        'after': _distributor_audit_snapshot(after),
+        # Callers may supply booleans/counts/status labels only. Passwords,
+        # email addresses, phone numbers and internal notes never enter audit.
+        'metadata': metadata or {},
+        'created_at': _now(),
+    }, **kwargs)
+
+
+async def _distributor_admin_view(distributor: dict, *, include_private=False) -> dict:
+    """Stable admin response with no password/session/token material."""
+    view = {
+        key: distributor.get(key) for key in (
+            'id', 'code', 'name', 'status', 'is_house', 'created_at',
+            'created_by', 'updated_at', 'updated_by', 'user_id',
+        )
+    }
+    view.update({
+        'record_version': int(distributor.get('record_version') or 0),
+        'rate_bps': await crm.rate_on(distributor['id'], crm.now_iso()),
+        'players': await db.users.count_documents({
+            'distributor_id': distributor['id'], 'role': 'PLAYER',
+        }),
+        'login_configured': bool(distributor.get('user_id')),
+        'login_username': distributor.get('login_username') or (
+            distributor.get('code') if distributor.get('user_id') else None
+        ),
+    })
+    if include_private:
+        view.update({
+            'email': distributor.get('email'),
+            'phone': distributor.get('phone'),
+            'note': distributor.get('note'),
+        })
+        if distributor.get('user_id'):
+            login = await db.users.find_one(
+                {'id': distributor['user_id'], 'role': 'DISTRIBUTOR'},
+                {'_id': 0, 'username': 1, 'status': 1, 'last_login_at': 1,
+                 'password_change_required': 1},
+            )
+            if login:
+                view['login'] = {
+                    'username': login.get('username'),
+                    'status': login.get('status'),
+                    'last_login_at': login.get('last_login_at'),
+                    'password_change_required': bool(login.get('password_change_required')),
+                }
+    return view
+
+
+def _csv_safe(value) -> str:
+    """Neutralize spreadsheet formulas in human-entered CSV fields."""
+    text = '' if value is None else str(value)
+    if text.lstrip().startswith(('=', '+', '-', '@', '\t', '\r')):
+        return "'" + text
+    return text
+
+
+async def _distributor_export_metrics(distributor_ids: list[str]) -> tuple[dict, dict]:
+    """Load rates and player counts in two batched queries per export page."""
+    if not distributor_ids:
+        return {}, {}
+    now = crm.now_iso()
+    rate_rows = await db.distributor_rates.find({
+        'distributor_id': {'$in': distributor_ids},
+        'effective_from': {'$lte': now},
+        '$or': [
+            {'effective_to': None},
+            {'effective_to': {'$exists': False}},
+            {'effective_to': {'$gt': now}},
+        ],
+    }, {'_id': 0, 'distributor_id': 1, 'rate_bps': 1, 'effective_from': 1}).sort(
+        'effective_from', -1,
+    ).to_list(max(len(distributor_ids) * 2, 1))
+    rates = {}
+    for row in rate_rows:
+        rates.setdefault(row.get('distributor_id'), int(row.get('rate_bps') or 0))
+
+    count_rows = await db.users.aggregate([
+        {'$match': {
+            'role': 'PLAYER',
+            'distributor_id': {'$in': distributor_ids},
+        }},
+        {'$group': {'_id': '$distributor_id', 'count': {'$sum': 1}}},
+    ]).to_list(len(distributor_ids))
+    counts = {row['_id']: int(row.get('count') or 0) for row in count_rows}
+    return rates, counts
 
 
 def _allow_nontransactional_auth_tests() -> bool:
@@ -113,6 +285,166 @@ async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *
         'balance_after': balance_after, 'note': note, 'ref': ref, 'created_at': _now(),
     }, **kwargs)
     return balance_after
+
+
+def _admin_step_up_identity(admin: dict):
+    """Use only an already verified administrator contact for the second factor."""
+    candidates = []
+    if admin.get('phone') and admin.get('phone_verified') is True:
+        candidates.append(admin.get('phone_normalized') or admin.get('phone'))
+    if admin.get('email') and admin.get('email_verified') is True:
+        candidates.append(admin.get('email_normalized') or admin.get('email'))
+    for value in candidates:
+        try:
+            return normalize_identity(value)
+        except ValueError:
+            continue
+    raise HTTPException(status_code=403, detail={
+        'code': 'ADMIN_MFA_CONTACT_REQUIRED',
+        'message': 'Verify an administrator phone or email before requesting a security code.',
+    })
+
+
+def _raise_otp_http(exc: OtpError):
+    headers = {'Retry-After': str(exc.retry_after)} if exc.retry_after else None
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={'code': exc.code, 'message': exc.message},
+        headers=headers,
+    ) from exc
+
+
+@router.post('/security/step-up/start')
+async def start_admin_step_up(body: AdminStepUpStart,
+                              admin: dict = Depends(require_admin)):
+    """Verify the admin password, then send a one-use code to a trusted contact."""
+    try:
+        require_configured_pepper()
+        await require_otp_indexes()
+    except OtpConfigurationError as exc:
+        _raise_otp_http(exc)
+    try:
+        await consume_persistent_limit(
+            'admin_step_up_password', admin['id'], limit=5,
+            window_seconds=15 * 60,
+        )
+    except OtpError as exc:
+        _raise_otp_http(exc)
+    original_hash = admin.get('password_hash') or ''
+    if not await asyncio.to_thread(
+        verify_password, body.current_password, original_hash,
+    ):
+        raise HTTPException(status_code=401, detail={
+            'code': 'ADMIN_REAUTH_FAILED',
+            'message': 'Administrator password is incorrect.',
+        })
+    identity = _admin_step_up_identity(admin)
+    try:
+        challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
+    except OtpError as exc:
+        _raise_otp_http(exc)
+    password_verified_at = _now()
+    result = await db.users.update_one({
+        'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
+        'password_hash': original_hash,
+        'active_session_id': admin.get('active_session_id'),
+    }, {'$set': {'admin_step_up_password_verified_at': password_verified_at}})
+    if result.matched_count != 1:
+        await db.otp_challenges.update_one(
+            {'id': challenge['challenge_id'], 'active': True},
+            {'$set': {'active': False, 'status': 'CANCELLED', 'updated_at': _now()}},
+        )
+        raise HTTPException(status_code=409, detail={
+            'code': 'ADMIN_AUTH_CHANGED',
+            'message': 'Administrator authentication changed. Sign in and retry.',
+        })
+    await db.otp_challenges.update_one({
+        'id': challenge['challenge_id'], 'user_id': admin['id'],
+        'purpose': ADMIN_STEP_UP, 'active': True,
+    }, {'$set': {'password_verified_at': password_verified_at}})
+    return {'message': 'Security code sent.', **challenge}
+
+
+@router.post('/security/step-up/verify')
+async def verify_admin_step_up(body: AdminStepUpVerify,
+                               admin: dict = Depends(require_admin)):
+    """Consume the code and server-record one short-lived MFA/reauth window."""
+    identity = _admin_step_up_identity(admin)
+    try:
+        prepared = await prepare_challenge_verification(
+            identity, body.code, ADMIN_STEP_UP, challenge_id=body.challenge_id,
+        )
+    except OtpError as exc:
+        _raise_otp_http(exc)
+    password_at = prepared.get('password_verified_at')
+    try:
+        password_at = datetime.fromisoformat(str(password_at).replace('Z', '+00:00'))
+        if password_at.tzinfo is None:
+            password_at = password_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        password_at = None
+    if (
+        prepared.get('user_id') != admin['id']
+        or password_at is None
+        or datetime.now(timezone.utc) - password_at > timedelta(seconds=OTP_TTL_SECONDS)
+    ):
+        raise HTTPException(status_code=400, detail={
+            'code': 'ADMIN_STEP_UP_EXPIRED',
+            'message': 'Restart administrator verification.',
+        })
+
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        completed_at = datetime.now(timezone.utc)
+        try:
+            await consume_prepared_challenge(
+                prepared, identity, body.code, ADMIN_STEP_UP, session=session,
+            )
+        except OtpError as exc:
+            _raise_otp_http(exc)
+        result = await db.users.update_one({
+            'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
+            'password_hash': admin.get('password_hash'),
+            'active_session_id': admin.get('active_session_id'),
+        }, {
+            '$set': {
+                'mfa_enabled': True,
+                'mfa_verified_at': completed_at,
+                'reauthenticated_at': completed_at,
+                'admin_step_up_completed_at': completed_at,
+                'admin_step_up_session_id': admin.get('active_session_id'),
+            },
+            '$unset': {'admin_step_up_password_verified_at': ''},
+        }, **kwargs)
+        if result.matched_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ADMIN_AUTH_CHANGED',
+                'message': 'Administrator authentication changed. Sign in and retry.',
+            })
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'ADMIN_STEP_UP_COMPLETED',
+            'target_type': 'ADMIN',
+            'target_id': admin['id'],
+            'metadata': {'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL'},
+            'created_at': completed_at.isoformat(),
+        }, **kwargs)
+        return completed_at
+
+    completed_at = await _run_account_transaction(commit)
+    try:
+        expires_in = min(
+            max(int(os.environ.get('ADMIN_FINANCIAL_STEP_UP_SECONDS', '300')), 60),
+            900,
+        )
+    except (TypeError, ValueError):
+        expires_in = 300
+    return {
+        'message': 'Administrator verification complete.',
+        'verified_at': completed_at.isoformat(),
+        'expires_in_seconds': expires_in,
+    }
 
 
 def _require_player_credential_target(user: dict) -> None:
@@ -473,11 +805,16 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     """Create a player account directly. The server issues the Login ID
     (GK + 7 digits) and password (7 CAPITAL letters). The account is ACTIVE and
     pre-verified; the player logs in with the credentials the admin hands them."""
+    await _require_distributor_identity_ready()
     # Allocate a unique GK Login ID.
     username = None
     for _ in range(40):
         cand = _issue_username()
-        if not await db.users.find_one({'username': cand}):
+        user_taken = await db.users.find_one({'$or': [
+            {'username_key': cand.casefold()}, {'username': cand},
+        ]})
+        distributor_reserved = await crm.distributor_login_id_is_reserved(cand)
+        if not user_taken and not distributor_reserved:
             username = cand
             break
     if not username:
@@ -494,7 +831,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     user = {
         'id': str(uuid.uuid4()),
         'email': email_normalized, 'email_normalized': email_normalized,
-        'username': username,
+        'username': username, 'username_key': username.casefold(),
         'password_hash': hash_password(password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': body.full_name, 'full_name': body.full_name,
@@ -508,12 +845,34 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'admin_note': body.note,
     }
-    await db.users.insert_one(user)
-    # Attribution is bound at creation and never again — see crm.py. An account
-    # keyed in by an admin has no referral code, so it lands on the house.
-    await crm.attribute_user(user['id'], getattr(body, 'referral_code', None), actor=admin['id'])
-    if body.starting_chips > 0:
-        await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        try:
+            await crm.reserve_login_id(
+                username, 'USER', user['id'], session=session,
+            )
+            await db.users.insert_one(user, **kwargs)
+            # Attribution is bound at creation and never again — see crm.py. An
+            # account keyed in by an admin has no referral code, so it lands on
+            # the house.
+            await crm.attribute_user(
+                user['id'], getattr(body, 'referral_code', None),
+                actor=admin['id'], session=session,
+            )
+            if body.starting_chips > 0:
+                await _credit_chips(
+                    user['id'], body.starting_chips,
+                    'Welcome play chips — account provisioned by admin',
+                    session=session,
+                )
+        except (DuplicateKeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail={
+                'code': 'LOGIN_ID_OR_IDENTITY_TAKEN',
+                'message': 'The Login ID or contact identity is already in use.',
+            }) from exc
+        return user
+
+    await _run_account_transaction(commit)
     logger.info(f'admin {admin.get("email")} created account -> {username}')
     return {'message': f'Account created. Login ID: {username}', 'username': username, 'password': password, 'user': serialize_doc(user)}
 
@@ -532,13 +891,17 @@ async def list_signup_requests(status: str = Query(default=None), admin: dict = 
 async def approve_signup_request(request_id: str, body: AdminSignupApprove, admin: dict = Depends(require_admin)):
     """Verify a signup request and provision the account with an admin-assigned
     unique Login ID + password. The account is created ACTIVE and pre-verified."""
+    await _require_distributor_identity_ready()
     req = await db.signup_requests.find_one({'id': request_id})
     if not req:
         raise HTTPException(status_code=404, detail='Signup request not found')
     if req.get('status') != 'PENDING':
         raise HTTPException(status_code=400, detail='Request already resolved')
     username = body.username  # validated + lowercased by the model
-    if await db.users.find_one({'username': username}):
+    if await db.users.find_one({'$or': [
+        {'username_key': username.casefold()},
+        {'username': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]}) or await crm.distributor_login_id_is_reserved(username):
         raise HTTPException(status_code=409, detail=f'Login ID "{username}" is already taken')
     email_normalized = normalize_identity(req['email']).value
     phone_normalized = None
@@ -556,18 +919,10 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         ])
     if await db.users.find_one({'$or': identity_clauses}):
         raise HTTPException(status_code=409, detail='A user with this email already exists')
-    # resolve the request atomically first (idempotency guard), then create the user
-    result = await db.signup_requests.update_one(
-        {'id': request_id, 'status': 'PENDING'},
-        {'$set': {'status': 'APPROVED', 'reviewed_at': _now(), 'reviewed_by': admin['id'],
-                  'assigned_username': username, 'admin_note': body.note}},
-    )
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail='Request already resolved')
     user = {
         'id': str(uuid.uuid4()),
         'email': email_normalized, 'email_normalized': email_normalized,
-        'username': username,
+        'username': username, 'username_key': username.casefold(),
         'password_hash': hash_password(body.password),
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': req['full_name'], 'full_name': req['full_name'],
@@ -582,14 +937,58 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'signup_request_id': request_id,
     }
-    await db.users.insert_one(user)
-    # Attribution is bound at creation and never again — see crm.py. The code the
-    # player typed travels on the request; an unknown one falls to the house.
-    await crm.attribute_user(user['id'], req.get('referral_code'), actor=admin['id'])
-    if body.starting_chips > 0:
-        await _credit_chips(user['id'], body.starting_chips, 'Welcome play chips — account provisioned by admin')
-    await _notify(user['id'], 'Welcome to Chakri.Casino!',
-                  f'Your account is ready. Log in with your assigned Login ID "{username}".', 'APPROVAL')
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        current = await db.signup_requests.find_one({'id': request_id}, **kwargs)
+        if not current:
+            raise HTTPException(status_code=404, detail='Signup request not found')
+        if current.get('status') != 'PENDING':
+            raise HTTPException(status_code=400, detail='Request already resolved')
+        try:
+            await crm.reserve_login_id(
+                username, 'USER', user['id'], session=session,
+            )
+            # Resolve the request, create the user, bind attribution, opening
+            # chips and notification in the same transaction.
+            result = await db.signup_requests.update_one(
+                {'id': request_id, 'status': 'PENDING'},
+                {'$set': {
+                    'status': 'APPROVED', 'reviewed_at': _now(),
+                    'reviewed_by': admin['id'], 'assigned_username': username,
+                    'admin_note': body.note,
+                }},
+                **kwargs,
+            )
+            if result.modified_count == 0:
+                raise HTTPException(status_code=400, detail='Request already resolved')
+            await db.users.insert_one(user, **kwargs)
+            # The code the player typed travels on the request; an unknown one
+            # falls to the house without losing the registration.
+            await crm.attribute_user(
+                user['id'], current.get('referral_code'),
+                actor=admin['id'], session=session,
+            )
+            if body.starting_chips > 0:
+                await _credit_chips(
+                    user['id'], body.starting_chips,
+                    'Welcome play chips — account provisioned by admin',
+                    session=session,
+                )
+            await _notify(
+                user['id'], 'Welcome to Chakri.Casino!',
+                f'Your account is ready. Log in with your assigned Login ID "{username}".',
+                'APPROVAL', session=session,
+            )
+        except HTTPException:
+            raise
+        except (DuplicateKeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail={
+                'code': 'LOGIN_ID_OR_IDENTITY_TAKEN',
+                'message': 'The Login ID or contact identity is already in use.',
+            }) from exc
+        return user
+
+    await _run_account_transaction(commit)
     logger.info(f'Signup request {request_id} approved -> user {username}')
     return {'message': f'Account created. Login ID: {username}', 'username': username, 'user': serialize_doc(user)}
 
@@ -1041,40 +1440,242 @@ async def get_telesign_status(admin: dict = Depends(require_admin)):
 # figures a distributor's dashboard is built from.
 
 @router.get('/distributors')
-async def list_distributors(admin: dict = Depends(require_admin)):
+async def list_distributors(
+    q: str = Query(default=None, max_length=100),
+    status: str = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=500),
+    admin: dict = Depends(require_admin),
+):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
     await crm.ensure_house_account()
-    rows = await db.distributors.find({}, {'_id': 0}).sort('created_at', 1).to_list(500)
-    out = []
-    for d in rows:
-        d['rate_bps'] = await crm.rate_on(d['id'], crm.now_iso())
-        d['players'] = await db.users.count_documents({'distributor_id': d['id'], 'role': 'PLAYER'})
-        out.append(d)
-    return {'distributors': out}
+    query = {}
+    if status:
+        status = status.strip().upper()
+        if status not in {'ACTIVE', 'DISABLED', 'SUSPENDED', 'TERMINATED'}:
+            raise HTTPException(status_code=400, detail='Unknown distributor status')
+        query['status'] = status
+    if q and q.strip():
+        pattern = re.escape(q.strip())
+        query['$or'] = [
+            {'name': {'$regex': pattern, '$options': 'i'}},
+            {'code': {'$regex': pattern, '$options': 'i'}},
+            {'login_username': {'$regex': pattern, '$options': 'i'}},
+            {'email': {'$regex': pattern, '$options': 'i'}},
+            {'phone': {'$regex': pattern, '$options': 'i'}},
+        ]
+    total = await db.distributors.count_documents(query)
+    rows = await db.distributors.find(query, {'_id': 0}).sort('created_at', 1).to_list(limit)
+    out = [await _distributor_admin_view(row, include_private=True) for row in rows]
+    return {'distributors': out, 'count': len(out), 'total': total}
 
 
 @router.post('/distributors')
 async def create_distributor(body: DistributorCreate, admin: dict = Depends(require_admin)):
-    try:
-        doc = await crm.create_distributor(
-            name=body.name, code=body.code, rate_bps=body.rate_bps,
-            created_by=admin['id'], email=body.email, phone=body.phone, note=body.note)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
+    await _require_distributor_identity_ready()
+    async def commit(session):
+        try:
+            doc = await crm.create_distributor(
+                name=body.name, code=body.code, rate_bps=body.rate_bps,
+                created_by=admin['id'], email=body.email, phone=body.phone,
+                note=body.note, username=body.username, session=session,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409, detail='Distributor code or Login ID is already in use')
+        await _audit_distributor(
+            admin, 'DISTRIBUTOR_CREATED', doc['id'], after=doc, metadata={
+                'opening_rate_bps': body.rate_bps,
+                'login_username_reserved': bool(body.username),
+            }, session=session,
+        )
+        return doc
+
+    doc = await _run_account_transaction(commit)
     doc.pop('_id', None)
-    return {'message': f"Distributor {doc['code']} created", 'distributor': doc}
+    return {
+        'message': f"Distributor {doc['code']} created",
+        'distributor': await _distributor_admin_view(doc, include_private=True),
+    }
+
+
+@router.get('/distributors/export.csv')
+async def export_distributors(admin: dict = Depends(require_admin)):
+    """Operational export deliberately excludes contact details and notes."""
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
+    await crm.ensure_house_account()
+    total = await db.distributors.count_documents({})
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        'Code', 'Name', 'Status', 'Players', 'Commission rate (bps)',
+        'Portal login configured', 'Created at',
+    ])
+    last_id = None
+    exported = 0
+    while True:
+        page_query = {} if last_id is None else {'_id': {'$gt': last_id}}
+        rows = await db.distributors.find(page_query).sort('_id', 1).to_list(500)
+        if not rows:
+            break
+        distributor_ids = [row['id'] for row in rows]
+        rates, counts = await _distributor_export_metrics(distributor_ids)
+        for row in rows:
+            writer.writerow([
+                row.get('code'), _csv_safe(row.get('name')), row.get('status'),
+                counts.get(row['id'], 0), rates.get(row['id'], 0),
+                'YES' if row.get('user_id') else 'NO', row.get('created_at'),
+            ])
+        exported += len(rows)
+        last_id = rows[-1]['_id']
+    if exported != total:
+        # A concurrently changing collection should never masquerade as a
+        # complete administrative export.
+        raise HTTPException(status_code=409, detail={
+            'code': 'DISTRIBUTOR_EXPORT_CHANGED',
+            'message': 'Distributor records changed during export. Retry the download.',
+        })
+    return Response(
+        content=buf.getvalue(), media_type='text/csv',
+        headers={
+            'Content-Disposition': 'attachment; filename="chakri-distributors.csv"',
+            'Cache-Control': 'no-store, max-age=0',
+            'X-Total-Records': str(exported),
+        },
+    )
+
+
+@router.get('/distributors/{distributor_id}')
+async def distributor_detail(distributor_id: str, admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
+    dist = await db.distributors.find_one({'id': distributor_id}, {'_id': 0})
+    if not dist:
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    return {'distributor': await _distributor_admin_view(dist, include_private=True)}
+
+
+@router.patch('/distributors/{distributor_id}')
+async def update_distributor(distributor_id: str, body: DistributorUpdate,
+                             admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
+    initial = await db.distributors.find_one({'id': distributor_id}, {'_id': 0})
+    if not initial:
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    fields = body.model_dump(exclude_unset=True, exclude={'expected_version'})
+    observed_version = int(initial.get('record_version') or 0)
+    expected_version = (
+        body.expected_version
+        if body.expected_version is not None
+        else observed_version
+    )
+    if expected_version != observed_version:
+        raise HTTPException(status_code=409, detail={
+            'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+            'message': 'Distributor changed since it was loaded. Reload and retry.',
+            'current_version': observed_version,
+        })
+    if 'username' in fields or ('email' in fields and initial.get('user_id')):
+        _require_distributor_permission(admin, 'DISTRIBUTORS_CREDENTIALS')
+        await _require_distributor_identity_ready()
+
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        before = await db.distributors.find_one(
+            {'id': distributor_id}, {'_id': 0}, **kwargs,
+        )
+        if not before:
+            raise HTTPException(status_code=404, detail='Distributor not found')
+        current_version = int(before.get('record_version') or 0)
+        if current_version != expected_version:
+            raise HTTPException(status_code=409, detail={
+                'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+                'message': 'Distributor changed since it was loaded. Reload and retry.',
+                'current_version': current_version,
+            })
+        if 'username' in fields or ('email' in fields and before.get('user_id')):
+            _require_distributor_permission(admin, 'DISTRIBUTORS_CREDENTIALS')
+        try:
+            after = await crm.update_distributor(
+                distributor_id, fields, admin['id'],
+                expected_version=expected_version, session=session,
+            )
+        except ValueError as e:
+            message = str(e)
+            if 'another administrator session' in message:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+                    'message': 'Distributor changed since it was loaded. Reload and retry.',
+                }) from e
+            raise HTTPException(status_code=400, detail=message) from e
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409, detail='Login ID or email is already in use')
+        await _audit_distributor(
+            admin, 'DISTRIBUTOR_UPDATED', distributor_id, before=before, after=after,
+            metadata={'changed_fields': sorted(fields)}, session=session,
+        )
+        return after
+
+    after = await _run_account_transaction(commit)
+    return {
+        'message': 'Distributor profile updated',
+        'distributor': await _distributor_admin_view(after, include_private=True),
+    }
+
+
+@router.get('/distributors/{distributor_id}/rates')
+async def distributor_rate_history(distributor_id: str,
+                                   admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
+    if not await db.distributors.find_one({'id': distributor_id}):
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    rows = await db.distributor_rates.find(
+        {'distributor_id': distributor_id},
+        {'_id': 0, 'id': 1, 'rate_bps': 1, 'effective_from': 1,
+         'effective_to': 1, 'set_at': 1, 'set_by': 1, 'note': 1},
+    ).sort('effective_from', -1).to_list(1000)
+    return {'rates': rows, 'count': len(rows)}
+
+
+@router.get('/distributors/{distributor_id}/audit')
+async def distributor_audit(distributor_id: str, admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
+    if not await db.distributors.find_one({'id': distributor_id}):
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    rows = await db.admin_audit.find(
+        {'target_type': 'DISTRIBUTOR', 'target_id': distributor_id},
+        {'_id': 0},
+    ).sort('created_at', -1).to_list(1000)
+    return {'events': rows, 'count': len(rows)}
 
 
 @router.patch('/distributors/{distributor_id}/rate')
 async def change_rate(distributor_id: str, body: DistributorRate, admin: dict = Depends(require_admin)):
-    dist = await db.distributors.find_one({'id': distributor_id})
-    if not dist:
-        raise HTTPException(status_code=404, detail='Distributor not found')
-    if dist.get('is_house'):
-        raise HTTPException(status_code=400, detail='The house account does not earn commission')
-    try:
-        row = await crm.set_rate(distributor_id, body.rate_bps, admin['id'], note=body.note)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        dist = await db.distributors.find_one({'id': distributor_id}, **kwargs)
+        if not dist:
+            raise HTTPException(status_code=404, detail='Distributor not found')
+        if dist.get('is_house'):
+            raise HTTPException(status_code=400, detail='The house account does not earn commission')
+        try:
+            row = await crm.set_rate(
+                distributor_id, body.rate_bps, admin['id'], note=body.note,
+                session=session,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        row.pop('_id', None)
+        await _audit_distributor(
+            admin, 'DISTRIBUTOR_RATE_CHANGED', distributor_id,
+            before=dist, after=dist,
+            metadata={'rate_bps': body.rate_bps, 'rate_id': row['id']},
+            session=session,
+        )
+        return row
+
+    row = await _run_account_transaction(commit)
     row.pop('_id', None)
     # The old rate is closed, not overwritten: statements already issued must
     # keep reproducing the number they printed.
@@ -1084,13 +1685,60 @@ async def change_rate(distributor_id: str, body: DistributorRate, admin: dict = 
 @router.patch('/distributors/{distributor_id}/status')
 async def set_distributor_status(distributor_id: str, body: DistributorStatus,
                                  admin: dict = Depends(require_admin)):
-    dist = await db.distributors.find_one({'id': distributor_id})
-    if not dist:
+    _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
+    initial = await db.distributors.find_one({'id': distributor_id}, {'_id': 0})
+    if not initial:
         raise HTTPException(status_code=404, detail='Distributor not found')
-    if dist.get('is_house'):
-        raise HTTPException(status_code=400, detail='The house account cannot be suspended')
-    await db.distributors.update_one({'id': distributor_id}, {'$set': {
-        'status': body.status, 'status_changed_at': crm.now_iso(), 'status_changed_by': admin['id']}})
+    observed_version = int(initial.get('record_version') or 0)
+    expected_version = (
+        body.expected_version
+        if body.expected_version is not None
+        else observed_version
+    )
+    if expected_version != observed_version:
+        raise HTTPException(status_code=409, detail={
+            'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+            'message': 'Distributor changed since it was loaded. Reload and retry.',
+            'current_version': observed_version,
+        })
+
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        dist = await db.distributors.find_one({'id': distributor_id}, **kwargs)
+        if not dist:
+            raise HTTPException(status_code=404, detail='Distributor not found')
+        if dist.get('is_house'):
+            raise HTTPException(status_code=400, detail='The house account cannot be suspended')
+        current_version = int(dist.get('record_version') or 0)
+        if current_version != expected_version:
+            raise HTTPException(status_code=409, detail={
+                'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+                'message': 'Distributor changed since it was loaded. Reload and retry.',
+                'current_version': current_version,
+            })
+        try:
+            updated = await crm.set_distributor_status(
+                distributor_id, body.status, admin['id'],
+                expected_version=expected_version, session=session,
+            )
+        except ValueError as e:
+            message = str(e)
+            if 'another administrator session' in message:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'DISTRIBUTOR_VERSION_CONFLICT',
+                    'message': 'Distributor changed since it was loaded. Reload and retry.',
+                }) from e
+            raise HTTPException(status_code=400, detail=message) from e
+        await _audit_distributor(
+            admin, 'DISTRIBUTOR_STATUS_CHANGED', distributor_id,
+            before=dist, after=updated,
+            metadata={'from_status': dist.get('status'), 'to_status': body.status,
+                      'sessions_revoked': bool(dist.get('user_id'))},
+            session=session,
+        )
+        return updated
+
+    await _run_account_transaction(commit)
     # Players stay where they are. Suspending a distributor stops new signups on
     # the code and stops payouts; it does not orphan the players they brought.
     return {'message': f'Distributor set to {body.status}'}
@@ -1098,6 +1746,7 @@ async def set_distributor_status(distributor_id: str, body: DistributorStatus,
 
 @router.post('/distributors/{distributor_id}/login')
 async def issue_distributor_login(distributor_id: str, body: DistributorLogin,
+                                  response: Response,
                                   admin: dict = Depends(require_admin)):
     """Create or reset a partner's portal credentials.
 
@@ -1105,23 +1754,79 @@ async def issue_distributor_login(distributor_id: str, body: DistributorLogin,
     again — it is stored hashed like every other. The operator hands it over
     out of band, the same way player credentials are already issued.
     """
-    password = (body.password or '').strip() or _issue_password() + _issue_password()
-    try:
-        user = await crm.attach_login(distributor_id, body.email, hash_password(password), admin['id'])
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    _require_distributor_permission(admin, 'DISTRIBUTORS_CREDENTIALS')
+    await _require_distributor_identity_ready()
+    # A supplied password is exact input: trimming after Pydantic's length
+    # validation could turn a valid 12-character value into a shorter secret.
+    password = body.password if body.password is not None else _issue_password() + _issue_password()
+    password_hash = hash_password(password)
+    expected = await db.distributors.find_one(
+        {'id': distributor_id}, {'_id': 0, 'credentials_version': 1},
+    )
+    if expected is None:
+        raise HTTPException(status_code=404, detail='Distributor not found')
+    expected_version = int(expected.get('credentials_version') or 0)
+
+    async def provision(session):
+        kwargs = {'session': session} if session is not None else {}
+        before = await db.distributors.find_one(
+            {'id': distributor_id}, {'_id': 0}, **kwargs,
+        )
+        if not before:
+            raise HTTPException(status_code=404, detail='Distributor not found')
+        if int(before.get('credentials_version') or 0) != expected_version:
+            raise HTTPException(status_code=409, detail={
+                'code': 'DISTRIBUTOR_CREDENTIALS_CHANGED',
+                'message': 'Credentials changed in another administrator session. Reload and retry.',
+            })
+        try:
+            user = await crm.attach_login(
+                distributor_id, str(body.email), password_hash, admin['id'],
+                username=body.username,
+                must_change_password=body.must_change_password,
+                session=session,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except DuplicateKeyError as exc:
+            raise HTTPException(status_code=409, detail={
+                'code': 'DISTRIBUTOR_LOGIN_ID_TAKEN',
+                'message': 'That partner Login ID was claimed concurrently. Reload and retry.',
+            }) from exc
+        after = await db.distributors.find_one(
+            {'id': distributor_id}, {'_id': 0}, **kwargs,
+        )
+        await _audit_distributor(
+            admin, 'DISTRIBUTOR_CREDENTIALS_ISSUED', distributor_id,
+            before=before, after=after,
+            metadata={
+                'login_created': not bool(before.get('user_id')),
+                'session_revoked': bool(before.get('user_id')),
+                'must_change_password': bool(body.must_change_password),
+            },
+            session=session,
+        )
+        return user
+
+    user = await _run_account_transaction(provision)
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
     return {
         'message': 'Portal login issued',
         'login_id': user['username'],
         'email': user['email'],
         'password': password,
+        'must_change_password': bool(body.must_change_password),
         'note': 'Give these to the partner now — the password cannot be shown again.',
-        'portal_url': '/partner',
+        'portal_url': '/distributor/login',
     }
 
 
 @router.get('/distributors/{distributor_id}/players')
 async def distributor_players(distributor_id: str, admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_VIEW')
+    if not await db.distributors.find_one({'id': distributor_id}):
+        raise HTTPException(status_code=404, detail='Distributor not found')
     rows = await db.users.find(
         {'distributor_id': distributor_id, 'role': 'PLAYER'},
         {'_id': 0, 'id': 1, 'username': 1, 'full_name': 1, 'status': 1,
@@ -1132,6 +1837,7 @@ async def distributor_players(distributor_id: str, admin: dict = Depends(require
 
 @router.post('/players/{user_id}/distributor')
 async def move_player(user_id: str, body: PlayerReassign, admin: dict = Depends(require_admin)):
+    _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
     if not await db.users.find_one({'id': user_id}):
         raise HTTPException(status_code=404, detail='Player not found')
     try:

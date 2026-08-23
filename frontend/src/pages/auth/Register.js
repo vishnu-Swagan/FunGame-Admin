@@ -140,7 +140,7 @@ export default function Register() {
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
             : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
         </p>
-        <p className="text-[11px] text-white/45 leading-relaxed">Real-money deposits and withdrawals remain unavailable until required identity, age and jurisdiction checks are complete.</p>
+        <p className="text-[11px] text-white/45 leading-relaxed">Virtual chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.</p>
         <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || !selectedChannelAvailable || !termsAccepted} className="w-full h-12 rounded-xl text-base font-bold">
           {manualReview && <LockKeyhole className="mr-2 h-4 w-4" />}
           {capabilitiesLoading

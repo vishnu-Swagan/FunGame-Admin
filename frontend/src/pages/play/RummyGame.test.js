@@ -345,9 +345,10 @@ test("the Rummy lobby presents all five levels without showing the gameplay tabl
   const lobby = container.querySelector('[data-testid="rummy-category-lobby"]');
   expect(lobby).not.toBeNull();
   expect(lobby.textContent).toContain("CHAKRI.CASINO");
-  expect(lobby.textContent).toContain("RUMMY");
-  expect(lobby.textContent).toContain("MOST PLAYED ONLINE");
-  expect(lobby.querySelector('header img[src="/chakri-app-icon-192.png"]')).not.toBeNull();
+  expect(lobby.textContent).toContain("PLAY IN THE LIGHT");
+  expect(lobby.querySelectorAll('[role="img"][aria-label="CHAKRI.CASINO — PLAY IN THE LIGHT"]')).toHaveLength(1);
+  expect(lobby.querySelector("footer [role=img]")).toBeNull();
+  expect(lobby.querySelector('header img[src="/chakri-roulette-emblem-transparent.png"]')).not.toBeNull();
   expect(lobby.querySelector(".rummy-lobby-table-preview")).toBeNull();
   expect(lobby.querySelector('img[src="/game-art/rummy/table-palace-v2.png"]')).toBeNull();
   expect([...lobby.querySelectorAll(".rummy-category")].map((card) => card.textContent).join(" ")).toMatch(/LV1[\s\S]*LV2[\s\S]*LV3[\s\S]*LV4[\s\S]*LV5/);
@@ -549,7 +550,7 @@ test("the flagship result dialog renders a royal outcome hero and complete stand
   const winner = standings?.querySelector("article.is-winner");
 
   expect(hero?.querySelector(".rummy-result-seal")).not.toBeNull();
-  expect(hero?.querySelector(".rummy-result-award")?.getAttribute("aria-label")).toBe("725 chips payout");
+  expect(hero?.querySelector(".rummy-result-award")?.getAttribute("aria-label")).toBe("725 chips returned");
   expect(standings?.getAttribute("aria-labelledby")).toBe("rummy-result-standings-title");
   expect(standings?.querySelectorAll(".rummy-result-rows > article")).toHaveLength(5);
   expect(winner?.querySelector(".rummy-result-player b")?.textContent).toBe("Mira");

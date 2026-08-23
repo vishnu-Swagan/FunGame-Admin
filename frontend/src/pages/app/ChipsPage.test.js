@@ -5,10 +5,6 @@ import ChipsPage from "./ChipsPage";
 const mockNavigate = jest.fn();
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();
-const mockWallet = jest.fn();
-const mockDeposits = jest.fn();
-const mockWithdrawals = jest.fn();
-const mockBanks = jest.fn();
 
 jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
@@ -25,17 +21,6 @@ jest.mock("@/lib/api", () => ({
     post: (...args) => mockApiPost(...args),
   },
   errMsg: (error) => error?.message || "Request failed",
-}));
-
-jest.mock("@/lib/paymentApi", () => ({
-  payments: {
-    wallet: (...args) => mockWallet(...args),
-    deposits: (...args) => mockDeposits(...args),
-    withdrawals: (...args) => mockWithdrawals(...args),
-    bankDetails: (...args) => mockBanks(...args),
-    createDeposit: jest.fn(),
-    createWithdrawal: jest.fn(),
-  },
 }));
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }));
@@ -56,7 +41,7 @@ jest.mock("@/components/ui/tabs", () => ({
   Tabs: ({ children }) => <div>{children}</div>,
   TabsList: ({ children }) => <div>{children}</div>,
   TabsTrigger: ({ children, ...props }) => <button {...props}>{children}</button>,
-  TabsContent: ({ children, value }) => value === "deposit" ? <div>{children}</div> : null,
+  TabsContent: ({ children, value }) => value === "request" ? <div>{children}</div> : null,
 }));
 
 jest.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }) => <button {...props}>{children}</button> }));
@@ -95,13 +80,6 @@ beforeEach(() => {
   mockNavigate.mockReset();
   mockApiGet.mockReset();
   mockApiPost.mockReset();
-  mockWallet.mockReset().mockResolvedValue({
-    available_chips: 250,
-    financial: { ready: false, features: { real_money: false, deposits: false, withdrawals: false } },
-  });
-  mockDeposits.mockReset().mockResolvedValue([]);
-  mockWithdrawals.mockReset().mockResolvedValue([]);
-  mockBanks.mockReset().mockResolvedValue([]);
   mockApiGet.mockResolvedValue({ data: { requests: [{ id: "request-1", amount: 500, status: "PENDING" }] } });
   mockApiPost.mockResolvedValue({ data: { message: "Chip request submitted for review." } });
 });
@@ -111,11 +89,11 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test("unavailable provider deposits fall back to an operator-reviewed chip request", async () => {
+test("play chips always use an operator-reviewed request", async () => {
   const { container, root } = await renderPage();
   expect(container.querySelector('[data-testid="deposit-form"]')).toBeNull();
   expect(container.querySelector('[data-testid="manual-chip-request-form"]')).not.toBeNull();
-  expect(container.querySelector('[data-testid="manual-chip-request-row"]')?.textContent).toMatch(/500 chips.*PENDING/i);
+  expect(mockApiGet).toHaveBeenCalledWith("/chips/requests");
 
   change(container.querySelector('[data-testid="manual-chip-request-amount"]'), "2500");
   change(container.querySelector('[data-testid="manual-chip-request-note"]'), "Investor demo account");
@@ -132,13 +110,10 @@ test("unavailable provider deposits fall back to an operator-reviewed chip reque
   await act(async () => root.unmount());
 });
 
-test("a ready payment provider keeps the verified deposit checkout flow", async () => {
-  mockWallet.mockResolvedValue({
-    available_chips: 250,
-    financial: { ready: true, features: { real_money: true, deposits: true, withdrawals: true } },
-  });
+test("no payment-provider UI is rendered", async () => {
   const { container, root } = await renderPage();
-  expect(container.querySelector('[data-testid="deposit-form"]')).not.toBeNull();
-  expect(container.querySelector('[data-testid="manual-chip-request-form"]')).toBeNull();
+  expect(container.querySelector('[data-testid="deposit-form"]')).toBeNull();
+  expect(container.querySelector('[data-testid="withdrawal-form"]')).toBeNull();
+  expect(container.querySelector('[data-testid="manual-chip-request-form"]')).not.toBeNull();
   await act(async () => root.unmount());
 });

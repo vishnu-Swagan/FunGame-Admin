@@ -10,7 +10,6 @@ import { useAuth } from "@/context/AuthContext";
 import { usePlayersOnline } from "@/lib/liveActivity";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 import { sfx } from "@/lib/sound";
-import { BrandWordmark } from "@/components/Brand";
 
 const CATEGORY_ORDER = ["Cards", "Slots", "Wheel", "Numbers", "Dice", "Crash", "Board"];
 
@@ -72,9 +71,8 @@ function VideoHero({ navigate, userName }) {
           <div aria-hidden className="fg-scanlines absolute inset-0 pointer-events-none opacity-12" />
           {!reduced && <div aria-hidden className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/4 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)" }} />}
           {!reduced && <HeroSparks />}
-          {/* brand + live floor */}
-          <div className="fg-safe-top absolute inset-x-0 top-0 px-4 pt-3 flex items-center justify-between">
-            <BrandWordmark logoClassName="h-auto w-[clamp(140px,45vw,190px)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" />
+          {/* live floor status; the global header owns the single dominant brand lockup */}
+          <div className="fg-safe-top absolute inset-x-0 top-0 px-4 pt-3 flex items-center justify-end">
             <span className="flex items-center gap-1.5 rounded-full border border-[hsl(var(--emerald)/0.4)] bg-black/45 px-2.5 py-1 backdrop-blur-sm">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--emerald))] opacity-70 animate-ping" />
@@ -90,7 +88,7 @@ function VideoHero({ navigate, userName }) {
         <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(180deg, #05070f, #0a0e1a)" }}>
           <p className="font-gaming text-[10px] tracking-[0.4em] uppercase mb-1 text-primary">◆ Welcome to the floor</p>
           <h1 className="font-tech font-black uppercase text-white leading-[0.92] tracking-tight text-[2rem]" style={{ textShadow: "0 0 30px rgba(255,199,64,0.25)" }}>
-            Real casino <span style={{ color: "#ffd447" }}>real thrill</span>
+            Virtual chips <span style={{ color: "#ffd447" }}>golden thrills</span>
           </h1>
           <div className="mt-3 flex items-center gap-2.5">
             <button

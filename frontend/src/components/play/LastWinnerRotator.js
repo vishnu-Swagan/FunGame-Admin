@@ -54,7 +54,7 @@ export function LastWinnerRotator({ slug }) {
       <span className="last-winner-slide" key={winner.id || `${winner.masked_id}-${cursor}`}>
         <b>{winner.masked_id}</b>
         <span>won</span>
-        <strong>₹{money(winner.payout)}</strong>
+        <strong>{money(winner.payout)} chips</strong>
         {winner.round_number != null && <small>R{winner.round_number}</small>}
       </span>
     </aside>

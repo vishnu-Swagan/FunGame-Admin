@@ -7,8 +7,8 @@ import { BrandWordmark } from "@/components/Brand";
 import { useAuthCapabilities } from "@/lib/authCapabilities";
 
 const BASE_FEATURES = [
-  { icon: Gamepad2, title: "Live casino games", text: "Play the live tables now and preview the premium games coming next." },
-  { icon: Coins, title: "One chips wallet", text: "Add chips in INR and follow every deposit or withdrawal from your dashboard." },
+  { icon: Gamepad2, title: "Premium digital games", text: "Enter the live game lobby and explore the available tables and arcade titles." },
+  { icon: Coins, title: "Virtual play chips", text: "Request play chips from an operator and follow the approval status from your profile." },
 ];
 
 export default function Welcome() {
@@ -32,9 +32,12 @@ export default function Welcome() {
             <BrandWordmark logoClassName="h-auto w-[min(88vw,380px)]" className="mb-5" />
             <h1 className="sr-only">CHAKRI.CASINO</h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
-              Premium chip-based casino games in one glowing midnight lobby.
+              Premium virtual-chip digital entertainment in one glowing midnight lobby.
             </p>
             <Disclaimer className="mt-3" />
+            <p className="mt-3 text-[11px] leading-relaxed text-white/45">
+              Chakri.Casino is a virtual-chip digital entertainment service launched by Liberty Markets Ltd, a UK software development, sales and production company.
+            </p>
           </motion.div>
 
           <div className="mt-8 space-y-3">

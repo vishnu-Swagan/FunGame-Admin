@@ -112,7 +112,7 @@ export function createRummyDemoState(categoryId = "LV1") {
     privateState: privateStateFor({ cards: clone(DEMO_HAND), groups: DEMO_GROUPS.map(({ cardIds }) => [...cardIds]), drawn: false, drawnCardId: null }),
     result: null,
     walletNeutral: true,
-    botTableNotice: "Practice table · AUTO seats fill missing places · no stake or payout",
+    botTableNotice: "Practice table · AUTO seats fill missing places · no chips are used or returned",
     balance: RUMMY_DEMO_BALANCE,
   };
 }

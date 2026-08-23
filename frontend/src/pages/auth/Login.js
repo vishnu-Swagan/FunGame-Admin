@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg, routeForUser } from "@/lib/api";
+import { LOGIN_SURFACES, loginRequestPayload } from "@/lib/loginSurface";
 import { loginVerificationRecovery, normalizeAuthCapabilities, normalizeContactChannel, useAuthCapabilities } from "@/lib/authCapabilities";
 import { useAuth } from "@/context/AuthContext";
 import { AuthShell } from "@/pages/auth/AuthShell";
@@ -36,11 +37,18 @@ export default function Login() {
     setBusy(true);
     try {
       // `email` keeps older API deployments compatible during the rollout.
-      const { data } = await api.post("/auth/login", { identifier, email: identifier, password });
+      const { data } = await api.post(
+        "/auth/login",
+        loginRequestPayload(identifier, password, LOGIN_SURFACES.PLAYER),
+      );
       if (data.user.role === "ADMIN") {
-        login(data.access_token, data.user);
-        toast.success("Operator workspace opened.");
-        navigate("/admin/dashboard", { replace: true });
+        toast.info("Administrator accounts sign in through Chakri.Casino/Admin.");
+        navigate("/Admin/login", { replace: true });
+        return;
+      }
+      if (data.user.role === "DISTRIBUTOR") {
+        toast.info("Distributor accounts use the dedicated distributor portal.");
+        navigate("/distributor/login", { replace: true });
         return;
       }
       login(data.access_token, data.user);

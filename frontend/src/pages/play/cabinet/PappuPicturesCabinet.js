@@ -165,7 +165,7 @@ function useDemoPictures() {
 }
 
 function useCabinetScale(shellRef) {
-  const measure = () => {
+  const measure = useCallback(() => {
     if (typeof window === "undefined") return 1;
     const shell = shellRef.current;
     const width = shell?.clientWidth || window.visualViewport?.width || window.innerWidth;
@@ -177,7 +177,7 @@ function useCabinetScale(shellRef) {
       designHeight: 880,
       maxScale: 1.15,
     }).scale;
-  };
+  }, [shellRef]);
   const [scale, setScale] = useState(measure);
   useLayoutEffect(() => {
     const resize = () => setScale(measure());
@@ -195,7 +195,7 @@ function useCabinetScale(shellRef) {
       window.visualViewport?.removeEventListener("resize", resize);
       window.visualViewport?.removeEventListener("scroll", resize);
     };
-  }, [shellRef]);
+  }, [measure, shellRef]);
   return scale;
 }
 
@@ -427,7 +427,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
         <header className="pp-topbar">
           <button type="button" className="pp-round-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back to game details"><ChevronLeft /></button>
           <span className="pp-topbar-brand"><BrandWordmark logoClassName="pp-topbar-brand-logo" /><small><i />LIVE</small></span>
-          <strong>₹{balance == null ? "…" : formatChips(balance)} <small>INR</small></strong>
+          <strong>{balance == null ? "…" : formatChips(balance)} <small>CHIPS</small></strong>
           <button type="button" className="pp-sound-button" onClick={toggleMuted} aria-label={muted ? "Turn sound on" : "Mute sound"}>{muted ? <VolumeX /> : <Volume2 />}</button>
         </header>
 
@@ -459,7 +459,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
           <div className={`pp-phase-banner is-${(phase || "loading").toLowerCase()}`}>
             {phase === "BETTING" && <b>PLEASE BET NOW</b>}
             {phase === "REVEAL" && <b>{scratched ? (outcome?.extra_pay ? "EXTRA PAY REVEALED" : "CARD REVEALED") : "SCRATCH THE COVERED CARD"}</b>}
-            {phase === "RESULT" && <b>WIN ₹{formatChips(settlement?.payout || 0)} <small>· {SYMBOL_MAP[outcome?.symbol]?.label || "RESULT"} {outcome?.multiplier || 8}×</small></b>}
+            {phase === "RESULT" && <b>WIN {formatChips(settlement?.payout || 0)} CHIPS <small>· {SYMBOL_MAP[outcome?.symbol]?.label || "RESULT"} {outcome?.multiplier || 8}×</small></b>}
           </div>
 
           {(phase === "REVEAL" || phase === "RESULT") && (
@@ -492,7 +492,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
           ))}
         </section>
 
-        <div className="pp-money"><span>Balance <b>₹{balance == null ? "…" : formatChips(balance)}</b></span><span>Your Bet <b>₹{formatChips(myTotal)}</b></span></div>
+        <div className="pp-money"><span>Balance <b>{balance == null ? "…" : formatChips(balance)} chips</b></span><span>Your Bet <b>{formatChips(myTotal)} chips</b></span></div>
 
         <footer className="pp-controls">
           <div className="pp-player"><span>🧑🏽</span><small>P***7</small></div>

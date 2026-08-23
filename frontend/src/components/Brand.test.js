@@ -8,28 +8,62 @@ beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-test("the shared brand component renders the approved wide lockup", () => {
+test("the shared brand component renders one page-native 3D lockup", () => {
   const container = document.createElement("div");
   const root = createRoot(container);
 
   act(() => root.render(<BrandWordmark logoClassName="brand-size" />));
 
-  const image = container.querySelector("img");
-  expect(BRAND_ASSET).toBe("/chakri-roulette-brand.png");
-  expect(image?.getAttribute("src")).toBe(BRAND_ASSET);
-  expect(image?.getAttribute("alt")).toBe("CHAKRI.CASINO");
-  expect(image?.getAttribute("width")).toBe("1600");
-  expect(image?.getAttribute("height")).toBe("400");
-  expect(image?.className).toContain("brand-size");
+  const lockup = container.querySelector('[role="img"]');
+  expect(BRAND_ASSET).toBe("/chakri-roulette-emblem-transparent.png");
+  expect(lockup?.getAttribute("aria-label")).toBe("CHAKRI.CASINO — PLAY IN THE LIGHT");
+  expect(lockup?.className).toContain("brand-size");
+  expect(lockup?.querySelectorAll(".chakri-logo__wheel")).toHaveLength(1);
+  expect(lockup?.querySelector("strong")?.textContent).toBe("CHAKRI.CASINO");
+  expect(lockup?.querySelector("small")?.textContent).toBe("PLAY IN THE LIGHT");
+  expect(lockup?.querySelector("img")?.getAttribute("src")).toBe(BRAND_ASSET);
 
   act(() => root.unmount());
 });
 
-test("the installed source artwork keeps its 4:1 dimensions", () => {
-  const image = fs.readFileSync(path.join(__dirname, "../../public/chakri-roulette-brand.png"));
+test("the installed crest is a square RGBA PNG with real transparency", () => {
+  const image = fs.readFileSync(path.join(__dirname, "../../public/chakri-roulette-emblem-transparent.png"));
   expect(image.subarray(1, 4).toString()).toBe("PNG");
-  expect(image.readUInt32BE(16)).toBe(1600);
-  expect(image.readUInt32BE(20)).toBe(400);
+  expect(image.readUInt32BE(16)).toBe(1254);
+  expect(image.readUInt32BE(20)).toBe(1254);
+  expect(image[25]).toBe(6); // PNG colour type 6 = RGBA.
+});
+
+test("the page-native lockup never paints an opaque panel", () => {
+  const css = fs.readFileSync(path.join(__dirname, "Brand.css"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "Brand.js"), "utf8");
+  expect(css).toContain('background: transparent');
+  expect(source).toContain('PLAY IN THE LIGHT');
+  expect(css).not.toMatch(/background:\s*(?:#0b0c10|black|rgb\(11,\s*12,\s*16\))/i);
+});
+
+test("the offline shell also uses the transparent crest and corrected live tagline", () => {
+  const serviceWorker = fs.readFileSync(path.join(__dirname, "../../public/service-worker.js"), "utf8");
+  expect(serviceWorker).toContain("/chakri-roulette-emblem-transparent.png");
+  expect(serviceWorker).toContain("PLAY IN THE LIGHT");
+  expect(serviceWorker).not.toContain("/chakri-roulette-brand.png");
+});
+
+test("future app-icon regeneration cannot reintroduce the retired black-backed lockup", () => {
+  const generator = fs.readFileSync(path.join(__dirname, "../../scripts/render_app_icons.py"), "utf8");
+  expect(generator).toContain('chakri-roulette-emblem-transparent.png');
+  expect(generator).not.toContain('chakri-roulette-brand.png');
+  expect(generator).toContain('convert("RGBA")');
+});
+
+test("install icons use the real-alpha emblem and retired root badges stay absent", () => {
+  for (const name of ["chakri-app-icon-192.png", "chakri-app-icon-512.png", "chakri-apple-touch-icon.png", "chakri-favicon.png"]) {
+    const image = fs.readFileSync(path.join(__dirname, `../../public/${name}`));
+    expect(image[25]).toBe(6); // PNG colour type 6 = RGBA.
+  }
+  for (const retired of ["chakri-roulette-brand.png", "chakri-app-icon.svg", "favicon.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
+    expect(fs.existsSync(path.join(__dirname, `../../public/${retired}`))).toBe(false);
+  }
 });
 
 test.each([

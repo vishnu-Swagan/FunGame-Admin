@@ -162,6 +162,8 @@
   box-shadow: inset 0 1px rgba(255,255,255,.2), 0 5px 12px rgba(0,0,0,.45);
 }
 .rummy-lobby-head > button svg, .rummy-game-head > button svg { width: 21px; }
+.rummy-lobby-brand-lockup { min-width: 0; justify-self: center; display: flex; align-items: center; }
+.rummy-lobby-header-brand-logo { display: block; width: clamp(165px, 26vw, 330px); max-width: 100%; height: auto; filter: drop-shadow(0 4px 9px rgba(0,0,0,.58)); }
 .rummy-lobby-brand {
   min-width: 0;
   justify-self: center;
@@ -343,7 +345,6 @@
 .rummy-lobby > footer svg { width: 17px; color: #68d8ae; }
 .rummy-opponent-disclosure { margin: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: rgba(255,244,210,.66); font-size: 9px; font-weight: 750; letter-spacing: .035em; line-height: 1.35; }
 .rummy-opponent-disclosure svg { flex: 0 0 auto; width: 14px; height: 14px; color: #68d8ae; }
-.rummy-lobby-brand-logo { display: block; width: 150px; height: auto; filter: drop-shadow(0 3px 8px rgba(0,0,0,.65)); }
 
 /* ---------------- Live table ---------------- */
 .rummy-game { display: grid; grid-template-rows: clamp(50px, 7.2vh, 72px) minmax(0, 1fr); }

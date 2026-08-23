@@ -134,20 +134,8 @@ export default function ResponsiblePlay() {
         )}
 
         <LimitBlock
-          title="Deposit limits"
-          hint="The most you can add to your balance in a period."
-          kind="DEPOSIT"
-          usageKey="deposited"
-          data={data}
-          limitFor={limitFor}
-          onSave={save}
-          onCancel={cancelPending}
-          busy={busy}
-        />
-
-        <LimitBlock
-          title="Loss limits"
-          hint="Staked minus won. A bet that would take you past it is refused."
+          title="Play-result limits"
+          hint="Chips played minus chips returned. A round that would take you past the limit is refused."
           kind="LOSS"
           usageKey="lost"
           data={data}

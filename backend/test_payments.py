@@ -717,6 +717,8 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "permissions": ["PAYMENTS_RECONCILE", "WITHDRAWALS_MARK_PAID"],
             "mfa_enabled": True, "mfa_verified_at": finance.now(),
             "reauthenticated_at": finance.now(),
+            "active_session_id": "payment-admin-session",
+            "admin_step_up_session_id": "payment-admin-session",
         }
         with self.assertRaises(HTTPException) as denied:
             await routes.payments_reconcile_and_pay(user=explicit_empty)
@@ -776,6 +778,8 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         kyc_admin.update({
             "mfa_enabled": True, "mfa_verified_at": finance.now(),
             "reauthenticated_at": finance.now(),
+            "active_session_id": "kyc-admin-session",
+            "admin_step_up_session_id": "kyc-admin-session",
         })
         self.assertEqual((await routes.kyc_review(user=kyc_admin))["id"], "kyc-admin")
 

@@ -891,6 +891,8 @@ async def main():
         'mfa_enabled': True,
         'mfa_verified_at': datetime.now(timezone.utc),
         'reauthenticated_at': datetime.now(timezone.utc),
+        'active_session_id': 'kyc-admin-session',
+        'admin_step_up_session_id': 'kyc-admin-session',
     })
     await expect_http_error(
         routes_compliance.verify_age(
@@ -961,6 +963,8 @@ async def main():
         'mfa_enabled': True,
         'mfa_verified_at': datetime.now(timezone.utc),
         'reauthenticated_at': datetime.now(timezone.utc),
+        'active_session_id': 'compliance-admin-session',
+        'admin_step_up_session_id': 'compliance-admin-session',
     })
     await expect_http_error(
         routes_compliance.patch_config(

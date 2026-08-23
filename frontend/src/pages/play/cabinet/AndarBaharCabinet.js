@@ -329,7 +329,7 @@ function LiveAndarBahar({ game }) {
     formatResult: (settled) => {
       const count = settled.outcome?.sequence?.length || 0;
       return {
-        title: settled.payout > 0 ? `WIN ₹${money(settled.payout)}` : `${String(settled.outcome?.winner || "").toUpperCase()} WINS`,
+        title: settled.payout > 0 ? `WIN ${money(settled.payout)} CHIPS` : `${String(settled.outcome?.winner || "").toUpperCase()} WINS`,
         subtitle: `${count} card${count === 1 ? "" : "s"} dealt`,
       };
     },
@@ -724,10 +724,10 @@ function AndarBaharTable({ game, live, demo = false }) {
       });
 
       ctx.fillStyle = "#0c1024"; ctx.fillRect(0, 866, DESIGN_W, 34);
-      label(ctx, `Andar Bahar ₹${money(minBet)} – ₹${money(maxBet)}`, 12, 884, 13, "#a8b0cc", "left", 700);
-      label(ctx, `Balance ₹${money(scene.balance)}`, 420, 884, 13, "#a8b0cc", "center", 700);
-      label(ctx, `Bet ₹${money(scene.myTotal)}`, 790, 884, 13, "#a8b0cc", "center", 700);
-      label(ctx, `LAST WIN ₹${money(scene.lastWin)}`, 1112, 884, 14, "#f3d37e", "center", 900);
+      label(ctx, `Andar Bahar ${money(minBet)} – ${money(maxBet)} chips`, 12, 884, 13, "#a8b0cc", "left", 700);
+      label(ctx, `Balance ${money(scene.balance)} chips`, 420, 884, 13, "#a8b0cc", "center", 700);
+      label(ctx, `Bet ${money(scene.myTotal)} chips`, 790, 884, 13, "#a8b0cc", "center", 700);
+      label(ctx, `LAST WIN ${money(scene.lastWin)} chips`, 1112, 884, 14, "#f3d37e", "center", 900);
       label(ctx, `LIVE MODE · #${scene.state?.round_number || "—"}`, 1585, 884, 12, "#a8b0cc", "right", 800);
 
       const timelineStatus = scene.phase === "BETTING"
@@ -870,7 +870,7 @@ function AndarBaharTable({ game, live, demo = false }) {
             </>}
             {modal === "live" && <>
               <h2 id="ab-modal-title">Live Mode</h2>
-              <p>Round #{state?.round_number || "—"} is shared by every connected player. Cards, outcome, balance, bets, and payouts are synchronized by the game server.</p>
+              <p>Round #{state?.round_number || "—"} is shared by every connected player. Cards, outcome, chip balance, bets, and chip returns are synchronized by the game server.</p>
             </>}
           </div>
         </div>

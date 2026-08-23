@@ -193,7 +193,7 @@ export function AdminPaymentAudit() {
   const loader = useCallback(() => adminPayments.audit(), []);
   const { rows, loading, load } = useAdminRows(loader);
   return <PageTransition className="space-y-4">
-    <PageHead icon={ScrollText} title="Payment audit" subtitle="Administrative approvals, rejections, balance actions and control changes." onRefresh={load} loading={loading} />
+    <PageHead icon={ScrollText} title="Administrative audit" subtitle="Administrative approvals, rejections, virtual-chip actions, and control changes." onRefresh={load} loading={loading} />
     {rows.length ? <div className="space-y-3">{rows.map((item) => {
       const state = auditState(item);
       const target = [item.target_type, item.target_id].filter(Boolean).join(" · ") || "—";
