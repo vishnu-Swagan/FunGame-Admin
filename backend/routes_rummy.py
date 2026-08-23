@@ -47,7 +47,6 @@ LIVE_MATCHMAKING_CYCLE_SECONDS = 180
 LIVE_BOT_FALLBACK_SECONDS = float(LIVE_MATCHMAKING_CYCLE_SECONDS)
 MAX_AUTOMATED_TURNS_PER_REQUEST = 12
 MAX_ROUND_TURNS = 100
-DEFAULT_RUMMY_SKILL_RATING = 500
 PRESENCE_STALE_SECONDS = 6
 MAX_GROUP_CARD_ID_LENGTH = 64
 CHAT_RECENT_LIMIT = 30
@@ -497,25 +496,6 @@ async def _room_category(room: dict, session=None) -> dict:
         return _freeze_category(snapshot)
     category = await _category(room["category_id"], session, require_enabled=False)
     return _freeze_category(category)
-
-
-def _player_skill_rating(user: dict) -> int:
-    try:
-        return max(0, int(user.get("rummy_skill_rating", DEFAULT_RUMMY_SKILL_RATING)))
-    except (TypeError, ValueError):
-        return DEFAULT_RUMMY_SKILL_RATING
-
-
-def _assert_live_skill_eligible(user: dict, category: dict):
-    rating = _player_skill_rating(user)
-    minimum = int(category.get("skillRatingMin", 0))
-    maximum = int(category.get("skillRatingMax", 100_000))
-    if rating < minimum or rating > maximum:
-        _fail(
-            409,
-            "RUMMY_SKILL_RATING_OUT_OF_RANGE",
-            f"This live table accepts Rummy ratings from {minimum} to {maximum}.",
-        )
 
 
 def _iso_to_epoch(value) -> float:
@@ -1125,6 +1105,93 @@ async def _latest_membership(user_id: str, session=None):
     return seat, room
 
 
+async def _retire_wallet_neutral_membership_for_live(
+    room: dict, seat: dict, session=None,
+) -> None:
+    """Release one abandoned Practice/AUTO seat before a new Live join.
+
+    Practice and scheduled AUTO fallback tables are wallet-neutral by contract,
+    so recovering one of their stale memberships cannot forfeit a live stake.
+    A defensive refund still restores any legacy non-zero reservation exactly
+    inside the surrounding transaction. Funded LIVE rooms never enter here.
+
+    A solo Practice room is cancelled so its automated seats cannot become an
+    orphaned background game. A shared AUTO fallback keeps running for its other
+    human members; only the switching player's seat is dropped.
+    """
+    if room.get("mode") not in ("PRACTICE", BOT_TABLE_MODE):
+        _fail(
+            409,
+            "RUMMY_MODE_SWITCH_BLOCKED",
+            "Finish or leave the current funded Rummy round before changing mode.",
+        )
+    if seat.get("status") not in ACTIVE_SEAT_STATES:
+        _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat is no longer active.")
+
+    kwargs = _kwargs(session)
+    original_version = int(room.get("version", 0))
+    category = await _room_category(room, session)
+    legacy_refund = _seat_wallet_stake_chips(seat)
+    if legacy_refund:
+        await credit_chips(
+            seat["user_id"], legacy_refund,
+            "Rummy wallet-neutral table reservation restored before Live join",
+            ref=f"{seat.get('stake_ref') or room['id']}:wallet-neutral-switch-refund",
+            kind=ledger.REFUND, game="rummy", session=session,
+        )
+
+    points = int(
+        category.get("firstDropPoints", 20)
+        if int(seat.get("turns_taken", 0)) == 0
+        else category.get("middleDropPoints", 40)
+    )
+    released = await db.rummy_seats.update_one(
+        {
+            "room_id": room["id"], "user_id": seat["user_id"],
+            "status": {"$in": list(ACTIVE_SEAT_STATES)},
+        },
+        {
+            "$set": {
+                "status": "DROPPED", "drop_points": points,
+                "wallet_stake_chips": 0,
+                "switched_to_live_at": _now_iso(),
+            },
+            "$unset": {"active_user_key": ""},
+        },
+        **kwargs,
+    )
+    if released.modified_count != 1:
+        _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat could not be released.")
+
+    remaining_humans = await db.rummy_seats.count_documents(
+        {
+            "room_id": room["id"], "is_bot": {"$ne": True},
+            "status": {"$in": list(ACTIVE_SEAT_STATES)},
+        },
+        **kwargs,
+    )
+    if remaining_humans == 0:
+        await _cancel_room(room, "Player moved from a wallet-neutral table to Live", session)
+    else:
+        next_seat = room.get("current_seat")
+        if (
+            room.get("state") == "TURN_ACTIVE"
+            and int(room.get("current_seat", -1)) == int(seat.get("seat_index", -2))
+        ):
+            next_seat = await _next_active_seat(room["id"], int(seat["seat_index"]), session)
+        room.update({
+            "current_seat": next_seat,
+            "turn_deadline": (
+                _epoch() + int(category["turnDurationSeconds"])
+                if room.get("state") == "TURN_ACTIVE" and next_seat is not None
+                else room.get("turn_deadline")
+            ),
+            "version": original_version + 1,
+            "updated_at": _now_iso(),
+        })
+    await _replace_room_cas(room, original_version, session)
+
+
 def _new_bot_seat(
     room: dict, category: dict, seat_index: int, bot_number: int,
     now_epoch: float | None = None,
@@ -1237,28 +1304,42 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
                         existing_room["seat_count"] = rummy.MAX_PLAYERS
                         existing_room = await _start_round(existing_room, category, session)
                 return await _public_state(existing_room, user["id"], session)
-            if existing_room.get("state") != "WAITING_FOR_PLAYERS":
-                _fail(409, "RUMMY_MODE_SWITCH_BLOCKED", "Finish or leave the current Rummy round before changing mode.")
-            refund_amount = _waiting_refund_amount(existing_seat)
-            released = await db.rummy_seats.delete_one({
-                "room_id": existing_room["id"],
-                "user_id": user["id"],
-                "status": {"$in": list(ACTIVE_SEAT_STATES)},
-            }, **kwargs)
-            if released.deleted_count != 1:
-                _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat could not be released.")
-            if refund_amount:
-                await credit_chips(
-                    user["id"], refund_amount, "Rummy mode changed during matchmaking",
-                    ref=f"{existing_seat.get('stake_ref') or existing_room['id']}:refund",
-                    kind=ledger.REFUND, game="rummy", session=session,
+            if (
+                body.mode == "LIVE"
+                and existing_room.get("mode") in ("PRACTICE", BOT_TABLE_MODE)
+            ):
+                await _retire_wallet_neutral_membership_for_live(
+                    existing_room, existing_seat, session,
                 )
-            existing_room.update({
-                "seat_count": max(0, int(existing_room.get("seat_count", 1)) - 1),
-                "version": int(existing_room.get("version", 0)) + 1,
-                "updated_at": _now_iso(),
-            })
-            await db.rummy_rooms.replace_one({"id": existing_room["id"]}, existing_room, **kwargs)
+                existing_seat = None
+                existing_room = None
+            elif existing_room.get("state") != "WAITING_FOR_PLAYERS":
+                _fail(
+                    409,
+                    "RUMMY_MODE_SWITCH_BLOCKED",
+                    "Finish or leave the current funded Rummy round before changing mode.",
+                )
+            else:
+                refund_amount = _waiting_refund_amount(existing_seat)
+                released = await db.rummy_seats.delete_one({
+                    "room_id": existing_room["id"],
+                    "user_id": user["id"],
+                    "status": {"$in": list(ACTIVE_SEAT_STATES)},
+                }, **kwargs)
+                if released.deleted_count != 1:
+                    _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat could not be released.")
+                if refund_amount:
+                    await credit_chips(
+                        user["id"], refund_amount, "Rummy mode changed during matchmaking",
+                        ref=f"{existing_seat.get('stake_ref') or existing_room['id']}:refund",
+                        kind=ledger.REFUND, game="rummy", session=session,
+                    )
+                existing_room.update({
+                    "seat_count": max(0, int(existing_room.get("seat_count", 1)) - 1),
+                    "version": int(existing_room.get("version", 0)) + 1,
+                    "updated_at": _now_iso(),
+                })
+                await db.rummy_rooms.replace_one({"id": existing_room["id"]}, existing_room, **kwargs)
 
         current_category = await _category(body.categoryId, session)
 
@@ -1301,7 +1382,6 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
             _fail(404, "RUMMY_PLAYER_NOT_FOUND", "The player account could not be restored.")
         balance = int(current_user.get("chip_balance", 0))
         if body.mode == "LIVE":
-            _assert_live_skill_eligible(current_user, category)
             min_balance = max(int(category["minChipBalance"]), int(category["entryChips"]))
             if balance < min_balance:
                 _fail(409, "RUMMY_BALANCE_TOO_LOW", f"This table requires at least {min_balance} chips.")

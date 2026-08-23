@@ -334,17 +334,10 @@ def test_category_snapshot_is_deeply_frozen_and_survives_disablement():
     assert frozen["enabled"] is True
 
 
-def test_live_skill_rating_uses_stored_value_with_a_sane_default():
-    assert routes_rummy._player_skill_rating({}) == 500
-    routes_rummy._assert_live_skill_eligible({}, dict(rummy.RUMMY_CATEGORIES[0]))
-    try:
-        routes_rummy._assert_live_skill_eligible(
-            {"rummy_skill_rating": 1200}, dict(rummy.RUMMY_CATEGORIES[0]),
-        )
-    except HTTPException as exc:
-        assert exc.detail["code"] == "RUMMY_SKILL_RATING_OUT_OF_RANGE"
-    else:
-        raise AssertionError("an ineligible live rating was accepted")
+def test_live_join_has_no_hidden_skill_rating_gate():
+    source = inspect.getsource(routes_rummy.rummy_join)
+    assert "_assert_live_skill_eligible" not in source
+    assert "rummy_skill_rating" not in source
 
 
 def test_turn_deadline_is_closed_at_the_exact_server_deadline():
@@ -594,6 +587,299 @@ def test_practice_join_and_settlement_are_wallet_neutral_end_to_end():
                 routes_rummy.db, routes_rummy.debit_chips, routes_rummy.credit_chips,
                 routes_rummy.run_game_transaction, routes_rummy.require_playable_game,
             ) = originals
+
+    asyncio.run(scenario())
+
+
+def test_live_join_retires_abandoned_practice_and_uses_chips_not_rating():
+    async def scenario():
+        mock = AsyncMongoMockClient()
+        database = mock["rummy_practice_to_live"]
+        await database.rummy_categories.insert_many([
+            copy.deepcopy(category) for category in rummy.RUMMY_CATEGORIES
+        ])
+        await database.games.insert_one({"slug": "rummy", "status": "ENABLED", "name": "Rummy"})
+        await database.users.insert_one({
+            "id": "switch-player", "display_name": "Switch Player",
+            "chip_balance": 6000, "rummy_skill_rating": 0,
+        })
+        debits = []
+        credits = []
+
+        async def direct_transaction(_client, callback):
+            return await callback(None)
+
+        async def allow(_slug):
+            return True
+
+        async def debit(user_id, amount, *args, **kwargs):
+            debits.append((user_id, int(amount), kwargs.get("ref")))
+            updated = await database.users.find_one_and_update(
+                {"id": user_id, "chip_balance": {"$gte": int(amount)}},
+                {"$inc": {"chip_balance": -int(amount)}},
+                return_document=True,
+            )
+            if not updated:
+                raise routes_rummy.InsufficientChips()
+
+        async def credit(user_id, amount, *args, **kwargs):
+            credits.append((user_id, int(amount), kwargs.get("ref")))
+            await database.users.update_one(
+                {"id": user_id}, {"$inc": {"chip_balance": int(amount)}},
+            )
+
+        originals = (
+            routes_rummy.db, routes_rummy.run_game_transaction,
+            routes_rummy.require_playable_game, routes_rummy.debit_chips,
+            routes_rummy.credit_chips, routes_rummy._epoch,
+        )
+        routes_rummy.db = database
+        routes_rummy.run_game_transaction = direct_transaction
+        routes_rummy.require_playable_game = allow
+        routes_rummy.debit_chips = debit
+        routes_rummy.credit_chips = credit
+        routes_rummy._epoch = lambda: 100.0
+        routes_rummy._mark_rummy_core_ready_for_tests()
+        try:
+            practice = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV1", mode="PRACTICE"),
+                {"id": "switch-player", "display_name": "Switch Player"},
+            )
+            assert practice["state"] == "TURN_ACTIVE"
+
+            # Simulate one legacy wallet-neutral seat that retained a reservation.
+            # The switch must restore it once before taking the new Live stake.
+            await database.rummy_seats.update_one(
+                {"room_id": practice["roomId"], "user_id": "switch-player"},
+                {"$set": {"wallet_stake_chips": 100, "stake_ref": "legacy-practice-stake"}},
+            )
+            await database.users.update_one(
+                {"id": "switch-player"}, {"$inc": {"chip_balance": -100}},
+            )
+
+            live = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV5", mode="LIVE"),
+                {"id": "switch-player", "display_name": "Switch Player"},
+            )
+            assert live["mode"] == "LIVE"
+            assert live["state"] == "WAITING_FOR_PLAYERS"
+            assert live["category"]["id"] == "LV5"
+            assert live["roomId"] != practice["roomId"]
+            assert live["balance"] == 1000
+
+            old_room = await database.rummy_rooms.find_one(
+                {"id": practice["roomId"]}, {"_id": 0},
+            )
+            old_seats = await database.rummy_seats.find(
+                {"room_id": practice["roomId"]}, {"_id": 0},
+            ).to_list(rummy.MAX_PLAYERS)
+            assert old_room["state"] == "CANCELLED"
+            assert all(seat["status"] == "CANCELLED" for seat in old_seats)
+            assert all("active_user_key" not in seat for seat in old_seats)
+            assert credits == [(
+                "switch-player", 100,
+                "legacy-practice-stake:wallet-neutral-switch-refund",
+            )]
+            assert debits == [(
+                "switch-player", 5000,
+                f"rummy-seat:{live['roomId']}:switch-player",
+            )]
+
+            # Retrying the same Live join resumes the authoritative seat and
+            # cannot repeat either the legacy refund or the new table debit.
+            resumed = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV5", mode="LIVE"),
+                {"id": "switch-player", "display_name": "Switch Player"},
+            )
+            assert resumed["roomId"] == live["roomId"]
+            assert len(credits) == 1
+            assert len(debits) == 1
+        finally:
+            (
+                routes_rummy.db, routes_rummy.run_game_transaction,
+                routes_rummy.require_playable_game, routes_rummy.debit_chips,
+                routes_rummy.credit_chips, routes_rummy._epoch,
+            ) = originals
+            routes_rummy._mark_rummy_core_ready_for_tests()
+
+    asyncio.run(scenario())
+
+
+def test_mode_switch_never_auto_abandons_a_funded_live_round():
+    async def scenario():
+        mock = AsyncMongoMockClient()
+        database = mock["rummy_funded_live_guard"]
+        await database.rummy_categories.insert_one(copy.deepcopy(rummy.RUMMY_CATEGORIES[0]))
+        await database.games.insert_one({"slug": "rummy", "status": "ENABLED", "name": "Rummy"})
+        await database.users.insert_one({
+            "id": "funded-player", "display_name": "Funded Player", "chip_balance": 1000,
+        })
+        debits = []
+        credits = []
+
+        async def direct_transaction(_client, callback):
+            return await callback(None)
+
+        async def allow(_slug):
+            return True
+
+        async def debit(user_id, amount, *args, **kwargs):
+            debits.append((user_id, int(amount), kwargs.get("ref")))
+            await database.users.update_one(
+                {"id": user_id}, {"$inc": {"chip_balance": -int(amount)}},
+            )
+
+        async def credit(user_id, amount, *args, **kwargs):
+            credits.append((user_id, int(amount), kwargs.get("ref")))
+            await database.users.update_one(
+                {"id": user_id}, {"$inc": {"chip_balance": int(amount)}},
+            )
+
+        originals = (
+            routes_rummy.db, routes_rummy.run_game_transaction,
+            routes_rummy.require_playable_game, routes_rummy.debit_chips,
+            routes_rummy.credit_chips, routes_rummy._epoch,
+        )
+        routes_rummy.db = database
+        routes_rummy.run_game_transaction = direct_transaction
+        routes_rummy.require_playable_game = allow
+        routes_rummy.debit_chips = debit
+        routes_rummy.credit_chips = credit
+        routes_rummy._epoch = lambda: 100.0
+        routes_rummy._mark_rummy_core_ready_for_tests()
+        try:
+            live = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV1", mode="LIVE"),
+                {"id": "funded-player", "display_name": "Funded Player"},
+            )
+            await database.rummy_rooms.update_one(
+                {"id": live["roomId"]},
+                {"$set": {"state": "TURN_ACTIVE", "round_id": "funded-round"}},
+            )
+            try:
+                await routes_rummy.rummy_join(
+                    routes_rummy.JoinRequest(categoryId="LV1", mode="PRACTICE"),
+                    {"id": "funded-player", "display_name": "Funded Player"},
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 409
+                assert exc.detail["code"] == "RUMMY_MODE_SWITCH_BLOCKED"
+                assert "funded" in exc.detail["message"].lower()
+            else:
+                raise AssertionError("an active funded Live seat was abandoned automatically")
+
+            seat = await database.rummy_seats.find_one({
+                "room_id": live["roomId"], "user_id": "funded-player",
+            })
+            assert seat["status"] == "ACTIVE"
+            assert seat["wallet_stake_chips"] == 100
+            assert seat["active_user_key"] == "funded-player"
+            assert len(debits) == 1
+            assert credits == []
+            assert (await database.users.find_one({"id": "funded-player"}))["chip_balance"] == 900
+        finally:
+            (
+                routes_rummy.db, routes_rummy.run_game_transaction,
+                routes_rummy.require_playable_game, routes_rummy.debit_chips,
+                routes_rummy.credit_chips, routes_rummy._epoch,
+            ) = originals
+            routes_rummy._mark_rummy_core_ready_for_tests()
+
+    asyncio.run(scenario())
+
+
+def test_live_join_releases_only_requester_from_shared_wallet_neutral_fallback():
+    async def scenario():
+        mock = AsyncMongoMockClient()
+        database = mock["rummy_shared_fallback_switch"]
+        category = copy.deepcopy(rummy.RUMMY_CATEGORIES[0])
+        room = {
+            "id": "shared-auto-room", "category_id": "LV1",
+            "category_snapshot": category, "mode": routes_rummy.BOT_TABLE_MODE,
+            "requested_mode": "LIVE", "wallet_neutral": True,
+            "state": "TURN_ACTIVE", "round_id": "shared-round", "version": 7,
+            "seat_count": rummy.MAX_PLAYERS, "max_players": rummy.MAX_PLAYERS,
+            "current_seat": 0, "turn_deadline": 130.0,
+            "created_at": "1970-01-01T00:01:00+00:00",
+            "updated_at": "1970-01-01T00:01:00+00:00",
+        }
+        await database.rummy_categories.insert_one(category)
+        await database.games.insert_one({"slug": "rummy", "status": "ENABLED", "name": "Rummy"})
+        await database.users.insert_many([
+            {"id": "switching-player", "display_name": "Switching Player", "chip_balance": 1000},
+            {"id": "remaining-player", "display_name": "Remaining Player", "chip_balance": 1000},
+        ])
+        await database.rummy_rooms.insert_one(copy.deepcopy(room))
+        await database.rummy_seats.insert_many([
+            {
+                "room_id": room["id"], "user_id": "switching-player", "seat_index": 0,
+                "display_name": "Switching Player", "status": "ACTIVE", "is_bot": False,
+                "active_user_key": "switching-player", "entry_chips": 100,
+                "wallet_stake_chips": 0, "turns_taken": 0, "joined_at": "2026-08-23T00:00:00+00:00",
+            },
+            {
+                "room_id": room["id"], "user_id": "remaining-player", "seat_index": 1,
+                "display_name": "Remaining Player", "status": "ACTIVE", "is_bot": False,
+                "active_user_key": "remaining-player", "entry_chips": 100,
+                "wallet_stake_chips": 0, "turns_taken": 0, "joined_at": "2026-08-23T00:00:00+00:00",
+            },
+            *[
+                routes_rummy._new_bot_seat(room, category, index, index, 100.0)
+                for index in range(2, rummy.MAX_PLAYERS)
+            ],
+        ])
+
+        async def direct_transaction(_client, callback):
+            return await callback(None)
+
+        async def allow(_slug):
+            return True
+
+        async def debit(user_id, amount, *args, **kwargs):
+            await database.users.update_one(
+                {"id": user_id}, {"$inc": {"chip_balance": -int(amount)}},
+            )
+
+        originals = (
+            routes_rummy.db, routes_rummy.run_game_transaction,
+            routes_rummy.require_playable_game, routes_rummy.debit_chips,
+            routes_rummy._epoch,
+        )
+        routes_rummy.db = database
+        routes_rummy.run_game_transaction = direct_transaction
+        routes_rummy.require_playable_game = allow
+        routes_rummy.debit_chips = debit
+        routes_rummy._epoch = lambda: 100.0
+        routes_rummy._mark_rummy_core_ready_for_tests()
+        try:
+            live = await routes_rummy.rummy_join(
+                routes_rummy.JoinRequest(categoryId="LV1", mode="LIVE"),
+                {"id": "switching-player", "display_name": "Switching Player"},
+            )
+            assert live["mode"] == "LIVE"
+            assert live["roomId"] != room["id"]
+
+            old_room = await database.rummy_rooms.find_one({"id": room["id"]}, {"_id": 0})
+            switching = await database.rummy_seats.find_one({
+                "room_id": room["id"], "user_id": "switching-player",
+            })
+            remaining = await database.rummy_seats.find_one({
+                "room_id": room["id"], "user_id": "remaining-player",
+            })
+            assert old_room["state"] == "TURN_ACTIVE"
+            assert old_room["version"] == 8
+            assert old_room["current_seat"] != 0
+            assert switching["status"] == "DROPPED"
+            assert "active_user_key" not in switching
+            assert remaining["status"] == "ACTIVE"
+            assert remaining["active_user_key"] == "remaining-player"
+        finally:
+            (
+                routes_rummy.db, routes_rummy.run_game_transaction,
+                routes_rummy.require_playable_game, routes_rummy.debit_chips,
+                routes_rummy._epoch,
+            ) = originals
+            routes_rummy._mark_rummy_core_ready_for_tests()
 
     asyncio.run(scenario())
 

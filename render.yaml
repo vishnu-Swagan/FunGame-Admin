@@ -84,7 +84,9 @@ services:
       - play.chakri.casino
     envVars:
       - key: REACT_APP_BACKEND_URL
-        value: https://chakri-casino-api.onrender.com
+        # Keep new builds and installed PWAs pinned to the branded production
+        # origin.  The historical Render hostname no longer serves this API.
+        value: https://api.chakri.casino
       - key: GENERATE_SOURCEMAP
         value: "false"
     routes:
@@ -144,4 +146,4 @@ services:
       - key: CRON_SECRET
         sync: false
       - key: API_BASE
-        value: https://chakri-casino-api.onrender.com
+        value: https://api.chakri.casino

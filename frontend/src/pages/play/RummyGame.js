@@ -38,6 +38,12 @@ const readableRuleLabel = (value, fallback = "UNVALIDATED") => String(value || f
 const groupSignature = (groups) => JSON.stringify(groups || []);
 const MODAL_FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 const RUMMY_TABLE_CYCLE_SECONDS = 180;
+const RUMMY_ACTIVE_SEAT_STATES = new Set(["ACTIVE", "RECONNECTING"]);
+const RUMMY_EXIT_CONFIRMED_CODES = new Set([
+  "RUMMY_NOT_A_MEMBER",
+  "RUMMY_ROOM_NOT_FOUND",
+  "RUMMY_SEAT_INACTIVE",
+]);
 
 export function automatedSeatLabel(value) {
   const detail = String(value || "")
@@ -588,7 +594,7 @@ export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = fals
             data-testid="rummy-player-win-celebration"
             aria-hidden="true"
           >
-            <span>♛</span><b>ROYAL VICTORY</b>
+            <span>♛</span>
           </div>
         )}
       </motion.header>
@@ -1104,6 +1110,7 @@ export default function RummyGame({ game }) {
   const pollAbortRef = useRef(null);
   const mutationEpochRef = useRef(0);
   const socialInFlightRef = useRef(false);
+  const lastActionFailureRef = useRef(null);
   const rummyAudioRef = useRef(null);
   const previewAutoPlayStartedRef = useRef(false);
 
@@ -1186,10 +1193,12 @@ export default function RummyGame({ game }) {
     void join(categories[0].id, "PRACTICE");
   }, [categories, join, lobbyLoading, previewAutoPlay, state]);
 
-  const sendAction = useCallback(async (actionType, actionPayload = {}) => {
+  const sendAction = useCallback(async (actionType, actionPayload = {}, options = {}) => {
     const current = roomRef.current;
     if (!current || actionInFlightRef.current) return null;
+    const actionId = options.actionId || uuid();
     actionInFlightRef.current = true;
+    lastActionFailureRef.current = null;
     // Room versions intentionally remain unchanged for private GROUP actions.
     // Advance a local transport epoch before aborting so an older GET that has
     // already resolved at the network layer cannot overwrite its acknowledgement.
@@ -1203,7 +1212,7 @@ export default function RummyGame({ game }) {
       const data = preview
         ? { code: demoState.result?.reason === "VALID_DECLARATION" ? "VALID_DECLARATION" : `${actionType}_ACCEPTED`, state: demoState }
         : (await api.post(`/games/rummy/rooms/${current.roomId}/actions`, {
-          roomId: current.roomId, roundId: current.roundId, actionId: uuid(),
+          roomId: current.roomId, roundId: current.roundId, actionId,
           expectedVersion: current.version, actionType, actionPayload,
           clientTimestamp: Date.now() / 1000,
         }, { timeout: 22000 })).data;
@@ -1211,10 +1220,22 @@ export default function RummyGame({ game }) {
       acceptAuthoritativeState(next); setReconnecting(false);
       return next;
     } catch (error) {
-      if (["RUMMY_STALE_VERSION", "RUMMY_STALE_ROUND"].includes(errCode(error))) setReconnecting(true);
-      toast.error(errMsg(error, "The table rejected that action."));
+      const code = errCode(error);
+      const message = errMsg(error, "The table rejected that action.");
+      lastActionFailureRef.current = { code, message, transport: !error?.response };
+      if (["RUMMY_STALE_VERSION", "RUMMY_STALE_ROUND"].includes(code)) setReconnecting(true);
+      if (!options.suppressFailureToast) toast.error(message);
       return null;
     } finally { actionInFlightRef.current = false; setBusy(false); }
+  }, [acceptAuthoritativeState, preview]);
+
+  const refreshCurrentRoom = useCallback(async (roomId) => {
+    const targetRoomId = roomId || roomRef.current?.roomId;
+    if (!targetRoomId || preview) return roomRef.current;
+    const { data } = await api.get(`/games/rummy/rooms/${targetRoomId}/state`, { timeout: 12000 });
+    acceptAuthoritativeState(data);
+    setReconnecting(false);
+    return data;
   }, [acceptAuthoritativeState, preview]);
 
   const sendSocialEvent = useCallback(async ({ eventType, message, reactionId }) => {
@@ -1329,10 +1350,90 @@ export default function RummyGame({ game }) {
   }, [acceptAuthoritativeState, preview, sendAction, state?.roomId, state?.state]);
 
   const exit = async () => {
-    if (state && !state.result && state.state !== "CANCELLED") {
-      await sendAction(state.state === "WAITING_FOR_PLAYERS" ? "LEAVE" : "DROP");
+    const current = roomRef.current;
+    if (!current) {
+      setState(null);
+      await loadLobby();
+      return;
     }
-    setState(null); roomRef.current = null; await loadLobby();
+    if (!current.result && current.state !== "CANCELLED" && current.state !== "ROUND_SETTLED") {
+      const actionType = current.state === "WAITING_FOR_PLAYERS" ? "LEAVE" : "DROP";
+      const actionId = uuid();
+      let released = await sendAction(actionType, {}, { actionId, suppressFailureToast: true });
+      let failure = lastActionFailureRef.current;
+      let restoredBeforeRetry = false;
+
+      if (!released && RUMMY_EXIT_CONFIRMED_CODES.has(failure?.code)) {
+        released = { exitConfirmed: true };
+      }
+
+      const shouldRestore = (
+        !released
+        && (
+          ["RUMMY_STALE_VERSION", "RUMMY_STALE_ROUND"].includes(failure?.code)
+          || failure?.transport
+        )
+      );
+      if (shouldRestore) {
+        try {
+          const restored = await refreshCurrentRoom(current.roomId);
+          restoredBeforeRetry = true;
+          const viewerSeatIndex = Number.isInteger(restored?.privateState?.seatIndex)
+            ? restored.privateState.seatIndex
+            : current.privateState?.seatIndex;
+          const viewerSeat = Number.isInteger(viewerSeatIndex)
+            ? restored?.seats?.find((seat) => seat.seatIndex === viewerSeatIndex)
+            : null;
+          const seatAlreadyReleased = (
+            Number.isInteger(viewerSeatIndex)
+            && (!viewerSeat || !RUMMY_ACTIVE_SEAT_STATES.has(viewerSeat.status))
+          );
+          if (
+            restored?.result
+            || ["ROUND_SETTLED", "CANCELLED"].includes(restored?.state)
+            || seatAlreadyReleased
+          ) {
+            released = restored;
+          } else {
+            // Reuse the action id: a lost acknowledgement is replay-safe, while
+            // a genuinely stale request is retried against the restored version.
+            released = await sendAction(actionType, {}, { actionId, suppressFailureToast: true });
+            failure = lastActionFailureRef.current;
+            if (!released && RUMMY_EXIT_CONFIRMED_CODES.has(failure?.code)) {
+              released = { exitConfirmed: true };
+            }
+          }
+        } catch (error) {
+          const code = errCode(error);
+          if (RUMMY_EXIT_CONFIRMED_CODES.has(code)) {
+            released = { exitConfirmed: true };
+          } else {
+            failure = {
+              code,
+              message: errMsg(error, "The current table could not be restored yet."),
+              transport: !error?.response,
+            };
+            setReconnecting(true);
+          }
+        }
+      }
+
+      if (!released) {
+        setReconnecting(true);
+        toast.error(
+          restoredBeforeRetry
+            ? "Your current table was restored, but leaving was not confirmed. It remains open here so your seat and chips stay protected; try again when the connection is stable."
+            : failure?.code === "RUMMY_MODE_SWITCH_BLOCKED"
+            ? "Your current table is still active. Resume it here, then leave before changing mode."
+            : "The server did not confirm that you left. Your current table remains open here so your seat and chips stay protected. Try again when the connection is stable.",
+        );
+        return;
+      }
+    }
+    setState(null);
+    roomRef.current = null;
+    setReconnecting(false);
+    await loadLobby();
   };
 
   if (!state) return <CategoryLobby categories={categories} balance={balance} busy={busy} loading={lobbyLoading} error={lobbyError} joinFailure={joinFailure} preview={preview} onJoin={join} onRetry={loadLobby} onExit={() => navigate(`/games/${game.slug}`)} />;

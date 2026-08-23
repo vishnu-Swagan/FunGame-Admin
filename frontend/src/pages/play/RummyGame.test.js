@@ -4,6 +4,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import RummyGame, { CategoryLobby, getRummyScheduleInfo, nextRummyPollDelay, PlayerSeat, Results, RummyCard, RummyTable, visibleRummyName } from "./RummyGame";
 import { applyRummyDemoAction, createRummyDemoState, RUMMY_DEMO_CATEGORIES } from "./rummyDemo";
 
@@ -12,7 +13,7 @@ jest.mock("react-router-dom", () => ({ useNavigate: () => jest.fn() }), { virtua
 jest.mock("sonner", () => ({ toast: { info: jest.fn(), error: jest.fn() } }));
 jest.mock("@/lib/api", () => ({
   api: { get: jest.fn(), post: jest.fn() },
-  errCode: () => null,
+  errCode: (error) => error?.response?.data?.detail?.code || error?.response?.data?.code || null,
   errMsg: (error, fallback) => error?.response?.data?.detail?.message || error?.message || fallback,
 }));
 jest.mock("@/lib/sound", () => ({
@@ -462,7 +463,7 @@ test("results derive the player win from seat identity, trap focus, and remove r
   expect(panel.classList.contains("is-player-win")).toBe(true);
   expect(panel.dataset.reducedMotion).toBe("true");
   expect(container.querySelector("#rummy-result-title")?.textContent).toBe("You win");
-  expect(container.querySelector('[data-testid="rummy-player-win-celebration"]')?.textContent).toContain("ROYAL VICTORY");
+  expect(container.querySelector('[data-testid="rummy-player-win-celebration"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="rummy-player-win-celebration"]')?.classList.contains("is-static")).toBe(true);
   expect(document.activeElement).toBe(lobbyButton);
   [...panel.querySelectorAll(".rummy-result-ribbon, h2, p, article")].forEach((element) => {
@@ -731,6 +732,150 @@ test("a no-response join failure shows contextual recovery and a successful retr
   );
   expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
   expect(container.querySelector('[role="alert"]')).toBeNull();
+  act(() => root.unmount());
+});
+
+test("a failed leave keeps the authoritative table visible instead of stranding the player in the lobby", async () => {
+  const initial = createRummyDemoState("LV1");
+  const pendingPoll = deferred();
+  let roomReadCount = 0;
+  api.get.mockImplementation((url) => {
+    if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
+    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) {
+      roomReadCount += 1;
+      if (roomReadCount === 1) return pendingPoll.promise;
+      return Promise.reject(Object.assign(new Error("Network Error"), { request: {}, response: undefined }));
+    }
+    return Promise.reject(new Error(`Unexpected GET ${url}`));
+  });
+  api.post.mockImplementation((url) => {
+    if (url === "/games/rummy/join") return Promise.resolve({ data: initial });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/actions`)) {
+      return Promise.reject(Object.assign(new Error("Network Error"), { request: {}, response: undefined }));
+    }
+    return Promise.reject(new Error(`Unexpected POST ${url}`));
+  });
+
+  const { container, root } = await render(<RummyGame game={{ slug: "rummy", name: "Rummy" }} />);
+  await click([...container.querySelectorAll("button")].find((button) => button.textContent.includes("PRACTICE TABLE")));
+  expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
+
+  await click(container.querySelector('.rummy-game-head button[aria-label="Leave Rummy"]'));
+
+  expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="rummy-category-lobby"]')).toBeNull();
+  expect(container.textContent).toContain("Reconnecting to the authoritative table");
+  expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("table remains open here"));
+  act(() => root.unmount());
+});
+
+test("a committed drop with a lost acknowledgement accepts the inactive authoritative seat without a second action", async () => {
+  const initial = createRummyDemoState("LV1");
+  const pendingPoll = deferred();
+  const dropped = {
+    ...initial,
+    version: initial.version + 1,
+    seats: initial.seats.map((seat) => (
+      seat.seatIndex === initial.privateState.seatIndex
+        ? { ...seat, active: false, status: "DROPPED", droppedPoints: 20 }
+        : seat
+    )),
+  };
+  let roomReadCount = 0;
+  let actionCount = 0;
+  api.get.mockImplementation((url) => {
+    if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
+    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) {
+      roomReadCount += 1;
+      return roomReadCount === 1 ? pendingPoll.promise : Promise.resolve({ data: dropped });
+    }
+    return Promise.reject(new Error(`Unexpected GET ${url}`));
+  });
+  api.post.mockImplementation((url) => {
+    if (url === "/games/rummy/join") return Promise.resolve({ data: initial });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/actions`)) {
+      actionCount += 1;
+      return Promise.reject(Object.assign(new Error("Network Error"), { request: {}, response: undefined }));
+    }
+    return Promise.reject(new Error(`Unexpected POST ${url}`));
+  });
+
+  const { container, root } = await render(<RummyGame game={{ slug: "rummy", name: "Rummy" }} />);
+  await click([...container.querySelectorAll("button")].find((button) => button.textContent.includes("PRACTICE TABLE")));
+  await click(container.querySelector('.rummy-game-head button[aria-label="Leave Rummy"]'));
+
+  expect(actionCount).toBe(1);
+  expect(roomReadCount).toBe(2);
+  expect(container.querySelector('[data-testid="rummy-live-table"]')).toBeNull();
+  expect(container.querySelector('[data-testid="rummy-category-lobby"]')).not.toBeNull();
+  expect(toast.error).not.toHaveBeenCalled();
+  act(() => root.unmount());
+});
+
+test("a stale leave restores the room and retries once with the same idempotent action id", async () => {
+  jest.useFakeTimers();
+  const initial = createRummyDemoState("LV1");
+  const restored = { ...initial, version: initial.version + 1 };
+  const released = applyRummyDemoAction(restored, "DROP");
+  const actionPayloads = [];
+  api.get.mockImplementation((url) => {
+    if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
+    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) return Promise.resolve({ data: restored });
+    return Promise.reject(new Error(`Unexpected GET ${url}`));
+  });
+  api.post.mockImplementation((url, payload) => {
+    if (url === "/games/rummy/join") return Promise.resolve({ data: initial });
+    if (url.includes(`/games/rummy/rooms/${initial.roomId}/actions`)) {
+      actionPayloads.push(payload);
+      if (actionPayloads.length === 1) {
+        return Promise.reject({
+          response: { data: { detail: { code: "RUMMY_STALE_VERSION", message: "The table changed." } } },
+        });
+      }
+      return Promise.resolve({ data: { code: "PLAYER_DROPPED", state: released } });
+    }
+    return Promise.reject(new Error(`Unexpected POST ${url}`));
+  });
+
+  try {
+    const { container, root } = await render(<RummyGame game={{ slug: "rummy", name: "Rummy" }} />);
+    await click([...container.querySelectorAll("button")].find((button) => button.textContent.includes("PRACTICE TABLE")));
+    await click(container.querySelector('.rummy-game-head button[aria-label="Leave Rummy"]'));
+
+    expect(actionPayloads).toHaveLength(2);
+    expect(actionPayloads[1].actionId).toBe(actionPayloads[0].actionId);
+    expect(actionPayloads[0].expectedVersion).toBe(initial.version);
+    expect(actionPayloads[1].expectedVersion).toBe(restored.version);
+    expect(container.querySelector('[data-testid="rummy-live-table"]')).toBeNull();
+    expect(container.querySelector('[data-testid="rummy-category-lobby"]')).not.toBeNull();
+    expect(toast.error).not.toHaveBeenCalledWith("The table changed.");
+    act(() => root.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("the deterministic Practice journey reaches the premium five-seat result and returns cleanly to the lobby", async () => {
+  const { container, root } = await render(<RummyGame game={{ slug: "rummy", name: "Rummy", demo: true }} />);
+  expect(container.querySelector('[data-testid="rummy-category-lobby"]')).not.toBeNull();
+
+  await click([...container.querySelectorAll("button")].find((button) => button.textContent.includes("PRACTICE TABLE")));
+  const declare = [...container.querySelectorAll(".rummy-actions button")].find((button) => button.textContent.trim() === "DECLARE");
+  expect(declare?.disabled).toBe(false);
+  await click(declare);
+
+  expect(container.querySelector(".rummy-results[aria-modal='true']")).not.toBeNull();
+  expect(container.querySelector(".rummy-result-hero")?.textContent).toContain("You win");
+  expect(container.querySelector(".rummy-result-award")).not.toBeNull();
+  expect(container.querySelectorAll(".rummy-result-rows article")).toHaveLength(5);
+  expect(container.querySelector(".rummy-result-rows article.is-winner")).not.toBeNull();
+
+  await click([...container.querySelectorAll(".rummy-result-actions button")].find((button) => button.textContent === "BACK TO LOBBY"));
+  expect(container.querySelector(".rummy-results")).toBeNull();
+  expect(container.querySelector('[data-testid="rummy-category-lobby"]')).not.toBeNull();
   act(() => root.unmount());
 });
 
