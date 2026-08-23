@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import RummyGame, { CategoryLobby, getRummyScheduleInfo, nextRummyPollDelay, PlayerSeat, Results, RummyCard, RummyTable, visibleRummyName } from "./RummyGame";
+import RummyGame, { CategoryLobby, getRummyScheduleInfo, nextRummyPollDelay, PlayerSeat, requestRummyLandscape, Results, RummyCard, RummyLandscapeGuard, RummyTable, rummyTurnAnnouncement, shouldBlockRummyPortrait, visibleRummyName } from "./RummyGame";
 import { applyRummyDemoAction, createRummyDemoState, RUMMY_DEMO_CATEGORIES } from "./rummyDemo";
 
 
@@ -129,8 +129,33 @@ test("opponents retain hidden backs and only the active seat renders the one cou
   expect(container.querySelector('[data-testid="rummy-seat-avatar-1"] img')?.getAttribute("src")).toBe("/game-art/avatars/cartoon/avatar-02.png");
   expect(container.querySelectorAll(".rummy-only-timer")).toHaveLength(1);
   expect(container.querySelector(".rummy-only-timer")?.textContent).toBe("19");
+  expect(container.querySelector(".rummy-only-timer")?.getAttribute("role")).toBe("timer");
+  expect(container.querySelector(".rummy-avatar-ring")?.classList.contains("is-emerald")).toBe(true);
   expect(container.querySelector(".rummy-only-timer").parentElement).toBe(container.querySelector(".rummy-avatar-ring"));
   act(() => root.unmount());
+});
+
+test("the turn ring changes from emerald to amber to ruby as seconds run down", () => {
+  const seat = { seatIndex: 2, status: "ACTIVE", displayName: "Rival", playerId: "PL***03", isBot: false, cardCount: 13, active: true };
+  const amber = renderSeat(seat, 0, 12, 30);
+  expect(amber.container.querySelector(".rummy-avatar-ring")?.classList.contains("is-amber")).toBe(true);
+  expect(amber.container.querySelector(".rummy-only-timer")?.textContent).toBe("12");
+  act(() => amber.root.unmount());
+
+  const ruby = renderSeat(seat, 0, 5, 30);
+  expect(ruby.container.querySelector(".rummy-avatar-ring")?.classList.contains("is-ruby")).toBe(true);
+  expect(ruby.container.querySelector(".rummy-only-timer")?.textContent).toBe("5");
+  act(() => ruby.root.unmount());
+});
+
+test("turn urgency is announced only as a start, halfway, and final-seconds phase", () => {
+  const ownSeat = { seatIndex: 3, displayName: "You", isBot: false };
+  const rival = { seatIndex: 1, displayName: "Mira", isBot: true };
+  expect(rummyTurnAnnouncement(ownSeat, 3, 30, 30)).toBe("Your turn started.");
+  expect(rummyTurnAnnouncement(ownSeat, 3, 15, 30)).toBe("Less than half of your turn remains.");
+  expect(rummyTurnAnnouncement(ownSeat, 3, 6, 30)).toBe("Final seconds for your turn.");
+  expect(rummyTurnAnnouncement(rival, 3, 15, 30)).toBe("Less than half of Mira's turn remains.");
+  expect(rummyTurnAnnouncement(null, 3, null, 30)).toBe("");
 });
 
 test("an undealt wild joker renders a placeholder instead of crashing the table", () => {
@@ -141,12 +166,14 @@ test("an undealt wild joker renders a placeholder instead of crashing the table"
   act(() => root.unmount());
 });
 
-test("automated opponents use a compact AUTO label with their server difficulty", () => {
+test("computer-controlled opponents render as ordinary named seats without technical badges", () => {
   const bot = { seatIndex: 1, status: "ACTIVE", displayName: "Mira", avatar: "avatar-37", isBot: true, botLabel: "Expert bot", cardCount: 13 };
   const { container, root } = renderSeat(bot, 3);
-  expect(container.textContent).toContain("AUTO · EXPERT");
+  expect(container.textContent).toContain("Mira");
+  expect(container.textContent).toContain("PLAYING");
+  expect(container.textContent).not.toMatch(/\bauto\b/i);
   expect(container.textContent).not.toMatch(/\bbots?\b/i);
-  expect(container.querySelector(".rummy-seat-bot-badge")?.textContent).toBe("AUTO");
+  expect(container.querySelector(".rummy-seat-bot-badge")).toBeNull();
   expect(container.querySelector('[data-testid="rummy-seat-avatar-1"] img')?.getAttribute("src")).toBe("/game-art/avatars/cartoon/avatar-37.png");
   act(() => root.unmount());
 });
@@ -202,12 +229,12 @@ test("three-minute server matchmaking metadata renders an exact countdown", asyn
   act(() => root.unmount());
 });
 
-test("royal table conversation labels automated seats and sends only allow-listed code reactions", async () => {
+test("royal table conversation uses player names and sends only allow-listed code reactions", async () => {
   const state = createRummyDemoState("LV2");
   state.chatEvents = [{
     id: "BOT-CHAT-1",
     reactionId: "laugh",
-    message: "That was close!",
+    message: "AUTO atmosphere suggestion: That was close!",
     sender: { displayName: "Maharaja Arin", isBot: true, label: "BOT", botLabel: "BOT · CLASSIC" },
   }];
   const sendSocialEvent = jest.fn().mockResolvedValue({
@@ -217,7 +244,9 @@ test("royal table conversation labels automated seats and sends only allow-liste
   const { container, root } = await render(<RummyTable state={state} busy={false} reconnecting={false} sendAction={jest.fn()} sendSocialEvent={sendSocialEvent} onExit={jest.fn()} />);
   await click(container.querySelector('button[aria-label="Open Rummy table conversation"]'));
   expect(container.querySelector(".rummy-social-drawer")).not.toBeNull();
-  expect(container.querySelector(".rummy-chat-log")?.textContent).toContain("AUTO · CLASSIC");
+  expect(container.querySelector(".rummy-chat-log")?.textContent).toContain("Maharaja Arin");
+  expect(container.querySelector(".rummy-chat-log")?.textContent).toContain("That was close!");
+  expect(container.querySelector(".rummy-chat-log")?.textContent).not.toMatch(/\bauto\b/i);
   expect(container.querySelector(".rummy-chat-log")?.textContent).not.toMatch(/\bbots?\b/i);
   const royalClap = container.querySelector('button[aria-label="Royal clap animated reaction"]');
   await click(royalClap);
@@ -254,6 +283,7 @@ test("generated ambience is opt-in and music requests are submitted without prom
   expect(onSupportRequest).toHaveBeenCalledWith("MUSIC_REQUEST", "Play a calm instrumental mood");
   expect(container.querySelector(".rummy-music-pane .rummy-support-status:not(.rummy-music-status)")?.textContent).toContain("Support inbox");
   await click([...container.querySelectorAll(".rummy-social-drawer nav button")].find((button) => button.textContent.includes("Help Desk")));
+  expect(container.querySelector(".rummy-table-disclosure")?.textContent).toContain("computer-controlled opponents");
   expect(container.querySelector('textarea[aria-label="Help Desk message"]').maxLength).toBe(240);
   act(() => root.unmount());
 });
@@ -327,6 +357,8 @@ test("the Rummy lobby presents all five levels without showing the gameplay tabl
   expect(lobby.textContent).not.toContain("FAIR BOT TABLE");
   expect(lobby.textContent).not.toContain("Secure server shuffle · Practice is wallet-neutral · automated players are labelled in-game");
   expect(lobby.querySelector("footer")?.textContent).not.toContain("Secure server shuffle");
+  expect(lobby.querySelector(".rummy-opponent-disclosure")?.textContent).toContain("Computer-controlled opponents may fill empty seats");
+  expect(lobby.textContent).not.toMatch(/\bauto\b/i);
   expect(lobby.textContent).not.toMatch(/\bbots?\b/i);
   act(() => root.unmount());
 });
@@ -388,7 +420,11 @@ test("the deterministic preview completes draw and atomic discard-and-declare wi
   await click(practice);
   expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
   expect(container.querySelector(".rummy-live-pill")?.textContent).toContain("PRACTICE MODE");
-  expect(container.querySelector(".rummy-bot-table-notice")?.textContent).toContain("AUTO seats fill missing places");
+  expect(container.querySelector(".rummy-bot-table-notice")).toBeNull();
+  expect(container.querySelector(".rummy-table-opponent-disclosure")?.textContent).toContain("Computer-controlled opponents may fill empty seats");
+  expect(container.querySelector('.rummy-sr-only[role="status"]')?.textContent).toBe("Your turn started.");
+  expect(container.querySelector('.rummy-sr-only[role="status"]')?.getAttribute("aria-live")).toBe("polite");
+  expect(container.querySelector('[data-testid="rummy-live-table"]')?.textContent).not.toMatch(/\bauto\b/i);
   expect(container.querySelector('[data-testid="rummy-live-table"]')?.textContent).not.toMatch(/\bbots?\b/i);
   expect(container.textContent).toContain("PURE SEQUENCE");
 
@@ -401,7 +437,8 @@ test("the deterministic preview completes draw and atomic discard-and-declare wi
   expect(container.querySelector(".rummy-validation")?.textContent).toContain("Ready");
   await click(declare);
   expect(container.querySelector("#rummy-result-title")?.textContent).toBe("You win");
-  expect(container.querySelector(".rummy-result-rows")?.textContent).toContain("AUTO · PRACTICE");
+  expect(container.querySelector(".rummy-result-rows")?.textContent).toContain("SEAT 2");
+  expect(container.querySelector(".rummy-result-rows")?.textContent).not.toMatch(/\bauto\b/i);
   expect(container.querySelector(".rummy-balance")?.textContent).toContain("12000");
   act(() => root.unmount());
 });
@@ -516,7 +553,8 @@ test("the flagship result dialog renders a royal outcome hero and complete stand
   expect(standings?.getAttribute("aria-labelledby")).toBe("rummy-result-standings-title");
   expect(standings?.querySelectorAll(".rummy-result-rows > article")).toHaveLength(5);
   expect(winner?.querySelector(".rummy-result-player b")?.textContent).toBe("Mira");
-  expect(winner?.textContent).toContain("AUTO · ROYAL");
+  expect(winner?.textContent).toContain("SEAT 2");
+  expect(winner?.textContent).not.toMatch(/\bauto\b/i);
   expect(panel?.textContent).not.toMatch(/\bbots?\b/i);
   expect(actions?.querySelector("button")?.textContent).toBe("BACK TO LOBBY");
   expect(panel?.querySelector(".rummy-result-ribbon")).toBeNull();
@@ -678,6 +716,7 @@ test("waiting and cancelled rooms use dedicated recovery panels without blank de
   const { container, root } = await render(<RummyTable state={waiting} busy={false} reconnecting={false} sendAction={jest.fn()} onExit={jest.fn()} />);
   expect(container.querySelector('[data-testid="rummy-waiting-room"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="rummy-fallback-countdown"]')?.textContent).toContain("9s");
+  expect(container.querySelector('[data-testid="rummy-fallback-countdown"]')?.textContent).toContain("computer-controlled opponents");
   expect(container.querySelector(".rummy-deck")).toBeNull();
 
   const cancelled = { ...waiting, state: "CANCELLED", cancelReason: "Stake restored." };
@@ -912,7 +951,6 @@ test("the exact-ratio table auto-fits the safe viewport without portrait croppin
 
 test("the rendered practice table keeps the stable auto-fit layer hierarchy without network entry", async () => {
   const state = createRummyDemoState("LV1");
-  state.botTableNotice = "Live stakes refunded · bots filled the practice seats";
   const { container, root } = await render(
     <RummyTable state={state} busy={false} reconnecting={false} sendAction={jest.fn()} onExit={jest.fn()} />,
   );
@@ -932,61 +970,85 @@ test("the rendered practice table keeps the stable auto-fit layer hierarchy with
   expect(art?.getAttribute("draggable")).toBe("false");
   expect(table?.querySelectorAll(":scope > .rummy-seat")).toHaveLength(5);
   expect(hand).not.toBeNull();
-  expect(stage?.querySelector(".rummy-bot-table-notice")?.textContent).toBe("Live stakes refunded · AUTO filled the practice seats");
-  expect(stage?.querySelector(".rummy-bot-table-notice")?.textContent).not.toMatch(/\bbots?\b/i);
+  expect(stage?.querySelector(".rummy-bot-table-notice")).toBeNull();
+  expect(stage?.querySelector(".rummy-table-opponent-disclosure")?.textContent).toContain("Computer-controlled opponents may fill empty seats");
+  expect(stage?.textContent).not.toMatch(/\bauto\b/i);
+  expect(stage?.textContent).not.toMatch(/\bbots?\b/i);
   expect(api.get).not.toHaveBeenCalled();
   expect(api.post).not.toHaveBeenCalled();
   act(() => root.unmount());
 });
 
-test("mobile portrait keeps the full table aspect ratio above intrinsic non-stretch hand controls", () => {
-  const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  const viewport = cssBlock(css, ".rummy-lobby,\n.rummy-game");
-  const portrait = cssBlock(css, "@media (orientation: portrait)");
-  const phonePortrait = cssBlock(css, "@media (orientation: portrait) and (max-width: 430px)");
-  const portraitGame = cssRuleWithin(portrait, ".rummy-game");
-  const portraitSlot = cssRuleWithin(portrait, ".rummy-table-slot");
-  const portraitDrawer = cssRuleWithin(portrait, ".rummy-social-drawer");
-  const phoneHand = cssRuleWithin(phonePortrait, ".rummy-hand-zone");
-  const phoneActions = cssRuleWithin(phonePortrait, ".rummy-actions");
-  const phoneActionButton = cssRuleWithin(phonePortrait, ".rummy-actions button");
-  const phoneValidation = cssRuleWithin(phonePortrait, ".rummy-validation");
-  const table = cssRuleWithin(css, ".rummy-table");
-  const tableArt = cssRuleWithin(css, ".rummy-table-art");
+test("Rummy portrait detection blocks handheld screens but leaves landscape and desktop available", () => {
+  const handheld = (width, height, { touch = true, coarse = true } = {}) => ({
+    innerWidth: width,
+    innerHeight: height,
+    navigator: { maxTouchPoints: touch ? 5 : 0 },
+    matchMedia: () => ({ matches: coarse }),
+    document: { documentElement: { clientWidth: width, clientHeight: height } },
+  });
 
-  expect(viewport).toMatch(/position:\s*fixed/);
-  expect(viewport).toMatch(/left:\s*calc\(var\(--fg-viewport-left, 0px\) \+ var\(--fg-safe-left, 0px\)\)/);
-  expect(viewport).toMatch(/top:\s*calc\(var\(--fg-viewport-top, 0px\) \+ var\(--fg-safe-top, 0px\)\)/);
-  expect(viewport).toMatch(/width:\s*var\(--fg-usable-w, 100vw\)/);
-  expect(viewport).toMatch(/height:\s*var\(--fg-usable-h, 100dvh\)/);
-  expect(viewport).toMatch(/overflow:\s*hidden/);
-  expect(portraitGame).toMatch(/grid-template-rows:\s*58px minmax\(0, 1fr\)/);
-  expect(portraitSlot).toMatch(/width:\s*100%/);
-  expect(portraitSlot).toMatch(/height:\s*auto/);
-  expect(portraitSlot).toMatch(/aspect-ratio:\s*1672 \/ 941/);
-  expect(table).toMatch(/width:\s*min\(100cqw, 177\.6833cqh\)/);
-  expect(table).toMatch(/aspect-ratio:\s*1672 \/ 941/);
-  expect(tableArt).toMatch(/inset:\s*0/);
-  expect(tableArt).toMatch(/width:\s*100%/);
-  expect(tableArt).toMatch(/height:\s*100%/);
-  expect(tableArt).toMatch(/object-fit:\s*contain/);
-  expect(portraitDrawer).toMatch(/width:\s*calc\(100% - 10px\)/);
-  expect(phoneHand).toMatch(/grid-template-rows:\s*max-content max-content max-content/);
-  expect(phoneHand).not.toMatch(/minmax\(0,\s*1fr\)/);
-  expect(phoneHand).toMatch(/align-self:\s*start/);
-  expect(phoneHand).toMatch(/align-content:\s*start/);
-  expect(phoneHand).toMatch(/height:\s*max-content/);
-  expect(phoneHand).toMatch(/max-height:\s*100%/);
-  expect(phoneActions).toMatch(/align-self:\s*start/);
-  expect(phoneActions).toMatch(/grid-auto-rows:\s*44px/);
-  expect(phoneActionButton).toMatch(/height:\s*44px/);
-  expect(phoneActionButton).toMatch(/min-height:\s*44px/);
-  expect(phoneActionButton).toMatch(/max-height:\s*44px/);
-  expect(phoneValidation).toMatch(/position:\s*static/);
-  expect(phoneValidation).toMatch(/grid-row:\s*3/);
+  expect(shouldBlockRummyPortrait(handheld(390, 844))).toBe(true);
+  expect(shouldBlockRummyPortrait(handheld(844, 390))).toBe(false);
+  expect(shouldBlockRummyPortrait(handheld(768, 1024))).toBe(true);
+  expect(shouldBlockRummyPortrait(handheld(1280, 1600))).toBe(false);
+  expect(shouldBlockRummyPortrait(handheld(900, 1200, { touch: false, coarse: false }))).toBe(false);
+  expect(shouldBlockRummyPortrait(handheld(390, 844, { touch: false, coarse: false }))).toBe(true);
 });
 
-test("short mobile landscape docks a bounded hand beside the flexible table in one row", () => {
+test("Rummy landscape request uses fullscreen fallback only after the direct lock is rejected", async () => {
+  const calls = [];
+  const lock = jest.fn(async () => {
+    calls.push("lock");
+    if (lock.mock.calls.length === 1) throw new Error("fullscreen required");
+  });
+  const targetWindow = {
+    screen: { orientation: { lock } },
+    document: {
+      fullscreenElement: null,
+      documentElement: { requestFullscreen: jest.fn(async () => { calls.push("fullscreen"); }) },
+    },
+  };
+
+  await expect(requestRummyLandscape(targetWindow)).resolves.toEqual({ locked: false, enteredFullscreen: false });
+  expect(calls).toEqual(["lock"]);
+  lock.mockClear();
+  calls.length = 0;
+  await expect(requestRummyLandscape(targetWindow, { allowFullscreen: true })).resolves.toEqual({ locked: true, enteredFullscreen: true });
+  expect(calls).toEqual(["lock", "fullscreen", "lock"]);
+});
+
+test("portrait guard keeps the active Rummy subtree mounted and makes it inert until rotation", async () => {
+  const originalWidth = window.innerWidth;
+  const originalHeight = window.innerHeight;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+  const onExit = jest.fn();
+  const { container, root } = await render(
+    <RummyLandscapeGuard onExit={onExit}><button data-testid="guarded-action">PLAY</button></RummyLandscapeGuard>,
+  );
+
+  const guardedAction = container.querySelector('[data-testid="guarded-action"]');
+  expect(container.querySelector('[data-testid="rummy-orientation-gate"]')).not.toBeNull();
+  expect(container.querySelector(".rummy-landscape-content")?.getAttribute("aria-hidden")).toBe("true");
+  expect(container.querySelector(".rummy-landscape-content")?.hasAttribute("inert")).toBe(true);
+
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 844 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 390 });
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"));
+    await Promise.resolve();
+  });
+  expect(container.querySelector('[data-testid="rummy-orientation-gate"]')).toBeNull();
+  expect(container.querySelector('[data-testid="guarded-action"]')).toBe(guardedAction);
+  expect(container.querySelector(".rummy-landscape-content")?.hasAttribute("inert")).toBe(false);
+
+  act(() => root.unmount());
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+});
+
+test("short mobile landscape keeps an uncropped table above a full-width bottom hand tray", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
   const landscape = cssBlock(css, "@media (orientation: landscape) and (max-height: 430px)");
   const landscapeGame = cssRuleWithin(landscape, ".rummy-game");
@@ -1000,21 +1062,27 @@ test("short mobile landscape docks a bounded hand beside the flexible table in o
   const landscapeSeatBack = cssRuleWithin(landscape, ".rummy-seat > small,\n  .rummy-seat .rummy-card-back");
 
   expect(landscapeGame).toMatch(/grid-template-rows:\s*44px minmax\(0, 1fr\)/);
-  expect(landscapeStage).toMatch(/--rummy-mobile-dock-w:\s*clamp\(250px, 36vw, 320px\)/);
-  expect(landscapeStage).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) var\(--rummy-mobile-dock-w\)/);
-  expect(landscapeStage).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\)/);
+  expect(landscapeStage).not.toMatch(/--rummy-mobile-dock-w/);
+  expect(landscapeStage).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
+  expect(landscapeStage).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\) auto/);
   expect(landscapeSlot).toMatch(/grid-column:\s*1/);
   expect(landscapeSlot).toMatch(/grid-row:\s*1/);
-  expect(landscapeHand).toMatch(/grid-column:\s*2/);
-  expect(landscapeHand).toMatch(/grid-row:\s*1/);
+  expect(landscapeHand).toMatch(/grid-column:\s*1/);
+  expect(landscapeHand).toMatch(/grid-row:\s*2/);
   expect(landscapeHand).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
   expect(landscapeHand).toMatch(/grid-template-rows:\s*max-content max-content max-content/);
-  expect(landscapeHand).toMatch(/align-content:\s*center/);
+  expect(landscapeHand).toMatch(/align-content:\s*start/);
   expect(landscapeHand).toMatch(/overflow:\s*hidden/);
-  expect(landscapeHand).toMatch(/padding:\s*2px 4px max\(3px, var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/min-height:\s*calc\(134px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/height:\s*calc\(134px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/max-height:\s*calc\(134px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).not.toMatch(/126px/);
+  expect(landscapeHand).toMatch(/border-top:\s*1px solid/);
+  expect(landscapeHand).toMatch(/border-left:\s*0/);
+  expect(landscapeHand).toMatch(/padding:\s*2px 5px max\(3px, var\(--fg-safe-bottom\)\)/);
   expect(landscapeActions).toMatch(/grid-column:\s*1/);
   expect(landscapeActions).toMatch(/grid-row:\s*2/);
-  expect(landscapeActions).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+  expect(landscapeActions).toMatch(/grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/);
   expect(landscapeActions).toMatch(/grid-auto-rows:\s*44px/);
   expect(landscapeActionButton).toMatch(/min-height:\s*44px/);
   expect(landscapeActionButton).toMatch(/height:\s*44px/);

@@ -54,6 +54,8 @@ def test_exactly_five_central_categories_and_seats():
     assert all(row["firstDropPoints"] == 20 for row in rummy.RUMMY_CATEGORIES)
     assert all(row["middleDropPoints"] == 40 for row in rummy.RUMMY_CATEGORIES)
     assert all(row["invalidDeclarationPoints"] == 80 for row in rummy.RUMMY_CATEGORIES)
+    assert all("skillRatingMin" not in row for row in rummy.RUMMY_CATEGORIES)
+    assert all("skillRatingMax" not in row for row in rummy.RUMMY_CATEGORIES)
 
 
 def test_pure_impure_set_and_full_declaration_rules():
@@ -338,6 +340,10 @@ def test_live_join_has_no_hidden_skill_rating_gate():
     source = inspect.getsource(routes_rummy.rummy_join)
     assert "_assert_live_skill_eligible" not in source
     assert "rummy_skill_rating" not in source
+    assert "skillRatingMin" not in routes_rummy.CATEGORY_SNAPSHOT_FIELDS
+    assert "skillRatingMax" not in routes_rummy.CATEGORY_SNAPSHOT_FIELDS
+    assert "skillRatingMin" not in routes_rummy.CategoryPatch.model_fields
+    assert "skillRatingMax" not in routes_rummy.CategoryPatch.model_fields
 
 
 def test_turn_deadline_is_closed_at_the_exact_server_deadline():
@@ -501,28 +507,26 @@ def test_cancellation_refunds_each_frozen_seat_stake_not_a_changed_category_valu
     asyncio.run(scenario())
 
 
-def test_admin_single_bound_patch_validates_merged_range_and_disable_returns_success():
+def test_retired_skill_ranges_are_not_advertised_and_disable_returns_success():
     async def scenario():
         mock = AsyncMongoMockClient()
         database = mock["rummy_category_admin"]
-        await database.rummy_categories.insert_one(copy.deepcopy(rummy.RUMMY_CATEGORIES[0]))
+        legacy = copy.deepcopy(rummy.RUMMY_CATEGORIES[0])
+        legacy.update({"skillRatingMin": 1000, "skillRatingMax": 2000})
+        await database.rummy_categories.insert_one(legacy)
         original_db = routes_rummy.db
         routes_rummy.db = database
         try:
-            try:
-                await routes_rummy.admin_rummy_category_update(
-                    "LV1", routes_rummy.CategoryPatch(skillRatingMin=1000), {"id": "admin-1"},
-                )
-            except HTTPException as exc:
-                assert exc.status_code == 422
-                assert exc.detail["code"] == "RUMMY_SKILL_RANGE_INVALID"
-            else:
-                raise AssertionError("a single-bound invalid skill range was accepted")
+            categories = await routes_rummy._categories()
+            assert "skillRatingMin" not in categories[0]
+            assert "skillRatingMax" not in categories[0]
 
             response = await routes_rummy.admin_rummy_category_update(
                 "LV1", routes_rummy.CategoryPatch(enabled=False), {"id": "admin-1"},
             )
             assert response["category"]["enabled"] is False
+            assert "skillRatingMin" not in response["category"]
+            assert "skillRatingMax" not in response["category"]
         finally:
             routes_rummy.db = original_db
 

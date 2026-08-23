@@ -44,16 +44,128 @@ const RUMMY_EXIT_CONFIRMED_CODES = new Set([
   "RUMMY_ROOM_NOT_FOUND",
   "RUMMY_SEAT_INACTIVE",
 ]);
+const RUMMY_HANDHELD_MAX_PORTRAIT_WIDTH = 1024;
+const RUMMY_PHONE_PORTRAIT_WIDTH = 600;
 
-export function automatedSeatLabel(value) {
-  const detail = String(value || "")
-    .replace(/\bautomated\s+players?\b/gi, "")
-    .replace(/\bbots?\b/gi, "")
-    .replace(/\bauto\b/gi, "")
-    .replace(/[|:·—–-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return detail ? `AUTO · ${detail.toUpperCase()}` : "AUTO";
+function getRummyViewport(targetWindow) {
+  const viewport = targetWindow?.visualViewport;
+  const width = Number(viewport?.width || targetWindow?.innerWidth || targetWindow?.document?.documentElement?.clientWidth || 0);
+  const height = Number(viewport?.height || targetWindow?.innerHeight || targetWindow?.document?.documentElement?.clientHeight || 0);
+  return { width, height };
+}
+
+export function shouldBlockRummyPortrait(targetWindow = typeof window === "undefined" ? null : window) {
+  if (!targetWindow) return false;
+  const { width, height } = getRummyViewport(targetWindow);
+  if (!width || !height || height <= width || width > RUMMY_HANDHELD_MAX_PORTRAIT_WIDTH) return false;
+  const touchCapable = Number(targetWindow.navigator?.maxTouchPoints || 0) > 0
+    || Boolean(targetWindow.matchMedia?.("(hover: none) and (pointer: coarse)")?.matches);
+  return touchCapable || width <= RUMMY_PHONE_PORTRAIT_WIDTH;
+}
+
+export async function requestRummyLandscape(targetWindow = typeof window === "undefined" ? null : window, { allowFullscreen = false } = {}) {
+  const orientation = targetWindow?.screen?.orientation;
+  if (!orientation?.lock) return { locked: false, enteredFullscreen: false };
+
+  try {
+    await orientation.lock("landscape");
+    return { locked: true, enteredFullscreen: false };
+  } catch {
+    if (!allowFullscreen) return { locked: false, enteredFullscreen: false };
+  }
+
+  const targetDocument = targetWindow?.document;
+  let enteredFullscreen = false;
+  if (!targetDocument?.fullscreenElement && targetDocument?.documentElement?.requestFullscreen) {
+    try {
+      await targetDocument.documentElement.requestFullscreen();
+      enteredFullscreen = true;
+    } catch {
+      return { locked: false, enteredFullscreen: false };
+    }
+  }
+
+  try {
+    await orientation.lock("landscape");
+    return { locked: true, enteredFullscreen };
+  } catch {
+    return { locked: false, enteredFullscreen };
+  }
+}
+
+export function RummyLandscapeGuard({ children, onExit }) {
+  const [blocked, setBlocked] = useState(() => shouldBlockRummyPortrait());
+  const rotateButtonRef = useRef(null);
+  const ownsOrientationLockRef = useRef(false);
+  const ownsFullscreenRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let active = true;
+    const update = () => {
+      if (active) setBlocked(shouldBlockRummyPortrait(window));
+    };
+    const viewport = window.visualViewport;
+    const orientation = window.screen?.orientation;
+
+    window.addEventListener("resize", update, { passive: true });
+    window.addEventListener("orientationchange", update, { passive: true });
+    viewport?.addEventListener?.("resize", update, { passive: true });
+    orientation?.addEventListener?.("change", update, { passive: true });
+    void requestRummyLandscape(window).then(({ locked }) => {
+      if (active && locked) ownsOrientationLockRef.current = true;
+    });
+
+    return () => {
+      active = false;
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      viewport?.removeEventListener?.("resize", update);
+      orientation?.removeEventListener?.("change", update);
+      if (ownsOrientationLockRef.current) {
+        try { orientation?.unlock?.(); } catch { /* Browser owns the fallback. */ }
+      }
+      if (
+        ownsFullscreenRef.current
+        && window.document?.fullscreenElement === window.document?.documentElement
+        && window.document?.exitFullscreen
+      ) {
+        try { void Promise.resolve(window.document.exitFullscreen()).catch(() => {}); } catch { /* Browser already exited. */ }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (blocked) rotateButtonRef.current?.focus?.({ preventScroll: true });
+  }, [blocked]);
+
+  const enterLandscape = useCallback(async () => {
+    const { locked, enteredFullscreen } = await requestRummyLandscape(window, { allowFullscreen: true });
+    if (locked) ownsOrientationLockRef.current = true;
+    if (enteredFullscreen) ownsFullscreenRef.current = true;
+    setBlocked(shouldBlockRummyPortrait(window));
+  }, []);
+
+  return (
+    <>
+      <div className="rummy-landscape-content" inert={blocked ? true : undefined} aria-hidden={blocked ? "true" : undefined}>
+        {children}
+      </div>
+      {blocked && (
+        <main className="rummy-orientation-gate" style={RUMMY_ART} data-testid="rummy-orientation-gate" role="dialog" aria-modal="true" aria-labelledby="rummy-orientation-title">
+          <button type="button" className="rummy-orientation-back" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
+          <section>
+            <span className="rummy-orientation-eyebrow">CHAKRI.CASINO · RUMMY</span>
+            <div className="rummy-orientation-phone" aria-hidden="true"><i /><b>♛</b></div>
+            <h1 id="rummy-orientation-title">Rotate to landscape</h1>
+            <p>Turn your phone sideways to reveal the full royal table, your cards and every play control along the bottom.</p>
+            <button ref={rotateButtonRef} type="button" className="rummy-orientation-enter" onClick={enterLandscape}><RotateCcw /> ENTER LANDSCAPE</button>
+            <small>If your browser cannot rotate automatically, turn the device by hand.</small>
+          </section>
+        </main>
+      )}
+    </>
+  );
 }
 
 export function visibleRummyName(value, automated = false, fallback = "Player") {
@@ -62,7 +174,7 @@ export function visibleRummyName(value, automated = false, fallback = "Player") 
   const cleaned = raw
     .replace(/\s*(?:[|:·—–-]\s*)?\b(?:bots?|auto)\b(?:\s*[|:·—–-]\s*[a-z0-9 ]+)?\s*$/i, "")
     .trim();
-  return cleaned || "Automated seat";
+  return cleaned || fallback;
 }
 
 export function rummyAvatarKeyForSeat(seat) {
@@ -193,8 +305,8 @@ const normalizeTableMessages = (state) => {
       senderName: visibleRummyName(row.sender?.displayName || row.sender?.name || row.senderName || row.displayName || row.playerName, automated),
       seatIndex: row.sender?.seatIndex ?? row.seatIndex ?? null,
       isBot: automated,
-      botLabel: row.sender?.botLabel || row.botLabel || row.difficultyLabel || row.sender?.label || "AUTO",
-      message: row.message || row.text || row.reactionText || "",
+      message: String(row.message || row.text || row.reactionText || "")
+        .replace(/^\s*(?:auto|bot)\s+atmosphere\s+suggestion\s*:\s*/i, ""),
       glyph: row.glyph || row.emoji || RUMMY_REACTIONS.find((reaction) => reaction.id === row.reactionId)?.glyph || "",
       createdAt: row.createdAt || row.timestamp || null,
     };
@@ -284,7 +396,7 @@ function SocialDrawer({
         <div className="rummy-chat-log" role="log" aria-live="polite" aria-label="Table messages">
           {messages.length ? messages.map((message) => (
             <article key={message.id} className={message.isBot ? "is-bot" : ""}>
-              <div><b>{message.senderName}</b>{message.isBot && <span>{automatedSeatLabel(message.botLabel)}</span>}</div>
+              <div><b>{message.senderName}</b></div>
               <p>{message.glyph && <i aria-hidden>{message.glyph}</i>}{message.message}</p>
             </article>
           )) : <div className="rummy-chat-empty"><span>♛</span><b>The table is quiet</b><small>Use a friendly reaction to break the ice.</small></div>}
@@ -292,7 +404,7 @@ function SocialDrawer({
         <div className="rummy-reaction-grid" aria-label="Quick table reactions">
           {RUMMY_REACTIONS.map((reaction) => <button key={reaction.id} type="button" className={reaction.animated ? "is-gif-reaction" : ""} disabled={busy} onClick={() => onReaction(reaction)} aria-label={`${reaction.label}${reaction.animated ? " animated reaction" : ""}`}><span aria-hidden>{reaction.glyph}</span><small>{reaction.label}{reaction.animated && <i>GIF</i>}</small></button>)}
         </div>
-        <p className="rummy-chat-safety">Quick reactions only. Automated seats are always marked AUTO.</p>
+        <p className="rummy-chat-safety">Quick reactions are limited to the friendly options above.</p>
       </div>}
 
       {tab === "music" && <div className="rummy-music-pane">
@@ -316,6 +428,7 @@ function SocialDrawer({
         <span>CHAKRI TEAM</span>
         <h3>Help without leaving the table</h3>
         <p>Describe what you need. Submitting creates a support message; it does not promise an instant live response.</p>
+        <p className="rummy-table-disclosure">Empty seats may be filled by computer-controlled opponents so scheduled tables can start on time.</p>
         <textarea value={supportText} maxLength={240} onChange={(event) => { setSupportText(event.target.value); setSupportStatus(""); }} placeholder="Type your question for Help Desk…" aria-label="Help Desk message" />
         <button type="button" className="rummy-request-submit" disabled={busy || !supportText.trim()} onClick={() => submitSupport("HELP_DESK")}><RoyalGlyph name="send" />SUBMIT TO HELP DESK</button>
         <small className="rummy-support-status" role="status">{supportStatus || "You can read the reply later in Support & messages."}</small>
@@ -438,14 +551,18 @@ export function PlayerSeat({ seat, timer, turnDuration = 30, reducedMotion, view
   const active = seat?.active;
   const occupied = seat?.status !== "EMPTY";
   const timerText = active && timer != null ? Math.max(0, Math.ceil(timer)) : null;
+  const turnProgress = timerText == null
+    ? 0
+    : Math.max(0.02, Math.min(1, Number(timer || 0) / Math.max(1, Number(turnDuration) || 30)));
+  const turnTone = turnProgress > 0.5 ? "emerald" : turnProgress > 0.2 ? "amber" : "ruby";
   const avatarKey = rummyAvatarKeyForSeat(seat);
   const avatarUrl = seat?.avatarUrl || seat?.avatar_url || seat?.profileAvatarUrl || null;
   const seatName = visibleRummyName(seat?.displayName, seat?.isBot, "Rummy player");
   return (
     <div className={`rummy-seat rummy-seat-${seat.seatIndex} ${active ? "is-active" : ""} is-${String(seat.status || "empty").toLowerCase()}`}>
       <div
-        className="rummy-avatar-ring"
-        style={active ? { "--turn-progress": Math.max(0.02, Math.min(1, Number(timer || 0) / Math.max(1, Number(turnDuration) || 30))) } : undefined}
+        className={`rummy-avatar-ring ${timerText == null ? "" : `is-counting is-${turnTone}`}`.trim()}
+        style={timerText == null ? undefined : { "--turn-progress": turnProgress }}
       >
         {occupied ? (
           <ProfileAvatar
@@ -458,16 +575,27 @@ export function PlayerSeat({ seat, timer, turnDuration = 30, reducedMotion, view
             loading="eager"
           />
         ) : <span className="rummy-empty-avatar" aria-hidden>+</span>}
-        {occupied && seat.isBot && <span className="rummy-seat-bot-badge">AUTO</span>}
-        {timerText != null && <b className="rummy-only-timer" aria-label={`${timerText} seconds remaining`}>{timerText}</b>}
+        {timerText != null && <b className="rummy-only-timer" role="timer" aria-live="off" aria-label={`${timerText} seconds remaining`}>{timerText}</b>}
       </div>
       <strong>{seat.status === "EMPTY" ? "Waiting" : seatName}</strong>
-      <small>{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? automatedSeatLabel(seat.botLabel) : seat.playerId}</small>
+      <small>{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? "PLAYING" : seat.playerId}</small>
       {seat.latestReaction && <span className="rummy-seat-reaction" aria-label={`${seatName} reacted ${seat.latestReaction.message || seat.latestReaction.emoji || ""}`}><i aria-hidden>{seat.latestReaction.emoji || seat.latestReaction.glyph || "♛"}</i>{seat.latestReaction.message || ""}</span>}
       {seat.cardCount > 0 && seat.seatIndex !== viewerSeatIndex && <CardBack count={seat.cardCount} />}
       {active && !reducedMotion && <span className="rummy-active-flare" aria-hidden />}
     </div>
   );
+}
+
+export function rummyTurnAnnouncement(activeSeat, viewerSeatIndex, timer, turnDuration = 30) {
+  if (!activeSeat || timer == null) return "";
+  const remaining = Math.max(0, Number(timer) || 0);
+  const duration = Math.max(1, Number(turnDuration) || 30);
+  const progress = remaining / duration;
+  const ownTurn = Number(activeSeat.seatIndex) === Number(viewerSeatIndex);
+  const playerName = visibleRummyName(activeSeat.displayName, activeSeat.isBot, "Player");
+  if (progress <= 0.2) return ownTurn ? "Final seconds for your turn." : `Final seconds for ${playerName}.`;
+  if (progress <= 0.5) return ownTurn ? "Less than half of your turn remains." : `Less than half of ${playerName}'s turn remains.`;
+  return ownTurn ? "Your turn started." : `${playerName}'s turn started.`;
 }
 
 function Deck({ label, card, count, disabled, onClick, open = false, reducedMotion = false }) {
@@ -543,7 +671,10 @@ export function CategoryLobby({ categories, balance, busy, loading, error, joinF
           );
         })}
       </section>
-      <footer><BrandWordmark logoClassName="rummy-lobby-brand-logo" /></footer>
+      <footer>
+        <p className="rummy-opponent-disclosure"><ShieldCheck />Computer-controlled opponents may fill empty seats.</p>
+        <BrandWordmark logoClassName="rummy-lobby-brand-logo" />
+      </footer>
     </main>
   );
 }
@@ -618,7 +749,7 @@ export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = fals
                 <span className="rummy-result-position" aria-label={rowWon ? "Winner" : `Seat ${row.seatIndex + 1}`}>{rowWon ? "♛" : row.seatIndex + 1}</span>
                 <div className="rummy-result-player">
                   <b>{visibleRummyName(row.displayName, row.isBot, `Seat ${row.seatIndex + 1}`)}</b>
-                  <small>SEAT {row.seatIndex + 1}{row.isBot ? ` · ${automatedSeatLabel(row.botLabel)}` : ""}</small>
+                  <small>SEAT {row.seatIndex + 1}</small>
                 </div>
                 <dl>
                   <div><dt>STATUS</dt><dd>{readableRuleLabel(row.status, "SETTLED")}</dd></div>
@@ -886,7 +1017,14 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
 
   const waitingCount = Math.max(0, Number(state.maxPlayers || 5) - seats.filter((seat) => seat.status !== "EMPTY").length);
   const activeSeat = seats.find((seat) => seat.seatIndex === state.currentSeat);
-  const botPhase = state.botAction?.phase === "DISCARDING" ? "choosing a discard" : "thinking";
+  const hasComputerOpponents = Boolean(state.walletNeutral) || seats.some((seat) => seat.status !== "EMPTY" && seat.isBot);
+  const turnAnnouncement = rummyTurnAnnouncement(
+    activeSeat,
+    viewerSeatIndex,
+    state.turnEndsIn,
+    state.category?.turnDurationSeconds,
+  );
+  const opponentPhase = state.botAction?.phase === "DISCARDING" ? "choosing a discard" : "thinking";
   const status = state.state === "WAITING_FOR_PLAYERS"
     ? `Waiting for ${waitingCount} more player${waitingCount === 1 ? "" : "s"}`
     : state.state === "CANCELLED"
@@ -896,7 +1034,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         : state.currentSeat === mySeat?.seatIndex
           ? privateState?.drawn ? "Choose one card to discard" : "Your turn · draw from either pile"
           : activeSeat?.isBot
-            ? `${visibleRummyName(activeSeat.displayName, true)} · AUTO · ${botPhase}`
+            ? `${visibleRummyName(activeSeat.displayName, true)} · ${opponentPhase}`
             : `${visibleRummyName(activeSeat?.displayName)}'s turn`;
   const validationCode = privateState?.groupValidation?.code;
 
@@ -924,7 +1062,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <NextTableSchedule source={state} />
           {state.fallbackStartsIn != null && (
             <p className="rummy-fallback-note" data-testid="rummy-fallback-countdown">
-              Clearly labelled AUTO seats fill missing places in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s so the scheduled game can begin.
+              Game starts in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s. Empty seats may be filled by computer-controlled opponents.
             </p>
           )}
           <div className="rummy-waiting-seats" aria-label="Occupied Rummy seats">
@@ -941,12 +1079,13 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <button type="button" onClick={onExit}>RETURN TO RUMMY LOBBY</button>
         </section>
       ) : <section className="rummy-stage">
-        {state.walletNeutral && (
-          <div className="rummy-bot-table-notice" role="status">
-            {String(state.botTableNotice || "Practice table · AUTO seats fill missing places · no stake or payout").replace(/\bbots?\b/gi, "AUTO")}
+        {hasComputerOpponents && (
+          <div className="rummy-opponent-disclosure rummy-table-opponent-disclosure" role="note">
+            <ShieldCheck />Computer-controlled opponents may fill empty seats.
           </div>
         )}
         <div className="rummy-status" aria-live="polite">{status}</div>
+        <div className="rummy-sr-only" role="status" aria-live="polite" aria-atomic="true">{turnAnnouncement}</div>
         <div className="rummy-table-slot">
           <div className="rummy-table" aria-label="Five-seat Rummy table">
             <img
@@ -998,7 +1137,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
               )}
             </div>
             <div className="rummy-actions">
-              <button type="button" onClick={autoSort} disabled={busy}><RotateCcw />AUTO SORT</button>
+              <button type="button" onClick={autoSort} disabled={busy}><RotateCcw />SORT HAND</button>
               <button type="button" onClick={groupSelected} disabled={busy || selected.length < 2}><Layers3 />GROUP</button>
               <button type="button" onClick={ungroupSelected} disabled={busy || !selected.length}><X />UNGROUP</button>
               <button type="button" className="is-drop" onClick={() => { playAudioCue(RUMMY_AUDIO_CUES.UI_TAP); setDropOpen(true); }} disabled={busy || Boolean(state.result)}><LogOut />DROP</button>
@@ -1436,10 +1575,16 @@ export default function RummyGame({ game }) {
     await loadLobby();
   };
 
-  if (!state) return <CategoryLobby categories={categories} balance={balance} busy={busy} loading={lobbyLoading} error={lobbyError} joinFailure={joinFailure} preview={preview} onJoin={join} onRetry={loadLobby} onExit={() => navigate(`/games/${game.slug}`)} />;
+  if (!state) return (
+    <RummyLandscapeGuard onExit={() => navigate(`/games/${game.slug}`)}>
+      <CategoryLobby categories={categories} balance={balance} busy={busy} loading={lobbyLoading} error={lobbyError} joinFailure={joinFailure} preview={preview} onJoin={join} onRetry={loadLobby} onExit={() => navigate(`/games/${game.slug}`)} />
+    </RummyLandscapeGuard>
+  );
   return (
-    <RummyTableBoundary state={state} onExit={exit}>
-      <RummyTable state={state} busy={busy} reconnecting={reconnecting} sendAction={sendAction} sendSocialEvent={sendSocialEvent} onSupportRequest={submitSupportRequest} onExit={exit} audioController={rummyAudioRef.current} />
-    </RummyTableBoundary>
+    <RummyLandscapeGuard onExit={exit}>
+      <RummyTableBoundary state={state} onExit={exit}>
+        <RummyTable state={state} busy={busy} reconnecting={reconnecting} sendAction={sendAction} sendSocialEvent={sendSocialEvent} onSupportRequest={submitSupportRequest} onExit={exit} audioController={rummyAudioRef.current} />
+      </RummyTableBoundary>
+    </RummyLandscapeGuard>
   );
 }

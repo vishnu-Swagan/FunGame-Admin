@@ -25,7 +25,7 @@ RUMMY_CATEGORIES = (
     {
         "id": "LV1", "displayName": "Beginner", "entryChips": 100,
         "pointsValue": 1, "minChipBalance": 100, "maxChipBalance": None,
-        "turnDurationSeconds": 30, "skillRatingMin": 0, "skillRatingMax": 999,
+        "turnDurationSeconds": 30,
         "reconnectAllowanceSeconds": 20, "practiceBotDifficulty": "guided",
         "firstDropPoints": 20, "middleDropPoints": 40, "invalidDeclarationPoints": 80,
         "maxPlayers": MAX_PLAYERS, "enabled": True, "displayOrder": 1,
@@ -34,7 +34,7 @@ RUMMY_CATEGORIES = (
     {
         "id": "LV2", "displayName": "Classic", "entryChips": 500,
         "pointsValue": 2, "minChipBalance": 500, "maxChipBalance": None,
-        "turnDurationSeconds": 30, "skillRatingMin": 300, "skillRatingMax": 1599,
+        "turnDurationSeconds": 30,
         "reconnectAllowanceSeconds": 20, "practiceBotDifficulty": "standard",
         "firstDropPoints": 20, "middleDropPoints": 40, "invalidDeclarationPoints": 80,
         "maxPlayers": MAX_PLAYERS, "enabled": True, "displayOrder": 2,
@@ -43,7 +43,7 @@ RUMMY_CATEGORIES = (
     {
         "id": "LV3", "displayName": "Pro", "entryChips": 1000,
         "pointsValue": 5, "minChipBalance": 1000, "maxChipBalance": None,
-        "turnDurationSeconds": 28, "skillRatingMin": 900, "skillRatingMax": 2299,
+        "turnDurationSeconds": 28,
         "reconnectAllowanceSeconds": 18, "practiceBotDifficulty": "strong",
         "firstDropPoints": 20, "middleDropPoints": 40, "invalidDeclarationPoints": 80,
         "maxPlayers": MAX_PLAYERS, "enabled": True, "displayOrder": 3,
@@ -52,7 +52,7 @@ RUMMY_CATEGORIES = (
     {
         "id": "LV4", "displayName": "Elite", "entryChips": 2500,
         "pointsValue": 10, "minChipBalance": 2500, "maxChipBalance": None,
-        "turnDurationSeconds": 25, "skillRatingMin": 1600, "skillRatingMax": 2999,
+        "turnDurationSeconds": 25,
         "reconnectAllowanceSeconds": 15, "practiceBotDifficulty": "expert",
         "firstDropPoints": 20, "middleDropPoints": 40, "invalidDeclarationPoints": 80,
         "maxPlayers": MAX_PLAYERS, "enabled": True, "displayOrder": 4,
@@ -61,7 +61,7 @@ RUMMY_CATEGORIES = (
     {
         "id": "LV5", "displayName": "Royal", "entryChips": 5000,
         "pointsValue": 20, "minChipBalance": 5000, "maxChipBalance": None,
-        "turnDurationSeconds": 22, "skillRatingMin": 2300, "skillRatingMax": 9999,
+        "turnDurationSeconds": 22,
         "reconnectAllowanceSeconds": 15, "practiceBotDifficulty": "royal",
         "firstDropPoints": 20, "middleDropPoints": 40, "invalidDeclarationPoints": 80,
         "maxPlayers": MAX_PLAYERS, "enabled": True, "displayOrder": 5,

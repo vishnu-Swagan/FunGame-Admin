@@ -97,8 +97,8 @@ BOT_SOCIAL_BEATS = (
 )
 CATEGORY_SNAPSHOT_FIELDS = (
     "id", "displayName", "entryChips", "pointsValue", "minChipBalance",
-    "maxChipBalance", "turnDurationSeconds", "skillRatingMin",
-    "skillRatingMax", "reconnectAllowanceSeconds", "practiceBotDifficulty",
+    "maxChipBalance", "turnDurationSeconds", "reconnectAllowanceSeconds",
+    "practiceBotDifficulty",
     "firstDropPoints", "middleDropPoints", "invalidDeclarationPoints",
     "maxPlayers", "enabled", "displayOrder", "accent",
 )
@@ -287,8 +287,6 @@ class CategoryPatch(BaseModel):
     minChipBalance: Optional[int] = Field(default=None, ge=0, le=100_000_000)
     maxChipBalance: Optional[int] = Field(default=None, ge=1, le=100_000_000)
     turnDurationSeconds: Optional[int] = Field(default=None, ge=10, le=90)
-    skillRatingMin: Optional[int] = Field(default=None, ge=0, le=100_000)
-    skillRatingMax: Optional[int] = Field(default=None, ge=1, le=100_000)
     reconnectAllowanceSeconds: Optional[int] = Field(default=None, ge=5, le=120)
     practiceBotDifficulty: Optional[
         Literal["guided", "standard", "strong", "expert", "royal"]
@@ -452,14 +450,29 @@ async def _categories(session=None):
         {}, {"_id": 0}, **_kwargs(session),
     ).sort("displayOrder", 1).to_list(10)
     if not rows:
-        return [copy.deepcopy(row) for row in rummy.RUMMY_CATEGORIES]
-    return rows
+        rows = [copy.deepcopy(row) for row in rummy.RUMMY_CATEGORIES]
+    return [_without_retired_skill_range(row) for row in rows]
+
+
+def _without_retired_skill_range(category: dict) -> dict:
+    """Project one chip/category table without the retired rating gate.
+
+    Existing production rows can retain the two legacy fields until a normal
+    database migration removes them.  They no longer affect eligibility and
+    must not be advertised to players or operators as if they still did.
+    """
+    projected = copy.deepcopy(category)
+    projected.pop("skillRatingMin", None)
+    projected.pop("skillRatingMax", None)
+    return projected
 
 
 async def _category(category_id: str, session=None, *, require_enabled: bool = True):
     row = await db.rummy_categories.find_one({"id": category_id}, {"_id": 0}, **_kwargs(session))
     if not row:
         row = rummy.category_map().get(category_id)
+    if row:
+        row = _without_retired_skill_range(row)
     if not row or (require_enabled and not row.get("enabled", True)):
         _fail(409, "RUMMY_CATEGORY_UNAVAILABLE", "That Rummy table is not available.")
     if int(row.get("maxPlayers", 0)) != rummy.MAX_PLAYERS:
@@ -2802,11 +2815,6 @@ async def admin_rummy_category_update(
     if category_id not in rummy.category_map():
         _fail(404, "RUMMY_CATEGORY_NOT_FOUND", "Rummy category not found.")
     updates = body.model_dump(exclude_none=True)
-    current = await _category(category_id, require_enabled=False)
-    merged_skill_min = int(updates.get("skillRatingMin", current.get("skillRatingMin", 0)))
-    merged_skill_max = int(updates.get("skillRatingMax", current.get("skillRatingMax", 100_000)))
-    if merged_skill_min > merged_skill_max:
-        _fail(422, "RUMMY_SKILL_RANGE_INVALID", "Minimum rating cannot exceed maximum rating.")
     updates.update({"maxPlayers": rummy.MAX_PLAYERS, "updated_at": _now_iso(), "updated_by": admin["id"]})
     await db.rummy_categories.update_one({"id": category_id}, {"$set": updates}, upsert=True)
     updated = await _category(category_id, require_enabled=False)
