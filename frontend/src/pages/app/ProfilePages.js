@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { setHaptics, setMuted } from "@/lib/sound";
 import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2, Landmark, HandCoins, Pencil, Save, X,
+  Download, CheckCircle2, Landmark, HandCoins, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,24 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api, errMsg, APP_VERSION } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { PageTransition, AvatarBadge, UserStatusBadge, Disclaimer, formatChips, AVATARS } from "@/components/common";
+import { PageTransition, UserStatusBadge, Disclaimer, formatChips } from "@/components/common";
+import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { APP_INSTALL_REQUEST_EVENT, isAppStandalone } from "@/components/IosInstallHint";
+import { cartoonAvatarForKey, filterCartoonAvatars } from "@/lib/profileAvatars";
+
+
+export const PERSONAL_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+export const PERSONAL_AVATAR_TYPES = Object.freeze(["image/jpeg", "image/png", "image/webp"]);
+
+export function validatePersonalAvatarFile(file) {
+  if (!file) return "Choose an image to upload.";
+  if (!PERSONAL_AVATAR_TYPES.includes(String(file.type || "").toLowerCase())) {
+    return "Choose a PNG, JPG, or WebP image.";
+  }
+  if (Number(file.size || 0) <= 0) return "The selected image is empty.";
+  if (Number(file.size) > PERSONAL_AVATAR_MAX_BYTES) return "The image must be 5 MB or smaller.";
+  return null;
+}
 
 // ---------------- Profile ----------------
 export function Profile() {
@@ -24,6 +40,15 @@ export function Profile() {
   const [draftName, setDraftName] = useState(user?.display_name || "");
   const [draftAvatar, setDraftAvatar] = useState(user?.avatar || "star");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [avatarSearch, setAvatarSearch] = useState("");
+  const [pendingAvatarFile, setPendingAvatarFile] = useState(null);
+  const [pendingAvatarPreview, setPendingAvatarPreview] = useState(null);
+  const [profileError, setProfileError] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [presetSelectionMade, setPresetSelectionMade] = useState(false);
+  const avatarInputRef = useRef(null);
+  const filteredAvatars = useMemo(() => filterCartoonAvatars(avatarSearch), [avatarSearch]);
 
   const links = [
     { icon: HandCoins, label: "Request chips", to: "/chips/request", testId: "profile-link-request-chips" },
@@ -44,10 +69,59 @@ export function Profile() {
   const contactVerified = user?.contact_verified === true;
   const verificationLabel = contactVerified ? "Verified" : verificationDeferred ? "OTP deferred" : "Not verified";
 
+  useEffect(() => () => {
+    if (pendingAvatarPreview && typeof URL?.revokeObjectURL === "function") {
+      URL.revokeObjectURL(pendingAvatarPreview);
+    }
+  }, [pendingAvatarPreview]);
+
+  const resetPendingUpload = () => {
+    setPendingAvatarFile(null);
+    setPendingAvatarPreview(null);
+    setUploadError("");
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+  };
+
   const beginEdit = () => {
     setDraftName(user?.display_name || "");
     setDraftAvatar(user?.avatar || "star");
+    setAvatarSearch("");
+    setPresetSelectionMade(false);
+    setProfileError("");
+    resetPendingUpload();
+    setPresetSelectionMade(false);
     setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    resetPendingUpload();
+    setProfileError("");
+    setEditing(false);
+  };
+
+  const choosePresetAvatar = (avatarKey) => {
+    resetPendingUpload();
+    setDraftAvatar(avatarKey);
+    setPresetSelectionMade(true);
+    setProfileError("");
+  };
+
+  const choosePersonalAvatar = (event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+    const validationError = validatePersonalAvatarFile(file);
+    if (validationError) {
+      setUploadError(validationError);
+      setProfileError("");
+      return;
+    }
+    const preview = typeof URL?.createObjectURL === "function" ? URL.createObjectURL(file) : null;
+    setPendingAvatarFile(file);
+    setPendingAvatarPreview(preview);
+    setDraftAvatar(user?.avatar || "star");
+    setPresetSelectionMade(false);
+    setUploadError("");
+    setProfileError("");
   };
 
   const saveProfile = async (event) => {
@@ -57,20 +131,74 @@ export function Profile() {
       return toast.error("Display name must contain 2 to 32 characters");
     }
     setSaving(true);
+    setProfileError("");
+    setUploadError("");
+    let operation = "profile";
     try {
-      const { data } = await api.patch("/profile", { display_name: displayName, avatar: draftAvatar });
-      const profile = data?.profile || {};
-      setUser((current) => ({
-        ...current,
-        display_name: profile.display_name ?? displayName,
-        avatar: profile.avatar ?? draftAvatar,
-        ...(profile.profile_updated_at ? { profile_updated_at: profile.profile_updated_at } : {}),
-      }));
+      let message = "Game profile updated";
+      const displayNameChanged = displayName !== String(user?.display_name || "").trim();
+      if (displayNameChanged) {
+        operation = "display name";
+        const { data } = await api.patch("/profile", { display_name: displayName });
+        const profile = data?.profile || {};
+        setUser((current) => ({
+          ...current,
+          display_name: profile.display_name ?? displayName,
+          ...(profile.profile_updated_at ? { profile_updated_at: profile.profile_updated_at } : {}),
+        }));
+        message = data?.message || message;
+      }
+
+      if (pendingAvatarFile) {
+        operation = "avatar upload";
+        setUploading(true);
+        const body = new FormData();
+        body.append("file", pendingAvatarFile);
+        const { data } = await api.post("/profile/avatar/upload", body);
+        const profile = data?.profile || {};
+        const uploadedAvatarUrl = profile.avatar_url ?? profile.avatarUrl ?? null;
+        if (!uploadedAvatarUrl) throw new Error("The avatar upload did not return a usable image. Please try again.");
+        setUser((current) => ({
+          ...current,
+          display_name: profile.display_name ?? displayName,
+          avatar: profile.avatar ?? current?.avatar ?? draftAvatar,
+          avatar_url: uploadedAvatarUrl,
+          avatar_source: profile.avatar_source ?? "UPLOAD",
+          ...(profile.avatar_upload_id ? { avatar_upload_id: profile.avatar_upload_id } : {}),
+          ...(profile.profile_updated_at ? { profile_updated_at: profile.profile_updated_at } : {}),
+        }));
+        message = data?.message || message;
+      } else if (presetSelectionMade) {
+        operation = "avatar preset";
+        const { data } = await api.put("/profile/avatar", { avatar: draftAvatar });
+        const profile = data?.profile || {};
+        setUser((current) => ({
+          ...current,
+          display_name: profile.display_name ?? displayName,
+          avatar: profile.avatar ?? draftAvatar,
+          avatar_url: null,
+          avatar_source: profile.avatar_source ?? "PRESET",
+          avatar_upload_id: null,
+          ...(profile.profile_updated_at ? { profile_updated_at: profile.profile_updated_at } : {}),
+        }));
+        message = data?.message || message;
+      }
+      resetPendingUpload();
+      setPresetSelectionMade(false);
       setEditing(false);
-      toast.success(data?.message || "Game profile updated");
+      toast.success(message);
     } catch (error) {
-      toast.error(errMsg(error));
+      const fallback = operation === "avatar upload"
+        ? "The avatar could not be uploaded."
+        : operation === "avatar preset"
+          ? "The avatar could not be updated."
+          : "The game profile could not be updated.";
+      const message = errMsg(error, fallback);
+      setProfileError(message);
+      if (operation === "avatar upload") setUploadError(message);
+      toast.error(message);
     } finally {
+      setUploading(false);
       setSaving(false);
     }
   };
@@ -81,7 +209,14 @@ export function Profile() {
 
       <div className="rounded-2xl bg-card/60 backdrop-blur-md border border-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
         <div className="flex items-center gap-4">
-          <AvatarBadge avatarKey={user?.avatar} size={60} />
+          <ProfileAvatar
+            avatarKey={user?.avatar}
+            avatarUrl={user?.avatar_url ?? user?.avatarUrl}
+            size={60}
+            alt=""
+            loading="eager"
+            testId="profile-current-avatar"
+          />
           <div className="min-w-0">
             <p data-testid="profile-display-name" className="font-bold text-lg truncate">{user?.display_name || "Player"}</p>
             <p className="text-xs text-white/55 truncate">
@@ -109,37 +244,145 @@ export function Profile() {
       </div>
 
       {editing && (
-        <form data-testid="profile-edit-form" onSubmit={saveProfile} className="space-y-4 rounded-2xl border border-primary/25 bg-card/60 p-4">
-          <div>
-            <p className="text-sm font-semibold">Game profile</p>
-            <p className="mt-0.5 text-[11px] text-white/45">Only your public display name and avatar can be changed here.</p>
+        <form data-testid="profile-edit-form" aria-busy={saving} onSubmit={saveProfile} className="space-y-5 rounded-2xl border border-primary/25 bg-card/60 p-4 sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="relative shrink-0">
+              <ProfileAvatar
+                avatarKey={draftAvatar}
+                avatarUrl={pendingAvatarPreview || (draftAvatar === user?.avatar ? (user?.avatar_url ?? user?.avatarUrl) : null)}
+                size={72}
+                alt="Selected profile avatar"
+                loading="eager"
+                testId="profile-edit-current-avatar"
+                className="ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+              />
+              <span className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full border border-primary/40 bg-primary text-primary-foreground shadow-lg" aria-hidden="true">
+                <Camera className="h-3.5 w-3.5" />
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">Game profile</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-white/45">Choose a royal 3D avatar or upload your own image. Your account, contact and chip details stay unchanged.</p>
+            </div>
           </div>
+
           <div className="space-y-2">
-            <Label>Avatar</Label>
-            <div className="grid grid-cols-6 gap-2" role="radiogroup" aria-label="Game profile avatar">
-              {AVATARS.map((item) => (
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <Label htmlFor="profile-avatar-search">3D cartoon avatars</Label>
+                <p className="mt-0.5 text-[10px] text-white/40">{filteredAvatars.length} of 60 portraits</p>
+              </div>
+              {cartoonAvatarForKey(draftAvatar) && !pendingAvatarFile && (
+                <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">Selected {cartoonAvatarForKey(draftAvatar).number}</span>
+              )}
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" aria-hidden="true" />
+              <Input
+                id="profile-avatar-search"
+                data-testid="profile-avatar-search"
+                type="search"
+                value={avatarSearch}
+                onChange={(event) => setAvatarSearch(event.target.value)}
+                placeholder="Search by avatar number"
+                autoComplete="off"
+                disabled={saving}
+                className="h-11 rounded-xl border-white/12 bg-white/5 pl-10"
+              />
+            </div>
+            <div
+              data-testid="profile-avatar-gallery"
+              className="grid max-h-72 grid-cols-4 gap-2 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-black/15 p-2 pr-1 sm:grid-cols-6 md:grid-cols-8"
+              role="radiogroup"
+              aria-label="Royal 3D cartoon avatar gallery"
+            >
+              {filteredAvatars.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   role="radio"
-                  aria-checked={draftAvatar === item.key}
-                  aria-label={`Choose ${item.key} avatar`}
+                  aria-checked={!pendingAvatarFile && draftAvatar === item.key}
+                  aria-label={`Choose ${item.label}`}
                   data-testid={`profile-edit-avatar-${item.key}`}
-                  onClick={() => setDraftAvatar(item.key)}
-                  className={`rounded-full p-0.5 ${draftAvatar === item.key ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100"}`}
+                  onClick={() => choosePresetAvatar(item.key)}
+                  disabled={saving}
+                  className={`group relative aspect-square min-h-14 rounded-2xl border p-1 transition-[transform,opacity,border-color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${!pendingAvatarFile && draftAvatar === item.key ? "border-primary bg-primary/15 shadow-[0_0_0_1px_hsl(var(--primary)/0.45),0_8px_22px_rgba(0,0,0,0.35)]" : "border-white/8 bg-white/[0.035] opacity-75 hover:-translate-y-0.5 hover:border-primary/30 hover:opacity-100"}`}
                 >
-                  <AvatarBadge avatarKey={item.key} size={42} />
+                  <ProfileAvatar avatarKey={item.key} size={54} alt="" className="h-full w-full max-h-[62px] max-w-[62px]" />
+                  <span className="pointer-events-none absolute bottom-1 right-1 grid h-4 min-w-4 place-items-center rounded-full border border-black/25 bg-black/65 px-1 text-[7px] font-black tabular-nums text-white/85">{item.number}</span>
                 </button>
               ))}
+              {!filteredAvatars.length && (
+                <div className="col-span-full px-4 py-8 text-center" role="status">
+                  <Search className="mx-auto h-5 w-5 text-white/30" />
+                  <p className="mt-2 text-xs font-semibold text-white/65">No avatar matches “{avatarSearch.trim()}”</p>
+                  <button type="button" onClick={() => setAvatarSearch("")} className="mt-2 text-[11px] font-semibold text-primary">Show all 60</button>
+                </div>
+              )}
             </div>
           </div>
+
+          <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-primary/10 via-white/[0.035] to-transparent p-3.5">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+                {uploading ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold">Use your own picture</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-white/45">PNG, JPG or WebP · maximum 5 MB. Square images look best.</p>
+              </div>
+            </div>
+            <input
+              ref={avatarInputRef}
+              data-testid="profile-avatar-upload-input"
+              className="sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+              onChange={choosePersonalAvatar}
+              disabled={saving}
+            />
+            <div className="mt-3 grid grid-cols-1 gap-2 min-[380px]:grid-cols-2">
+              <Button
+                data-testid="profile-avatar-upload-choose"
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => avatarInputRef.current?.click()}
+                className="h-10 rounded-xl border-primary/25 bg-primary/10 text-xs text-primary hover:bg-primary/15"
+              >
+                <Camera className="mr-1.5 h-4 w-4" />{pendingAvatarFile ? "Choose another" : "Choose image"}
+              </Button>
+              {pendingAvatarFile && (
+                <Button
+                  data-testid="profile-avatar-upload-remove"
+                  type="button"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => { resetPendingUpload(); setDraftAvatar(user?.avatar || "star"); setPresetSelectionMade(false); }}
+                  className="h-10 rounded-xl border-white/12 bg-white/5 text-xs"
+                >
+                  <X className="mr-1.5 h-4 w-4" />Remove selection
+                </Button>
+              )}
+            </div>
+            {pendingAvatarFile && !uploadError && (
+              <p className="mt-2 truncate text-[10px] text-emerald-300" data-testid="profile-avatar-upload-ready">Ready to upload · {pendingAvatarFile.name}</p>
+            )}
+            {uploading && <p className="mt-2 text-[10px] text-primary" role="status">Uploading and securing your avatar…</p>}
+            {uploadError && <p className="mt-2 text-[10px] font-medium text-red-300" role="alert" data-testid="profile-avatar-upload-error">{uploadError}</p>}
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="profile-edit-display-name">Display name</Label>
             <Input id="profile-edit-display-name" data-testid="profile-edit-display-name" required minLength={2} maxLength={32} value={draftName} onChange={(event) => setDraftName(event.target.value)} className="h-12 rounded-xl border-white/12 bg-white/5" />
           </div>
+          {profileError && <p role="alert" data-testid="profile-edit-error" className="rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-[11px] font-medium text-red-200">{profileError}</p>}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => setEditing(false)} className="h-11 rounded-xl border-white/15 bg-white/5"><X className="mr-1.5 h-4 w-4" />Cancel</Button>
-            <Button data-testid="profile-edit-save" type="submit" disabled={saving} className="h-11 rounded-xl font-bold"><Save className="mr-1.5 h-4 w-4" />{saving ? "Saving…" : "Save"}</Button>
+            <Button type="button" variant="outline" disabled={saving} onClick={cancelEdit} className="h-11 rounded-xl border-white/15 bg-white/5"><X className="mr-1.5 h-4 w-4" />Cancel</Button>
+            <Button data-testid="profile-edit-save" type="submit" disabled={saving} className="h-11 rounded-xl font-bold">
+              {saving ? <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
+              {uploading ? "Uploading…" : saving ? "Saving…" : "Save profile"}
+            </Button>
           </div>
           <p className="text-[11px] leading-relaxed text-white/40">Email, mobile number, country, verification status and chip balances are managed separately and remain read-only here.</p>
         </form>

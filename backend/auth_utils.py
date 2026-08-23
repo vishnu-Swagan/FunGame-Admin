@@ -1,10 +1,13 @@
 """Auth helpers: bcrypt hashing, JWT tokens, FastAPI dependencies."""
+import logging
 import os
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pymongo import ReturnDocument
+from avatar_service import legacy_avatar_upgrade_fields
 from db import db
 import compliance
 
@@ -12,6 +15,7 @@ JWT_ALG = 'HS256'
 ACCESS_TOKEN_DAYS = 7
 
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger('auth')
 
 
 def _real_money_enabled() -> bool:
@@ -124,6 +128,40 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             'code': 'SESSION_REPLACED',
             'message': 'You were signed out because this Login ID was used on another device.',
         })
+    return await maybe_upgrade_legacy_avatar(user)
+
+
+async def maybe_upgrade_legacy_avatar(user: dict) -> dict:
+    """Best-effort, race-safe migration of retired symbolic player avatars."""
+    avatar_upgrade = legacy_avatar_upgrade_fields(user)
+    if avatar_upgrade:
+        # Compare-and-set guards ensure a concurrent personal upload or preset
+        # selection always wins over this one-time compatibility migration.
+        try:
+            upgraded = await db.users.find_one_and_update(
+                {
+                    'id': user['id'],
+                    'role': 'PLAYER',
+                    'avatar': user.get('avatar'),
+                    'avatar_source': {'$ne': 'UPLOAD'},
+                    'avatar_upload_id': {'$in': [None, '']},
+                    'avatar_url': {'$in': [None, '']},
+                },
+                {'$set': avatar_upgrade},
+                return_document=ReturnDocument.AFTER,
+            )
+            if upgraded:
+                return upgraded
+            # A profile mutation won the compare-and-set; reflect its current
+            # choice instead of returning the stale legacy snapshot.
+            latest = await db.users.find_one({'id': user['id']})
+            if latest:
+                return latest
+        except Exception as exc:  # migration must never turn a valid token into an outage
+            logger.warning(
+                'Deferred legacy avatar upgrade for %s: %s',
+                user['id'], type(exc).__name__,
+            )
     return user
 
 

@@ -29,6 +29,7 @@ import commission
 import payouts
 from game_access import assert_admin_status_change_allowed
 from otp_service import normalize_identity
+from avatar_service import deterministic_avatar_key
 import os
 from pymongo import ReturnDocument
 
@@ -441,7 +442,8 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
         'display_name': body.full_name, 'full_name': body.full_name,
         'country': None, 'date_of_birth': None, 'phone': None,
-        'avatar': 'star',
+        'avatar': deterministic_avatar_key(email_normalized),
+        'avatar_source': 'PRESET',
         'chip_balance': 0, 'points_balance': 0,
         'favorites': [], 'recent_games': [],
         'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},
@@ -514,7 +516,8 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         'display_name': req['full_name'], 'full_name': req['full_name'],
         'country': None, 'date_of_birth': req.get('date_of_birth'),
         'phone': phone_normalized, 'phone_normalized': phone_normalized,
-        'avatar': 'star',
+        'avatar': deterministic_avatar_key(phone_normalized or email_normalized),
+        'avatar_source': 'PRESET',
         'chip_balance': 0, 'points_balance': 0,
         'favorites': [], 'recent_games': [],
         'settings': {'sound_enabled': True, 'music_enabled': True, 'haptics_enabled': True, 'reduced_motion': False, 'high_contrast': False},

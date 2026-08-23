@@ -321,18 +321,172 @@ def best_arrangement(cards: list[dict], wild_rank: int) -> dict:
     }
 
 
-def choose_bot_discard(cards: list[dict], wild_rank: int) -> dict:
-    """Choose a legal discard using only this bot's private hand."""
-    choices = []
+BOT_DIFFICULTIES = ("guided", "standard", "strong", "expert", "royal")
+
+
+def bot_difficulty(value: str | None) -> str:
+    """Return one stable level name for persisted/admin supplied values."""
+    canonical = str(value or "standard").strip().lower()
+    return canonical if canonical in BOT_DIFFICULTIES else "standard"
+
+
+def _bot_private_meld_potential(
+    cards: list[dict], wild_rank: int,
+) -> tuple[int, int]:
+    """Measure future meld links using only cards the bot may inspect.
+
+    Royal bots use this as a final look-ahead after the normal declaration,
+    point and coverage rules.  It never receives the closed deck or another
+    player's hand: same-rank/different-suit pairs can grow into sets, while
+    close same-suit ranks can grow into sequences.  Aces are treated as both
+    low (A-2) and high (Q-K-A) connectors.
+    """
+    naturals = [card for card in cards if not is_joker(card, wild_rank)]
+    strength = 0
+    linked_card_ids = set()
+    for left_index, left in enumerate(naturals):
+        for right in naturals[left_index + 1:]:
+            link_strength = 0
+            if (
+                int(left["rank"]) == int(right["rank"])
+                and left["suit"] != right["suit"]
+            ):
+                link_strength = 3
+            elif left["suit"] == right["suit"]:
+                left_rank = int(left["rank"])
+                right_rank = int(right["rank"])
+                distances = [abs(left_rank - right_rank)]
+                if left_rank == 1:
+                    distances.append(abs(14 - right_rank))
+                if right_rank == 1:
+                    distances.append(abs(left_rank - 14))
+                distance = min(distances)
+                if distance == 1:
+                    link_strength = 3
+                elif distance == 2:
+                    link_strength = 1
+            if link_strength:
+                strength += link_strength
+                linked_card_ids.update((left["id"], right["id"]))
+    return strength, len(linked_card_ids)
+
+
+def _bot_choice_rows(
+    cards: list[dict], wild_rank: int, forbidden_card_id: str | None = None,
+) -> list[tuple]:
+    """Score legal discards without looking at any opponent or covered card."""
+    rows = []
     for card in cards:
-        if is_joker(card, wild_rank):
+        if card["id"] == forbidden_card_id or is_joker(card, wild_rank):
             continue
         remaining = [candidate for candidate in cards if candidate["id"] != card["id"]]
         arrangement = best_arrangement(remaining, wild_rank)
-        choices.append((arrangement["score"], -card_points(card, wild_rank), card["id"], card))
-    if not choices:
-        return sorted(cards, key=lambda card: card["id"])[0]
-    return min(choices, key=lambda row: row[:3])[3]
+        rows.append((
+            int(not arrangement["valid"]),
+            int(arrangement["score"]),
+            -int(arrangement.get("coveredPoints", 0)),
+            -card_points(card, wild_rank),
+            card["id"],
+            card,
+            arrangement,
+        ))
+    if rows:
+        return rows
+    # A hand made entirely of jokers is unusual but still needs one legal move.
+    return [
+        (1, 0, 0, 0, card["id"], card, best_arrangement(
+            [candidate for candidate in cards if candidate["id"] != card["id"]],
+            wild_rank,
+        ))
+        for card in cards
+        if card["id"] != forbidden_card_id
+    ]
+
+
+def choose_bot_discard(
+    cards: list[dict], wild_rank: int, difficulty: str = "expert",
+    forbidden_card_id: str | None = None,
+) -> dict:
+    """Choose a legal discard using only the bot's private hand.
+
+    Difficulty changes decision quality, never the deal.  Guided bots make the
+    familiar high-card discard; stronger levels increasingly protect valid
+    groups and point coverage.  A picked open card can be forbidden so the bot
+    obeys the same no-pick-and-return rule as a person.
+    """
+    level = bot_difficulty(difficulty)
+    rows = _bot_choice_rows(cards, wild_rank, forbidden_card_id)
+    if not rows:
+        raise ValueError("a bot must own a legal discard")
+    if level == "guided":
+        return min(rows, key=lambda row: (row[0], row[3], row[4]))[5]
+    if level == "standard":
+        return min(rows, key=lambda row: (row[0], row[1], row[3], row[4]))[5]
+    if level == "strong":
+        return min(rows, key=lambda row: (row[0], row[1], row[2], row[4]))[5]
+    if level == "expert":
+        return min(rows, key=lambda row: row[:5])[5]
+
+    def royal_key(row):
+        remaining = [card for card in cards if card["id"] != row[4]]
+        potential, linked_cards = _bot_private_meld_potential(remaining, wild_rank)
+        return (
+            row[0], row[1], row[2], -potential, -linked_cards, row[3], row[4],
+        )
+
+    return min(rows, key=royal_key)[5]
+
+
+def choose_bot_draw_source(
+    cards: list[dict], open_discard: dict | None, wild_rank: int,
+    difficulty: str = "expert",
+) -> str:
+    """Choose ``DISCARD`` or ``CLOSED`` from information a player may see.
+
+    The covered deck is intentionally not accepted by this function.  A bot
+    therefore cannot peek at the next card even though the server stores it.
+    """
+    if not open_discard:
+        return "CLOSED"
+    level = bot_difficulty(difficulty)
+    if is_joker(open_discard, wild_rank):
+        return "DISCARD"
+    base = best_arrangement(cards, wild_rank)
+    candidate_cards = [*cards, open_discard]
+    discard = choose_bot_discard(
+        candidate_cards, wild_rank, level, forbidden_card_id=open_discard["id"],
+    )
+    remaining = [card for card in candidate_cards if card["id"] != discard["id"]]
+    candidate = best_arrangement(remaining, wild_rank)
+    score_gain = int(base["score"]) - int(candidate["score"])
+    coverage_gain = int(candidate.get("coveredPoints", 0)) - int(base.get("coveredPoints", 0))
+    if level == "guided":
+        useful = score_gain >= 10
+    elif level == "standard":
+        useful = score_gain >= 4
+    elif level == "strong":
+        useful = score_gain > 0 or coverage_gain >= 5
+    elif level == "expert":
+        useful = (
+            int(not candidate["valid"]), int(candidate["score"]),
+            -int(candidate.get("coveredPoints", 0)),
+        ) < (
+            int(not base["valid"]), int(base["score"]),
+            -int(base.get("coveredPoints", 0)),
+        )
+    else:
+        candidate_potential = _bot_private_meld_potential(remaining, wild_rank)
+        base_potential = _bot_private_meld_potential(cards, wild_rank)
+        useful = (
+            int(not candidate["valid"]), int(candidate["score"]),
+            -int(candidate.get("coveredPoints", 0)),
+            -candidate_potential[0], -candidate_potential[1],
+        ) < (
+            int(not base["valid"]), int(base["score"]),
+            -int(base.get("coveredPoints", 0)),
+            -base_potential[0], -base_potential[1],
+        )
+    return "DISCARD" if useful else "CLOSED"
 
 
 def masked_player_id(value: str) -> str:
