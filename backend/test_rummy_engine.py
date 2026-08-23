@@ -288,8 +288,8 @@ def test_bot_identity_and_social_helpers_are_explicit_and_card_blind():
         {"id": "room-profile"}, dict(rummy.RUMMY_CATEGORIES[4]), 2, 1, 100.0,
     )
     assert seat["is_bot"] is True
-    assert "BOT" in seat["display_name"]
-    assert seat["bot_label"].startswith("BOT ·")
+    assert seat["display_name"] == "Mira"
+    assert seat["bot_label"].startswith("AUTO ·")
     assert seat["bot_profile"]["difficulty"] == "royal"
     assert seat["bot_profile"]["outcomeControl"] is False
     assert seat["bot_profile"]["usesPrivateHandOnly"] is True
@@ -305,6 +305,16 @@ def test_bot_identity_and_social_helpers_are_explicit_and_card_blind():
         pass
     else:
         raise AssertionError("an arbitrary remote GIF was accepted")
+
+
+def test_current_chat_and_support_post_has_one_unambiguous_route():
+    path = "/games/rummy/rooms/{room_id}/chat"
+    matches = [
+        route for route in routes_rummy.router.routes
+        if getattr(route, "path", None) == path and "POST" in getattr(route, "methods", set())
+    ]
+    assert len(matches) == 1
+    assert matches[0].endpoint is routes_rummy.rummy_table_chat_send
 
 
 def test_category_snapshot_is_deeply_frozen_and_survives_disablement():
@@ -1131,15 +1141,15 @@ def test_table_chat_is_labelled_idempotent_rate_limited_and_records_support_only
             bot_event = await routes_rummy._emit_bot_chat_event(room, bot, "TEST_SOCIAL")
             public_bot = routes_rummy._public_chat_event(bot_event)
             assert public_bot["sender"]["isBot"] is True
-            assert public_bot["sender"]["label"] == "BOT"
-            assert public_bot["sender"]["botLabel"].startswith("BOT ·")
+            assert public_bot["sender"]["label"] == "AUTO"
+            assert public_bot["sender"]["botLabel"].startswith("AUTO ·")
             assert public_bot["generatedAt"]
 
             listing = await routes_rummy.rummy_table_chat(
                 room["id"], afterEpoch=0.0, limit=100, user={"id": "chat-player"},
             )
             assert any(event["sender"]["isBot"] for event in listing["events"])
-            assert all(event["sender"]["label"] in ("BOT", "PLAYER") for event in listing["events"])
+            assert all(event["sender"]["label"] in ("AUTO", "PLAYER") for event in listing["events"])
             assert all(event["eventType"] not in ("HELP_DESK", "MUSIC_REQUEST") for event in listing["events"])
             opponent_listing = await routes_rummy.rummy_table_chat(
                 room["id"], afterEpoch=0.0, limit=100, user={"id": "other-player"},

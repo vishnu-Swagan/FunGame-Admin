@@ -178,7 +178,7 @@ test("synthesizes every bounded Rummy cue and clamps public gain controls", asyn
   expect(context.compressors.every((node) => node.disconnected)).toBe(true);
 });
 
-test("global mute and reduced motion stop the ambient loop while preserving user intent", async () => {
+test("global mute stops ambience while reduced motion preserves user-requested audio", async () => {
   let muted = false;
   const muteListeners = new Set();
   const media = createMediaQuery(false);
@@ -207,7 +207,7 @@ test("global mute and reduced motion stop the ambient loop while preserving user
   await Promise.resolve();
   expect(controller.getState().ambientActive).toBe(true);
   media.change(true);
-  expect(controller.getState()).toMatchObject({ reducedMotion: true, ambientRequested: true, ambientActive: false });
+  expect(controller.getState()).toMatchObject({ reducedMotion: true, ambientRequested: true, ambientActive: true });
   await expect(controller.play(RUMMY_AUDIO_CUES.DECLARE)).resolves.toBe(true);
   media.change(false);
   await Promise.resolve();

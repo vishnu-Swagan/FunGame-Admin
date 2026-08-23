@@ -85,10 +85,10 @@ function privateStateFor({ cards, groups, drawn, drawnCardId, canAct = true, dro
 function demoSeats(activeSeat = 0) {
   return [
     { seatIndex: 0, playerId: "DE***01", displayName: "You", avatar: "avatar-01", isBot: false, status: "ACTIVE", cardCount: 13, active: activeSeat === 0 },
-    { seatIndex: 1, playerId: "BO***01", displayName: "Maya", avatar: "avatar-26", isBot: true, botLabel: "BOT · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 1 },
-    { seatIndex: 2, playerId: "BO***02", displayName: "Arjun", avatar: "avatar-37", isBot: true, botLabel: "BOT · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 2 },
-    { seatIndex: 3, playerId: "BO***03", displayName: "Tara", avatar: "avatar-48", isBot: true, botLabel: "BOT · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 3 },
-    { seatIndex: 4, playerId: "BO***04", displayName: "Kabir", avatar: "avatar-59", isBot: true, botLabel: "BOT · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 4 },
+    { seatIndex: 1, playerId: "BO***01", displayName: "Maya", avatar: "avatar-26", isBot: true, botLabel: "AUTO · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 1 },
+    { seatIndex: 2, playerId: "BO***02", displayName: "Arjun", avatar: "avatar-37", isBot: true, botLabel: "AUTO · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 2 },
+    { seatIndex: 3, playerId: "BO***03", displayName: "Tara", avatar: "avatar-48", isBot: true, botLabel: "AUTO · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 3 },
+    { seatIndex: 4, playerId: "BO***04", displayName: "Kabir", avatar: "avatar-59", isBot: true, botLabel: "AUTO · PRACTICE", status: "ACTIVE", cardCount: 13, active: activeSeat === 4 },
   ];
 }
 
@@ -112,7 +112,7 @@ export function createRummyDemoState(categoryId = "LV1") {
     privateState: privateStateFor({ cards: clone(DEMO_HAND), groups: DEMO_GROUPS.map(({ cardIds }) => [...cardIds]), drawn: false, drawnCardId: null }),
     result: null,
     walletNeutral: true,
-    botTableNotice: "Practice table · automated players are labelled BOT · no stake or payout",
+    botTableNotice: "Practice table · AUTO seats fill missing places · no stake or payout",
     balance: RUMMY_DEMO_BALANCE,
   };
 }
@@ -127,7 +127,7 @@ function settledState(state, playerWon, reason) {
   };
   const botRows = next.seats.slice(1).map((seat, index) => ({
     seatIndex: seat.seatIndex, playerId: seat.playerId, displayName: seat.displayName,
-    isBot: true, botLabel: seat.botLabel || "BOT · PRACTICE",
+    isBot: true, botLabel: seat.botLabel || "AUTO · PRACTICE",
     status: !playerWon && index === 0 ? "WON" : "LOST", points: !playerWon && index === 0 ? 0 : 42 + index,
     chipDelta: 0, cards: [],
   }));

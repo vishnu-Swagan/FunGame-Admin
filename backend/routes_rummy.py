@@ -92,7 +92,7 @@ BOT_SOCIAL_BEATS = (
     {"eventType": "TEXT", "message": "That card made the table interesting 😄"},
     {
         "eventType": "MUSIC_REQUEST", "reactionId": "palace-focus",
-        "message": "BOT atmosphere suggestion: Palace Focus instrumental.",
+        "message": "AUTO atmosphere suggestion: Palace Focus instrumental.",
     },
     {"eventType": "EMOJI", "reactionId": "good-game"},
 )
@@ -129,6 +129,34 @@ def _kwargs(session):
 
 def _fail(status: int, code: str, message: str):
     raise HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+_PUBLIC_BOT_WORD = re.compile(r"\bbots?\b", re.IGNORECASE)
+
+
+def _public_automated_text(value, fallback: str = "AUTO") -> str:
+    """Keep legacy automation metadata explicit without exposing old BOT copy."""
+    normalized = " ".join(str(value or fallback).split())
+    return _PUBLIC_BOT_WORD.sub("AUTO", normalized)
+
+
+def _public_result(result):
+    """Project persisted results through the current public automation labels."""
+    if not isinstance(result, dict):
+        return result
+    projected = copy.deepcopy(result)
+    rows = projected.get("rows") if isinstance(projected.get("rows"), list) else []
+    for row in rows:
+        if isinstance(row, dict) and row.get("isBot"):
+            row["displayName"] = _public_automated_text(row.get("displayName"), "Automated Player")
+            row["botLabel"] = _public_automated_text(row.get("botLabel"), "AUTO")
+    winner_seat = projected.get("winnerSeat")
+    winner = next((row for row in rows if row.get("seatIndex") == winner_seat), None)
+    if winner and winner.get("isBot"):
+        projected["winnerName"] = _public_automated_text(
+            projected.get("winnerName"), "Automated Player",
+        )
+    return projected
 
 
 def _public_uploaded_avatar_url(profile: dict) -> str | None:
@@ -392,7 +420,7 @@ async def _ensure_rummy_core_unchecked():
                 "$set": {
                     **copy.deepcopy(profile),
                     "is_bot": True,
-                    "public_label": "BOT",
+                    "public_label": "AUTO",
                     "logic_version": BOT_LOGIC_VERSION,
                     "updated_at": _now_iso(),
                 },
@@ -563,7 +591,7 @@ def _public_matchmaking(room: dict, seat_count: int | None = None) -> dict:
         "missingSeats": max(0, rummy.MAX_PLAYERS - count) if waiting else 0,
         "originMode": origin_mode,
         "fallbackPolicy": (
-            "MISSING_SEATS_USE_LABELLED_FAIR_BOTS_AND_LIVE_STAKES_ARE_REFUNDED"
+            "MISSING_SEATS_USE_LABELLED_AUTOMATED_PLAYERS_AND_LIVE_STAKES_ARE_REFUNDED"
         ),
     }
 
@@ -674,15 +702,24 @@ def _public_chat_event(event: dict) -> dict:
     return {
         "id": event["id"],
         "eventType": event["event_type"],
-        "message": event.get("message"),
+        "message": (
+            _public_automated_text(event.get("message"), "Automated table activity")
+            if is_bot and event.get("message") else event.get("message")
+        ),
         "reactionId": event.get("reaction_id"),
         "sender": {
             "seatIndex": event.get("sender_seat_index"),
             "playerId": event.get("masked_sender_id"),
-            "displayName": event.get("sender_name") or ("BOT" if is_bot else "Player"),
+            "displayName": (
+                _public_automated_text(event.get("sender_name"), "Automated Player")
+                if is_bot else event.get("sender_name") or "Player"
+            ),
             "isBot": is_bot,
-            "label": "BOT" if is_bot else "PLAYER",
-            "botLabel": event.get("bot_label") if is_bot else None,
+            "label": "AUTO" if is_bot else "PLAYER",
+            "botLabel": (
+                _public_automated_text(event.get("bot_label"), "AUTO")
+                if is_bot else None
+            ),
         },
         "requestStatus": event.get("request_status"),
         "visibility": event.get("visibility") or "TABLE",
@@ -742,9 +779,9 @@ async def _emit_bot_chat_event(room: dict, seat: dict, phase: str, session=None)
         "sender_user_id": seat["user_id"],
         "masked_sender_id": rummy.masked_player_id(seat["user_id"]),
         "sender_seat_index": int(seat["seat_index"]),
-        "sender_name": seat.get("display_name") or "BOT",
+        "sender_name": seat.get("display_name") or "AUTO",
         "is_bot": True,
-        "bot_label": seat.get("bot_label") or "BOT",
+        "bot_label": seat.get("bot_label") or "AUTO",
         "visibility": "TABLE",
         "request_status": (
             "AUTOMATED_ATMOSPHERE_SUGGESTION"
@@ -974,12 +1011,18 @@ async def _public_state(room: dict, requester_id: str, session=None):
         seat_rows.append({
             "seatIndex": seat_index,
             "playerId": rummy.masked_player_id(seat["user_id"]),
-            "displayName": seat.get("display_name") or ("Practice Bot" if seat.get("is_bot") else "Player"),
+            "displayName": (
+                _public_automated_text(seat.get("display_name"), "Automated Player")
+                if seat.get("is_bot") else seat.get("display_name") or "Player"
+            ),
             "avatar": seat.get("avatar") or "crown",
             "avatarUrl": avatar_url,
             "isBot": bool(seat.get("is_bot")),
             "botDifficulty": seat.get("bot_difficulty") if seat.get("is_bot") else None,
-            "botLabel": seat.get("bot_label") if seat.get("is_bot") else None,
+            "botLabel": (
+                _public_automated_text(seat.get("bot_label"), "AUTO")
+                if seat.get("is_bot") else None
+            ),
             "botProfile": copy.deepcopy(seat.get("bot_profile")) if seat.get("is_bot") else None,
             "status": seat.get("status", "ACTIVE"),
             "cardCount": len(hand.get("cards", [])) if hand else 0,
@@ -1052,14 +1095,17 @@ async def _public_state(room: dict, requester_id: str, session=None):
         "currentSeat": room.get("current_seat"), "turnEndsIn": remaining,
         "closedDeckCount": len(room.get("closed_deck", [])),
         "openDiscard": top_discard, "wildJoker": room.get("wild_joker"),
-        "privateState": private, "result": room.get("result"),
+        "privateState": private, "result": _public_result(room.get("result")),
         "chat": serialize_doc(public_chat_rows),
         "walletNeutral": bool(room.get("wallet_neutral") or room.get("mode") in ("PRACTICE", BOT_TABLE_MODE)),
         "fallbackStartsIn": fallback_remaining,
         "scheduledStartAtEpoch": matchmaking["scheduledStartAtEpoch"],
         "scheduledStartIn": matchmaking["startsIn"],
         "matchmaking": matchmaking,
-        "botTableNotice": room.get("bot_table_notice"),
+        "botTableNotice": (
+            _public_automated_text(room.get("bot_table_notice"), "Automated players are clearly disclosed")
+            if room.get("bot_table_notice") else None
+        ),
         "botAction": bot_action,
         "chatEvents": chat_events,
         "shuffleProof": proof, "balance": int((user or {}).get("chip_balance", 0)),
@@ -1090,11 +1136,11 @@ def _new_bot_seat(
         "room_id": room["id"],
         "user_id": f"BOT:{room['id']}:{seat_index}",
         "seat_index": int(seat_index),
-        "display_name": f"{profile['name']} · BOT",
+        "display_name": profile["name"],
         "avatar": profile["avatar"],
         "is_bot": True,
         "bot_difficulty": difficulty,
-        "bot_label": f"BOT · {difficulty.title()}",
+        "bot_label": f"AUTO · {difficulty.title()}",
         "bot_profile_id": profile["id"],
         "bot_profile": profile,
         "bot_logic_version": BOT_LOGIC_VERSION,
@@ -1307,7 +1353,7 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
             room["seat_count"] = rummy.MAX_PLAYERS
             room["wallet_neutral"] = True
             if body.mode == BOT_TABLE_MODE:
-                room["bot_table_notice"] = "Practice table · automated players labelled BOT · no wallet stake or payout"
+                room["bot_table_notice"] = "Practice table · AUTO players clearly disclosed · no wallet stake or payout"
 
         live_waits_for_schedule = (
             body.mode == "LIVE" and _epoch() < _scheduled_room_start_epoch(room)
@@ -1386,7 +1432,7 @@ async def _activate_scheduled_room(room_id: str) -> bool:
                 refund_ref = f"{stake_ref}:bot-fallback-refund"
                 await credit_chips(
                     seat["user_id"], refund,
-                    "Rummy live matchmaking moved to a wallet-neutral bot table",
+                    "Rummy live matchmaking moved to a wallet-neutral practice table",
                     ref=refund_ref, kind=ledger.REFUND, game="rummy", session=session,
                 )
                 refunded_total += refund
@@ -1401,7 +1447,7 @@ async def _activate_scheduled_room(room_id: str) -> bool:
                     **kwargs,
                 )
                 if zeroed.modified_count != 1:
-                    _fail(409, "RUMMY_STAKE_CHANGED", "The reserved stake changed before bot fallback.")
+                    _fail(409, "RUMMY_STAKE_CHANGED", "The reserved stake changed before practice fallback.")
 
         occupied = {int(seat["seat_index"]) for seat in humans}
         free = [index for index in range(rummy.MAX_PLAYERS) if index not in occupied]
@@ -1422,7 +1468,7 @@ async def _activate_scheduled_room(room_id: str) -> bool:
             "fallback_refunded_chips": refunded_total,
             "matchmaking_filled_by_bots": len(bots),
             "bot_table_notice": (
-                "Scheduled match · fair clearly labelled BOT players · "
+                "Scheduled match · fair AUTO players clearly disclosed · "
                 "live stakes refunded · no wallet payout"
             ),
         })
@@ -1608,9 +1654,15 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
         rows.append({
             "seatIndex": seat["seat_index"],
             "playerId": rummy.masked_player_id(seat["user_id"]),
-            "displayName": seat.get("display_name") or "Player",
+            "displayName": (
+                _public_automated_text(seat.get("display_name"), "Automated Player")
+                if seat.get("is_bot") else seat.get("display_name") or "Player"
+            ),
             "isBot": bool(seat.get("is_bot")),
-            "botLabel": seat.get("bot_label") if seat.get("is_bot") else None,
+            "botLabel": (
+                _public_automated_text(seat.get("bot_label"), "AUTO")
+                if seat.get("is_bot") else None
+            ),
             "botProfile": copy.deepcopy(seat.get("bot_profile")) if seat.get("is_bot") else None,
             "status": "WON" if won else ("DROPPED" if seat.get("status") == "DROPPED" else "LOST"),
             "points": points, "chipDelta": (winner_payout if won else 0) - wallet_entry,
@@ -1636,12 +1688,12 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
                     },
                     "$set": {
                         "is_bot": True,
-                        "public_label": "BOT",
+                        "public_label": "AUTO",
                         "logic_version": BOT_LOGIC_VERSION,
                         "last_played_at": _now_iso(),
                     },
                     "$setOnInsert": {
-                        "name": seat.get("display_name") or "BOT",
+                        "name": seat.get("display_name") or "AUTO",
                         "created_at": _now_iso(),
                     },
                 },
@@ -1668,7 +1720,10 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
         "result": {
             "winnerSeat": winner_seat["seat_index"],
             "winnerId": rummy.masked_player_id(winner_user_id),
-            "winnerName": winner_seat.get("display_name") or "Player",
+            "winnerName": (
+                _public_automated_text(winner_seat.get("display_name"), "Automated Player")
+                if winner_seat.get("is_bot") else winner_seat.get("display_name") or "Player"
+            ),
             "payoutChips": winner_payout, "virtualPotChips": pot,
             "reason": reason, "rows": rows,
             "settledAt": _now_iso(),
@@ -2308,7 +2363,7 @@ async def rummy_room_state(room_id: str, user: dict = Depends(require_active_pla
     return await _public_state(room, user["id"])
 
 
-@router.post("/games/rummy/rooms/{room_id}/chat")
+@router.post("/games/rummy/rooms/{room_id}/legacy-chat", include_in_schema=False)
 async def rummy_room_chat(room_id: str, body: RummyChatCreate, user: dict = Depends(require_active_player)):
     """Post one short, room-scoped message retained for no more than 24 hours."""
     await require_playable_game("rummy")

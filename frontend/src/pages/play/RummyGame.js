@@ -39,6 +39,26 @@ const groupSignature = (groups) => JSON.stringify(groups || []);
 const MODAL_FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 const RUMMY_TABLE_CYCLE_SECONDS = 180;
 
+export function automatedSeatLabel(value) {
+  const detail = String(value || "")
+    .replace(/\bautomated\s+players?\b/gi, "")
+    .replace(/\bbots?\b/gi, "")
+    .replace(/\bauto\b/gi, "")
+    .replace(/[|:·—–-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return detail ? `AUTO · ${detail.toUpperCase()}` : "AUTO";
+}
+
+export function visibleRummyName(value, automated = false, fallback = "Player") {
+  const raw = String(value || "").trim();
+  if (!automated) return raw || fallback;
+  const cleaned = raw
+    .replace(/\s*(?:[|:·—–-]\s*)?\b(?:bots?|auto)\b(?:\s*[|:·—–-]\s*[a-z0-9 ]+)?\s*$/i, "")
+    .trim();
+  return cleaned || "Automated seat";
+}
+
 export function rummyAvatarKeyForSeat(seat) {
   const configured = String(seat?.avatarKey || seat?.avatar || "").trim().toLowerCase();
   const configuredMatch = /^avatar-(\d{1,2})$/.exec(configured);
@@ -160,16 +180,19 @@ function NextTableSchedule({ source, compact = false }) {
 const normalizeTableMessages = (state) => {
   const rows = state?.chatEvents || state?.chatMessages || state?.tableChatMessages || state?.chat?.messages || [];
   if (!Array.isArray(rows)) return [];
-  return rows.slice(-30).map((row, index) => ({
-    id: row.id || row.messageId || `${row.createdAt || "message"}-${index}`,
-    senderName: row.sender?.displayName || row.sender?.name || row.senderName || row.displayName || row.playerName || "Player",
-    seatIndex: row.sender?.seatIndex ?? row.seatIndex ?? null,
-    isBot: Boolean(row.sender?.isBot || row.isBot || row.senderType === "BOT"),
-    botLabel: row.sender?.botLabel || row.botLabel || row.difficultyLabel || row.sender?.label || "BOT",
-    message: row.message || row.text || row.reactionText || "",
-    glyph: row.glyph || row.emoji || RUMMY_REACTIONS.find((reaction) => reaction.id === row.reactionId)?.glyph || "",
-    createdAt: row.createdAt || row.timestamp || null,
-  })).filter((row) => row.message || row.glyph);
+  return rows.slice(-30).map((row, index) => {
+    const automated = Boolean(row.sender?.isBot || row.isBot || row.senderType === "BOT");
+    return {
+      id: row.id || row.messageId || `${row.createdAt || "message"}-${index}`,
+      senderName: visibleRummyName(row.sender?.displayName || row.sender?.name || row.senderName || row.displayName || row.playerName, automated),
+      seatIndex: row.sender?.seatIndex ?? row.seatIndex ?? null,
+      isBot: automated,
+      botLabel: row.sender?.botLabel || row.botLabel || row.difficultyLabel || row.sender?.label || "AUTO",
+      message: row.message || row.text || row.reactionText || "",
+      glyph: row.glyph || row.emoji || RUMMY_REACTIONS.find((reaction) => reaction.id === row.reactionId)?.glyph || "",
+      createdAt: row.createdAt || row.timestamp || null,
+    };
+  }).filter((row) => row.message || row.glyph);
 };
 
 function RoyalGlyph({ name }) {
@@ -190,6 +213,7 @@ function SocialDrawer({
   onSupportRequest,
   busy,
   musicOn,
+  musicStatus,
   musicPreset,
   onMusicPreset,
   onToggleMusic,
@@ -216,12 +240,20 @@ function SocialDrawer({
       return;
     }
     setSupportStatus("Sending securely…");
-    const submitted = await onSupportRequest(kind, request);
-    if (submitted) {
-      setSupportText("");
-      setSupportStatus("Request submitted. Chakri Team replies will appear in your Support inbox.");
-    } else {
-      setSupportStatus("Request not sent. Please retry or open Support from your profile.");
+    try {
+      const response = await onSupportRequest(kind, request);
+      const accepted = response === true || response?.accepted === true;
+      const requestStatus = String(
+        response?.requestStatus || (accepted ? "ACCEPTED" : "NOT_SENT"),
+      ).replaceAll("_", " ").toLowerCase();
+      if (accepted) {
+        setSupportText("");
+        setSupportStatus(`Request ${requestStatus}. Chakri Team replies will appear in your Support inbox.`);
+      } else {
+        setSupportStatus(response?.message || `Request ${requestStatus}. Please retry or open Support from your profile.`);
+      }
+    } catch (error) {
+      setSupportStatus(error?.message ? `Request failed: ${error.message}` : "Request failed. Please retry or open Support from your profile.");
     }
   };
 
@@ -246,7 +278,7 @@ function SocialDrawer({
         <div className="rummy-chat-log" role="log" aria-live="polite" aria-label="Table messages">
           {messages.length ? messages.map((message) => (
             <article key={message.id} className={message.isBot ? "is-bot" : ""}>
-              <div><b>{message.senderName}</b>{message.isBot && <span>{String(message.botLabel).toUpperCase().startsWith("BOT") ? message.botLabel : `BOT · ${message.botLabel}`}</span>}</div>
+              <div><b>{message.senderName}</b>{message.isBot && <span>{automatedSeatLabel(message.botLabel)}</span>}</div>
               <p>{message.glyph && <i aria-hidden>{message.glyph}</i>}{message.message}</p>
             </article>
           )) : <div className="rummy-chat-empty"><span>♛</span><b>The table is quiet</b><small>Use a friendly reaction to break the ice.</small></div>}
@@ -254,7 +286,7 @@ function SocialDrawer({
         <div className="rummy-reaction-grid" aria-label="Quick table reactions">
           {RUMMY_REACTIONS.map((reaction) => <button key={reaction.id} type="button" className={reaction.animated ? "is-gif-reaction" : ""} disabled={busy} onClick={() => onReaction(reaction)} aria-label={`${reaction.label}${reaction.animated ? " animated reaction" : ""}`}><span aria-hidden>{reaction.glyph}</span><small>{reaction.label}{reaction.animated && <i>GIF</i>}</small></button>)}
         </div>
-        <p className="rummy-chat-safety">Quick reactions only. Automated players are always marked BOT.</p>
+        <p className="rummy-chat-safety">Quick reactions only. Automated seats are always marked AUTO.</p>
       </div>}
 
       {tab === "music" && <div className="rummy-music-pane">
@@ -266,6 +298,7 @@ function SocialDrawer({
           {RUMMY_AMBIENT_PRESETS.map((preset) => <button key={preset.id} type="button" role="radio" aria-checked={musicPreset === preset.id} className={musicPreset === preset.id ? "is-active" : ""} onClick={() => onMusicPreset(preset.id)}><b>{preset.name}</b><small>{preset.detail}</small></button>)}
         </div>
         <button type="button" className="rummy-music-toggle" aria-pressed={musicOn} onClick={onToggleMusic}><RoyalGlyph name="music" />{musicOn ? "STOP AMBIENCE" : "PLAY AMBIENCE"}</button>
+        <small className="rummy-support-status rummy-music-status" role="status">{musicStatus}</small>
         <div className="rummy-request-divider"><span>OR ASK CHAKRI TEAM</span></div>
         <textarea value={supportText} maxLength={120} onChange={(event) => { setSupportText(event.target.value); setSupportStatus(""); }} placeholder="Type a motivational song or mood request…" aria-label="Music request" />
         <button type="button" className="rummy-request-submit" disabled={busy || !supportText.trim()} onClick={() => submitSupport("MUSIC_REQUEST")}><RoyalGlyph name="send" />SEND MUSIC REQUEST</button>
@@ -401,6 +434,7 @@ export function PlayerSeat({ seat, timer, turnDuration = 30, reducedMotion, view
   const timerText = active && timer != null ? Math.max(0, Math.ceil(timer)) : null;
   const avatarKey = rummyAvatarKeyForSeat(seat);
   const avatarUrl = seat?.avatarUrl || seat?.avatar_url || seat?.profileAvatarUrl || null;
+  const seatName = visibleRummyName(seat?.displayName, seat?.isBot, "Rummy player");
   return (
     <div className={`rummy-seat rummy-seat-${seat.seatIndex} ${active ? "is-active" : ""} is-${String(seat.status || "empty").toLowerCase()}`}>
       <div
@@ -412,18 +446,18 @@ export function PlayerSeat({ seat, timer, turnDuration = 30, reducedMotion, view
             avatarKey={avatarKey}
             avatarUrl={avatarUrl}
             size="100%"
-            alt={`${seat.displayName || "Rummy player"} portrait`}
+            alt={`${seatName} portrait`}
             className="rummy-seat-avatar"
             testId={`rummy-seat-avatar-${seat.seatIndex}`}
             loading="eager"
           />
         ) : <span className="rummy-empty-avatar" aria-hidden>+</span>}
-        {occupied && seat.isBot && <span className="rummy-seat-bot-badge">BOT</span>}
+        {occupied && seat.isBot && <span className="rummy-seat-bot-badge">AUTO</span>}
         {timerText != null && <b className="rummy-only-timer" aria-label={`${timerText} seconds remaining`}>{timerText}</b>}
       </div>
-      <strong>{seat.status === "EMPTY" ? "Waiting" : seat.displayName}</strong>
-      <small>{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? (seat.botLabel || "BOT") : seat.playerId}</small>
-      {seat.latestReaction && <span className="rummy-seat-reaction" aria-label={`${seat.displayName || "Player"} reacted ${seat.latestReaction.message || seat.latestReaction.emoji || ""}`}><i aria-hidden>{seat.latestReaction.emoji || seat.latestReaction.glyph || "♛"}</i>{seat.latestReaction.message || ""}</span>}
+      <strong>{seat.status === "EMPTY" ? "Waiting" : seatName}</strong>
+      <small>{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? automatedSeatLabel(seat.botLabel) : seat.playerId}</small>
+      {seat.latestReaction && <span className="rummy-seat-reaction" aria-label={`${seatName} reacted ${seat.latestReaction.message || seat.latestReaction.emoji || ""}`}><i aria-hidden>{seat.latestReaction.emoji || seat.latestReaction.glyph || "♛"}</i>{seat.latestReaction.message || ""}</span>}
       {seat.cardCount > 0 && seat.seatIndex !== viewerSeatIndex && <CardBack count={seat.cardCount} />}
       {active && !reducedMotion && <span className="rummy-active-flare" aria-hidden />}
     </div>
@@ -503,7 +537,7 @@ export function CategoryLobby({ categories, balance, busy, loading, error, joinF
           );
         })}
       </section>
-      <footer><BrandWordmark logoClassName="rummy-lobby-brand-logo" /><span><ShieldCheck /> Secure server shuffle · Practice is wallet-neutral · automated players are labelled in-game</span></footer>
+      <footer><BrandWordmark logoClassName="rummy-lobby-brand-logo" /></footer>
     </main>
   );
 }
@@ -512,9 +546,13 @@ export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = fals
   const dialogRef = useRef(null);
   useModalFocusTrap(true, dialogRef, onLobby);
   const playerWon = result.winnerSeat === viewerSeatIndex;
+  const settledRows = result.rows || [];
+  const winnerRow = settledRows.find((row) => row.seatIndex === result.winnerSeat);
+  const winnerName = visibleRummyName(result.winnerName || winnerRow?.displayName, winnerRow?.isBot, "Winner");
+  const reason = readableRuleLabel(result.reason, "ROUND SETTLED");
   const panelMotion = reducedMotion
     ? { initial: false, animate: { opacity: 1 }, transition: { duration: 0 } }
-    : { initial: { opacity: 0, scale: .94, y: 24 }, animate: { opacity: 1, scale: 1, y: 0 }, transition: { duration: .48, ease: [.16, 1, .3, 1] } };
+    : { initial: { opacity: 0, scale: .985, y: 12 }, animate: { opacity: 1, scale: 1, y: 0 }, transition: { duration: .34, ease: [.16, 1, .3, 1] } };
   const revealMotion = (initial, animate, transition) => reducedMotion
     ? { initial: false, animate: { opacity: 1 }, transition: { duration: 0 } }
     : { initial, animate, transition };
@@ -530,34 +568,70 @@ export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = fals
       {...panelMotion}
     >
       <div className="rummy-result-crest" aria-hidden><span>{playerWon ? "♛" : "♜"}</span><i /></div>
-      {playerWon && !reducedMotion && <div className="rummy-victory-sparks" aria-hidden>{Array.from({ length: 18 }, (_, index) => <i key={index} style={{ "--spark-index": index }} />)}</div>}
+      {playerWon && !reducedMotion && <div className="rummy-victory-sparks" aria-hidden>{Array.from({ length: 10 }, (_, index) => <i key={index} style={{ "--spark-index": index }} />)}</div>}
       {!playerWon && <div className="rummy-loss-veil" aria-hidden />}
-      <motion.div className="rummy-result-ribbon" {...revealMotion({ opacity: 0, y: -16 }, { opacity: 1, y: 0 }, { delay: .1, duration: .36, ease: [.16, 1, .3, 1] })}><span>ROYAL RESULT</span></motion.div>
-      <div className="rummy-result-title-stage">
+      <motion.header className="rummy-result-hero" {...revealMotion({ opacity: 0, y: -8 }, { opacity: 1, y: 0 }, { delay: .06, duration: .3, ease: [.16, 1, .3, 1] })}>
+        <div className="rummy-result-seal" aria-hidden><span>{playerWon ? "♛" : "♜"}</span><i /></div>
+        <div className="rummy-result-copy">
+          <span>{playerWon ? "ROYAL HAND COMPLETE" : "ROUND COMPLETE"}</span>
+          <h2 id="rummy-result-title">{playerWon ? "You win" : `${winnerName} wins`}</h2>
+          <p>{reason}</p>
+        </div>
+        <div className="rummy-result-award" aria-label={`${formatChips(result.payoutChips)} chips payout`}>
+          <span>PAYOUT</span>
+          <strong>{formatChips(result.payoutChips)}</strong>
+          <small>CHIPS</small>
+        </div>
         {playerWon && (
           <div
             className={`rummy-player-win-celebration ${reducedMotion ? "is-static" : ""}`}
             data-testid="rummy-player-win-celebration"
             aria-hidden="true"
           >
-            <i /><span>♛</span><b>ROYAL VICTORY</b><i />
+            <span>♛</span><b>ROYAL VICTORY</b>
           </div>
         )}
-        <motion.h2 id="rummy-result-title" {...revealMotion({ opacity: 0, scale: .82 }, { opacity: 1, scale: 1 }, { delay: .16, duration: .5, ease: [.34, 1.56, .64, 1] })}>{playerWon ? "You win" : `${result.winnerName} wins`}</motion.h2>
-      </div>
-      <motion.p {...revealMotion({ opacity: 0, y: 9 }, { opacity: 1, y: 0 }, { delay: .24, duration: .35, ease: [.16, 1, .3, 1] })}>{formatChips(result.payoutChips)} chips · {String(result.reason || "").replaceAll("_", " ")}</motion.p>
-      <div className="rummy-result-rows">
-        {(result.rows || []).map((row, index) => (
-          <motion.article key={row.seatIndex} className={row.status === "WON" ? "is-winner" : ""} {...revealMotion({ opacity: 0, x: index % 2 ? 20 : -20 }, { opacity: 1, x: 0 }, { delay: .28 + index * .055, duration: .38, ease: [.16, 1, .3, 1] })}>
-            <div><b>Seat {row.seatIndex + 1} · {row.displayName}{row.isBot ? ` · ${row.botLabel || "Bot"}` : ""}</b><span>{row.status} · {row.points} pts</span></div>
-            <strong>{row.chipDelta >= 0 ? "+" : ""}{formatChips(row.chipDelta)} chips</strong>
-            <div className="rummy-result-cards">
-              {(row.cards || []).map((card) => <RummyCard key={card.id} card={card} compact reducedMotion={reducedMotion} />)}
-            </div>
-          </motion.article>
-        ))}
-      </div>
-      <button type="button" onClick={onLobby}>BACK TO LOBBY</button>
+      </motion.header>
+
+      <section className="rummy-result-standings" aria-labelledby="rummy-result-standings-title">
+        <header>
+          <div><span>FINAL STANDINGS</span><h3 id="rummy-result-standings-title">Table scores</h3></div>
+          <strong>{settledRows.length} SEATS SETTLED</strong>
+        </header>
+        <div className="rummy-result-rows">
+          {settledRows.map((row, index) => {
+            const rowWon = row.status === "WON" || row.seatIndex === result.winnerSeat;
+            const chipDelta = Number(row.chipDelta) || 0;
+            return (
+              <motion.article
+                key={row.seatIndex}
+                className={rowWon ? "is-winner" : ""}
+                data-status={String(row.status || "SETTLED").toLowerCase()}
+                {...revealMotion({ opacity: 0, y: 8 }, { opacity: 1, y: 0 }, { delay: .16 + index * .045, duration: .28, ease: [.16, 1, .3, 1] })}
+              >
+                <span className="rummy-result-position" aria-label={rowWon ? "Winner" : `Seat ${row.seatIndex + 1}`}>{rowWon ? "♛" : row.seatIndex + 1}</span>
+                <div className="rummy-result-player">
+                  <b>{visibleRummyName(row.displayName, row.isBot, `Seat ${row.seatIndex + 1}`)}</b>
+                  <small>SEAT {row.seatIndex + 1}{row.isBot ? ` · ${automatedSeatLabel(row.botLabel)}` : ""}</small>
+                </div>
+                <dl>
+                  <div><dt>STATUS</dt><dd>{readableRuleLabel(row.status, "SETTLED")}</dd></div>
+                  <div><dt>POINTS</dt><dd>{Number(row.points) || 0}</dd></div>
+                </dl>
+                <strong className={chipDelta > 0 ? "is-positive" : chipDelta < 0 ? "is-negative" : ""}>{chipDelta > 0 ? "+" : ""}{formatChips(chipDelta)} <small>CHIPS</small></strong>
+                <div className="rummy-result-cards">
+                  {(row.cards || []).map((card) => <RummyCard key={card.id} card={card} compact reducedMotion={reducedMotion} />)}
+                </div>
+              </motion.article>
+            );
+          })}
+        </div>
+      </section>
+
+      <footer className="rummy-result-actions">
+        <p><ShieldCheck /> Server-settled hand</p>
+        <button type="button" onClick={onLobby}>BACK TO LOBBY</button>
+      </footer>
     </motion.section>
   );
 }
@@ -572,6 +646,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
   const [socialOpen, setSocialOpen] = useState(false);
   const [localChatMessages, setLocalChatMessages] = useState([]);
   const [musicOn, setMusicOn] = useState(false);
+  const [musicStatus, setMusicStatus] = useState("Ambience is off.");
   const [musicPreset, setMusicPreset] = useState(RUMMY_AMBIENT_PRESETS[0].id);
   const [atmosphereEvent, setAtmosphereEvent] = useState({ phase: RUMMY_ATMOSPHERE_PHASES.TABLE, id: 0 });
   const dropDialogRef = useRef(null);
@@ -623,9 +698,13 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
     audioController?.stopAmbient?.();
   }, [audioController]);
   useEffect(() => {
-    if (!muted) return;
-    setMusicOn(false);
-    audioController?.stopAmbient?.();
+    if (muted) {
+      setMusicOn(false);
+      setMusicStatus("Table sound is muted. Turn sound on to play ambience.");
+      audioController?.stopAmbient?.();
+      return;
+    }
+    setMusicStatus((current) => current.startsWith("Table sound is muted") ? "Ambience is off." : current);
   }, [audioController, muted]);
 
   useEffect(() => {
@@ -662,27 +741,32 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
     if (musicOn) {
       audioController?.stopAmbient?.();
       setMusicOn(false);
+      setMusicStatus("Ambience stopped.");
       return;
     }
     if (muted) {
+      setMusicStatus("Table sound is muted. Turn sound on to play ambience.");
       toast.info("Turn table sound on before playing ambience");
       return;
     }
+    setMusicStatus("Starting generated ambience…");
     audioController?.setAmbientVolume?.(selectedAmbient.volume);
     const ready = await settleAudio(() => audioController?.enableFromGesture?.());
     const started = ready && await settleAudio(() => audioController?.startAmbient?.());
     if (!started) {
-      toast.info(reducedMotion ? "Generated ambience is paused by your reduced-motion setting" : "Audio is unavailable on this device");
+      setMusicStatus("Ambience could not start. Check device audio permissions and try again.");
+      toast.info("Audio is unavailable on this device");
       return;
     }
     setMusicOn(true);
-  }, [audioController, musicOn, muted, reducedMotion, selectedAmbient.volume]);
+    setMusicStatus("Generated royal ambience is playing.");
+  }, [audioController, musicOn, muted, selectedAmbient.volume]);
   const sendReaction = useCallback(async (reaction) => {
     const response = await sendSocialEvent({
       eventType: reaction.eventType || "EMOJI",
       reactionId: reaction.id,
     });
-    if (!response) return false;
+    if (!response?.accepted) return false;
     const normalized = normalizeTableMessages({ chatEvents: response.event ? [response.event] : [] });
     const message = normalized[0] || {
       id: response.requestId || `local-${Date.now()}`,
@@ -806,8 +890,8 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         : state.currentSeat === mySeat?.seatIndex
           ? privateState?.drawn ? "Choose one card to discard" : "Your turn · draw from either pile"
           : activeSeat?.isBot
-            ? `${activeSeat.displayName} · ${botPhase}`
-            : `${activeSeat?.displayName || "Player"}'s turn`;
+            ? `${visibleRummyName(activeSeat.displayName, true)} · AUTO · ${botPhase}`
+            : `${visibleRummyName(activeSeat?.displayName)}'s turn`;
   const validationCode = privateState?.groupValidation?.code;
 
   return (
@@ -834,7 +918,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <NextTableSchedule source={state} />
           {state.fallbackStartsIn != null && (
             <p className="rummy-fallback-note" data-testid="rummy-fallback-countdown">
-              Clearly labelled bots fill missing seats in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s so the scheduled game can begin.
+              Clearly labelled AUTO seats fill missing places in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s so the scheduled game can begin.
             </p>
           )}
           <div className="rummy-waiting-seats" aria-label="Occupied Rummy seats">
@@ -851,7 +935,11 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <button type="button" onClick={onExit}>RETURN TO RUMMY LOBBY</button>
         </section>
       ) : <section className="rummy-stage">
-        {state.walletNeutral && <div className="rummy-bot-table-notice" role="status">{state.botTableNotice || "Practice table · automated players labelled BOT · no stake or payout"}</div>}
+        {state.walletNeutral && (
+          <div className="rummy-bot-table-notice" role="status">
+            {String(state.botTableNotice || "Practice table · AUTO seats fill missing places · no stake or payout").replace(/\bbots?\b/gi, "AUTO")}
+          </div>
+        )}
         <div className="rummy-status" aria-live="polite">{status}</div>
         <div className="rummy-table-slot">
           <div className="rummy-table" aria-label="Five-seat Rummy table">
@@ -930,6 +1018,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         onSupportRequest={onSupportRequest}
         busy={busy}
         musicOn={musicOn}
+        musicStatus={musicStatus}
         musicPreset={musicPreset}
         onMusicPreset={setMusicPreset}
         onToggleMusic={toggleMusic}
@@ -1157,7 +1246,7 @@ export default function RummyGame({ game }) {
       if (message) payload.message = message;
       if (reactionId) payload.reactionId = reactionId;
       const { data } = await api.post(`/games/rummy/rooms/${current.roomId}/chat`, payload, { timeout: 12000 });
-      return data?.accepted === false ? null : data;
+      return data || null;
     } catch (error) {
       toast.error(errMsg(error, "The table message could not be sent."));
       return null;
@@ -1168,7 +1257,14 @@ export default function RummyGame({ game }) {
 
   const submitSupportRequest = useCallback(async (kind, request) => {
     const response = await sendSocialEvent({ eventType: kind, message: request });
-    return Boolean(response?.accepted && response?.requestStatus === "SUBMITTED");
+    if (!response) {
+      return {
+        accepted: false,
+        requestStatus: "FAILED",
+        message: "Request could not be sent. Check your connection and try again.",
+      };
+    }
+    return response;
   }, [sendSocialEvent]);
 
   useEffect(() => {

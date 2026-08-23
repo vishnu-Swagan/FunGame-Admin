@@ -296,7 +296,7 @@ export function createRummyAudioController(options = {}) {
   };
 
   const startAmbientNow = () => {
-    if (!enabled || disposed || muted || reducedMotion || backgrounded || ambientNodes || context?.state !== "running" || !masterNode) return Boolean(ambientNodes);
+    if (!enabled || disposed || muted || backgrounded || ambientNodes || context?.state !== "running" || !masterNode) return Boolean(ambientNodes);
     if (typeof context.createBuffer !== "function") return false;
     clearIdleTimer();
     const sampleRate = clamp(context.sampleRate, 8000, 192000, 44100);
@@ -340,11 +340,11 @@ export function createRummyAudioController(options = {}) {
   };
 
   const startAmbientWhenReady = async () => {
-    if (!enabled || disposed || muted || reducedMotion || backgrounded || !context || !masterNode) return false;
+    if (!enabled || disposed || muted || backgrounded || !context || !masterNode) return false;
     const targetContext = context;
     const generation = lifecycleGeneration;
     const resumed = await wakeContext(targetContext);
-    if (!resumed || disposed || generation !== lifecycleGeneration || context !== targetContext || muted || reducedMotion || backgrounded) return false;
+    if (!resumed || disposed || generation !== lifecycleGeneration || context !== targetContext || muted || backgrounded) return false;
     return startAmbientNow();
   };
 
@@ -413,8 +413,6 @@ export function createRummyAudioController(options = {}) {
 
   const onReducedMotionChange = (event) => {
     reducedMotion = Boolean(event?.matches);
-    if (reducedMotion) stopAmbientNow();
-    else if (ambientRequested) void startAmbientWhenReady();
   };
 
   const suspendForBackground = () => {
