@@ -118,7 +118,7 @@ export default function OnboardingProfile() {
             <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5 cursor-pointer">
               <Checkbox data-testid="onboarding-terms-checkbox" checked={terms} onCheckedChange={(v) => setTerms(!!v)} className="mt-0.5" />
               <span className="text-xs text-white/70 leading-relaxed">
-                I confirm that the details I provided are accurate, I am eligible to use the service, and deposits, gameplay and withdrawals remain subject to identity, age and jurisdiction checks.
+                I confirm that the details I provided are accurate, I am at least 18, and my access remains subject to identity, age, and jurisdiction checks.
               </span>
             </label>
             <Button data-testid="onboarding-profile-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150">

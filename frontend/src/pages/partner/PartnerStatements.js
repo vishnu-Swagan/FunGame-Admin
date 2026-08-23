@@ -6,7 +6,7 @@ import { formatChips } from "@/components/common";
 import { Card, Money, Pill, Table, pct, shortDate } from "./partnerBits";
 
 /**
- * Settled commission, and the payments made against it.
+ * Settled commission and its processing history.
  *
  * Two things here exist because of how commission actually behaves rather than
  * because they look good on a statement:
@@ -60,10 +60,10 @@ export default function PartnerStatements() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl text-white flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" /> Statements
+            <FileText className="h-5 w-5 text-primary" /> My commission
           </h1>
           <p className="text-xs text-white/55 mt-1">
-            Each settled period, the rate it was settled at, and the payments made.
+            Each settled period, the recorded rate, and its processing status.
           </p>
         </div>
         <div className="flex gap-2">
@@ -86,18 +86,18 @@ export default function PartnerStatements() {
         <>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-amber-400/25 bg-amber-400/8 p-4">
-              <p className="text-xs text-amber-200/80">Accrued, not yet paid</p>
+              <p className="text-xs text-amber-200/80">Accrued commission units</p>
               <p className="text-2xl font-bold text-amber-200 tabular-nums">{formatChips(accrued)}</p>
             </div>
             <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/8 p-4">
-              <p className="text-xs text-emerald-200/80">Paid to date</p>
+              <p className="text-xs text-emerald-200/80">Processed to date</p>
               <p className="text-2xl font-bold text-emerald-200 tabular-nums">{formatChips(paidTotal)}</p>
             </div>
           </div>
 
           <Card title="Commission periods" testId="partner-ledger">
             <Table
-              head={["Period", "NGR", "Carried in", "Basis", "Rate", "Commission", "Carried out", ""]}
+              head={["Period", "Net result", "Carried in", "Basis", "Rate", "Commission", "Carried out", ""]}
               right={[1, 2, 3, 4, 5, 6]}
               rows={entries.map((e) => [
                 e.period_start === e.period_end ? e.period_start : `${e.period_start} → ${e.period_end}`,
@@ -112,16 +112,15 @@ export default function PartnerStatements() {
               empty="No periods settled yet. Commission appears the morning after your players first play."
             />
             <p className="text-[10px] text-white/35 mt-2">
-              Commission is charged on the basis, which is that period's NGR after
-              anything carried forward. A period where players won more than they
-              staked carries forward as a negative and reduces the next one — it is
-              never invoiced back to you.
+              Commission uses the recorded net-result basis after anything carried
+              forward. Negative periods reduce the next positive basis; they are not
+              charged to a player. Virtual player chips have no cash value.
             </p>
           </Card>
 
-          <Card title="Payments" testId="partner-payments">
+          <Card title="Processing history" testId="partner-payments">
             <Table
-              head={["Raised", "Covering", "Amount", "Status", "Paid", "Reference"]}
+              head={["Raised", "Covering", "Units", "Status", "Processed", "Reference"]}
               right={[2]}
               rows={payouts.map((p) => [
                 shortDate(p.created_at),
@@ -129,13 +128,13 @@ export default function PartnerStatements() {
                 <Money value={p.amount} />,
                 <Pill>{p.status}</Pill>,
                 shortDate(p.paid_at),
-                p.payment_ref || (p.status === "REJECTED" ? "Returned to balance" : "—"),
+                p.payment_ref || (p.status === "REJECTED" ? "Returned to accrued" : "—"),
               ])}
-              empty="No payments raised yet."
+              empty="No processing records yet."
             />
             <p className="text-[10px] text-white/35 mt-2">
-              A rejected payment returns the commission to your accrued balance and
-              is picked up by a later run. It is not money lost.
+              A rejected record returns its commission units to the accrued balance
+              for a later processing run.
             </p>
           </Card>
         </>

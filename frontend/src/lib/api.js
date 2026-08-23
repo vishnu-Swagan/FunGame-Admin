@@ -1,10 +1,12 @@
 import axios from "axios";
 import {
   ADMIN_LOGIN_PATH,
+  DISTRIBUTOR_LOGIN_PATH,
   IS_ADMIN_CONSOLE,
   apiAlternatesForRuntime,
   apiOriginForRuntime,
   financialApiOriginForRuntime,
+  loginPathForBrowserPath,
 } from "@/lib/adminConsole";
 
 export const APP_VERSION = "1.0.0";
@@ -96,7 +98,7 @@ function failover() {
   return failoverInFlight;
 }
 
-const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH];
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH, DISTRIBUTOR_LOGIN_PATH];
 
 function attachAccessToken(config) {
   const token = localStorage.getItem("fg_token");
@@ -129,7 +131,7 @@ async function handleApiError(error, allowFailover) {
         localStorage.setItem("fg_logout_reason", detail.message || "You were signed out because this Login ID was used on another device.");
       }
       localStorage.removeItem("fg_token");
-      window.location.assign(IS_ADMIN_CONSOLE ? ADMIN_LOGIN_PATH : "/login");
+      window.location.assign(loginPathForBrowserPath(path, IS_ADMIN_CONSOLE));
       return Promise.reject(error);
     }
     /* A refusal that closes the whole app to this player gets its own screen.
@@ -145,7 +147,7 @@ async function handleApiError(error, allowFailover) {
       }
     }
     if (status === 503 && detail && detail.code === "MAINTENANCE") {
-      if (!path.startsWith("/maintenance") && !path.startsWith("/admin")) {
+      if (!path.startsWith("/maintenance") && !path.startsWith("/Admin")) {
         window.location.assign("/maintenance");
       }
     }
@@ -212,10 +214,15 @@ export async function downloadCsv(path, fallbackName) {
 
 export function routeForUser(user) {
   if (!user) return "/welcome";
-  if (user.role === "ADMIN") return "/admin";
+  if (user.role === "ADMIN") return "/Admin/dashboard";
   // A partner has no onboarding and no wallet — the account is provisioned
   // complete, so the status ladder below does not apply to them.
-  if (user.role === "DISTRIBUTOR") return "/partner";
+  if (user.role === "DISTRIBUTOR") {
+    if (user.status !== "ACTIVE") return "/distributor/login";
+    return user.password_change_required
+      ? "/distributor/change-password"
+      : "/distributor/dashboard";
+  }
   switch (user.status) {
     case "VERIFIED":
       return "/onboarding/profile";

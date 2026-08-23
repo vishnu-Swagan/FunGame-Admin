@@ -1,17 +1,18 @@
-# Render Blueprint — deploys the Chakri.Casino FastAPI backend as a Docker web service.
-# 1. Push this repo to GitHub (already done).
-# 2. On render.com: New + > Blueprint > pick this repo. Render reads this file.
-# 3. Fill in MONGO_URL (from MongoDB Atlas) and JWT_SECRET when prompted.
+# Render Blueprint for the existing production services.
+#
+# Keep Blueprint Auto Sync disabled. Review a Blueprint diff before a manual
+# sync, then deploy an already-tested commit explicitly. The service names below
+# intentionally remain the historical Render names: changing them would create
+# replacement services instead of updating the production services in place.
 services:
   - type: web
-    name: chakri-casino-api
+    name: fungame-api
     runtime: docker
-    # Declared explicitly. The static site was picking up every push while this
-    # service sat on old code, which is invisible from outside — the API answers
-    # perfectly well, it is just answering with a build from before the change.
-    autoDeploy: true
+    autoDeployTrigger: "off"
     branch: main
-    plan: free
+    # Preserve the live production capacity. A Blueprint sync treats this as an
+    # instruction, so declaring free here would attempt an unsafe downgrade.
+    plan: standard
     region: singapore              # near India players; MUST match the MongoDB Atlas region
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
@@ -45,33 +46,49 @@ services:
       - key: APP_ENV
         value: production                            # production requires live-only account flows
       - key: REGISTRATION_MODE
-        value: ADMIN_REVIEW                          # temporary: admin approval replaces contact OTP activation
+        sync: false                                  # preserve the live PHONE_OTP rollout managed in Render
       - key: OTP_PEPPER
         sync: false                                  # secret used by persistent auth rate-limit hashes
       - key: OTP_EMAIL_ADAPTER
-        value: disabled
+        sync: false                                  # preserve the existing production delivery setting
       - key: OTP_SMS_ADAPTER
-        value: disabled
+        sync: false                                  # preserve the existing Telesign delivery setting
       - key: TELESIGN_CUSTOMER_ID
         sync: false                                  # Telesign account credential; configure in Render before enabling
       - key: TELESIGN_API_KEY
         sync: false                                  # secret; never commit or expose to the frontend
       - key: TELESIGN_PLAN
-        value: self-service
+        sync: false                                  # account capability; preserve the value managed in Render
       - key: TELESIGN_INTELLIGENCE_MODE
-        value: disabled                              # observe first; enforce only after false-positive review
+        sync: false                                  # disabled/observe/enforce is an operator-controlled rollout
       - key: TELESIGN_PHONE_ID_MODE
-        value: disabled                              # explicit paid-call gate
+        sync: false                                  # explicit paid-call gate; never change during a code migration
       - key: TELESIGN_CONTACT_ADDON_ENABLED
-        value: "false"                               # contact PII is discarded even when enabled
+        sync: false                                  # preserve the already-reviewed account capability
       - key: TELESIGN_VERIFY_PLUS_ENABLED
-        value: "false"                               # activate in My Telesign before declaring true
+        sync: false                                  # must match My Telesign; do not overwrite from source
       - key: TELESIGN_ENGAGEMENT_SMS_ENABLED
-        value: "false"                               # requires sender/compliance/consent workflow
+        sync: false                                  # requires sender/compliance/consent workflow
       - key: OTP_EXPOSE_DEV_CODE
         value: "false"
       - key: EMAIL_PROVIDER
-        value: disabled                              # configure resend, sendgrid, or smtp before enabling recovery email
+        sync: false                                  # preserve the production provider selection
+      # Chakri.Casino is virtual-chip-only. Source-controlled false values make
+      # an accidental dashboard drift fail closed on the next reviewed sync.
+      - key: REAL_MONEY_ENABLED
+        value: "false"
+      - key: DEPOSITS_ENABLED
+        value: "false"
+      - key: WITHDRAWALS_ENABLED
+        value: "false"
+      - key: AUTO_WITHDRAWALS_ENABLED
+        value: "false"
+      - key: FINANCIAL_GAME_WALLET_INTEGRATED
+        value: "false"
+      - key: SUPABASE_GAME_SETTLEMENT_ENABLED
+        value: "false"
+      - key: MIGRATION_EXPORT_ENABLED
+        value: "false"
       - key: CRON_SECRET
         sync: false          # set in dashboard — the night job's shared key
       - key: SETTLEMENT_TZ
@@ -83,21 +100,16 @@ services:
   # Static frontend (CDN-served, always on). Built by Render; serves the PWA
   # that PWABuilder wraps into the Android APK.
   - type: web
-    name: chakri-casino
+    name: Chakri.Casino-web
     runtime: static
-    autoDeploy: true
+    autoDeployTrigger: "off"
     branch: main
     rootDir: frontend
-    buildCommand: yarn install --network-timeout 600000 && yarn build
+    buildCommand: yarn install --frozen-lockfile --network-timeout 600000 && yarn build
     staticPublishPath: build
-    # Declared here rather than clicked into the dashboard, so the domain is part
-    # of the repo and survives a service being recreated. Render still has to see
-    # the matching DNS records at the registrar before it will issue a
-    # certificate — this side only claims the names.
-    domains:
-      - chakri.casino
-      - www.chakri.casino
-      - play.chakri.casino
+    # Custom domains are intentionally omitted. chakri.casino is owned by the
+    # separate public Sites project, crm.chakri.casino remains the rollback CRM,
+    # and play.chakri.casino must be connected only as a reviewed DNS change.
     envVars:
       - key: REACT_APP_BACKEND_URL
         # Keep new builds and installed PWAs pinned to the branded production
@@ -141,25 +153,8 @@ services:
         name: Permissions-Policy
         value: geolocation=(), microphone=(), camera=()
 
-  # The night run: aggregate yesterday's revenue, settle commission, raise
-  # payouts. 02:00 Europe/London — Render schedules in UTC, so this is 01:00 UTC
-  # and drifts an hour across BST. That is deliberate and harmless: the job
-  # settles a NAMED day rather than "the last 24 hours", and every step is
-  # idempotent, so firing early, late or twice changes nothing.
-  - type: cron
-    name: chakri-casino-night
-    runtime: docker
-    branch: main
-    plan: free
-    region: singapore
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    schedule: "0 1 * * *"
-    dockerCommand: >-
-      sh -c "curl -sS -X POST -H \"x-cron-key: $CRON_SECRET\"
-      $API_BASE/api/admin/cron/night -w '\n%{http_code}\n' --fail-with-body"
-    envVars:
-      - key: CRON_SECRET
-        sync: false
-      - key: API_BASE
-        value: https://api.chakri.casino
+# The nightly settlement cron is intentionally not managed by this Blueprint.
+# Render does not allow a free cron plan, and the current backend image does not
+# install curl. Reintroduce it only after a paid plan, spend ceiling, command,
+# idempotency dry run, and rollback owner are approved. Removing a resource from
+# a Blueprint never deletes an existing Render service.

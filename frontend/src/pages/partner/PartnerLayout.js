@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, TrendingUp, FileText, Users, LifeBuoy, LogOut, Handshake } from "lucide-react";
+import { LayoutDashboard, BarChart3, Bell, FileText, Users, LifeBuoy, LogOut, Handshake, UserRound, ListChecks } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
@@ -18,11 +18,14 @@ import { toast } from "sonner";
  * a control that 403s is worse than no control.
  */
 const NAV = [
-  { to: "/partner", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "partner-nav-dashboard" },
-  { to: "/partner/revenue", label: "Revenue", icon: TrendingUp, testId: "partner-nav-revenue" },
-  { to: "/partner/statements", label: "Statements", icon: FileText, testId: "partner-nav-statements" },
-  { to: "/partner/players", label: "My players", icon: Users, testId: "partner-nav-players" },
-  { to: "/support", label: "Support", icon: LifeBuoy, testId: "partner-nav-support" },
+  { to: "/distributor/dashboard", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "partner-nav-dashboard" },
+  { to: "/distributor/my-commission", label: "My commission", icon: FileText, testId: "partner-nav-commission" },
+  { to: "/distributor/my-players", label: "My players", icon: Users, testId: "partner-nav-players" },
+  { to: "/distributor/transactions", label: "Transactions", icon: ListChecks, testId: "partner-nav-transactions" },
+  { to: "/distributor/reports", label: "Reports", icon: BarChart3, testId: "partner-nav-reports" },
+  { to: "/distributor/notifications", label: "Notifications", icon: Bell, testId: "partner-nav-notifications" },
+  { to: "/distributor/support", label: "Support", icon: LifeBuoy, testId: "partner-nav-support" },
+  { to: "/distributor/profile", label: "Profile", icon: UserRound, testId: "partner-nav-profile" },
 ];
 
 export default function PartnerLayout() {
@@ -46,7 +49,7 @@ export default function PartnerLayout() {
               data-testid="partner-logout-button"
               onClick={() => {
                 logout();
-                navigate("/login");
+                navigate("/distributor/login");
                 toast.success("Signed out");
               }}
               aria-label="Sign out"

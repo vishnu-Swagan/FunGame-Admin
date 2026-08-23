@@ -83,10 +83,10 @@ GAMES = [
      "description": "The beloved three-card game. Boot, blind, chaal and show — all in play chips.",
      "art": {"from": "#3a1206", "to": "#c05a12", "accent": "#ffa04d", "icon": "club", "glyph": "3\u2666"}},
     {"slug": "ice-fishing", "name": "Ice Fishing", "category": "Wheel", "tagline": "Spin the ice, reel the big catch", "featured": True,
-     "description": "A 53-segment money wheel with three cinematic fish bonus games. Bet the leaves for instant pays, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
+     "description": "A 53-segment virtual-chip prize wheel with three cinematic fish bonus games. Choose the leaves for instant chip awards, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
      "art": {"from": "#0a2a44", "to": "#4aa3d9", "accent": "#bfe6ff", "icon": "fish", "glyph": "\u2744"}},
     {"slug": "blackjack", "name": "Blackjack", "category": "Cards", "tagline": "Hit, stand, beat the dealer", "featured": True,
-     "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side bets, insurance, blackjack pays 3:2. Real casino rules.",
+     "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side options, insurance, and blackjack awards 3:2 in virtual chips.",
      "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
     {"slug": "rummy", "name": "Rummy", "category": "Cards", "tagline": "Five seats, thirteen cards, one royal table", "featured": True,
      "description": "Server-authoritative Indian 13-card Rummy for exactly five seats across five skill categories. Played exclusively with virtual chips.",
@@ -177,6 +177,28 @@ async def run_seed():
                 }},
                 upsert=True,
             )
+
+    # Narrow exact-copy migrations update only the two historical public
+    # descriptions that implied real-money play. Operator-authored edits are
+    # deliberately left untouched.
+    await db.games.update_one(
+        {
+            'slug': 'ice-fishing',
+            'description': "A 53-segment money wheel with three cinematic fish bonus games. Bet the leaves for instant pays, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
+        },
+        {'$set': {'description': next(
+            game['description'] for game in GAMES if game['slug'] == 'ice-fishing'
+        )}},
+    )
+    await db.games.update_one(
+        {
+            'slug': 'blackjack',
+            'description': 'First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side bets, insurance, blackjack pays 3:2. Real casino rules.',
+        },
+        {'$set': {'description': next(
+            game['description'] for game in GAMES if game['slug'] == 'blackjack'
+        )}},
+    )
 
     # Enforce the immutable reviewed set before optional copy/index maintenance.
     # This also marks the superseded broad migrations complete before server.py

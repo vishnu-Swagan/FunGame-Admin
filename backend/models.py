@@ -188,6 +188,10 @@ class LoginRequest(BaseModel):
     email: Optional[str] = Field(default=None, min_length=3, max_length=254)
     phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
     password: str = Field(min_length=1, max_length=128)
+    # Optional for older clients. New player/admin/distributor entry points set
+    # this so a correct password on the wrong surface cannot replace an
+    # operator or partner session before the frontend notices the role.
+    login_surface: Optional[str] = None
 
     _password_bytes = field_validator('password')(_bcrypt_password_size)
 
@@ -195,6 +199,16 @@ class LoginRequest(BaseModel):
     def login_identity(self):
         _consistent_identity_values(self.identifier, self.identity, self.email, self.phone)
         return self
+
+    @field_validator('login_surface')
+    @classmethod
+    def known_login_surface(cls, value):
+        if value is None:
+            return None
+        value = str(value).strip().upper()
+        if value not in {'PLAYER', 'ADMIN', 'DISTRIBUTOR'}:
+            raise ValueError('Login surface must be PLAYER, ADMIN or DISTRIBUTOR')
+        return value
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -396,6 +410,18 @@ class AdminSetPassword(BaseModel):
     _password_bytes = field_validator('password')(_bcrypt_password_size)
 
 
+class AdminStepUpStart(BaseModel):
+    """Begin a password plus one-time-code administrator trust ceremony."""
+    current_password: str = Field(min_length=1, max_length=128)
+
+    _password_bytes = field_validator('current_password')(_bcrypt_password_size)
+
+
+class AdminStepUpVerify(BaseModel):
+    challenge_id: str = Field(min_length=32, max_length=64)
+    code: str = Field(pattern=r'^\d{6}$')
+
+
 class ReturnChipsRequestCreate(BaseModel):
     """Player asks the operator to return chips to the admin. Chips stay in the
     player's balance until the admin approves, then they are deducted."""
@@ -410,14 +436,55 @@ class SupportMessageCreate(BaseModel):
 
 # ---------- Distributor CRM ----------
 class DistributorCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     name: str = Field(min_length=2, max_length=80)
     code: str = Field(min_length=4, max_length=12)
     # Basis points, not a percentage float. 25.5% is 2550. A commission rate
     # multiplies money, and money must not be multiplied by a float.
     rate_bps: int = Field(ge=0, le=10000)
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    note: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=32)
+    note: Optional[str] = Field(default=None, max_length=1000)
+    # The portal Login ID is independent from the public referral code.  It can
+    # be reserved when the CRM record is created and used later when credentials
+    # are provisioned; existing clients that omit it keep using the code.
+    username: Optional[str] = Field(default=None, min_length=4, max_length=32)
+
+    @field_validator('username')
+    @classmethod
+    def valid_distributor_username(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{3,31}', value):
+            raise ValueError(
+                'Login ID must be 4-32 characters: letters, numbers, dot, underscore or hyphen'
+            )
+        return value
+
+
+class DistributorUpdate(BaseModel):
+    """Editable CRM fields. Referral code and historical attribution are fixed."""
+    model_config = ConfigDict(extra='forbid')
+
+    name: Optional[str] = Field(default=None, min_length=2, max_length=80)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=32)
+    note: Optional[str] = Field(default=None, max_length=1000)
+    username: Optional[str] = Field(default=None, min_length=4, max_length=32)
+    expected_version: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator('username')
+    @classmethod
+    def valid_distributor_username(cls, value):
+        return DistributorCreate.valid_distributor_username(value)
+
+    @model_validator(mode='after')
+    def at_least_one_field(self):
+        if not (self.model_fields_set - {'expected_version'}):
+            raise ValueError('Provide at least one distributor field to update')
+        return self
 
 
 class DistributorRate(BaseModel):
@@ -427,11 +494,12 @@ class DistributorRate(BaseModel):
 
 class DistributorStatus(BaseModel):
     status: str
+    expected_version: Optional[int] = Field(default=None, ge=0)
 
     @field_validator('status')
     @classmethod
     def known_status(cls, v):
-        allowed = {'ACTIVE', 'SUSPENDED', 'TERMINATED'}
+        allowed = {'ACTIVE', 'DISABLED', 'SUSPENDED', 'TERMINATED'}
         u = str(v).upper()
         if u not in allowed:
             raise ValueError(f'Status must be one of {", ".join(sorted(allowed))}')
@@ -439,13 +507,36 @@ class DistributorStatus(BaseModel):
 
 
 class DistributorLogin(BaseModel):
-    """Portal credentials for a distributor. The Login ID is their code."""
-    email: str
+    """One-time portal credential provisioning for a distributor."""
+    model_config = ConfigDict(extra='forbid')
+
+    email: EmailStr
+    username: Optional[str] = Field(default=None, min_length=4, max_length=32)
     # Left optional so the operator can have one generated rather than inventing
     # (and then emailing) a weak one.
-    password: Optional[str] = Field(default=None, min_length=8, max_length=64)
+    password: Optional[str] = Field(default=None, min_length=12, max_length=72)
+    must_change_password: bool = True
 
     _password_bytes = field_validator('password')(_bcrypt_password_size)
+
+    @field_validator('password')
+    @classmethod
+    def password_has_visible_character(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError('Temporary password cannot contain only whitespace')
+        return value
+
+    @field_validator('must_change_password')
+    @classmethod
+    def temporary_password_must_be_changed(cls, value):
+        if value is not True:
+            raise ValueError('Distributor temporary passwords must be changed at first login')
+        return True
+
+    @field_validator('username')
+    @classmethod
+    def valid_distributor_username(cls, value):
+        return DistributorCreate.valid_distributor_username(value)
 
 
 class LimitSet(BaseModel):

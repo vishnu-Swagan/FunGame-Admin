@@ -6,7 +6,7 @@ import { formatChips } from "@/components/common";
 import { Card, Metric, Money, Table } from "./partnerBits";
 
 /**
- * Day-by-day revenue for a chosen range, and the export of it.
+ * Day-by-day attributed virtual-chip activity for a chosen range.
  *
  * The deductions between GGR and NGR are shown as their own columns rather than
  * summarised into one "adjustments" figure. NGR is what commission is paid on,
@@ -51,11 +51,11 @@ export default function PartnerRevenue() {
     <div className="space-y-5" data-testid="partner-revenue">
       <div>
         <h1 className="font-display text-2xl text-white flex items-center gap-2">
-          <TrendingUp className="h-5 w-5 text-primary" /> Revenue
+          <TrendingUp className="h-5 w-5 text-primary" /> Reports
         </h1>
         <p className="text-xs text-white/55 mt-1">
-          Every gaming day your players generated, and what was deducted before
-          commission was calculated.
+          Daily virtual-chip activity attributed to your distributor code and the
+          recorded basis used for commission reporting.
         </p>
       </div>
 
@@ -84,16 +84,16 @@ export default function PartnerRevenue() {
 
       {t && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Metric label="TURNOVER" value={formatChips(t.turnover)} hint={`${data.players} player${data.players === 1 ? "" : "s"}`} />
-          <Metric label="PAID OUT" value={formatChips(t.payout)} hint={`${t.bets} bets`} />
-          <Metric label="GGR" value={<Money value={t.ggr} />} />
-          <Metric label="NGR" value={<Money value={t.ngr} />} tone={t.ngr < 0 ? "loss" : "win"} hint="Commission base" />
+          <Metric label="CHIPS PLAYED" value={formatChips(t.turnover)} hint={`${data.players} player${data.players === 1 ? "" : "s"}`} />
+          <Metric label="CHIPS RETURNED" value={formatChips(t.payout)} hint={`${t.bets} rounds`} />
+          <Metric label="GROSS RESULT" value={<Money value={t.ggr} />} />
+          <Metric label="NET RESULT" value={<Money value={t.ngr} />} tone={t.ngr < 0 ? "loss" : "win"} hint="Commission basis" />
         </div>
       )}
 
       <Card title={data ? `${data.from} → ${data.to}` : "Days"} testId="partner-revenue-table">
         <Table
-          head={["Day", "Players", "Bets", "Turnover", "Paid out", "GGR", "Deductions", "NGR"]}
+          head={["Day", "Players", "Rounds", "Chips played", "Chips returned", "Gross", "Adjustments", "Net"]}
           right={[1, 2, 3, 4, 5, 6, 7]}
           rows={(data?.days || []).map((r) => {
             const deductions = (r.bonus_cost || 0) + (r.duty || 0) + (r.gateway_fee || 0) + (r.platform_fee || 0);
@@ -108,9 +108,8 @@ export default function PartnerRevenue() {
           empty="No play in this range."
         />
         <p className="text-[10px] text-white/35 mt-2">
-          Turnover excludes refunded stakes — a voided round was never at risk, so
-          it is not counted. Deductions are the bonus chips, duty and fees applied
-          to that day, frozen as they stood when the day was calculated.
+          Voided rounds are excluded. Adjustments are the recorded bonus-chip and
+          platform entries frozen when the day was calculated. Player chips have no cash value.
         </p>
       </Card>
     </div>

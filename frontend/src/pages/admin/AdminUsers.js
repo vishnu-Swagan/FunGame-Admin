@@ -135,7 +135,6 @@ export default function AdminUsers() {
                 <TableHead className="text-white/50">Country</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
                 <TableHead className="text-white/50 text-right">Chips</TableHead>
-                <TableHead className="text-white/50 text-right">Deposits</TableHead>
                 <TableHead className="text-white/50 text-right">Won</TableHead>
                 <TableHead className="text-white/50 text-right">Lost</TableHead>
                 <TableHead className="text-white/50">Joined</TableHead>
@@ -145,10 +144,6 @@ export default function AdminUsers() {
             <TableBody>
               {shownUsers.map((u) => {
                 const review = registrationReview(u);
-                const onboarding = u.telesign_onboarding || {};
-                const telesignRisk = onboarding.intelligence?.risk || u.telesign_last_sign_in?.risk;
-                const telesignPhone = onboarding.intelligence?.phone_type || onboarding.phone_id?.phone_type;
-                const telesignContact = onboarding.phone_id?.contact_addon?.available === true;
                 return (
                 <TableRow key={u.id} data-testid="admin-user-row" className="border-white/5 hover:bg-white/5">
                   <TableCell>
@@ -184,27 +179,11 @@ export default function AdminUsers() {
                         {review.submitted ? `Submitted ${timeAgo(u.submitted_at)}` : review.submissionLabel}
                       </p>
                       {review.selfService && <p className={review.termsAccepted ? "text-white/50" : "text-amber-300"}>Terms: {review.termsAccepted ? "accepted" : "missing"}</p>}
-                      {telesignRisk && (
-                        <p
-                          data-testid="admin-user-telesign-risk"
-                          className={telesignRisk.recommendation === "allow" ? "text-emerald-300" : telesignRisk.recommendation === "flag" ? "text-amber-300" : "text-red-300"}
-                        >
-                          Telesign: {telesignRisk.recommendation || "review"} · risk {telesignRisk.score ?? "—"}
-                        </p>
-                      )}
-                      {telesignPhone?.description && (
-                        <p data-testid="admin-user-telesign-phone" className="text-white/50">
-                          Phone: {telesignPhone.description}{telesignContact ? " · contact found" : ""}
-                        </p>
-                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-white/70">{u.country || "—"}</TableCell>
                   <TableCell><UserStatusBadge status={u.status} /></TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-semibold">{formatChips(u.chip_balance)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-sm text-white/70" data-testid="admin-user-deposits">
-                    {formatChips(u.stats?.total_deposits || 0)}
-                  </TableCell>
                   <TableCell className="text-right tabular-nums text-sm font-semibold text-[hsl(var(--emerald))]" data-testid="admin-user-won">
                     {formatChips(u.stats?.winning_chips || 0)}
                   </TableCell>

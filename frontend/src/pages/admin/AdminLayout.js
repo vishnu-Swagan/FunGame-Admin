@@ -4,7 +4,6 @@ import {
   Bell,
   Calculator,
   ChevronDown,
-  CircleDollarSign,
   FileText,
   Gamepad2,
   Gift,
@@ -17,8 +16,6 @@ import {
   Settings,
   ShieldCheck,
   Users,
-  WalletCards,
-  Webhook,
   X,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -30,67 +27,44 @@ import "@/pages/admin/admin-crm.css";
 const NAV_GROUPS = [
   {
     items: [
-      { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
+      { to: "/Admin/dashboard", label: "Dashboard", icon: LayoutDashboard, end: true, testId: "admin-nav-dashboard" },
     ],
   },
   {
     label: "People",
     items: [
-      { to: "/admin/players", label: "Players", icon: Users, matches: ["/admin/players", "/admin/users"], testId: "admin-nav-users" },
-      { to: "/admin/distributors", label: "Distributors", icon: Network, testId: "admin-nav-distributors" },
+      { to: "/Admin/players", label: "Players", icon: Users, matches: ["/Admin/players", "/Admin/users"], testId: "admin-nav-users" },
+      { to: "/Admin/distributors", label: "Distributors", icon: Network, permission: ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW, testId: "admin-nav-distributors" },
+      { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
     ],
   },
   {
-    label: "Money",
+    label: "Virtual chips",
     items: [
-      {
-        to: "/admin/finance/deposits",
-        label: "Finance",
-        icon: CircleDollarSign,
-        permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW,
-        matches: ["/admin/finance", "/admin/deposits", "/admin/withdrawals", "/admin/wallet-ledger", "/admin/payouts"],
-        testId: "admin-nav-deposits",
-      },
-      {
-        to: "/admin/payment-gateways",
-        label: "Payment gateways",
-        icon: WalletCards,
-        permission: ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE,
-        testId: "admin-nav-payment-settings",
-      },
-      { to: "/admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
-      { to: "/admin/bonuses", label: "Bonuses", icon: Gift, matches: ["/admin/bonuses", "/admin/chip-requests"], testId: "admin-nav-chip-requests" },
+      { to: "/Admin/bonuses", label: "Chip requests", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
     ],
   },
   {
     label: "Platform",
     items: [
-      { to: "/admin/games/catalog", label: "Games", icon: Gamepad2, matches: ["/admin/games"], testId: "admin-nav-games" },
-      { to: "/admin/reports", label: "Reports", icon: FileText, matches: ["/admin/reports", "/admin/compliance"], testId: "admin-nav-compliance" },
-      { to: "/admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
-      { to: "/admin/notifications", label: "Notifications", icon: Bell, matches: ["/admin/notifications", "/admin/announcements"], testId: "admin-nav-announcements" },
+      { to: "/Admin/games/catalog", label: "Games", icon: Gamepad2, matches: ["/Admin/games"], testId: "admin-nav-games" },
+      { to: "/Admin/reports", label: "Reports", icon: FileText, matches: ["/Admin/reports", "/Admin/compliance"], testId: "admin-nav-compliance" },
+      { to: "/Admin/support", label: "Support", icon: MessagesSquare, testId: "admin-nav-support" },
+      { to: "/Admin/notifications", label: "Notifications", icon: Bell, matches: ["/Admin/notifications", "/Admin/announcements"], testId: "admin-nav-announcements" },
     ],
   },
   {
     label: "Control",
     items: [
       {
-        to: "/admin/security",
+        to: "/Admin/security",
         label: "Security & audit",
         icon: ShieldCheck,
         permission: ADMIN_PERMISSIONS.AUDIT_VIEW,
-        matches: ["/admin/security", "/admin/payment-audit", "/admin/kyc"],
+        matches: ["/Admin/security", "/Admin/payment-audit", "/Admin/kyc"],
         testId: "admin-nav-payment-audit",
       },
-      {
-        to: "/admin/monitoring",
-        label: "System monitoring",
-        icon: Webhook,
-        permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW,
-        matches: ["/admin/monitoring", "/admin/payment-events"],
-        testId: "admin-nav-payment-events",
-      },
-      { to: "/admin/settings", label: "Settings", icon: Settings, testId: "admin-nav-settings" },
+      { to: "/Admin/settings", label: "Settings", icon: Settings, testId: "admin-nav-settings" },
     ],
   },
 ];
@@ -135,7 +109,7 @@ export default function AdminLayout() {
   }, [query, visibleGroups]);
 
   const activeItem = FLAT_NAV.find((item) => {
-    if (item.end) return location.pathname === item.to || (item.label === "Dashboard" && location.pathname === "/admin");
+    if (item.end) return location.pathname === item.to || (item.label === "Dashboard" && location.pathname === "/Admin");
     return (item.matches || [item.to]).some((path) => location.pathname.startsWith(path));
   });
   const activeGroup = NAV_GROUPS.find((group) => group.items.some((item) => item === activeItem));
@@ -186,7 +160,7 @@ export default function AdminLayout() {
                     end={end}
                     data-testid={testId}
                     onClick={() => setSidebarOpen(false)}
-                    className={({ isActive }) => `nav-link ${isActive || forcedActive || (label === "Dashboard" && location.pathname === "/admin") ? "active" : ""}`}
+                    className={({ isActive }) => `nav-link ${isActive || forcedActive || (label === "Dashboard" && location.pathname === "/Admin") ? "active" : ""}`}
                   >
                     <Icon size={17} strokeWidth={1.8} />
                     <span>{label}</span>
@@ -223,7 +197,7 @@ export default function AdminLayout() {
               <span>Search workspace</span>
               <kbd>⌘ K</kbd>
             </button>
-            <button type="button" className="icon-button has-alert" aria-label="Open notifications" onClick={() => navigate("/admin/notifications")}>
+            <button type="button" className="icon-button has-alert" aria-label="Open notifications" onClick={() => navigate("/Admin/notifications")}>
               <Bell size={17} />
             </button>
             <div className="role-switcher role-fixed" aria-label="Current administrator">

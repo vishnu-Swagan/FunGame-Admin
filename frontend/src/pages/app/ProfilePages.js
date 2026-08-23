@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2, Landmark, HandCoins, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
+  Download, CheckCircle2, HandCoins, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +54,6 @@ export function Profile() {
     { icon: HandCoins, label: "Request chips", to: "/chips/request", testId: "profile-link-request-chips" },
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
-    { icon: Landmark, label: "Bank details", to: "/profile/bank-details", testId: "profile-link-bank-details" },
     { icon: HeartPulse, label: "Responsible play", to: "/responsible-play", testId: "profile-link-responsible" },
     { icon: SettingsIcon, label: "Account settings", to: "/settings", testId: "profile-link-settings" },
     { icon: Megaphone, label: "Announcements", to: "/announcements", testId: "profile-link-announcements" },
@@ -404,7 +403,7 @@ export function Profile() {
       {user?.role === "ADMIN" && (
         <button
           data-testid="profile-admin-panel-link"
-          onClick={() => navigate("/admin")}
+          onClick={() => navigate("/Admin/dashboard")}
           className="w-full flex items-center justify-between rounded-2xl border border-primary/35 bg-primary/10 p-4 hover:bg-primary/15 transition-[background-color] duration-150"
         >
           <span className="flex items-center gap-3 font-semibold text-primary">

@@ -12,6 +12,7 @@ collect_ignore = [
     "test_commission.py",
     "test_compliance.py",
     "test_crm.py",
+    "test_distributor_parity.py",
     "test_enable_all_games.py",
     "test_game_transactions.py",
     "test_migration_export.py",

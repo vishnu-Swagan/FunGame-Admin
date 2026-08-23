@@ -96,6 +96,37 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+def public_user(user: dict) -> dict:
+    """Return the signed-in user's safe client projection.
+
+    Keep this shared by login, ``/auth/me`` and onboarding polling so adding a
+    new internal identity or provisioning field cannot accidentally make one
+    of those responses broader than the others.
+    """
+    # Import lazily: several isolated engine/financial suites intentionally
+    # replace the ``db`` module with a minimal test double that only supplies
+    # the database handle and never exercises response serialization.
+    from db import serialize_doc
+    public = serialize_doc(user)
+    for key in (
+        'active_session_id', 'email_normalized', 'phone_normalized',
+        'username_key', 'previous_email', 'password_failed_attempts',
+        'locked_until', 'telesign_onboarding', 'telesign_last_sign_in',
+        'password_provisioned_at', 'password_provisioned_by',
+        'created_by', 'provisioned_by', 'approved_by', 'reviewed_by',
+        'updated_by', 'admin_note', 'disabled_by_distributor_status',
+        'admin_step_up_password_verified_at', 'admin_step_up_session_id',
+        'mfa_verified_at', 'reauthenticated_at', 'admin_step_up_completed_at',
+    ):
+        public.pop(key, None)
+    # Phone registrations and provisional manual applications carry unique
+    # compatibility addresses for the legacy non-sparse email index. They are
+    # never presented as user data.
+    if str(public.get('email') or '').endswith(('.phone.invalid', '.manual.invalid')):
+        public['email'] = None
+    return public
+
+
 def create_access_token(user_id: str, role: str, session_id: str = None) -> str:
     payload = {
         'sub': user_id,
@@ -203,6 +234,14 @@ def require_recent_admin_step_up(admin: dict) -> None:
             'message': 'Administrator step-up verification is unavailable.',
         }) from exc
     current = datetime.now(timezone.utc)
+    if (
+        not admin.get('active_session_id')
+        or admin.get('admin_step_up_session_id') != admin.get('active_session_id')
+    ):
+        raise HTTPException(status_code=403, detail={
+            'code': 'ADMIN_STEP_UP_REQUIRED',
+            'message': 'Complete administrator verification in this signed-in session.',
+        })
     mfa_at = _parse_security_time(admin.get('mfa_verified_at'))
     reauth_at = _parse_security_time(admin.get('reauthenticated_at'))
     mfa_age = (current - mfa_at).total_seconds() if mfa_at else None
@@ -235,12 +274,40 @@ async def require_distributor(user: dict = Depends(get_current_user)):
     dist = await db.distributors.find_one({'user_id': user['id']}, {'_id': 0})
     if not dist:
         raise HTTPException(status_code=403, detail='This login is not linked to a distributor account')
-    if dist.get('status') != 'ACTIVE':
+    if user.get('status') != 'ACTIVE':
         raise HTTPException(status_code=403, detail={
-            'code': 'DISTRIBUTOR_SUSPENDED',
-            'message': 'Your partner account is suspended. Please contact the operator.',
+            'code': 'DISTRIBUTOR_LOGIN_DISABLED',
+            'message': 'This partner login is disabled. Please contact the operator.',
+        })
+    if dist.get('status') != 'ACTIVE':
+        state = str(dist.get('status') or 'DISABLED').upper()
+        raise HTTPException(status_code=403, detail={
+            'code': f'DISTRIBUTOR_{state}',
+            'message': f'Your partner account is {state.lower()}. Please contact the operator.',
+        })
+    if user.get('password_change_required'):
+        raise HTTPException(status_code=403, detail={
+            'code': 'PASSWORD_CHANGE_REQUIRED',
+            'message': 'Change the temporary password before opening the partner portal.',
+            'change_password_url': '/auth/change-password',
         })
     return {'user': user, 'distributor': dist}
+
+
+async def require_password_ready_user(user: dict = Depends(get_current_user)):
+    """Block provisioned partners from every non-auth route until reset.
+
+    `/auth/me`, `/auth/change-password` and `/auth/logout` intentionally keep
+    using `get_current_user` directly; every shared signed-in application route
+    uses this dependency so a temporary credential cannot read or mutate data.
+    """
+    if user.get('role') == 'DISTRIBUTOR' and user.get('password_change_required'):
+        raise HTTPException(status_code=403, detail={
+            'code': 'PASSWORD_CHANGE_REQUIRED',
+            'message': 'Change the temporary password before continuing.',
+            'change_password_url': '/auth/change-password',
+        })
+    return user
 
 
 async def check_maintenance_for_players(user: dict):

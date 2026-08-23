@@ -113,7 +113,7 @@ export default function AdminSettings() {
               <ShieldCheck className="h-4 w-4 text-primary" /> Telesign trust platform
             </p>
             <p className="text-xs text-white/55 mt-1">
-              One server-side integration for onboarding, account integrity, and transactional engagement.
+              Read-only server readiness for account-integrity services. This panel cannot send messages or change provider configuration.
             </p>
           </div>
           <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${telesign?.credentials_ready ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-amber-300/30 bg-amber-300/10 text-amber-200"}`}>
@@ -137,11 +137,11 @@ export default function AdminSettings() {
           <div className="grid grid-cols-3 gap-2 border-t border-white/8 pt-3 text-center">
             <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.screened_players}</p><p className="text-[10px] text-white/45">Screened players</p></div>
             <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.flagged_players}</p><p className="text-[10px] text-white/45">Risk flags</p></div>
-            <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.sms_verify_challenges}</p><p className="text-[10px] text-white/45">OTP sends</p></div>
+            <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.sms_verify_challenges}</p><p className="text-[10px] text-white/45">Verification activity</p></div>
           </div>
         )}
         <p className="text-[11px] leading-relaxed text-white/45">
-          API keys are managed by the deployment host and can never be viewed or edited here. Product calls may consume Telesign balance even when included in the account plan.
+          Secret values stay on the deployment host and are never returned, viewed, or edited here. This readiness panel makes no provider calls other than loading its status.
         </p>
       </div>
 

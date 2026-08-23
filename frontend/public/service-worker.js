@@ -1,10 +1,10 @@
 // Installable app shell. API calls remain network-only because games and account
 // data are live; only the frontend shell and same-origin static assets are cached.
-const CACHE = 'chakri-shell-v5';
+const CACHE = 'chakri-shell-v6';
 const CORE_ASSETS = [
   '/',
   '/manifest.json',
-  '/chakri-roulette-brand.png',
+  '/chakri-roulette-emblem-transparent.png',
   '/chakri-favicon.png',
   '/chakri-app-icon-192.png',
   '/chakri-app-icon-512.png',
@@ -13,7 +13,7 @@ const CORE_ASSETS = [
 ];
 
 const offlineDocument = () => new Response(
-  '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0B0B0F"><title>CHAKRI.CASINO</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0f;color:#fff;font:600 16px system-ui"><main style="text-align:center;padding:24px"><img src="/chakri-roulette-brand.png" width="640" height="160" style="width:min(90vw,640px);height:auto" alt="CHAKRI.CASINO"><p style="color:#aaa;font-weight:400">You are offline. Reconnect to continue playing live games.</p></main></body></html>',
+  '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0B0B0F"><title>CHAKRI.CASINO</title></head><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0f;color:#fff;font:600 16px system-ui"><main style="text-align:center;padding:24px"><div role="img" aria-label="CHAKRI.CASINO — PLAY IN THE LIGHT" style="display:inline-flex;align-items:center;width:min(92vw,640px);background:transparent"><img src="/chakri-roulette-emblem-transparent.png" width="1254" height="1254" alt="" style="display:block;width:25%;height:auto"><span style="display:grid;flex:1;text-align:left;padding-left:2.3%;line-height:1"><strong style="color:#efc86d;font:800 clamp(22px,7.7vw,56px) Georgia,serif;letter-spacing:-.035em;white-space:nowrap;text-shadow:0 3px 3px #000">CHAKRI.CASINO</strong><small style="margin-top:6%;color:#f5d584;font-size:clamp(7px,1.8vw,13px);font-weight:850;letter-spacing:.42em;white-space:nowrap">PLAY IN THE LIGHT</small></span></div><p style="color:#aaa;font-weight:400">You are offline. Reconnect to continue playing live games.</p></main></body></html>',
   { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
 );
 

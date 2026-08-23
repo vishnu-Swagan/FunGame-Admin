@@ -71,7 +71,7 @@ export default function AdminCommission() {
           <Calculator className="h-5 w-5 text-primary" /> Commission
         </h1>
         <p className="text-xs text-white/55 mt-1">
-          The night job settles the previous gaming day at 02:00. These controls do the
+          The night job settles the previous virtual-chip activity day at 02:00. These controls do the
           same thing by hand — safely, because a settled period is refused rather than repeated.
         </p>
       </div>
@@ -79,7 +79,7 @@ export default function AdminCommission() {
       <div className="rounded-2xl border border-white/10 bg-card/55 p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1">
-            <span className="block text-xs text-white/60">Gaming day</span>
+            <span className="block text-xs text-white/60">Activity day</span>
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} data-testid="commission-day"
               className="h-10 rounded-xl bg-white/5 border border-white/12 px-3 text-sm text-white" />
           </label>
@@ -105,12 +105,12 @@ export default function AdminCommission() {
       {revenue && (
         <Panel title={`Revenue · ${revenue.day}`}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            <Metric label="Turnover" value={formatChips(revenue.totals.turnover)} />
-            <Metric label="Payout" value={formatChips(revenue.totals.payout)} />
-            <Metric label="GGR" value={formatChips(revenue.totals.ggr)} />
-            <Metric label="NGR" value={formatChips(revenue.totals.ngr)} tone={revenue.totals.ngr < 0 ? "loss" : "win"} />
+            <Metric label="Chips played" value={formatChips(revenue.totals.turnover)} />
+            <Metric label="Chips returned" value={formatChips(revenue.totals.payout)} />
+            <Metric label="Gross result" value={formatChips(revenue.totals.ggr)} />
+            <Metric label="Net result" value={formatChips(revenue.totals.ngr)} tone={revenue.totals.ngr < 0 ? "loss" : "win"} />
           </div>
-          <Table head={["Distributor", "Players", "Turnover", "GGR", "NGR"]}
+          <Table head={["Distributor", "Players", "Chips played", "Gross result", "Net result"]}
                  rows={revenue.distributors.map((d) => [
                    d.distributor_code || d.distributor_id.slice(0, 8),
                    d.players, formatChips(d.turnover), formatChips(d.ggr), formatChips(d.ngr),
@@ -119,7 +119,7 @@ export default function AdminCommission() {
       )}
 
       <Panel title="Settled periods">
-        <Table head={["Period", "Distributors", "NGR", "Commission", "Carried", "Status"]}
+        <Table head={["Period", "Distributors", "Net result", "Commission", "Carried", "Status"]}
                rows={runs.map((r) => [
                  r.period_start === r.period_end ? r.period_start : `${r.period_start} → ${r.period_end}`,
                  r.distributors ?? "—",
@@ -131,7 +131,7 @@ export default function AdminCommission() {
       </Panel>
 
       <Panel title="Commission ledger">
-        <Table head={["Period", "Distributor", "NGR", "Carry in", "Rate", "Commission", "Carry out", "Status"]}
+        <Table head={["Period", "Distributor", "Net result", "Carry in", "Rate", "Commission", "Carry out", "Status"]}
                rows={entries.map((e) => [
                  e.period_end,
                  e.distributor_code || e.distributor_id.slice(0, 8),

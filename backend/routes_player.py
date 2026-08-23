@@ -26,9 +26,10 @@ from avatar_service import (
 )
 from auth_utils import (
     check_maintenance_for_players,
-    get_current_user,
+    public_user,
     require_active_player,
     require_legacy_chip_mutation_allowed,
+    require_password_ready_user,
 )
 from game_access import (
     normalise_game_slug,
@@ -231,7 +232,7 @@ def _onboarding_state_conflict(current: dict | None):
 
 
 @router.post('/onboarding/profile')
-async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depends(get_current_user)):
+async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depends(require_password_ready_user)):
     if user.get('role') != 'PLAYER':
         raise HTTPException(status_code=403, detail='Player onboarding is required')
     if not (user.get('contact_verified') or user.get('email_verified')
@@ -276,7 +277,7 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
 
 
 @router.post('/onboarding/submit')
-async def onboarding_submit(user: dict = Depends(get_current_user)):
+async def onboarding_submit(user: dict = Depends(require_password_ready_user)):
     if user.get('role') != 'PLAYER':
         raise HTTPException(status_code=403, detail='Player onboarding is required')
     if not (user.get('contact_verified') or user.get('email_verified')
@@ -319,8 +320,14 @@ async def onboarding_submit(user: dict = Depends(get_current_user)):
 
 
 @router.get('/onboarding/status')
-async def onboarding_status(user: dict = Depends(get_current_user)):
-    return {'status': user.get('status'), 'rejection_reason': user.get('rejection_reason'), 'user': serialize_doc(user)}
+async def onboarding_status(user: dict = Depends(require_password_ready_user)):
+    if user.get('role') != 'PLAYER':
+        raise HTTPException(status_code=403, detail='Player onboarding is required')
+    return {
+        'status': user.get('status'),
+        'rejection_reason': user.get('rejection_reason'),
+        'user': public_user(user),
+    }
 
 
 # ---------- Games ----------
@@ -550,7 +557,7 @@ async def my_transactions(user: dict = Depends(require_active_player)):
 
 # ---------- Support / messaging (available to every signed-in user) ----------
 @router.get('/support/thread')
-async def support_thread(user: dict = Depends(get_current_user)):
+async def support_thread(user: dict = Depends(require_password_ready_user)):
     """This user's full conversation with the admin. Marks admin replies read."""
     msgs = await db.support_messages.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', 1).to_list(500)
     await db.support_messages.update_many(
@@ -559,13 +566,13 @@ async def support_thread(user: dict = Depends(get_current_user)):
 
 
 @router.get('/support/unread')
-async def support_unread(user: dict = Depends(get_current_user)):
+async def support_unread(user: dict = Depends(require_password_ready_user)):
     n = await db.support_messages.count_documents({'user_id': user['id'], 'sender': 'ADMIN', 'read_user': False})
     return {'unread': n}
 
 
 @router.post('/support/message')
-async def support_send(body: SupportMessageCreate, user: dict = Depends(get_current_user)):
+async def support_send(body: SupportMessageCreate, user: dict = Depends(require_password_ready_user)):
     recent = await db.support_messages.count_documents({
         'user_id': user['id'], 'sender': 'USER',
         'created_at': {'$gte': (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
@@ -584,7 +591,7 @@ async def support_send(body: SupportMessageCreate, user: dict = Depends(get_curr
 
 # ---------- Announcements ----------
 @router.get('/announcements')
-async def announcements(user: dict = Depends(get_current_user)):
+async def announcements(user: dict = Depends(require_password_ready_user)):
     await check_maintenance_for_players(user)
     items = await db.announcements.find({'active': True}, {'_id': 0}).sort([('pinned', -1), ('created_at', -1)]).to_list(100)
     return {'announcements': serialize_doc(items)}
@@ -592,14 +599,14 @@ async def announcements(user: dict = Depends(get_current_user)):
 
 # ---------- Notifications ----------
 @router.get('/notifications')
-async def notifications(user: dict = Depends(get_current_user)):
+async def notifications(user: dict = Depends(require_password_ready_user)):
     items = await db.notifications.find({'user_id': user['id']}, {'_id': 0}).sort('created_at', -1).to_list(100)
     unread = sum(1 for i in items if not i.get('read'))
     return {'notifications': serialize_doc(items), 'unread_count': unread}
 
 
 @router.post('/notifications/{notification_id}/read')
-async def mark_read(notification_id: str, user: dict = Depends(get_current_user)):
+async def mark_read(notification_id: str, user: dict = Depends(require_password_ready_user)):
     result = await db.notifications.update_one({'id': notification_id, 'user_id': user['id']}, {'$set': {'read': True}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail='Notification not found')
@@ -607,7 +614,7 @@ async def mark_read(notification_id: str, user: dict = Depends(get_current_user)
 
 
 @router.post('/notifications/read-all')
-async def mark_all_read(user: dict = Depends(get_current_user)):
+async def mark_all_read(user: dict = Depends(require_password_ready_user)):
     await db.notifications.update_many({'user_id': user['id']}, {'$set': {'read': True}})
     return {'message': 'All notifications marked as read'}
 
@@ -699,7 +706,7 @@ async def _select_preset_avatar(avatar: str, user: dict) -> dict:
 
 
 @router.get('/profile/avatars')
-async def list_profile_avatars(user: dict = Depends(get_current_user)):
+async def list_profile_avatars(user: dict = Depends(require_password_ready_user)):
     """Return the selectable local catalogue and current avatar descriptor."""
     if user.get('role') != 'PLAYER':
         raise HTTPException(status_code=403, detail='Player profile is required')
@@ -726,7 +733,7 @@ async def list_profile_avatars(user: dict = Depends(get_current_user)):
 @router.put('/profile/avatar')
 async def select_profile_avatar(
         body: PlayerAvatarSelection,
-        user: dict = Depends(get_current_user)):
+        user: dict = Depends(require_password_ready_user)):
     fresh = await _select_preset_avatar(body.avatar, user)
     return {'message': 'Avatar updated.', 'profile': serialize_doc(fresh)}
 
@@ -757,7 +764,7 @@ async def _read_avatar_upload(file: UploadFile) -> bytes:
 @router.post('/profile/avatar/upload')
 async def upload_profile_avatar(
         file: UploadFile = File(...),
-        user: dict = Depends(get_current_user)):
+        user: dict = Depends(require_password_ready_user)):
     """Normalize one player image and persist it in Mongo-backed storage."""
     _require_active_profile_player(user)
     try:
@@ -859,7 +866,7 @@ async def uploaded_avatar(upload_id: str):
 
 
 @router.patch('/profile')
-async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_current_user)):
+async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(require_password_ready_user)):
     """Edit only the public game identity of an active player.
 
     Email, phone, country, date of birth, verification and balances are
@@ -897,7 +904,7 @@ async def update_profile(body: PlayerProfileUpdate, user: dict = Depends(get_cur
 
 
 @router.patch('/settings')
-async def update_settings(body: SettingsUpdate, user: dict = Depends(get_current_user)):
+async def update_settings(body: SettingsUpdate, user: dict = Depends(require_password_ready_user)):
     updates = {f'settings.{k}': v for k, v in body.model_dump(exclude_none=True).items()}
     if updates:
         await db.users.update_one({'id': user['id']}, {'$set': updates})

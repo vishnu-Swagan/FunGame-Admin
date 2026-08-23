@@ -612,10 +612,7 @@ export function CategoryLobby({ categories, balance, busy, loading, error, joinF
     <main className="rummy-lobby" data-testid="rummy-category-lobby">
       <header className="rummy-lobby-head">
         <button type="button" onClick={onExit} aria-label="Back to Rummy details"><ArrowLeft /></button>
-        <div className="rummy-lobby-brand" aria-label="CHAKRI.CASINO Rummy">
-          <img src="/chakri-app-icon-192.png" alt="" aria-hidden="true" />
-          <span><b>CHAKRI.CASINO</b><strong>RUMMY</strong><small>MOST PLAYED ONLINE</small></span>
-        </div>
+        <BrandWordmark className="rummy-lobby-brand-lockup" logoClassName="rummy-lobby-header-brand-logo" />
         <div className="rummy-lobby-balance"><Coins /><b>{balance == null ? "—" : formatChips(balance)}</b><span>chips</span></div>
       </header>
       <section className="rummy-lobby-copy">
@@ -673,7 +670,6 @@ export function CategoryLobby({ categories, balance, busy, loading, error, joinF
       </section>
       <footer>
         <p className="rummy-opponent-disclosure"><ShieldCheck />Computer-controlled opponents may fill empty seats.</p>
-        <BrandWordmark logoClassName="rummy-lobby-brand-logo" />
       </footer>
     </main>
   );
@@ -714,8 +710,8 @@ export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = fals
           <h2 id="rummy-result-title">{playerWon ? "You win" : `${winnerName} wins`}</h2>
           <p>{reason}</p>
         </div>
-        <div className="rummy-result-award" aria-label={`${formatChips(result.payoutChips)} chips payout`}>
-          <span>PAYOUT</span>
+        <div className="rummy-result-award" aria-label={`${formatChips(result.payoutChips)} chips returned`}>
+          <span>CHIPS RETURNED</span>
           <strong>{formatChips(result.payoutChips)}</strong>
           <small>CHIPS</small>
         </div>
@@ -1044,7 +1040,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         <button type="button" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
         <BrandWordmark className="rummy-brand-lockup" logoClassName="rummy-brand-logo" />
         <div className={`rummy-live-pill ${state.walletNeutral ? "is-bot-table" : ""}`}><i />{
-          state.mode === "BOT_TABLE" ? "PRACTICE TABLE · FREE" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
+          state.mode === "BOT_TABLE" ? "PRACTICE TABLE · WALLET-NEUTRAL" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
         }</div>
         <div className="rummy-balance"><Coins /><b>{formatChips(state.balance)}</b><span>chips</span></div>
         <div className="rummy-table-utilities">

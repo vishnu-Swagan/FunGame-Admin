@@ -24,6 +24,7 @@ very expensive to retrofit once there is money and history in the system:
 Rates are basis points (integer). 25.5% is 2550, never 0.255 — percentages of
 money must not be floats.
 """
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -34,12 +35,15 @@ from pymongo.errors import DuplicateKeyError
 HOUSE_CODE = 'HOUSE'
 ACTIVE_ATTRIBUTION_INDEX = 'player_attribution_active_user_unique'
 ACTIVE_ATTRIBUTION_PARTIAL = {'active': True}
+LOGIN_ID_RESERVATION_INDEX = 'login_id_reservation_key_unique'
 
 # 0/O and 1/I/L are the same character to someone reading a code off a screen or
 # hearing it over a phone, and a mistyped code silently pays the wrong person.
 _CONFUSABLE = str.maketrans({'O': '0', 'I': '1', 'L': '1'})
 _CODE_OK = re.compile(r'^[A-Z0-9]{4,12}$')
+_LOGIN_USERNAME_OK = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$')
 _RESERVED = {'HOUSE', 'ADMIN', 'NULL', 'NONE', 'TEST', 'SYSTEM', 'CHAKRI'}
+logger = logging.getLogger('crm')
 
 
 class CrmConfigurationError(RuntimeError):
@@ -74,6 +78,125 @@ def code_is_available(code):
     return code not in _RESERVED or code == HOUSE_CODE
 
 
+def normalise_login_username(raw):
+    """Return a display Login ID and its case-insensitive uniqueness key."""
+    username = str(raw or '').strip()
+    if not _LOGIN_USERNAME_OK.fullmatch(username):
+        raise ValueError(
+            'Login ID must be 4-32 characters: letters, numbers, dot, underscore or hyphen'
+        )
+    return username, username.casefold()
+
+
+async def _assert_login_username_available(username, distributor_id=None, user_id=None,
+                                           *, session=None):
+    """Reserve partner Login IDs across CRM reservations and existing users."""
+    kwargs = _session_kwargs(session)
+    username, key = normalise_login_username(username)
+    reserved = await db.distributors.find_one({'login_username_key': key}, **kwargs)
+    if reserved and reserved.get('id') != distributor_id:
+        raise ValueError(f'Login ID {username} is already reserved for another distributor')
+    code_owner = await db.distributors.find_one({
+        'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'},
+    }, **kwargs)
+    if code_owner and code_owner.get('id') != distributor_id:
+        raise ValueError(f'Login ID {username} conflicts with another distributor referral code')
+    taken = await db.users.find_one({'$or': [
+        {'username_key': key},
+        {'username': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]}, **kwargs)
+    if taken and taken.get('id') != user_id:
+        raise ValueError(f'Login ID {username} is already in use')
+    return username, key
+
+
+async def distributor_login_id_is_reserved(username, *, session=None) -> bool:
+    """Whether a player Login ID would consume a distributor reservation.
+
+    An explicit independent partner Login ID and every referral code are both
+    reservations: a code remains the backward-compatible portal default until
+    an independent ID is chosen. Player provisioning consults this helper
+    before inserting into ``users`` so it cannot strand an unprovisioned CRM
+    record whose Login ID was already promised.
+    """
+    # Player Login IDs have their own (slightly broader) schema, so do not run
+    # the distributor-only 4-32 character validator here.
+    username = str(username or '').strip()
+    if not username:
+        return False
+    key = username.casefold()
+    if normalise_code(username) in _RESERVED:
+        return True
+    kwargs = _session_kwargs(session)
+    return bool(await db.distributors.find_one({'$or': [
+        {'login_username_key': key},
+        {'login_username': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+        {'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]}, {'_id': 0, 'id': 1}, **kwargs))
+
+
+async def reserve_login_id(username, owner_type, owner_id, *, session=None):
+    """Atomically reserve one cross-collection Login ID.
+
+    The unique reservation key closes the race that separate unique indexes on
+    ``users`` and ``distributors`` cannot: a player approval and distributor
+    provisioning can no longer both win the same case-insensitive ID.
+    """
+    display = str(username or '').strip()
+    if not display:
+        raise ValueError('Login ID cannot be blank')
+    key = display.casefold()
+    owner_type = str(owner_type or '').strip().upper()
+    if owner_type not in {'DISTRIBUTOR', 'USER'} or not owner_id:
+        raise ValueError('A valid Login ID reservation owner is required')
+    kwargs = _session_kwargs(session)
+    doc = {
+        'id': str(uuid.uuid4()),
+        'key': key,
+        'display': display,
+        'owner_type': owner_type,
+        'owner_id': str(owner_id),
+        'created_at': now_iso(),
+    }
+    existing = await db.login_id_reservations.find_one({'key': key}, **kwargs)
+    if existing:
+        if (
+            existing.get('owner_type') == owner_type
+            and existing.get('owner_id') == str(owner_id)
+        ):
+            return existing
+        raise ValueError(f'Login ID {display} is already reserved')
+    try:
+        await db.login_id_reservations.insert_one(doc, **kwargs)
+        return doc
+    except DuplicateKeyError:
+        # A duplicate-key write aborts a real Mongo transaction immediately;
+        # do not issue a recovery read on that dead session. The surrounding
+        # route maps the conflict and the client reloads. Outside a transaction
+        # (startup/lazy legacy adoption), it is safe to read the winner.
+        if session is not None:
+            raise
+        existing = await db.login_id_reservations.find_one({'key': key}, **kwargs)
+        if (
+            existing
+            and existing.get('owner_type') == owner_type
+            and existing.get('owner_id') == str(owner_id)
+        ):
+            return existing
+        raise ValueError(f'Login ID {display} is already reserved')
+
+
+async def release_login_id(username, owner_type, owner_id, *, session=None):
+    display = str(username or '').strip()
+    if not display:
+        return
+    await db.login_id_reservations.delete_one({
+        'key': display.casefold(),
+        'owner_type': str(owner_type or '').strip().upper(),
+        'owner_id': str(owner_id),
+    }, **_session_kwargs(session))
+
+
 # ---------------------------------------------------------------- distributors
 
 async def ensure_house_account(*, session=None):
@@ -95,7 +218,11 @@ async def ensure_house_account(*, session=None):
         'is_house': True,
         'email': None,
         'phone': None,
+        'login_username': None,
+        'login_username_key': None,
         'user_id': None,          # no portal login
+        'record_version': 0,
+        'credentials_version': 0,
         'created_at': now_iso(),
         'created_by': 'system',
         'note': 'Players who arrived without a referral code.',
@@ -120,33 +247,255 @@ async def ensure_house_account(*, session=None):
 
 
 async def create_distributor(name, code, rate_bps, created_by, email=None,
-                             phone=None, note=None):
+                             phone=None, note=None, username=None, *, session=None):
+    kwargs = _session_kwargs(session)
     code = normalise_code(code)
     if not code:
         raise ValueError('Code must be 4-12 letters or digits')
     if not code_is_available(code):
         raise ValueError(f'"{code}" is reserved')
-    if await db.distributors.find_one({'code': code}):
+    if await db.distributors.find_one({'code': code}, **kwargs):
         raise ValueError(f'Code "{code}" is already in use')
+    if await db.distributors.find_one({'login_username_key': code.casefold()}, **kwargs):
+        raise ValueError(f'Code "{code}" conflicts with a reserved distributor Login ID')
     rate_bps = int(rate_bps)
     if not 0 <= rate_bps <= 10000:
         raise ValueError('Commission must be between 0 and 100 percent')
+    login_username = login_username_key = None
+    if username:
+        login_username, login_username_key = await _assert_login_username_available(
+            username, session=session,
+        )
+    distributor_id = str(uuid.uuid4())
+    await reserve_login_id(code, 'DISTRIBUTOR', distributor_id, session=session)
+    if login_username and login_username_key != code.casefold():
+        await reserve_login_id(
+            login_username, 'DISTRIBUTOR', distributor_id, session=session,
+        )
     doc = {
-        'id': str(uuid.uuid4()),
+        'id': distributor_id,
         'code': code,
         'name': name.strip(),
         'status': 'ACTIVE',
         'is_house': False,
         'email': (email or '').strip().lower() or None,
         'phone': (phone or '').strip() or None,
+        'login_username': login_username,
+        'login_username_key': login_username_key,
         'user_id': None,
+        'record_version': 0,
+        'credentials_version': 0,
         'created_at': now_iso(),
         'created_by': created_by,
         'note': note,
     }
-    await db.distributors.insert_one(doc)
-    await set_rate(doc['id'], rate_bps, created_by, note='Opening rate')
+    await db.distributors.insert_one(doc, **kwargs)
+    await set_rate(
+        doc['id'], rate_bps, created_by, note='Opening rate', session=session,
+    )
     return doc
+
+
+async def update_distributor(distributor_id, updates, actor, *, expected_version=None,
+                             session=None):
+    """Update mutable CRM profile fields without touching code or attribution.
+
+    Contact and Login ID changes are mirrored to an existing portal account.
+    Any authentication-identity change revokes its current session immediately.
+    Missing fields on legacy rows remain valid; this function only writes keys
+    explicitly supplied by the administrator.
+    """
+    kwargs = _session_kwargs(session)
+    dist = await db.distributors.find_one({'id': distributor_id}, **kwargs)
+    if not dist:
+        raise ValueError('Unknown distributor')
+    if dist.get('is_house'):
+        raise ValueError('The house account profile cannot be edited')
+    linked_user = None
+    if dist.get('user_id'):
+        linked_user = await db.users.find_one({'id': dist['user_id']}, **kwargs)
+        if not linked_user or linked_user.get('role') != 'DISTRIBUTOR':
+            raise ValueError('Distributor portal linkage is invalid; no profile was changed')
+
+    allowed = {'name', 'email', 'phone', 'note', 'username'}
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f'Unsupported distributor fields: {", ".join(sorted(unknown))}')
+    patch = {}
+    user_patch = {}
+    revoke_session = False
+
+    if 'name' in updates:
+        name = str(updates.get('name') or '').strip()
+        if len(name) < 2:
+            raise ValueError('Distributor name must contain at least 2 characters')
+        patch['name'] = name
+        user_patch.update({'full_name': name, 'display_name': f"{name} ({dist['code']})"})
+
+    if 'email' in updates:
+        email = str(updates.get('email') or '').strip().lower() or None
+        if email and '@' not in email:
+            raise ValueError('A valid email is required')
+        if dist.get('user_id') and not email:
+            raise ValueError('A distributor with a portal login must keep a login email')
+        if email and dist.get('user_id'):
+            clash = await db.users.find_one({'$or': [
+                {'email': email}, {'email_normalized': email},
+            ]}, **kwargs)
+            if clash and clash.get('id') != dist.get('user_id'):
+                raise ValueError('That email already belongs to another account')
+        patch['email'] = email
+        if dist.get('user_id'):
+            user_patch.update({'email': email, 'email_normalized': email})
+            revoke_session = True
+
+    if 'phone' in updates:
+        patch['phone'] = str(updates.get('phone') or '').strip() or None
+    if 'note' in updates:
+        patch['note'] = str(updates.get('note') or '').strip() or None
+
+    if 'username' in updates:
+        raw_username = updates.get('username')
+        if not raw_username:
+            raise ValueError('Login ID cannot be blank; supply a replacement Login ID')
+        username, key = await _assert_login_username_available(
+            raw_username, distributor_id=distributor_id, user_id=dist.get('user_id'),
+            session=session,
+        )
+        await reserve_login_id(
+            username, 'DISTRIBUTOR', distributor_id, session=session,
+        )
+        patch.update({'login_username': username, 'login_username_key': key})
+        if dist.get('user_id'):
+            user_patch['username'] = username
+            user_patch['username_key'] = key
+            revoke_session = True
+
+    if not patch:
+        raise ValueError('Nothing to update')
+    patch.update({'updated_at': now_iso(), 'updated_by': actor})
+    if expected_version is None:
+        expected_version = int(dist.get('record_version') or 0)
+    else:
+        expected_version = int(expected_version)
+    version_query = {'id': distributor_id}
+    if expected_version == 0:
+        # Legacy rows have no version field; the first guarded write upgrades
+        # them additively to version 1.
+        version_query['$or'] = [
+            {'record_version': 0},
+            {'record_version': None},
+            {'record_version': {'$exists': False}},
+        ]
+    else:
+        version_query['record_version'] = expected_version
+    result = await db.distributors.update_one(
+        version_query,
+        {'$set': patch, '$inc': {'record_version': 1}},
+        **kwargs,
+    )
+    if result.matched_count != 1:
+        raise ValueError('Distributor changed in another administrator session; reload and retry')
+    if dist.get('user_id') and user_patch:
+        if revoke_session:
+            user_patch['active_session_id'] = f'revoked-{uuid.uuid4()}'
+        user_patch['updated_at'] = now_iso()
+        user_result = await db.users.update_one(
+            {'id': dist['user_id'], 'role': 'DISTRIBUTOR'},
+            {'$set': user_patch}, **kwargs,
+        )
+        if user_result.matched_count != 1:
+            raise ValueError('Distributor portal linkage changed; reload and retry')
+    old_username = dist.get('login_username')
+    if (
+        'username' in updates
+        and old_username
+        and old_username.casefold() != str(patch.get('login_username') or '').casefold()
+        and old_username.casefold() != str(dist.get('code') or '').casefold()
+    ):
+        await release_login_id(
+            old_username, 'DISTRIBUTOR', distributor_id, session=session,
+        )
+    return await db.distributors.find_one(
+        {'id': distributor_id}, {'_id': 0}, **kwargs,
+    )
+
+
+async def set_distributor_status(distributor_id, status, actor, *, expected_version=None,
+                                 session=None):
+    """Change partner availability and revoke any live portal session."""
+    kwargs = _session_kwargs(session)
+    status = str(status or '').upper()
+    if status not in {'ACTIVE', 'DISABLED', 'SUSPENDED', 'TERMINATED'}:
+        raise ValueError('Unknown distributor status')
+    dist = await db.distributors.find_one({'id': distributor_id}, **kwargs)
+    if not dist:
+        raise ValueError('Unknown distributor')
+    if dist.get('is_house'):
+        raise ValueError('The house account cannot be disabled')
+    if dist.get('user_id'):
+        linked_user = await db.users.find_one({'id': dist['user_id']}, **kwargs)
+        if not linked_user or linked_user.get('role') != 'DISTRIBUTOR':
+            raise ValueError('Distributor portal linkage is invalid; status was not changed')
+    changed_at = now_iso()
+    if expected_version is None:
+        expected_version = int(dist.get('record_version') or 0)
+    else:
+        expected_version = int(expected_version)
+    version_query = {'id': distributor_id}
+    if expected_version == 0:
+        version_query['$or'] = [
+            {'record_version': 0},
+            {'record_version': None},
+            {'record_version': {'$exists': False}},
+        ]
+    else:
+        version_query['record_version'] = expected_version
+    result = await db.distributors.update_one(
+        version_query,
+        {'$set': {
+            'status': status,
+            'status_changed_at': changed_at,
+            'status_changed_by': actor,
+            'updated_at': changed_at,
+            'updated_by': actor,
+        }, '$inc': {'record_version': 1}},
+        **kwargs,
+    )
+    if result.matched_count != 1:
+        raise ValueError('Distributor changed in another administrator session; reload and retry')
+    if dist.get('user_id'):
+        common = {
+            'active_session_id': f'revoked-{uuid.uuid4()}',
+            'updated_at': changed_at,
+        }
+        if status == 'ACTIVE':
+            # Only undo a disablement caused by this distributor status flow;
+            # never revive a login independently disabled after compromise.
+            await db.users.update_one(
+                {'id': dist['user_id'], 'role': 'DISTRIBUTOR',
+                 'disabled_by_distributor_status': {'$exists': True}},
+                {'$set': {**common, 'status': 'ACTIVE'},
+                 '$unset': {'disabled_by_distributor_status': ''}},
+                **kwargs,
+            )
+            await db.users.update_one(
+                {'id': dist['user_id'], 'role': 'DISTRIBUTOR',
+                 'disabled_by_distributor_status': {'$exists': False}},
+                {'$set': common}, **kwargs,
+            )
+        else:
+            await db.users.update_one(
+                {'id': dist['user_id'], 'role': 'DISTRIBUTOR'},
+                {'$set': {
+                    **common,
+                    'status': 'DISABLED',
+                    'disabled_by_distributor_status': status,
+                }}, **kwargs,
+            )
+    return await db.distributors.find_one(
+        {'id': distributor_id}, {'_id': 0}, **kwargs,
+    )
 
 
 async def set_rate(distributor_id, rate_bps, set_by, effective_from=None, note=None,
@@ -299,7 +648,8 @@ async def reassign_user(user_id, new_distributor_id, actor, note=None):
     return doc
 
 
-async def attach_login(distributor_id, email, password_hash, actor):
+async def attach_login(distributor_id, email, password_hash, actor, username=None,
+                       must_change_password=False, *, session=None):
     """Give a distributor a portal login, or reset the one they have.
 
     The login is an ordinary user row with role DISTRIBUTOR, so the portal
@@ -317,39 +667,89 @@ async def attach_login(distributor_id, email, password_hash, actor):
     is often a partner who has lost control of the old one, and leaving their
     previous token valid for the rest of the week defeats the point of resetting.
     """
-    dist = await db.distributors.find_one({'id': distributor_id})
+    kwargs = _session_kwargs(session)
+    dist = await db.distributors.find_one({'id': distributor_id}, **kwargs)
     if not dist:
         raise ValueError('Unknown distributor')
     if dist.get('is_house'):
         raise ValueError('The house account is not a partner and has no portal login')
+    linked_user = None
+    if dist.get('user_id'):
+        linked_user = await db.users.find_one({'id': dist['user_id']}, **kwargs)
+        if not linked_user or linked_user.get('role') != 'DISTRIBUTOR':
+            raise ValueError('Distributor portal linkage is invalid; credentials were not changed')
     email = (email or '').strip().lower()
     if '@' not in email:
         raise ValueError('A valid email is required for a portal login')
 
-    clash = await db.users.find_one({'email': email})
+    clash = await db.users.find_one({'$or': [
+        {'email': email}, {'email_normalized': email},
+    ]}, **kwargs)
     if clash and clash.get('id') != dist.get('user_id'):
         raise ValueError('That email already belongs to another account')
 
-    if dist.get('user_id'):
-        await db.users.update_one({'id': dist['user_id']}, {'$set': {
-            'email': email,
-            'password_hash': password_hash,
-            'active_session_id': f'revoked-{uuid.uuid4()}',
-            'updated_at': now_iso(),
-        }})
-        await db.distributors.update_one({'id': distributor_id}, {'$set': {'email': email}})
-        return await db.users.find_one({'id': dist['user_id']}, {'_id': 0, 'password_hash': 0})
+    desired_username = username or dist.get('login_username') or dist['code']
+    desired_username, username_key = await _assert_login_username_available(
+        desired_username, distributor_id=distributor_id, user_id=dist.get('user_id'),
+        session=session,
+    )
+    await reserve_login_id(
+        dist['code'], 'DISTRIBUTOR', distributor_id, session=session,
+    )
+    await reserve_login_id(
+        desired_username, 'DISTRIBUTOR', distributor_id, session=session,
+    )
+    provisioned_at = now_iso()
 
-    # The referral code doubles as the Login ID so a partner has one identifier
-    # to remember, which only works while it is unique across every account.
-    taken = await db.users.find_one({'username': {'$regex': f"^{re.escape(dist['code'])}$", '$options': 'i'}})
-    if taken:
-        raise ValueError(f"Login ID {dist['code']} is already in use — change the referral code first")
+    if dist.get('user_id'):
+        await db.users.update_one(
+            {'id': dist['user_id'], 'role': 'DISTRIBUTOR'},
+            {
+                '$set': {
+                    'username': desired_username,
+                    'username_key': username_key,
+                    'email': email,
+                    'email_normalized': email,
+                    'password_hash': password_hash,
+                    'password_change_required': bool(must_change_password),
+                    'password_provisioned_at': provisioned_at,
+                    'password_provisioned_by': actor,
+                    'password_failed_attempts': 0,
+                    'active_session_id': f'revoked-{uuid.uuid4()}',
+                    'updated_at': provisioned_at,
+                },
+                '$unset': {'locked_until': ''},
+            },
+            **kwargs,
+        )
+        await db.distributors.update_one({'id': distributor_id}, {'$set': {
+            'email': email,
+            'login_username': desired_username,
+            'login_username_key': username_key,
+            'credentials_updated_at': provisioned_at,
+            'credentials_updated_by': actor,
+        }, '$inc': {'credentials_version': 1, 'record_version': 1}}, **kwargs)
+        previous_username = dist.get('login_username')
+        if (
+            previous_username
+            and previous_username.casefold() != desired_username.casefold()
+            and previous_username.casefold() != str(dist.get('code') or '').casefold()
+        ):
+            await release_login_id(
+                previous_username, 'DISTRIBUTOR', distributor_id, session=session,
+            )
+        return await db.users.find_one(
+            {'id': dist['user_id'], 'role': 'DISTRIBUTOR'},
+            {'_id': 0, 'password_hash': 0},
+            **kwargs,
+        )
 
     user = {
         'id': str(uuid.uuid4()),
-        'username': dist['code'],
+        'username': desired_username,
+        'username_key': username_key,
         'email': email,
+        'email_normalized': email,
         'password_hash': password_hash,
         'role': 'DISTRIBUTOR',
         'status': 'ACTIVE',
@@ -359,12 +759,22 @@ async def attach_login(distributor_id, email, password_hash, actor):
         'full_name': dist['name'],
         'display_name': f"{dist['name']} ({dist['code']})",
         'chip_balance': 0,
-        'created_at': now_iso(),
+        'password_change_required': bool(must_change_password),
+        'password_failed_attempts': 0,
+        'password_provisioned_at': provisioned_at,
+        'password_provisioned_by': actor,
+        'created_at': provisioned_at,
         'created_by': actor,
     }
-    await db.users.insert_one(user)
+    await db.users.insert_one(user, **kwargs)
     await db.distributors.update_one({'id': distributor_id}, {'$set': {
-        'user_id': user['id'], 'email': email}})
+        'user_id': user['id'],
+        'email': email,
+        'login_username': desired_username,
+        'login_username_key': username_key,
+        'credentials_updated_at': provisioned_at,
+        'credentials_updated_by': actor,
+    }, '$inc': {'credentials_version': 1, 'record_version': 1}}, **kwargs)
     user.pop('_id', None)
     user.pop('password_hash', None)
     return user
@@ -390,6 +800,81 @@ async def ensure_indexes():
     )
     await db.player_attribution.create_index('distributor_id')
     await db.users.create_index('distributor_id')
+    # New portal-parity indexes stay after the established attribution indexes.
+    # Attempt every additive index independently so one legacy conflict never
+    # suppresses the others, then surface a single readiness error. No data is
+    # backfilled or deleted automatically.
+    failures = []
+    specs = (
+        (
+            db.distributors, 'user_id',
+            {'unique': True,
+             'partialFilterExpression': {'user_id': {'$type': 'string'}},
+             'name': 'distributor_portal_user_unique'},
+        ),
+        (
+            db.distributors, 'login_username_key',
+            {'unique': True,
+             'partialFilterExpression': {'login_username_key': {'$type': 'string'}},
+             'name': 'distributor_login_username_unique'},
+        ),
+        (
+            db.users, 'username_key',
+            {'unique': True,
+             'partialFilterExpression': {'username_key': {'$type': 'string'}},
+             'name': 'users_username_key_unique'},
+        ),
+        (
+            db.login_id_reservations, 'key',
+            {'unique': True, 'name': LOGIN_ID_RESERVATION_INDEX},
+        ),
+    )
+    for collection, keys, options in specs:
+        try:
+            await collection.create_index(keys, **options)
+        except Exception as exc:  # continue so later invariants are still attempted
+            failures.append(f"{options['name']}:{type(exc).__name__}")
+            logger.error(
+                'CRM portal index %s unavailable: %s',
+                options['name'], type(exc).__name__,
+            )
+    if failures:
+        raise CrmConfigurationError(
+            f'CRM portal identity indexes are unavailable ({", ".join(failures)})'
+        )
+
+
+async def require_portal_identity_readiness() -> None:
+    """Fail credential/Login-ID mutations closed without exact unique indexes."""
+    expected = (
+        (
+            db.distributors, 'distributor_portal_user_unique', [('user_id', 1)],
+            {'user_id': {'$type': 'string'}},
+        ),
+        (
+            db.distributors, 'distributor_login_username_unique',
+            [('login_username_key', 1)],
+            {'login_username_key': {'$type': 'string'}},
+        ),
+        (
+            db.users, 'users_username_key_unique', [('username_key', 1)],
+            {'username_key': {'$type': 'string'}},
+        ),
+        (
+            db.login_id_reservations, LOGIN_ID_RESERVATION_INDEX, [('key', 1)], None,
+        ),
+    )
+    try:
+        for collection, name, keys, partial in expected:
+            spec = (await collection.index_information()).get(name) or {}
+            if list(spec.get('key') or []) != keys or spec.get('unique') is not True:
+                raise CrmConfigurationError(f'CRM portal identity index {name} is unavailable')
+            if partial is not None and spec.get('partialFilterExpression') != partial:
+                raise CrmConfigurationError(f'CRM portal identity index {name} is invalid')
+    except CrmConfigurationError:
+        raise
+    except Exception as exc:
+        raise CrmConfigurationError('CRM portal identity storage is unavailable') from exc
 
 
 async def require_registration_attribution_readiness() -> None:

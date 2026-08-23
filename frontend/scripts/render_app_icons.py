@@ -6,7 +6,7 @@ from PIL import Image
 
 
 PUBLIC_DIR = Path(__file__).resolve().parents[1] / "public"
-BRAND_MASTER = PUBLIC_DIR / "chakri-roulette-brand.png"
+BRAND_MASTER = PUBLIC_DIR / "chakri-roulette-emblem-transparent.png"
 
 
 def render_square(source, size):
@@ -14,18 +14,21 @@ def render_square(source, size):
 
 
 def render_maskable(source, size):
-    """Keep the roulette and 3D wordmark inside Android's safe circle."""
+    """Keep the transparent 3D emblem inside Android's safe circle."""
     background = Image.new("RGB", (size, size), "#09090d")
     artwork_size = round(size * 0.72)
     artwork = source.resize((artwork_size, artwork_size), Image.Resampling.LANCZOS)
     offset = (size - artwork_size) // 2
-    background.paste(artwork, (offset, offset))
+    background.paste(artwork, (offset, offset), artwork)
     return background
 
 
 def main():
     with Image.open(BRAND_MASTER) as source_image:
-        source = source_image.convert("RGB")
+        # Preserve the approved emblem's real alpha channel for standard app
+        # icons. Only the maskable Android variant receives its required
+        # page-native backing colour in ``render_maskable``.
+        source = source_image.convert("RGBA")
         outputs = {
             "chakri-app-icon-512.png": 512,
             "chakri-app-icon-192.png": 192,

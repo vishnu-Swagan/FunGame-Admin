@@ -15,7 +15,7 @@ import { Card, Pill, Table, shortDate } from "./partnerBits";
  * every distributor an unmanaged processor of the operator's player records.
  *
  * The figure a partner actually needs from this screen is which introductions
- * generate revenue, and month turnover answers that without exposing anybody.
+ * generate attributed activity, and month turnover answers that without exposing anybody.
  */
 export default function PartnerPlayers() {
   const [rows, setRows] = useState([]);

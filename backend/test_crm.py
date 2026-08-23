@@ -32,8 +32,21 @@ async def main():
     T("house earns nothing",     await crm.rate_on(h1['id'], crm.now_iso()) == 0)
 
     # --- distributors ---
-    d = await crm.create_distributor('Northern Agents', 'nrth1', 2550, 'admin1')
+    d = await crm.create_distributor(
+        'Northern Agents', 'nrth1', 2550, 'admin1',
+        email='north@example.com', phone='+441234567890', note='Internal note',
+        username='north.partner',
+    )
     T("rate stored as bps",      await crm.rate_on(d['id'], crm.now_iso()) == 2550)
+    T("contact fields are preserved", d['phone'] == '+441234567890' and d['note'] == 'Internal note')
+    T("login id is independent", d['login_username'] == 'north.partner' and d['code'] == 'NRTH1')
+    reserved = None
+    try:
+        await crm.create_distributor(
+            'Reserved Login', 'rsv22', 1000, 'admin1', username='NORTH.PARTNER')
+    except ValueError as e:
+        reserved = str(e)
+    T("login id reservation is case-insensitive", reserved is not None)
     dup = None
     try: await crm.create_distributor('Copycat', 'NRTH1', 1000, 'admin1')
     except ValueError as e: dup = str(e)
@@ -49,6 +62,18 @@ async def main():
     await crm.set_rate(d['id'], 3000, 'admin1')
     T("new rate applies now",    await crm.rate_on(d['id'], crm.now_iso()) == 3000)
     T("old rate still answers for the past", await crm.rate_on(d['id'], t0) == 2550)
+
+    # --- additive profile updates never mutate the referral code ----------
+    updated = await crm.update_distributor(d['id'], {
+        'name': 'Northern Network',
+        'phone': '+441111111111',
+        'note': 'Updated internal note',
+        'username': 'north.network',
+    }, 'admin2')
+    T("profile update preserves referral code", updated['code'] == 'NRTH1')
+    T("profile update preserves contact/note", updated['phone'] == '+441111111111'
+      and updated['note'] == 'Updated internal note')
+    T("login reservation can be changed", updated['login_username'] == 'north.network')
 
     # --- attribution ---
     for uid in ('u-known', 'u-none', 'u-bad'):

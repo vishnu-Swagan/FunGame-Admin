@@ -57,10 +57,10 @@ export default function PartnerDashboard() {
       {/* What is owed comes before what was earned: it is the number a partner
           opens the portal to check. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Metric label="ACCRUED" value={formatChips(s.accrued)} hint="Earned, not yet sent" tone={s.accrued < 0 ? "loss" : "win"} />
-        <Metric label="IN PAYMENT" value={formatChips(s.in_flight)} hint="Raised, awaiting release" />
-        <Metric label="PAID TO DATE" value={formatChips(s.paid_to_date)} />
-        <Metric label="THIS MONTH" value={formatChips(s.month_commission_settled)} hint="Settled commission" />
+        <Metric label="ACCRUED" value={formatChips(s.accrued)} hint="Settled commission units" tone={s.accrued < 0 ? "loss" : "win"} />
+        <Metric label="IN REVIEW" value={formatChips(s.in_flight)} hint="Awaiting operator review" />
+        <Metric label="RECORDED TO DATE" value={formatChips(s.paid_to_date)} />
+        <Metric label="THIS MONTH" value={formatChips(s.month_commission_settled)} hint="Settled commission units" />
       </div>
 
       <Card
@@ -70,10 +70,10 @@ export default function PartnerDashboard() {
         action={<span className="text-[10px] text-amber-300 flex items-center gap-1"><Clock className="h-3 w-3" /> Provisional</span>}
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Metric label="TURNOVER" value={formatChips(s.today.turnover)} provisional />
-          <Metric label="GGR" value={<Money value={s.today.ggr} />} provisional />
-          <Metric label="NGR" value={<Money value={s.today.ngr} />} tone={s.today.ngr < 0 ? "loss" : "win"} provisional />
-          <Metric label="PLAYERS" value={s.today.players} hint={`${s.today.bets} bets`} provisional />
+          <Metric label="CHIPS PLAYED" value={formatChips(s.today.turnover)} provisional />
+          <Metric label="GROSS RESULT" value={<Money value={s.today.ggr} />} provisional />
+          <Metric label="NET RESULT" value={<Money value={s.today.ngr} />} tone={s.today.ngr < 0 ? "loss" : "win"} provisional />
+          <Metric label="PLAYERS" value={s.today.players} hint={`${s.today.bets} rounds`} provisional />
         </div>
         <p className="text-[10px] text-white/35 mt-2">
           Today is still running and is rebuilt overnight. Commission is calculated
@@ -84,14 +84,14 @@ export default function PartnerDashboard() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card title="Yesterday" subtitle={s.yesterday.day} testId="partner-yesterday">
           <div className="grid grid-cols-2 gap-3">
-            <Metric label="TURNOVER" value={formatChips(s.yesterday.turnover)} />
-            <Metric label="NGR" value={<Money value={s.yesterday.ngr} />} tone={s.yesterday.ngr < 0 ? "loss" : "win"} />
+            <Metric label="CHIPS PLAYED" value={formatChips(s.yesterday.turnover)} />
+            <Metric label="NET RESULT" value={<Money value={s.yesterday.ngr} />} tone={s.yesterday.ngr < 0 ? "loss" : "win"} />
           </div>
         </Card>
         <Card title="Month to date" subtitle={`${s.month.from} → ${s.month.to}`} testId="partner-month">
           <div className="grid grid-cols-2 gap-3">
-            <Metric label="TURNOVER" value={formatChips(s.month.turnover)} />
-            <Metric label="NGR" value={<Money value={s.month.ngr} />} tone={s.month.ngr < 0 ? "loss" : "win"} />
+            <Metric label="CHIPS PLAYED" value={formatChips(s.month.turnover)} />
+            <Metric label="NET RESULT" value={<Money value={s.month.ngr} />} tone={s.month.ngr < 0 ? "loss" : "win"} />
           </div>
         </Card>
       </div>
@@ -105,20 +105,17 @@ export default function PartnerDashboard() {
               <p className="text-[11px] text-white/45">{s.month.players} played this month</p>
             </div>
           </div>
-          <Link to="/partner/players" className="text-xs font-semibold text-primary flex items-center gap-1">
+          <Link to="/distributor/my-players" className="text-xs font-semibold text-primary flex items-center gap-1">
             View <ArrowRight className="h-3 w-3" />
           </Link>
         </div>
       </Card>
 
-      {/* The two rules that decide whether an accrued balance becomes a payment.
-          Stated here because the alternative is a partner asking every month. */}
       <p className="text-[11px] text-white/40 leading-relaxed">
-        Commission settles nightly for the previous gaming day. A settled amount is
-        held for a short period before it can be paid out, and small balances roll
-        forward until they are worth sending — so an accrued balance is normal and
-        is not lost. Payment dates and references appear on{" "}
-        <Link to="/partner/statements" className="text-primary">Statements</Link>.
+        Commission records settle nightly from virtual-chip activity. Player chips
+        have no cash value and cannot be purchased, transferred, withdrawn, exchanged,
+        or redeemed. Period detail appears under{" "}
+        <Link to="/distributor/my-commission" className="text-primary">My commission</Link>.
       </p>
     </div>
   );

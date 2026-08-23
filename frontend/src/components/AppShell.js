@@ -89,7 +89,7 @@ export default function AppShell() {
       ro?.disconnect();
       window.removeEventListener("orientationchange", set);
     };
-  }, [fullscreenGame]);
+  }, [fullscreenGame, onPlay]);
 
   // Online/offline
   useEffect(() => {
@@ -124,10 +124,10 @@ export default function AppShell() {
       <BrandBoot />
       <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(96px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
         {/* Header */}
-        <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
+        {!onPlay && <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
             <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
-              <BrandWordmark logoClassName="h-auto w-[clamp(118px,34vw,158px)]" />
+              <BrandWordmark logoClassName="h-auto w-[clamp(170px,48vw,238px)] drop-shadow-[0_8px_22px_rgba(0,0,0,.45)]" />
             </button>
             <div className="flex items-center gap-2">
               <button
@@ -155,7 +155,7 @@ export default function AppShell() {
             </div>
           </div>
           <Disclaimer className="mt-1.5" />
-        </header>
+        </header>}
 
         {/* Offline banner */}
         {!online && (
