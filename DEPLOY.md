@@ -45,7 +45,12 @@ login rate limits use it. Approval atomically claims the submitted contacts,
 records the operator decision, activates gameplay, and grants the existing
 welcome play-chip bonus. Restore contact OTP later by switching
 `REGISTRATION_MODE=PHONE_OTP` only after the SMS adapter and credentials are
-configured and tested. Administrator MFA is separate and is not changed here.
+configured and tested. For Telesign SMS Verify, store `TELESIGN_CUSTOMER_ID`
+and `TELESIGN_API_KEY` as Render secrets, set `OTP_SMS_ADAPTER=telesign`, keep
+`OTP_EXPOSE_DEV_CODE=false`, and prove delivery to an approved test number
+before changing the registration mode. Trial accounts can send only to verified
+test numbers; upgrade the Telesign account before accepting live customers.
+Administrator MFA is separate and is not changed here.
 
 ## The failure mode to know about
 

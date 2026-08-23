@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -553,6 +554,85 @@ class TwilioSmsAdapter:
             return {'sent': False, 'provider': 'twilio', 'error': type(exc).__name__}
 
 
+class TelesignSmsAdapter:
+    """Deliver an application-generated OTP through Telesign SMS Verify."""
+
+    VERIFY_SMS_URL = 'https://rest-ww.telesign.com/v1/verify/sms'
+    ACCEPTED_STATUS_CODES = frozenset({200, 203, 290})
+
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        customer_id = (os.environ.get('TELESIGN_CUSTOMER_ID') or '').strip()
+        api_key = (os.environ.get('TELESIGN_API_KEY') or '').strip()
+        if not customer_id or not api_key:
+            return {'sent': False, 'provider': 'telesign', 'error': 'not_configured'}
+
+        # Telesign accepts an international phone number as digits only. The
+        # identity layer already validates and normalizes this as E.164.
+        phone_number = re.sub(r'\D', '', identity.value)
+        if not phone_number:
+            return {'sent': False, 'provider': 'telesign', 'error': 'invalid_recipient'}
+        label = 'password reset' if purpose == RESET_PASSWORD else 'verification'
+        payload = urllib.parse.urlencode({
+            'phone_number': phone_number,
+            'verify_code': code,
+            'template': (
+                f'Your Chakri.Casino {label} code is $$CODE$$. '
+                'It expires in 15 minutes.'
+            ),
+        }).encode('utf-8')
+        auth = base64.b64encode(
+            f'{customer_id}:{api_key}'.encode('utf-8')
+        ).decode('ascii')
+        request = urllib.request.Request(
+            self.VERIFY_SMS_URL,
+            data=payload,
+            headers={
+                'Accept': 'application/json',
+                'Authorization': f'Basic {auth}',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+            },
+            method='POST',
+        )
+
+        def perform_request() -> tuple[int, bytes]:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, response.read(65_537)
+
+        try:
+            http_status, raw_body = await asyncio.to_thread(perform_request)
+            if len(raw_body) > 65_536:
+                raise ValueError('Telesign response exceeds size limit')
+            response_body = json.loads(raw_body.decode('utf-8'))
+            provider_status = response_body.get('status') or {}
+            provider_code = provider_status.get('code')
+            reference_id = str(response_body.get('reference_id') or '').strip()
+            errors = response_body.get('errors') or []
+            sent = (
+                200 <= http_status < 300
+                and provider_code in self.ACCEPTED_STATUS_CODES
+                and not errors
+                and bool(reference_id)
+            )
+            if not sent:
+                logger.error(
+                    'Telesign OTP delivery rejected: http_status=%s provider_status=%s',
+                    http_status, provider_code,
+                )
+                return {
+                    'sent': False,
+                    'provider': 'telesign',
+                    'error': 'provider_rejected',
+                }
+            return {
+                'sent': True,
+                'provider': 'telesign',
+                'reference_id': reference_id,
+            }
+        except Exception as exc:  # diagnostics only; never code/key/recipient
+            logger.error('Telesign OTP delivery failed: %s', type(exc).__name__)
+            return {'sent': False, 'provider': 'telesign', 'error': type(exc).__name__}
+
+
 class MockOtpAdapter:
     async def send(self, identity: Identity, code: str, purpose: str) -> dict:
         if _is_production():
@@ -577,6 +657,8 @@ def delivery_adapter(channel: str) -> OtpDeliveryAdapter:
         return EmailOtpAdapter()
     if channel == 'SMS' and adapter == 'twilio':
         return TwilioSmsAdapter()
+    if channel == 'SMS' and adapter == 'telesign':
+        return TelesignSmsAdapter()
     if adapter == 'disabled':
         return DisabledOtpAdapter()
     raise OtpConfigurationError(f'Unsupported {channel.lower()} OTP adapter')
@@ -614,6 +696,10 @@ def delivery_adapter_ready(channel: str) -> bool:
     if channel == 'SMS' and adapter == 'twilio':
         return all((os.environ.get(name) or '').strip() for name in (
             'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
+        ))
+    if channel == 'SMS' and adapter == 'telesign':
+        return all((os.environ.get(name) or '').strip() for name in (
+            'TELESIGN_CUSTOMER_ID', 'TELESIGN_API_KEY',
         ))
     return False
 
@@ -718,13 +804,16 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         await _restore_previous_challenge(database, active, now)
         raise OtpConfigurationError('Verification delivery is temporarily unavailable')
 
+    delivery_fields = {
+        'delivery_provider': delivery.get('provider', 'unknown'),
+        'delivered_at': _now(),
+        'updated_at': _now(),
+    }
+    if delivery.get('reference_id'):
+        delivery_fields['delivery_reference_id'] = delivery['reference_id']
     await database.otp_challenges.update_one(
         {'id': challenge_id, 'active': True},
-        {'$set': {
-            'delivery_provider': delivery.get('provider', 'unknown'),
-            'delivered_at': _now(),
-            'updated_at': _now(),
-        }},
+        {'$set': delivery_fields},
     )
     public_channel = 'PHONE' if identity.channel == 'SMS' else 'EMAIL'
     destination = masked_destination(identity)
