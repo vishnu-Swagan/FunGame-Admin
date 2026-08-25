@@ -982,8 +982,8 @@
       radial-gradient(ellipse at 50% 34%, rgba(129, 78, 29, .2), transparent 58%),
       linear-gradient(90deg, #26160f, #100a0e 23%, #0b090c 50%, #100a0e 77%, #26160f);
   }
-  /* The table stays uncropped above a full-width bottom tray. Cards never move
-     into a narrow side dock, so every group and play control remains reachable. */
+  /* Short landscape is a table-first composition: the immutable palace art is
+     enlarged inside its clipped stage while every seat keeps its exact anchor. */
   .rummy-table-slot {
     grid-column: 1;
     grid-row: 1;
@@ -992,10 +992,21 @@
       radial-gradient(ellipse at 50% 48%, rgba(15, 92, 61, .13), transparent 58%);
     box-shadow: inset 0 1px rgba(240,205,115,.18), inset 0 -1px rgba(240,205,115,.16);
   }
+  .rummy-table-slot::after {
+    filter: blur(3px) brightness(.91) saturate(1.02);
+    transform: scale(1.012) translateZ(0);
+  }
+  .rummy-table {
+    position: absolute;
+    left: 50%;
+    top: 47%;
+    width: min(100cqw, 240cqh);
+    transform: translate(-50%, -50%) translateZ(0);
+  }
   .rummy-status { left: 50%; top: 3px; max-width: calc(100% - 12px); padding: 3px 8px; font-size: 7px; }
   .rummy-table-hud { display: none; }
-  .rummy-seat { width: clamp(42px, 17cqw, 58px); }
-  .rummy-avatar-ring { width: clamp(28px, 10.5cqw, 34px); height: clamp(28px, 10.5cqw, 34px); padding: 3px; }
+  .rummy-seat { width: clamp(48px, 17cqw, 60px); }
+  .rummy-avatar-ring { width: clamp(32px, 10.5cqw, 38px); height: clamp(32px, 10.5cqw, 38px); padding: 3px; }
   .rummy-empty-avatar { font-size: 15px; }
   .rummy-only-timer { width: 18px; height: 18px; font-size: 8px; }
   .rummy-seat > strong { margin-top: 2px; font-size: clamp(6px, 2.2cqw, 8px); }
@@ -1006,53 +1017,51 @@
     grid-column: 1;
     grid-row: 2;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 44px;
     align-content: start;
     align-items: stretch;
     gap: 0;
-    min-height: calc(118px + var(--fg-safe-bottom));
-    height: calc(118px + var(--fg-safe-bottom));
-    max-height: calc(118px + var(--fg-safe-bottom));
+    min-height: calc(134px + var(--fg-safe-bottom));
+    height: calc(134px + var(--fg-safe-bottom));
+    max-height: calc(134px + var(--fg-safe-bottom));
     padding: 2px 5px max(3px, var(--fg-safe-bottom));
-    overflow: visible;
+    overflow: hidden;
     border-top: 1px solid rgba(236,197,102,.52);
     border-left: 0;
   }
-  .rummy-group-rail { grid-column: 1; grid-row: 1; width: 100%; height: 100%; align-self: start; justify-content: safe center; gap: 8px; padding: 14px 2px 2px; scroll-padding-inline: 8px; scroll-snap-type: x proximity; }
-  .rummy-group { grid-template-rows: auto 18px; border-radius: 5px 5px 8px 8px; scroll-snap-align: center; }
-  .rummy-group > span { min-height: 18px; border-radius: 0 0 7px 7px; padding-inline: 5px; font-size: 7px; letter-spacing: .08em; }
-  .rummy-group > div { min-height: 76px; padding: 2px 3px 2px; }
-  .rummy-card { width: clamp(50px, 6.15vw, 56px); height: clamp(72px, 18svh, 78px); padding: 4px; }
-  .rummy-group > div .rummy-card + .rummy-card { margin-left: -16px; }
+  .rummy-group-rail { grid-column: 1; grid-row: 1; width: 100%; height: 100%; align-self: start; justify-content: safe center; gap: 7px; padding: 12px 2px 2px; scroll-padding-inline: 8px; scroll-snap-type: x proximity; }
+  .rummy-group { grid-template-rows: auto 16px; border-radius: 5px 5px 8px 8px; scroll-snap-align: center; }
+  .rummy-group > span { min-height: 16px; border-radius: 0 0 7px 7px; padding-inline: 5px; font-size: 6px; letter-spacing: .07em; }
+  .rummy-group > div { min-height: 62px; padding: 1px 3px; }
+  .rummy-card { width: clamp(42px, 5.45vw, 48px); height: clamp(58px, 15svh, 64px); padding: 4px; }
+  .rummy-group > div .rummy-card + .rummy-card { margin-left: -14px; }
   .rummy-card span b { font-size: 14px; }
   .rummy-card span em { font-size: 11px; }
   .rummy-card > strong { font-size: 22px; }
   .rummy-card-corner { right: 3px; bottom: 3px; }
   .rummy-wild-crown { top: -7px !important; width: 18px; height: 14px; font-size: 9px !important; }
-  /* On very short landscapes the table's unused side gutters become the
-     action dock. This keeps the hand at a readable 72px minimum while every
-     existing action remains a reachable 44px target. */
+  /* All controls live in one tactile bottom dock. The table and every player
+     remain unobstructed, and the hand stays directly above its actions. */
   .rummy-actions {
-    position: absolute;
+    position: static;
     z-index: 38;
-    left: 6px;
-    right: 6px;
-    bottom: calc(100% + 6px);
-    width: auto;
-    height: 132px;
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    height: 44px;
     margin: 0;
     display: grid;
-    grid-template-columns: repeat(2, clamp(64px, 11vw, 86px));
-    grid-template-rows: repeat(3, 44px);
-    grid-auto-flow: column;
-    justify-content: space-between;
-    gap: 0;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-rows: 44px;
+    grid-auto-flow: row;
+    justify-content: stretch;
+    gap: 4px;
     padding: 0;
-    pointer-events: none;
+    pointer-events: auto;
   }
-  .rummy-actions button { min-width: 0; min-height: 44px; height: 44px; padding-inline: 3px; border-radius: 8px; font-size: 7px; pointer-events: auto; }
+  .rummy-actions button { min-width: 0; min-height: 44px; height: 44px; padding-inline: 3px; border-radius: 8px; font-size: clamp(6px, 1.22vw, 8px); pointer-events: auto; }
   .rummy-actions button svg { width: 13px; }
-  .rummy-validation { left: 50%; right: auto; bottom: calc(100% + 5px); max-width: calc(100% - (2 * clamp(64px, 11vw, 86px)) - 28px); min-height: 16px; padding: 3px 7px; border: 1px solid rgba(255,190,202,.22); border-radius: 999px; transform: translateX(-50%); color: #ffd1d7; background: rgba(22,10,15,.78); font-size: 6px; line-height: 1.2; text-align: center; }
+  .rummy-validation { left: 50%; right: auto; top: 1px; bottom: auto; max-width: calc(100% - 16px); min-height: 14px; padding: 2px 7px; border: 1px solid rgba(255,190,202,.22); border-radius: 999px; transform: translateX(-50%); color: #ffd1d7; background: rgba(22,10,15,.84); font-size: 6px; line-height: 1.15; text-align: center; }
   .rummy-validation.is-valid { border-color: rgba(130,233,189,.28); background: rgba(4,42,30,.78); }
   .rummy-table-opponent-disclosure { top: 25px; right: 5px; max-width: 190px; padding: 3px 6px; font-size: 6px; }
   .rummy-table-opponent-disclosure svg { width: 10px; height: 10px; }
