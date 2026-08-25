@@ -1,6 +1,31 @@
 import { MARKUP } from "./markup.js";
 import { CLIENT_BETTING_GUARD_SECONDS, secondsUntil } from "@/lib/serverClock";
 
+export function gateRouletteWheelAssets(phone) {
+  if (!phone) return () => {};
+  phone.dataset.mode = "bet";
+  phone.dataset.wheelReady = "false";
+  const images = Array.from(phone.querySelectorAll(".topimg"));
+  if (!images.length) return () => {};
+  const loaded = new Set();
+  let active = true;
+  const revealIfComplete = (image) => {
+    if (!active || loaded.has(image)) return;
+    loaded.add(image);
+    if (loaded.size === images.length) phone.dataset.wheelReady = "true";
+  };
+  const listeners = images.map((image) => {
+    const onLoad = () => revealIfComplete(image);
+    image.addEventListener("load", onLoad, { once: true });
+    if (image.complete && image.naturalWidth > 0) revealIfComplete(image);
+    return [image, onLoad];
+  });
+  return () => {
+    active = false;
+    listeners.forEach(([image, onLoad]) => image.removeEventListener("load", onLoad));
+  };
+}
+
 /**
  * The roulette table, mounted into a plain DOM node.
  *
@@ -29,9 +54,6 @@ export function mountRoulette(root, opts) {
   const parsed = new DOMParser().parseFromString('<div>' + MARKUP + '</div>', 'text/html');
   root.replaceChildren(...parsed.body.firstChild.childNodes);
   const tableName = root.querySelector('.tablename');
-  if (tableName && tableName.firstChild) {
-    tableName.firstChild.textContent = 'Chakri.Casino American Roulette ';
-  }
   const onPlaceBet = opts.onPlaceBet || (() => {});
   const onUndo = opts.onUndo || (() => {});
   const onClear = opts.onClear || (() => {});
@@ -80,6 +102,7 @@ export function mountRoulette(root, opts) {
 
   const $ = id => root.querySelector('#' + id);
   const phone = $('phone'), board = $('board');
+  const releaseWheelAssetGate = gateRouletteWheelAssets(phone);
   const ball = $('ball'), bshadow = $('bshadow');
   const pastEl = $('past'), latestEl = $('latest'), ringval = $('ringval'), toastEl = $('toast');
   const timerEl = $('bettimer');
@@ -2095,7 +2118,7 @@ export function mountRoulette(root, opts) {
        it was replacing. And a row that only says it cannot do the thing is not
        a menu row — Lobby leaves the table when the shell gives it somewhere to
        go, and says so plainly when it does not. */
-    row('lobby', 'Lobby', 'Chakri.Casino',
+    row('lobby', 'Lobby', 'Game lobby',
         onExit ? () => { closeSheets(); onExit(); }
                : () => toast('Use the back arrow above the table'));
     row('stats', 'Statistics', String(spins.length) + ' spins', () => { renderStats(); openSheet('statsheet'); });
@@ -2498,6 +2521,7 @@ export function mountRoulette(root, opts) {
       renderHistory();
     },
     destroy() {
+      releaseWheelAssetGate();
       clearInterval(roundClockTimer);
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(relayoutFrame);

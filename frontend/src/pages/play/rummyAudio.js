@@ -7,6 +7,18 @@
  */
 import { isMuted as globalIsMuted, onMuteChange as globalOnMuteChange } from "@/lib/sound";
 
+/**
+ * Atomic settlement cues. The result UI owns their timing so sound cannot drift
+ * away from card movement or announce a result before the server confirms it.
+ */
+export const RUMMY_SETTLEMENT_AUDIO_CUES = Object.freeze({
+  CARD_SETTLE: "settlement-card-settle",
+  GROUP_VALIDATION: "settlement-group-validation",
+  ROYAL_RISE: "settlement-royal-rise",
+  COIN_TICK: "settlement-coin-tick",
+  FINAL_PAYOUT: "settlement-final-payout",
+});
+
 export const RUMMY_AUDIO_CUES = Object.freeze({
   CARD_SLIDE: "card-slide",
   DRAW: "draw",
@@ -16,15 +28,23 @@ export const RUMMY_AUDIO_CUES = Object.freeze({
   DECLARE: "declare",
   DROP: "drop",
   INVALID: "invalid",
+  ...RUMMY_SETTLEMENT_AUDIO_CUES,
 });
 
 const VALID_CUES = new Set(Object.values(RUMMY_AUDIO_CUES));
+const VALID_SETTLEMENT_CUES = new Set(Object.values(RUMMY_SETTLEMENT_AUDIO_CUES));
 const DEFAULT_MASTER_GAIN = 0.38;
 const MAX_MASTER_GAIN = 0.72;
-const DEFAULT_AMBIENT_GAIN = 0.024;
-const MAX_AMBIENT_GAIN = 0.06;
+const DEFAULT_AMBIENT_GAIN = 0.065;
+const MAX_AMBIENT_GAIN = 0.12;
 const MAX_LIVE_SOURCES = 24;
+const COIN_TICK_MIN_INTERVAL = 0.045;
 const SILENCE = 0.0001;
+const AMBIENT_PROFILES = Object.freeze({
+  "palace-hush": { root: 110, harmonics: [1, 1.5, 2], toneGain: 0.09, roomGain: 0.18, cutoff: 820 },
+  "royal-focus": { root: 130.81, harmonics: [1, 1.25, 1.5, 2], toneGain: 0.085, roomGain: 0.16, cutoff: 1050 },
+  "grand-hall": { root: 146.83, harmonics: [1, 1.5, 2, 2.25], toneGain: 0.1, roomGain: 0.2, cutoff: 1320 },
+});
 
 const clamp = (value, min, max, fallback) => {
   const number = Number(value);
@@ -99,6 +119,7 @@ export function createRummyAudioController(options = {}) {
 
   let masterGainValue = clamp(options.masterGain, 0, MAX_MASTER_GAIN, DEFAULT_MASTER_GAIN);
   let ambientGainValue = clamp(options.ambientGain, 0, MAX_AMBIENT_GAIN, DEFAULT_AMBIENT_GAIN);
+  let ambientPreset = AMBIENT_PROFILES[options.ambientPreset] ? options.ambientPreset : "palace-hush";
   let context = null;
   let masterNode = null;
   let limiterNode = null;
@@ -109,6 +130,7 @@ export function createRummyAudioController(options = {}) {
   let ambientRequested = false;
   let ambientNodes = null;
   let idleTimer = null;
+  let lastCoinTickAt = Number.NEGATIVE_INFINITY;
   let muted = Boolean(safely(() => readMuted(), false));
   let reducedMotion = Boolean(mediaQueryList?.matches);
   const liveSources = new Map();
@@ -287,11 +309,12 @@ export function createRummyAudioController(options = {}) {
     if (!ambientNodes) return;
     const nodes = ambientNodes;
     ambientNodes = null;
-    nodes.source.onended = null;
-    safely(() => nodes.source.stop());
-    disconnect(nodes.source);
-    disconnect(nodes.filter);
-    disconnect(nodes.gain);
+    nodes.sources.forEach((source) => {
+      source.onended = null;
+      safely(() => source.stop());
+      disconnect(source);
+    });
+    nodes.nodes.forEach(disconnect);
     scheduleIdleSuspend();
   };
 
@@ -300,6 +323,7 @@ export function createRummyAudioController(options = {}) {
     if (typeof context.createBuffer !== "function") return false;
     clearIdleTimer();
     const sampleRate = clamp(context.sampleRate, 8000, 192000, 44100);
+    const profile = AMBIENT_PROFILES[ambientPreset] || AMBIENT_PROFILES["palace-hush"];
     const duration = 4;
     const buffer = safely(() => context.createBuffer(1, sampleRate * duration, sampleRate), null);
     const source = safely(() => context.createBufferSource(), null);
@@ -323,19 +347,48 @@ export function createRummyAudioController(options = {}) {
     filter.type = "lowpass";
     filter.frequency.value = 950;
     filter.Q.value = 0.3;
-    gainNode.gain.value = ambientGainValue;
-    safely(() => source.connect(filter));
-    safely(() => filter.connect(gainNode));
-    safely(() => gainNode.connect(masterNode));
-    const started = safely(() => { source.start(); return true; }, false);
-    if (!started) {
+    const roomGain = safely(() => context.createGain(), null);
+    if (!roomGain) {
       disconnect(source);
       disconnect(filter);
       disconnect(gainNode);
+      return false;
+    }
+    gainNode.gain.value = ambientGainValue;
+    roomGain.gain.value = profile.roomGain;
+    filter.frequency.value = profile.cutoff;
+    safely(() => source.connect(filter));
+    safely(() => filter.connect(roomGain));
+    safely(() => roomGain.connect(gainNode));
+    safely(() => gainNode.connect(masterNode));
+    const tonalSources = [];
+    const tonalNodes = [];
+    profile.harmonics.forEach((ratio, index) => {
+      const oscillator = safely(() => context.createOscillator(), null);
+      const voiceGain = safely(() => context.createGain(), null);
+      if (!oscillator || !voiceGain) {
+        disconnect(oscillator);
+        disconnect(voiceGain);
+        return;
+      }
+      oscillator.type = index === 0 ? "sine" : "triangle";
+      oscillator.frequency.value = profile.root * ratio;
+      voiceGain.gain.value = profile.toneGain / (1 + index * 0.7);
+      safely(() => oscillator.connect(voiceGain));
+      safely(() => voiceGain.connect(gainNode));
+      tonalSources.push(oscillator);
+      tonalNodes.push(voiceGain);
+    });
+    const allSources = [source, ...tonalSources];
+    const started = safely(() => { allSources.forEach((node) => node.start()); return true; }, false);
+    if (!started) {
+      allSources.forEach((node) => safely(() => node.stop()));
+      allSources.forEach(disconnect);
+      [filter, roomGain, ...tonalNodes, gainNode].forEach(disconnect);
       scheduleIdleSuspend();
       return false;
     }
-    ambientNodes = { source, filter, gain: gainNode };
+    ambientNodes = { sources: allSources, nodes: [filter, roomGain, ...tonalNodes, gainNode], gain: gainNode };
     return true;
   };
 
@@ -354,6 +407,7 @@ export function createRummyAudioController(options = {}) {
     const generation = lifecycleGeneration;
     const resumed = await wakeContext(targetContext);
     if (!resumed || disposed || generation !== lifecycleGeneration || context !== targetContext || muted || backgrounded) return false;
+    if (cue === RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK && now() - lastCoinTickAt < COIN_TICK_MIN_INTERVAL) return false;
     clearIdleTimer();
     const short = reducedMotion;
     const before = liveSources.size;
@@ -397,11 +451,100 @@ export function createRummyAudioController(options = {}) {
         tone({ frequency: 233, endFrequency: 196, duration: 0.12, gain: 0.045, type: "triangle" });
         tone({ frequency: 185, endFrequency: 155, duration: 0.14, gain: 0.038, type: "sine", delay: 0.085 });
         break;
+      case RUMMY_SETTLEMENT_AUDIO_CUES.CARD_SETTLE:
+        noise({
+          duration: short ? 0.055 : 0.095,
+          gain: short ? 0.036 : 0.046,
+          frequency: 2200,
+          endFrequency: 820,
+          q: 0.58,
+        });
+        tone({
+          frequency: 176,
+          endFrequency: 132,
+          duration: short ? 0.05 : 0.075,
+          gain: 0.032,
+          type: "sine",
+          delay: short ? 0.012 : 0.028,
+        });
+        break;
+      case RUMMY_SETTLEMENT_AUDIO_CUES.GROUP_VALIDATION: {
+        const notes = short ? [523.25, 783.99] : [523.25, 659.25, 987.77];
+        notes.forEach((frequency, index) => tone({
+          frequency,
+          endFrequency: frequency * 1.018,
+          duration: short ? 0.09 : 0.15 + index * 0.018,
+          gain: short ? 0.038 : index === 2 ? 0.03 : 0.048,
+          type: index === 0 ? "triangle" : "sine",
+          delay: index * (short ? 0.035 : 0.052),
+        }));
+        break;
+      }
+      case RUMMY_SETTLEMENT_AUDIO_CUES.ROYAL_RISE: {
+        tone({
+          frequency: 110,
+          endFrequency: 146.83,
+          duration: short ? 0.18 : 0.42,
+          gain: short ? 0.042 : 0.058,
+          type: "sine",
+        });
+        const notes = short ? [392, 659.25] : [329.63, 493.88, 659.25];
+        notes.forEach((frequency, index) => tone({
+          frequency,
+          endFrequency: frequency * 1.012,
+          duration: short ? 0.15 : 0.3 + index * 0.035,
+          gain: short ? 0.045 : 0.058 - index * 0.006,
+          type: index === 0 ? "triangle" : "sine",
+          delay: (index + 1) * (short ? 0.045 : 0.085),
+        }));
+        break;
+      }
+      case RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK:
+        tone({
+          frequency: 1567.98,
+          endFrequency: 2093,
+          duration: short ? 0.032 : 0.048,
+          gain: short ? 0.026 : 0.035,
+          type: "triangle",
+        });
+        noise({
+          duration: 0.03,
+          gain: short ? 0.012 : 0.018,
+          frequency: 4300,
+          endFrequency: 2900,
+          q: 1.3,
+          delay: 0.006,
+        });
+        break;
+      case RUMMY_SETTLEMENT_AUDIO_CUES.FINAL_PAYOUT: {
+        tone({
+          frequency: 130.81,
+          endFrequency: 98,
+          duration: short ? 0.2 : 0.38,
+          gain: short ? 0.036 : 0.048,
+          type: "sine",
+        });
+        const notes = short ? [523.25, 783.99] : [523.25, 659.25, 783.99, 1046.5];
+        notes.forEach((frequency, index) => tone({
+          frequency,
+          endFrequency: frequency * 1.006,
+          duration: short ? 0.16 : 0.32 + index * 0.025,
+          gain: short ? 0.05 : 0.062 - index * 0.006,
+          type: index === 0 ? "triangle" : "sine",
+          delay: index * (short ? 0.04 : 0.052),
+        }));
+        break;
+      }
       default:
         return false;
     }
-    scheduleIdleSuspend(short ? 600 : cue === RUMMY_AUDIO_CUES.DECLARE ? 1600 : 900);
-    return liveSources.size > before;
+    const producedAudio = liveSources.size > before;
+    if (producedAudio && cue === RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK) lastCoinTickAt = now();
+    const isLongFormCue = cue === RUMMY_AUDIO_CUES.DECLARE
+      || cue === RUMMY_SETTLEMENT_AUDIO_CUES.ROYAL_RISE
+      || cue === RUMMY_SETTLEMENT_AUDIO_CUES.FINAL_PAYOUT;
+    scheduleIdleSuspend(short ? 600 : isLongFormCue ? 1600 : 900);
+    return producedAudio;
   };
 
   const onMute = (nextMuted) => {
@@ -471,6 +614,15 @@ export function createRummyAudioController(options = {}) {
       return true;
     },
     play: playCue,
+    /**
+     * Plays one UI-synchronized settlement cue. Non-settlement cue names are
+     * rejected so integration code cannot accidentally schedule generic table
+     * feedback as part of the result choreography.
+     */
+    playSettlementCue(cue) {
+      if (!VALID_SETTLEMENT_CUES.has(cue)) return Promise.resolve(false);
+      return playCue(cue);
+    },
     async startAmbient() {
       ambientRequested = true;
       return startAmbientWhenReady();
@@ -489,6 +641,16 @@ export function createRummyAudioController(options = {}) {
       if (ambientNodes?.gain?.gain) setValue(ambientNodes.gain.gain, ambientGainValue, now());
       return ambientGainValue;
     },
+    setAmbientPreset(value) {
+      if (!AMBIENT_PROFILES[value]) return ambientPreset;
+      if (ambientPreset === value) return ambientPreset;
+      ambientPreset = value;
+      if (ambientNodes) {
+        stopAmbientNow();
+        if (ambientRequested) void startAmbientWhenReady();
+      }
+      return ambientPreset;
+    },
     getState() {
       return Object.freeze({
         enabled,
@@ -501,6 +663,7 @@ export function createRummyAudioController(options = {}) {
         disposed,
         masterGain: masterGainValue,
         ambientGain: ambientGainValue,
+        ambientPreset,
       });
     },
     async dispose() {

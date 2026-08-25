@@ -120,10 +120,15 @@ export function createRummyDemoState(categoryId = "LV1") {
 function settledState(state, playerWon, reason) {
   const next = clone(state);
   const cards = next.privateState?.cards || [];
+  const groupLabels = next.privateState?.groupValidation?.groups || [];
+  const settledGroups = (next.privateState?.groups || []).map((cardIds, index) => ({
+    cardIds: [...cardIds],
+    ...(groupLabels[index] ? { label: groupLabels[index] } : {}),
+  }));
   const userRow = {
     seatIndex: 0, playerId: "DE***01", displayName: "You",
     status: playerWon ? "WON" : "DROPPED", points: playerWon ? 0 : next.privateState?.dropPenaltyPoints || 20,
-    chipDelta: 0, cards,
+    chipDelta: 0, cards, groups: settledGroups,
   };
   const botRows = next.seats.slice(1).map((seat, index) => ({
     seatIndex: seat.seatIndex, playerId: seat.playerId, displayName: seat.displayName,

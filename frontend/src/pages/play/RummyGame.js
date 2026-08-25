@@ -1,5 +1,5 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, Check, Coins, Hand, Layers3, LogOut, RotateCcw, ShieldCheck, Volume2, VolumeX, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -17,7 +17,12 @@ import {
 } from "./rummyDemo";
 import RummyAtmosphere, { RUMMY_ATMOSPHERE_PHASES } from "./RummyAtmosphere";
 import { createRummyAudioController, RUMMY_AUDIO_CUES } from "./rummyAudio";
+import { CategoryLobby } from "./RummyPremiumLobby";
+import { RummyRoyalSettlement } from "./RummyRoyalSettlement";
 import "./rummy.css";
+
+export { CategoryLobby } from "./RummyPremiumLobby";
+export { RummyRoyalSettlement as Results } from "./RummyRoyalSettlement";
 
 
 const SUITS = {
@@ -28,10 +33,12 @@ const SUITS = {
 const uuid = () => globalThis.crypto?.randomUUID?.() || `rummy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const RUMMY_POLL_MS = 900;
 const RUMMY_POLL_MAX_MS = 8000;
+const RUMMY_PALACE_ART = "/game-art/rummy/table-palace-v2.png";
 const RUMMY_ART = {
   "--rummy-felt-art": "url('/game-art/rummy-felt.jpg')",
   "--rummy-avatar-art": "url('/game-art/rummy-avatar-atlas.jpg')",
   "--rummy-card-back-art": "url('/game-art/rummy-card-back.jpg')",
+  "--rummy-palace-art": `url('${RUMMY_PALACE_ART}')`,
 };
 const RUMMY_JOIN_TRANSPORT_MESSAGE = "We could not reach the secure Rummy server. Check your connection, then retry this table.";
 const readableRuleLabel = (value, fallback = "UNVALIDATED") => String(value || fallback).replaceAll("_", " ");
@@ -202,9 +209,9 @@ const RUMMY_REACTIONS = Object.freeze([
 ]);
 
 const RUMMY_AMBIENT_PRESETS = Object.freeze([
-  { id: "palace-hush", name: "Palace hush", detail: "Soft generated room tone", volume: .018 },
-  { id: "royal-focus", name: "Royal focus", detail: "Warm generated ambience", volume: .032 },
-  { id: "grand-hall", name: "Grand hall", detail: "Fuller generated atmosphere", volume: .05 },
+  { id: "palace-hush", name: "Palace hush", detail: "Soft tanpura-inspired harmony", volume: .055 },
+  { id: "royal-focus", name: "Royal focus", detail: "Warm ceremonial chord bed", volume: .075 },
+  { id: "grand-hall", name: "Grand hall", detail: "Full palace music atmosphere", volume: .095 },
 ]);
 
 const firstFinite = (...values) => values.find((value) => Number.isFinite(Number(value)));
@@ -428,7 +435,6 @@ function SocialDrawer({
         <span>CHAKRI TEAM</span>
         <h3>Help without leaving the table</h3>
         <p>Describe what you need. Submitting creates a support message; it does not promise an instant live response.</p>
-        <p className="rummy-table-disclosure">Empty seats may be filled by computer-controlled opponents so scheduled tables can start on time.</p>
         <textarea value={supportText} maxLength={240} onChange={(event) => { setSupportText(event.target.value); setSupportStatus(""); }} placeholder="Type your question for Help Desk…" aria-label="Help Desk message" />
         <button type="button" className="rummy-request-submit" disabled={busy || !supportText.trim()} onClick={() => submitSupport("HELP_DESK")}><RoyalGlyph name="send" />SUBMIT TO HELP DESK</button>
         <small className="rummy-support-status" role="status">{supportStatus || "You can read the reply later in Support & messages."}</small>
@@ -502,7 +508,7 @@ function useSoundState() {
   return muted;
 }
 
-export function RummyCard({ card, selected, raised, onSelect, onDragStart, compact = false, reducedMotion = false }) {
+export function RummyCard({ card, selected, raised, entering = false, motionId = null, onSelect, onDragStart, compact = false, reducedMotion = false, wildRank = null }) {
   if (!card) {
     return (
       <span className={`rummy-card rummy-card-placeholder ${compact ? "is-compact" : ""}`} aria-label="Card not dealt yet">
@@ -511,25 +517,45 @@ export function RummyCard({ card, selected, raised, onSelect, onDragStart, compa
     );
   }
   const joker = card?.printedJoker || card?.code === "PJ";
+  const wild = joker || (wildRank != null && Number(card?.rank) === Number(wildRank));
   const suit = SUITS[card?.suit];
   const rank = joker ? "J" : String(card?.code || "").slice(0, -1);
   const Root = onSelect ? motion.button : motion.div;
+  const restingLift = raised ? -16 : selected ? -12 : 0;
+  const pressedLift = raised || selected ? -14 : -9;
+  const handMotion = onSelect && !reducedMotion ? {
+    layout: "position",
+    layoutId: motionId || undefined,
+    initial: entering
+      ? { opacity: 0, transform: "translate3d(0,-28px,0) scale(.96) rotate(2deg)" }
+      : false,
+    animate: { opacity: 1, transform: `translate3d(0,${restingLift}px,0) scale(1) rotate(0deg)` },
+    whileTap: { transform: `translate3d(0,${pressedLift}px,0) scale(.975) rotate(0deg)` },
+    exit: { opacity: 0, transform: "translate3d(0,-30px,0) scale(.96) rotate(3deg)" },
+    transition: {
+      layout: { type: "spring", duration: 0.24, bounce: 0.12 },
+      opacity: { duration: 0.16, ease: [0.23, 1, 0.32, 1] },
+      transform: { duration: 0.22, ease: [0.23, 1, 0.32, 1] },
+    },
+  } : {};
   return (
     <Root
       {...(onSelect ? { type: "button" } : {})}
-      layout={!reducedMotion}
+      {...handMotion}
       draggable={Boolean(onDragStart)}
       onDragStart={(event) => onDragStart?.(event, card.id)}
       onClick={() => onSelect?.(card.id)}
-      className={`rummy-card ${selected ? "is-selected" : ""} ${raised ? "is-raised" : ""} ${compact ? "is-compact" : ""}`}
+      className={`rummy-card ${selected ? "is-selected" : ""} ${raised ? "is-raised" : ""} ${compact ? "is-compact" : ""} ${wild ? "is-wild-card" : ""}`}
       aria-pressed={selected}
-      aria-label={joker ? "Printed joker" : `${rank} of ${card.suit}`}
+      aria-label={joker ? "Printed joker" : `${rank} of ${card.suit}${wild ? ", wild joker" : ""}`}
       data-card-id={card.id}
+      data-wild={wild ? "true" : "false"}
     >
       {joker ? (
         <><b className="rummy-joker-letter">J</b><span className="rummy-jester">♛</span><small>JOKER</small></>
       ) : (
         <>
+          {wild && <span className="rummy-wild-crown" aria-hidden="true">♛</span>}
           <span className={suit?.red ? "is-red" : ""}><b>{rank}</b><em>{suit?.symbol}</em></span>
           <strong className={suit?.red ? "is-red" : ""}>{suit?.symbol}</strong>
           <span className={`rummy-card-corner ${suit?.red ? "is-red" : ""}`}><b>{rank}</b><em>{suit?.symbol}</em></span>
@@ -607,171 +633,10 @@ function Deck({ label, card, count, disabled, onClick, open = false, reducedMoti
   );
 }
 
-export function CategoryLobby({ categories, balance, busy, loading, error, joinFailure, preview, onJoin, onRetry, onExit }) {
-  return (
-    <main className="rummy-lobby" data-testid="rummy-category-lobby">
-      <header className="rummy-lobby-head">
-        <button type="button" onClick={onExit} aria-label="Back to Rummy details"><ArrowLeft /></button>
-        <BrandWordmark className="rummy-lobby-brand-lockup" logoClassName="rummy-lobby-header-brand-logo" />
-        <div className="rummy-lobby-balance"><Coins /><b>{balance == null ? "—" : formatChips(balance)}</b><span>chips</span></div>
-      </header>
-      <section className="rummy-lobby-copy">
-        <div className="rummy-lobby-copy-bg" aria-hidden="true" />
-        <div className="rummy-lobby-copy-text">
-          <span>LIVE MODE · FIVE-SEAT INDIAN RUMMY</span>
-          <h1>Choose your royal table</h1>
-          <p>Thirteen cards. Two sequences. One pure sequence. Every result is validated by the server.</p>
-          <div aria-label="Rummy table features"><b>LV1–LV5</b><b>SERVER SHUFFLE</b><b>PRACTICE AVAILABLE</b></div>
-        </div>
-      </section>
-      {loading && <div className="rummy-lobby-state" role="status">Preparing the royal tables…</div>}
-      {!loading && error && !categories.length && (
-        <div className="rummy-lobby-state is-error" role="alert">
-          <b>Rummy tables are temporarily unavailable.</b>
-          <button type="button" onClick={onRetry}>TRY AGAIN</button>
-        </div>
-      )}
-      <section className="rummy-categories" aria-label="Rummy table categories">
-        {categories.map((category) => {
-          const balanceKnown = Number.isFinite(balance);
-          const liveRequiredChips = Math.max(
-            Number(category.minChipBalance ?? 0),
-            Number(category.entryChips ?? 0),
-          );
-          const enough = balanceKnown && Number(balance) >= liveRequiredChips;
-          const failedJoin = joinFailure?.categoryId === category.id ? joinFailure : null;
-          return (
-            <article key={category.id} className={`rummy-category rummy-${category.id.toLowerCase()}`} style={{ "--cat-a": category.accent?.from, "--cat-b": category.accent?.to, "--cat-metal": category.accent?.metal }}>
-              <div className="rummy-category-level"><span>{category.id}</span><b>{category.displayName}</b></div>
-              <div className="rummy-category-chip" aria-hidden><i /><strong>{formatChips(category.entryChips)}</strong></div>
-              <dl>
-                <div><dt>Entry</dt><dd>{formatChips(category.entryChips)} chips</dd></div>
-                <div><dt>Point value</dt><dd>{formatChips(category.pointsValue)} chips</dd></div>
-                <div><dt>Turn</dt><dd>{category.turnDurationSeconds}s</dd></div>
-              </dl>
-              <NextTableSchedule source={category} compact />
-              <div className="rummy-category-actions">
-                <button type="button" disabled={busy || preview || !enough} onClick={() => onJoin(category.id, "LIVE")}>
-                  {preview ? "LIVE DISABLED IN PREVIEW" : failedJoin?.mode === "LIVE" ? "RETRY LIVE" : "JOIN LIVE"}
-                </button>
-                <button type="button" disabled={busy} onClick={() => onJoin(category.id, "PRACTICE")}>
-                  {failedJoin?.mode === "PRACTICE" ? "RETRY PRACTICE" : "PRACTICE TABLE"}
-                </button>
-              </div>
-              {failedJoin && <small role="alert">{failedJoin.message}</small>}
-              {preview
-                ? <small>Preview is deterministic and wallet-neutral</small>
-                : !balanceKnown
-                  ? <small>Balance unavailable · Practice remains available</small>
-                  : !enough && <small>Live requires {formatChips(liveRequiredChips)} chips · Practice is wallet-neutral</small>}
-            </article>
-          );
-        })}
-      </section>
-      <footer>
-        <p className="rummy-opponent-disclosure"><ShieldCheck />Computer-controlled opponents may fill empty seats.</p>
-      </footer>
-    </main>
-  );
-}
-
-export function Results({ result, viewerSeatIndex, onLobby, reducedMotion = false }) {
-  const dialogRef = useRef(null);
-  useModalFocusTrap(true, dialogRef, onLobby);
-  const playerWon = result.winnerSeat === viewerSeatIndex;
-  const settledRows = result.rows || [];
-  const winnerRow = settledRows.find((row) => row.seatIndex === result.winnerSeat);
-  const winnerName = visibleRummyName(result.winnerName || winnerRow?.displayName, winnerRow?.isBot, "Winner");
-  const reason = readableRuleLabel(result.reason, "ROUND SETTLED");
-  const panelMotion = reducedMotion
-    ? { initial: false, animate: { opacity: 1 }, transition: { duration: 0 } }
-    : { initial: { opacity: 0, scale: .985, y: 12 }, animate: { opacity: 1, scale: 1, y: 0 }, transition: { duration: .34, ease: [.16, 1, .3, 1] } };
-  const revealMotion = (initial, animate, transition) => reducedMotion
-    ? { initial: false, animate: { opacity: 1 }, transition: { duration: 0 } }
-    : { initial, animate, transition };
-  return (
-    <motion.section
-      ref={dialogRef}
-      tabIndex={-1}
-      className={`rummy-results ${playerWon ? "is-player-win" : "is-player-loss"}`}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="rummy-result-title"
-      data-reduced-motion={reducedMotion ? "true" : "false"}
-      {...panelMotion}
-    >
-      <div className="rummy-result-crest" aria-hidden><span>{playerWon ? "♛" : "♜"}</span><i /></div>
-      {playerWon && !reducedMotion && <div className="rummy-victory-sparks" aria-hidden>{Array.from({ length: 10 }, (_, index) => <i key={index} style={{ "--spark-index": index }} />)}</div>}
-      {!playerWon && <div className="rummy-loss-veil" aria-hidden />}
-      <motion.header className="rummy-result-hero" {...revealMotion({ opacity: 0, y: -8 }, { opacity: 1, y: 0 }, { delay: .06, duration: .3, ease: [.16, 1, .3, 1] })}>
-        <div className="rummy-result-seal" aria-hidden><span>{playerWon ? "♛" : "♜"}</span><i /></div>
-        <div className="rummy-result-copy">
-          <span>{playerWon ? "ROYAL HAND COMPLETE" : "ROUND COMPLETE"}</span>
-          <h2 id="rummy-result-title">{playerWon ? "You win" : `${winnerName} wins`}</h2>
-          <p>{reason}</p>
-        </div>
-        <div className="rummy-result-award" aria-label={`${formatChips(result.payoutChips)} chips returned`}>
-          <span>CHIPS RETURNED</span>
-          <strong>{formatChips(result.payoutChips)}</strong>
-          <small>CHIPS</small>
-        </div>
-        {playerWon && (
-          <div
-            className={`rummy-player-win-celebration ${reducedMotion ? "is-static" : ""}`}
-            data-testid="rummy-player-win-celebration"
-            aria-hidden="true"
-          >
-            <span>♛</span>
-          </div>
-        )}
-      </motion.header>
-
-      <section className="rummy-result-standings" aria-labelledby="rummy-result-standings-title">
-        <header>
-          <div><span>FINAL STANDINGS</span><h3 id="rummy-result-standings-title">Table scores</h3></div>
-          <strong>{settledRows.length} SEATS SETTLED</strong>
-        </header>
-        <div className="rummy-result-rows">
-          {settledRows.map((row, index) => {
-            const rowWon = row.status === "WON" || row.seatIndex === result.winnerSeat;
-            const chipDelta = Number(row.chipDelta) || 0;
-            return (
-              <motion.article
-                key={row.seatIndex}
-                className={rowWon ? "is-winner" : ""}
-                data-status={String(row.status || "SETTLED").toLowerCase()}
-                {...revealMotion({ opacity: 0, y: 8 }, { opacity: 1, y: 0 }, { delay: .16 + index * .045, duration: .28, ease: [.16, 1, .3, 1] })}
-              >
-                <span className="rummy-result-position" aria-label={rowWon ? "Winner" : `Seat ${row.seatIndex + 1}`}>{rowWon ? "♛" : row.seatIndex + 1}</span>
-                <div className="rummy-result-player">
-                  <b>{visibleRummyName(row.displayName, row.isBot, `Seat ${row.seatIndex + 1}`)}</b>
-                  <small>SEAT {row.seatIndex + 1}</small>
-                </div>
-                <dl>
-                  <div><dt>STATUS</dt><dd>{readableRuleLabel(row.status, "SETTLED")}</dd></div>
-                  <div><dt>POINTS</dt><dd>{Number(row.points) || 0}</dd></div>
-                </dl>
-                <strong className={chipDelta > 0 ? "is-positive" : chipDelta < 0 ? "is-negative" : ""}>{chipDelta > 0 ? "+" : ""}{formatChips(chipDelta)} <small>CHIPS</small></strong>
-                <div className="rummy-result-cards">
-                  {(row.cards || []).map((card) => <RummyCard key={card.id} card={card} compact reducedMotion={reducedMotion} />)}
-                </div>
-              </motion.article>
-            );
-          })}
-        </div>
-      </section>
-
-      <footer className="rummy-result-actions">
-        <p><ShieldCheck /> Server-settled hand</p>
-        <button type="button" onClick={onLobby}>BACK TO LOBBY</button>
-      </footer>
-    </motion.section>
-  );
-}
-
 export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEvent = async () => null, onSupportRequest = async () => false, onExit, audioController }) {
   const reducedMotion = useReducedMotion();
   const muted = useSoundState();
+  const [tableArtReady, setTableArtReady] = useState(false);
   const [selected, setSelected] = useState([]);
   const [groups, setGroups] = useState([]);
   const [groupLabels, setGroupLabels] = useState([]);
@@ -781,12 +646,14 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
   const [musicOn, setMusicOn] = useState(false);
   const [musicStatus, setMusicStatus] = useState("Ambience is off.");
   const [musicPreset, setMusicPreset] = useState(RUMMY_AMBIENT_PRESETS[0].id);
+  const [arrivingCardId, setArrivingCardId] = useState(null);
   const [atmosphereEvent, setAtmosphereEvent] = useState({ phase: RUMMY_ATMOSPHERE_PHASES.TABLE, id: 0 });
   const dropDialogRef = useRef(null);
   const lastRoundRef = useRef(null);
   const lastResultRef = useRef(null);
   const viewerSeatIndexRef = useRef(null);
   const authoritativeGroupsRef = useRef("");
+  const previousCardIdsRef = useRef(new Set());
   const privateState = state.privateState;
   const seats = Array.from({ length: 5 }, (_, seatIndex) => (
     state.seats?.find((seat) => seat?.seatIndex === seatIndex)
@@ -826,7 +693,8 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
   }, [state.roomId]);
   useEffect(() => {
     audioController?.setAmbientVolume?.(selectedAmbient.volume);
-  }, [audioController, selectedAmbient.volume]);
+    audioController?.setAmbientPreset?.(selectedAmbient.id);
+  }, [audioController, selectedAmbient.id, selectedAmbient.volume]);
   useEffect(() => () => {
     audioController?.stopAmbient?.();
   }, [audioController]);
@@ -854,6 +722,16 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
       setSelected((current) => current.filter((id) => cardIds.has(id)));
     }
   }, [authoritativeGroups, authoritativeLabels, authoritativeSignature, cardIds, state.roundId]);
+
+  useEffect(() => {
+    const previous = previousCardIdsRef.current;
+    const addedCard = cards.find((card) => !previous.has(card.id));
+    previousCardIdsRef.current = new Set(cards.map((card) => card.id));
+    if (!addedCard || addedCard.id !== privateState?.drawnCardId) return undefined;
+    setArrivingCardId(addedCard.id);
+    const timer = window.setTimeout(() => setArrivingCardId((current) => current === addedCard.id ? null : current), 260);
+    return () => window.clearTimeout(timer);
+  }, [cards, privateState?.drawnCardId]);
 
   const cardMap = useMemo(() => Object.fromEntries(cards.map((card) => [card.id, card])), [cards]);
   const groupedIds = useMemo(() => new Set(groups.flat()), [groups]);
@@ -884,6 +762,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
     }
     setMusicStatus("Starting generated ambience…");
     audioController?.setAmbientVolume?.(selectedAmbient.volume);
+    audioController?.setAmbientPreset?.(selectedAmbient.id);
     const ready = await settleAudio(() => audioController?.enableFromGesture?.());
     const started = ready && await settleAudio(() => audioController?.startAmbient?.());
     if (!started) {
@@ -893,7 +772,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
     }
     setMusicOn(true);
     setMusicStatus("Generated royal ambience is playing.");
-  }, [audioController, musicOn, muted, selectedAmbient.volume]);
+  }, [audioController, musicOn, muted, selectedAmbient.id, selectedAmbient.volume]);
   const sendReaction = useCallback(async (reaction) => {
     const response = await sendSocialEvent({
       eventType: reaction.eventType || "EMOJI",
@@ -1013,7 +892,6 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
 
   const waitingCount = Math.max(0, Number(state.maxPlayers || 5) - seats.filter((seat) => seat.status !== "EMPTY").length);
   const activeSeat = seats.find((seat) => seat.seatIndex === state.currentSeat);
-  const hasComputerOpponents = Boolean(state.walletNeutral) || seats.some((seat) => seat.status !== "EMPTY" && seat.isBot);
   const turnAnnouncement = rummyTurnAnnouncement(
     activeSeat,
     viewerSeatIndex,
@@ -1040,7 +918,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         <button type="button" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
         <BrandWordmark className="rummy-brand-lockup" logoClassName="rummy-brand-logo" />
         <div className={`rummy-live-pill ${state.walletNeutral ? "is-bot-table" : ""}`}><i />{
-          state.mode === "BOT_TABLE" ? "PRACTICE TABLE · WALLET-NEUTRAL" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
+          state.mode === "BOT_TABLE" ? "PRACTICE TABLE · FREE" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
         }</div>
         <div className="rummy-balance"><Coins /><b>{formatChips(state.balance)}</b><span>chips</span></div>
         <div className="rummy-table-utilities">
@@ -1058,7 +936,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <NextTableSchedule source={state} />
           {state.fallbackStartsIn != null && (
             <p className="rummy-fallback-note" data-testid="rummy-fallback-countdown">
-              Game starts in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s. Empty seats may be filled by computer-controlled opponents.
+              Game starts in {Math.max(0, Math.ceil(state.fallbackStartsIn))}s.
             </p>
           )}
           <div className="rummy-waiting-seats" aria-label="Occupied Rummy seats">
@@ -1075,21 +953,21 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <button type="button" onClick={onExit}>RETURN TO RUMMY LOBBY</button>
         </section>
       ) : <section className="rummy-stage">
-        {hasComputerOpponents && (
-          <div className="rummy-opponent-disclosure rummy-table-opponent-disclosure" role="note">
-            <ShieldCheck />Computer-controlled opponents may fill empty seats.
-          </div>
-        )}
         <div className="rummy-status" aria-live="polite">{status}</div>
         <div className="rummy-sr-only" role="status" aria-live="polite" aria-atomic="true">{turnAnnouncement}</div>
-        <div className="rummy-table-slot">
+        <div className={`rummy-table-slot ${tableArtReady ? "is-art-ready" : "is-art-loading"}`} data-table-art-ready={tableArtReady ? "true" : "false"}>
           <div className="rummy-table" aria-label="Five-seat Rummy table">
             <img
               className="rummy-table-art"
-              src="/game-art/rummy/table-palace-v2.png"
+              src={RUMMY_PALACE_ART}
               alt=""
               aria-hidden="true"
               draggable="false"
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                const decoded = typeof image.decode === "function" ? image.decode() : Promise.resolve();
+                Promise.resolve(decoded).catch(() => undefined).finally(() => setTableArtReady(true));
+              }}
             />
             <RummyAtmosphere
               phase={atmosphereEvent.phase}
@@ -1107,6 +985,9 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
             </div>
             {seats.map((seat) => <PlayerSeat key={seat.seatIndex} seat={seat} timer={seat.active ? state.turnEndsIn : null} turnDuration={state.category?.turnDurationSeconds} reducedMotion={reducedMotion} viewerSeatIndex={viewerSeatIndex} />)}
             <div className="rummy-piles">
+              {state.currentSeat === mySeat?.seatIndex && privateState?.canDraw && (
+                <div className="rummy-local-hint is-draw" role="status">Draw from either pile</div>
+              )}
               <Deck label="CLOSED DECK" count={state.closedDeckCount} disabled={busy || !privateState?.canDraw} onClick={() => performAction("DRAW_CLOSED")} reducedMotion={reducedMotion} />
               <Deck label="OPEN CARD" card={state.openDiscard} open disabled={busy || !privateState?.canDraw || !state.openDiscard} onClick={() => performAction("DRAW_DISCARD")} reducedMotion={reducedMotion} />
               <div className="rummy-wild"><RummyCard card={state.wildJoker} compact reducedMotion={reducedMotion} /><span>WILD JOKER</span></div>
@@ -1115,23 +996,38 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         </div>
 
         {privateState && (
-          <section className="rummy-hand-zone" aria-label="Your thirteen-card hand">
-            <div className="rummy-group-rail">
-              {groups.map((group, index) => (
-                <div
-                  key={`group-${index}`}
-                  className="rummy-group"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/rummy-card"); if (id) dropInto(index, id); }}
-                >
-                  <span className={`rummy-group-label is-${String(groupLabels[index] || "unvalidated").toLowerCase()}`}>{readableRuleLabel(groupLabels[index], `GROUP ${index + 1}`)}</span>
-                  <div>{group.map((id) => cardMap[id] && <RummyCard key={id} card={cardMap[id]} selected={selected.includes(id)} raised={privateState.drawnCardId === id} onSelect={toggleCard} onDragStart={(event, cardId) => event.dataTransfer.setData("text/rummy-card", cardId)} reducedMotion={reducedMotion} />)}</div>
-                </div>
-              ))}
-              {ungrouped.length > 0 && (
-                <div className="rummy-group is-ungrouped"><span>UNGROUPED</span><div>{ungrouped.map((card) => <RummyCard key={card.id} card={card} selected={selected.includes(card.id)} raised={privateState.drawnCardId === card.id} onSelect={toggleCard} onDragStart={(event, cardId) => event.dataTransfer.setData("text/rummy-card", cardId)} reducedMotion={reducedMotion} />)}</div></div>
-              )}
-            </div>
+          <section className="rummy-hand-zone" aria-label="Your thirteen-card hand" data-card-count={cards.length}>
+            <LayoutGroup id={`rummy-hand-${state.roomId || state.roundId || "table"}`}>
+              <div className="rummy-group-rail" tabIndex="0" aria-label={`${cards.length} cards arranged in ${groups.length + (ungrouped.length ? 1 : 0)} groups`}>
+                {groups.map((group, index) => (
+                  <motion.div
+                    layout={!reducedMotion}
+                    transition={{ layout: { type: "spring", duration: 0.24, bounce: 0.1 } }}
+                    key={`group-${index}`}
+                    className="rummy-group"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/rummy-card"); if (id) dropInto(index, id); }}
+                  >
+                    <div>
+                      <AnimatePresence initial={false} mode="popLayout">
+                        {group.map((id) => cardMap[id] && <RummyCard key={id} motionId={`rummy-hand-card-${id}`} entering={arrivingCardId === id} card={cardMap[id]} selected={selected.includes(id)} raised={privateState.drawnCardId === id} onSelect={toggleCard} onDragStart={(event, cardId) => event.dataTransfer.setData("text/rummy-card", cardId)} reducedMotion={reducedMotion} wildRank={state.wildJoker?.rank} />)}
+                      </AnimatePresence>
+                    </div>
+                    <span className={`rummy-group-label is-${String(groupLabels[index] || "unvalidated").toLowerCase()}`}>{readableRuleLabel(groupLabels[index], `GROUP ${index + 1}`)}</span>
+                  </motion.div>
+                ))}
+                {ungrouped.length > 0 && (
+                  <motion.div layout={!reducedMotion} transition={{ layout: { type: "spring", duration: 0.24, bounce: 0.1 } }} className="rummy-group is-ungrouped">
+                    <div>
+                      <AnimatePresence initial={false} mode="popLayout">
+                        {ungrouped.map((card) => <RummyCard key={card.id} motionId={`rummy-hand-card-${card.id}`} entering={arrivingCardId === card.id} card={card} selected={selected.includes(card.id)} raised={privateState.drawnCardId === card.id} onSelect={toggleCard} onDragStart={(event, cardId) => event.dataTransfer.setData("text/rummy-card", cardId)} reducedMotion={reducedMotion} wildRank={state.wildJoker?.rank} />)}
+                      </AnimatePresence>
+                    </div>
+                    <span className="rummy-group-label is-invalid">UNGROUPED</span>
+                  </motion.div>
+                )}
+              </div>
+            </LayoutGroup>
             <div className="rummy-actions">
               <button type="button" onClick={autoSort} disabled={busy}><RotateCcw />SORT HAND</button>
               <button type="button" onClick={groupSelected} disabled={busy || selected.length < 2}><Layers3 />GROUP</button>
@@ -1140,12 +1036,14 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
               <button type="button" className="is-discard" onClick={discard} disabled={busy || !privateState.canDiscard || selected.length !== 1}><Hand />DISCARD</button>
               <button type="button" className="is-declare" onClick={declare} disabled={busy || (privateState.drawn ? !selectedDeclarableDiscard : !canExactDeclare)}><Check />{privateState.drawn ? "DISCARD & DECLARE" : "DECLARE"}</button>
             </div>
-            <div className={`rummy-validation ${privateState.groupValidation?.valid ? "is-valid" : ""}`} role="status">
+            <div className={`rummy-validation ${privateState.groupValidation?.valid ? "is-valid" : ""}`} role="status" data-testid="rummy-hand-guidance">
               {privateState.drawn && declarableDiscardIds.length
                 ? selectedDeclarableDiscard
                   ? "Ready — Discard & Declare with the selected card"
                   : "Select a valid unmatched card, then Discard & Declare"
-                : readableRuleLabel(validationCode, "Arrange every card into valid groups")}
+                : privateState.groupValidation?.valid
+                  ? "Ready to declare"
+                  : readableRuleLabel(validationCode, "Arrange every card into valid groups")}
             </div>
           </section>
         )}
@@ -1168,7 +1066,14 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
 
       {reconnecting && <div className="rummy-reconnecting" role="status"><RotateCcw />Reconnecting to the authoritative table…</div>}
       {state.result ? (
-        <Results key={resultKey || "result"} result={state.result} viewerSeatIndex={viewerSeatIndex} onLobby={onExit} reducedMotion={reducedMotion} />
+        <RummyRoyalSettlement
+          key={resultKey || "result"}
+          result={state.result}
+          viewerSeatIndex={viewerSeatIndex}
+          onLobby={onExit}
+          onCue={(cue) => audioController?.playSettlementCue?.(cue)}
+          reducedMotion={reducedMotion}
+        />
       ) : dropModalOpen ? (
           <motion.div
             key="drop-confirmation"

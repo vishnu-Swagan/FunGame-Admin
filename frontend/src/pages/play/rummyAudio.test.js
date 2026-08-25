@@ -3,7 +3,11 @@ jest.mock("@/lib/sound", () => ({
   onMuteChange: () => () => {},
 }));
 
-import { createRummyAudioController, RUMMY_AUDIO_CUES } from "./rummyAudio";
+import {
+  createRummyAudioController,
+  RUMMY_AUDIO_CUES,
+  RUMMY_SETTLEMENT_AUDIO_CUES,
+} from "./rummyAudio";
 
 class FakeAudioParam {
   constructor(value = 0) { this.value = value; this.calls = []; }
@@ -155,19 +159,25 @@ test("synthesizes every bounded Rummy cue and clamps public gain controls", asyn
   const controller = createRummyAudioController({ audioContextFactory: () => context, mediaQueryList: null, random: () => 0.5 });
   await controller.enableFromGesture();
 
-  for (const cue of Object.values(RUMMY_AUDIO_CUES)) await expect(controller.play(cue)).resolves.toBe(true);
+  for (const cue of Object.values(RUMMY_AUDIO_CUES)) {
+    const sourceStart = context.sources.length;
+    context.currentTime += 0.1;
+    await expect(controller.play(cue)).resolves.toBe(true);
+    context.sources.slice(sourceStart).forEach((source) => source.onended?.());
+  }
   await expect(controller.play("unknown-cue")).resolves.toBe(false);
   expect(context.createOscillator).toHaveBeenCalled();
   expect(context.createBufferSource).toHaveBeenCalled();
   expect(context.createDynamicsCompressor).toHaveBeenCalledTimes(1);
   expect(context.sources.every((source) => source.start.mock.calls.length === 1)).toBe(true);
   const burstResults = [];
+  const burstSourceStart = context.sources.length;
   for (let index = 0; index < 20; index += 1) burstResults.push(await controller.play(RUMMY_AUDIO_CUES.UI_TAP));
-  expect(context.sources.length).toBeLessThanOrEqual(24);
+  expect(context.sources.length - burstSourceStart).toBeLessThanOrEqual(24);
   expect(burstResults).toContain(false);
   expect(controller.setVolume(99)).toBe(0.72);
   expect(controller.setVolume(-4)).toBe(0);
-  expect(controller.setAmbientVolume(99)).toBe(0.06);
+  expect(controller.setAmbientVolume(99)).toBe(0.12);
   expect(controller.setAmbientVolume(-4)).toBe(0);
   expect(controller.getState()).toMatchObject({ masterGain: 0, ambientGain: 0 });
 
@@ -176,6 +186,59 @@ test("synthesizes every bounded Rummy cue and clamps public gain controls", asyn
   expect(context.gains.every((node) => node.disconnected)).toBe(true);
   expect(context.filters.every((node) => node.disconnected)).toBe(true);
   expect(context.compressors.every((node) => node.disconnected)).toBe(true);
+});
+
+test("exposes atomic, gesture-gated settlement cues without owning animation timing", async () => {
+  const context = createFakeContext();
+  const factory = jest.fn(() => context);
+  const controller = createRummyAudioController({
+    audioContextFactory: factory,
+    mediaQueryList: null,
+    random: () => 0.5,
+  });
+
+  await expect(controller.playSettlementCue(RUMMY_SETTLEMENT_AUDIO_CUES.CARD_SETTLE)).resolves.toBe(false);
+  expect(factory).not.toHaveBeenCalled();
+
+  await controller.enableFromGesture();
+  for (const cue of Object.values(RUMMY_SETTLEMENT_AUDIO_CUES)) {
+    const sourceStart = context.sources.length;
+    context.currentTime += 0.1;
+    await expect(controller.playSettlementCue(cue)).resolves.toBe(true);
+    const cueSources = context.sources.slice(sourceStart);
+    expect(cueSources.length).toBeGreaterThan(0);
+    expect(cueSources.every((source) => source.start.mock.calls.length === 1)).toBe(true);
+    cueSources.forEach((source) => source.onended?.());
+  }
+
+  const sourceCount = context.sources.length;
+  await expect(controller.playSettlementCue(RUMMY_AUDIO_CUES.DRAW)).resolves.toBe(false);
+  await expect(controller.playSettlementCue("unknown-settlement-cue")).resolves.toBe(false);
+  expect(context.sources).toHaveLength(sourceCount);
+
+  await controller.dispose();
+});
+
+test("rate-limits payout ticks while allowing the final payout cue immediately", async () => {
+  const context = createFakeContext();
+  const controller = createRummyAudioController({
+    audioContextFactory: () => context,
+    mediaQueryList: null,
+    random: () => 0.5,
+  });
+  await controller.enableFromGesture();
+
+  context.currentTime = 20;
+  await expect(controller.playSettlementCue(RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK)).resolves.toBe(true);
+  const firstTickSources = context.sources.length;
+  await expect(controller.playSettlementCue(RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK)).resolves.toBe(false);
+  expect(context.sources).toHaveLength(firstTickSources);
+
+  await expect(controller.playSettlementCue(RUMMY_SETTLEMENT_AUDIO_CUES.FINAL_PAYOUT)).resolves.toBe(true);
+  context.currentTime += 0.046;
+  await expect(controller.playSettlementCue(RUMMY_SETTLEMENT_AUDIO_CUES.COIN_TICK)).resolves.toBe(true);
+
+  await controller.dispose();
 });
 
 test("global mute stops ambience while reduced motion preserves user-requested audio", async () => {
@@ -194,6 +257,9 @@ test("global mute stops ambience while reduced motion preserves user-requested a
   await controller.startAmbient();
   await controller.enableFromGesture();
   expect(controller.getState()).toMatchObject({ ambientRequested: true, ambientActive: true });
+  expect(controller.setAmbientPreset("grand-hall")).toBe("grand-hall");
+  await Promise.resolve();
+  expect(controller.getState()).toMatchObject({ ambientPreset: "grand-hall", ambientRequested: true, ambientActive: true });
   const firstLoop = context.sources.find((source) => source.loop);
 
   muted = true;

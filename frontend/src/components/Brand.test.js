@@ -71,7 +71,6 @@ test.each([
   "play/GameStage.js",
   "play/arcade/Cabinet.js",
   "../pages/play/RummyGame.js",
-  "../pages/play/RouletteGame.js",
   "../pages/play/AviatorGame.js",
   "../pages/play/cabinet/SevenUpDownCabinet.js",
   "../pages/play/cabinet/PappuPicturesCabinet.js",
@@ -79,4 +78,9 @@ test.each([
 ])("%s carries the shared brand lockup", (relativePath) => {
   const source = fs.readFileSync(path.join(__dirname, relativePath), "utf8");
   expect(source).toContain("BrandWordmark");
+});
+
+test("Roulette keeps the approved wheel-and-green-board-only presentation", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../pages/play/RouletteGame.js"), "utf8");
+  expect(source).not.toContain("BrandWordmark");
 });

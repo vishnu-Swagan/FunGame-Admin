@@ -4,18 +4,21 @@ import Unity from "react-unity-webgl";
 import "./crash.scss";
 import Context from "../../context";
 import aviatorLogo from "../../assets/images/logo.svg";
-import aviatorCraft from "../../assets/images/aviator-craft.svg";
 import { aviatorUnityContext } from "../../unity";
 import { playGameSound } from "../../sound";
 
 export default function WebGLStarter() {
-	const { GameState, currentNum, time, setCurrentTarget } = React.useContext(Context)
+	const { GameState, currentNum, time, setCurrentTarget, latestRoundNumber } = React.useContext(Context)
 	const [target, setTarget] = React.useState(1);
 	const [waiting, setWaiting] = React.useState(0);
 	const [flightSeconds, setFlightSeconds] = React.useState(0);
 	const [unityLoaded, setUnityLoaded] = React.useState(false);
 	const [unityFailed, setUnityFailed] = React.useState(false);
 	const lastUnityState = React.useRef(0);
+	const [rendererSyncKey, setRendererSyncKey] = React.useState("");
+	const stateReady = GameState === "BET" || GameState === "PLAYING" || GameState === "GAMEEND";
+	const phaseSyncKey = `${latestRoundNumber || 0}:${GameState}`;
+	const rendererReady = stateReady && unityLoaded && !unityFailed && rendererSyncKey === phaseSyncKey;
 
 	React.useEffect(() => {
 		const handleLoaded = () => setUnityLoaded(true);
@@ -83,134 +86,75 @@ export default function WebGLStarter() {
 		if (GameState === "GAMEEND") playGameSound("flewAway");
 	}, [GameState]);
 
-	const spaceRef = React.useRef<HTMLDivElement>(null);
-	const planeRef = React.useRef<HTMLImageElement>(null);
-	const [planeVisible, setPlaneVisible] = React.useState(false);
 	const [showLoading, setShowLoading] = React.useState(false);
-	const [showLogo, setShowLogo] = React.useState(true);
-	const visualProgress = GameState === "BET"
-		? 0
-		: GameState === "GAMEEND"
-			? 1
-			: Math.min(0.94, 1 - Math.exp(-flightSeconds / 7));
 
 	// Handle game state changes
 	React.useEffect(() => {
 		if (GameState === "BET") {
 			setShowLoading(true);
-			setShowLogo(true);
-			setPlaneVisible(false);
-			if (planeRef.current) {
-				planeRef.current.style.transform = 'translate(0px, 0px) rotate(0deg)';
-			}
 		} else if (GameState === "PLAYING") {
 			setShowLoading(false);
-			setShowLogo(false);
-			setPlaneVisible(true);
 		} else if (GameState === "GAMEEND") {
-			setPlaneVisible(true);
-			if (planeRef.current) {
-				const stageWidth = spaceRef.current?.clientWidth || 900;
-				const stageHeight = spaceRef.current?.clientHeight || 500;
-				const x = Math.min(stageWidth * 0.75, 720);
-				const y = -Math.min(stageHeight * 0.64, 320);
-				planeRef.current.style.transform = `translate(${x}px, ${y}px) rotate(-18deg)`;
-			}
+			setShowLoading(false);
 		}
 	}, [GameState]);
-
-	// Update plane position during game
-	React.useEffect(() => {
-		if (GameState === "PLAYING" && planeRef.current && target > 1) {
-			const stageWidth = spaceRef.current?.clientWidth || 900;
-			const stageHeight = spaceRef.current?.clientHeight || 500;
-			const maxX = Math.min(stageWidth * 0.75, 720);
-			const maxY = Math.min(stageHeight * 0.64, 320);
-			const x = maxX * visualProgress;
-			const y = -maxY * visualProgress;
-			const rot = -18 * visualProgress;
-			planeRef.current.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
-		}
-	}, [target, GameState, visualProgress]);
 
 	const displayedMultiplier = GameState === "PLAYING"
 		? Math.max(target || 1, 1)
 		: Math.max(Number(currentNum) || 1, 1);
-	const flightProgress = visualProgress;
+
+	React.useLayoutEffect(() => {
+		if (!stateReady || !unityLoaded || unityFailed) return undefined;
+		const phaseState = GameState === "PLAYING" ? 2 : GameState === "GAMEEND" ? 5 : 1;
+		lastUnityState.current = phaseState;
+		aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: phaseState }));
+		let secondFrame = 0;
+		const firstFrame = window.requestAnimationFrame(() => {
+			secondFrame = window.requestAnimationFrame(() => setRendererSyncKey(phaseSyncKey));
+		});
+		return () => {
+			window.cancelAnimationFrame(firstFrame);
+			window.cancelAnimationFrame(secondFrame);
+		};
+	}, [GameState, phaseSyncKey, stateReady, unityLoaded, unityFailed]);
 
 	React.useEffect(() => {
-		if (!unityLoaded || unityFailed) return;
-
-		let nextState = 1;
-		if (GameState === "PLAYING") {
-			nextState = target > 10 ? 4 : target > 2 ? 3 : 2;
-		} else if (GameState === "GAMEEND") {
-			nextState = 5;
-		}
-
-		if (lastUnityState.current !== nextState) {
-			lastUnityState.current = nextState;
-			aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: nextState }));
-		}
-	}, [GameState, target, unityLoaded, unityFailed]);
+		if (!rendererReady || GameState !== "PLAYING") return;
+		const nextState = target > 10 ? 4 : target > 2 ? 3 : 2;
+		if (lastUnityState.current === nextState) return;
+		lastUnityState.current = nextState;
+		aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: nextState }));
+	}, [GameState, rendererReady, target]);
 
 	return (
 		<div className="crash-container">
-			<div className={`space-box ${unityLoaded && !unityFailed ? "github-visual-ready" : ""}`} ref={spaceRef} id="space">
+			<div className={`space-box ${rendererReady ? "github-visual-ready" : "renderer-pending"}`} id="space" data-server-state-ready={stateReady ? "true" : "false"} data-renderer-ready={rendererReady ? "true" : "false"}>
 				<Unity
 					unityContext={aviatorUnityContext}
 					matchWebGLToCanvasSize={true}
 					className="github-unity-stage"
 				/>
+				<div className="aviator-renderer-gate" aria-live="polite">
+					<img src={aviatorLogo} alt="Aviator" />
+					<span>{unityFailed ? "Live renderer unavailable" : "Synchronising live round"}</span>
+				</div>
 				<div className="stage-grid" aria-hidden="true"></div>
-				<div className={`round-state state-${GameState.toLowerCase()}`}>
+				{stateReady && <div className={`round-state state-${GameState.toLowerCase()}`}>
 					<span className="state-dot"></span>
 					{GameState === "BET" ? "Next round" : GameState === "PLAYING" ? "Live round" : "Round ended"}
-				</div>
+				</div>}
 				<div
-					className={`flight-timer ${GameState === "PLAYING" || GameState === "GAMEEND" ? "show" : ""} ${GameState === "GAMEEND" ? "stopped" : ""}`}
+					className={`flight-timer ${stateReady && (GameState === "PLAYING" || GameState === "GAMEEND") ? "show" : ""} ${GameState === "GAMEEND" ? "stopped" : ""}`}
 					aria-live="off"
 				>
 					<span>Flight time</span>
 					<strong>{flightSeconds.toFixed(1)}s</strong>
 				</div>
-				<svg className={`flight-curve fallback-flight-visual ${GameState === "PLAYING" ? "active" : ""}`} viewBox="0 0 720 360" preserveAspectRatio="none" aria-hidden="true">
-					<defs>
-						<linearGradient id="flight-area" x1="0" y1="1" x2="1" y2="0">
-							<stop offset="0" stopColor="#6f071b" stopOpacity="0.72" />
-							<stop offset="0.68" stopColor="#c20b31" stopOpacity="0.65" />
-							<stop offset="1" stopColor="#ed1742" stopOpacity="0.52" />
-						</linearGradient>
-					</defs>
-					<path
-						className="curve-fill"
-						d="M 18 338 C 178 337, 255 318, 350 252 C 468 170, 516 73, 700 24 L 700 360 L 18 360 Z"
-						style={{ clipPath: `inset(0 ${100 - (flightProgress * 100)}% 0 0)` }}
-					/>
-					<path className="curve-shadow" d="M 18 338 C 178 337, 255 318, 350 252 C 468 170, 516 73, 700 24" />
-					<path
-						className="curve-line"
-						d="M 18 338 C 178 337, 255 318, 350 252 C 468 170, 516 73, 700 24"
-						style={{ strokeDashoffset: 820 - (flightProgress * 820) }}
-					/>
-				</svg>
-				<img 
-					src={aviatorCraft}
-					alt="Aviator craft"
-					className={`plane fallback-flight-visual ${planeVisible ? 'visible' : ''} ${GameState === "GAMEEND" ? "crashed" : ""}`}
-					ref={planeRef}
-				/>
-				{/* Unity owns the aircraft whenever it is available. Rendering a
-				    second DOM flyout here caused the duplicate plane at crash. */}
-				<div className={`flew-away ${GameState === "GAMEEND" ? 'show' : ''}`}>FLEW AWAY!</div>
-				<div className={`multiplier ${GameState !== "BET" ? 'show' : ''} ${GameState === "GAMEEND" ? 'crashed' : ''}`} aria-live="polite">
-					{GameState === "BET" ? '' : displayedMultiplier.toFixed(2)}x
+				<div className={`flew-away ${stateReady && GameState === "GAMEEND" ? 'show' : ''}`}>FLEW AWAY!</div>
+				<div className={`multiplier ${stateReady && GameState !== "BET" ? 'show' : ''} ${GameState === "GAMEEND" ? 'crashed' : ''}`} aria-live="polite">
+					{stateReady && GameState !== "BET" ? `${displayedMultiplier.toFixed(2)}x` : null}
 				</div>
-				<div className={`center-logo ${showLogo ? '' : 'hide'}`} id="ufcLogo">
-					<img src={aviatorLogo} alt="Aviator" />
-					<span>Real-time multiplayer crash</span>
-				</div>
-				<div className={`loading-container ${showLoading ? 'show-loading' : ''}`}>
+				<div className={`loading-container ${stateReady && showLoading ? 'show-loading' : ''}`}>
 					<div className="loading-bar">
 						<div 
 							className="loading-fill" 

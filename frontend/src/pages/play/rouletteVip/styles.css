@@ -294,6 +294,11 @@
     visibility: hidden;
   }
   .rvip .phone[data-mode="spin"] .topwrap, .rvip .phone[data-mode="result"] .topwrap { z-index: 20; opacity: 1; }
+  .rvip .phone:not([data-wheel-ready="true"]) .topwrap,
+  .rvip .phone:not([data-wheel-ready="true"]) .spotlight {
+    opacity: 0 !important;
+    visibility: hidden !important;
+  }
 
   /* Royal cabinet: a carved mahogany outer bezel with restrained brass
      detailing. The centre is masked away, leaving the ball track and all 38
@@ -1038,7 +1043,7 @@
   .rvip .lbl { color: var(--gold); }
   .rvip .val { color: var(--cream); font-variant-numeric: tabular-nums; }
   .rvip .dim { color: rgba(242,237,228,.42); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .rvip .tablename { color: var(--cream); font-size: 12px; }
+  .rvip .tablename { display: none; }
   .rvip .tablename b { color: var(--gold); font-weight: 500; }
 
 

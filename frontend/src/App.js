@@ -40,6 +40,7 @@ import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
 import AndarBaharCabinet from "@/pages/play/cabinet/AndarBaharCabinet";
 import PappuPicturesCabinet from "@/pages/play/cabinet/PappuPicturesCabinet";
 import RouletteGame from "@/pages/play/RouletteGame";
+import RummyGame from "@/pages/play/RummyGame";
 
 // System
 import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScreens";
@@ -171,6 +172,7 @@ function PlayerApp() {
               <Route path="/__preview/andar-bahar" element={<AndarBaharCabinet game={{ slug: "andar-bahar", name: "Andar Bahar", demo: true }} />} />
               <Route path="/__preview/american-roulette" element={<RouletteGame game={{ slug: "fun-roulette", name: "American Roulette", demo: true }} />} />
               <Route path="/__preview/pappu-pictures" element={<PappuPicturesCabinet game={{ slug: "pappu-pictures", name: "Pappu Pictures", demo: true }} />} />
+              <Route path="/__preview/rummy" element={<RummyGame game={{ slug: "rummy", name: "Rummy", demo: true }} />} />
             </>
           )}
           {/* Public / auth */}

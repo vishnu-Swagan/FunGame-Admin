@@ -19,6 +19,30 @@ import {
 
 type PanelKey = "f" | "s";
 
+const AVIATOR_PHASE_ORDER: Record<string, number> = {
+  BETTING: 0,
+  FLYING: 1,
+  CRASHED: 2,
+  RESULT: 2,
+  SETTLED: 2,
+};
+
+export const shouldAcceptAviatorSnapshot = (
+  previousRound: number | null,
+  previousPhase: string,
+  incomingRound: number,
+  incomingPhase: string,
+) => {
+  if (!Number.isFinite(incomingRound)) return false;
+  if (previousRound == null) return true;
+  if (incomingRound > previousRound) return true;
+  if (incomingRound < previousRound) return false;
+  const previousOrder = AVIATOR_PHASE_ORDER[previousPhase];
+  const incomingOrder = AVIATOR_PHASE_ORDER[incomingPhase];
+  if (!Number.isFinite(previousOrder) || !Number.isFinite(incomingOrder)) return previousPhase === incomingPhase;
+  return incomingOrder >= previousOrder;
+};
+
 const Context = React.createContext<ContextType>(null!);
 
 let cashOutImplementation: (at: number, index: PanelKey) => void = () => undefined;
@@ -115,6 +139,8 @@ export const Provider = ({ children }: any) => {
   const settledHistory = useRef<GameHistory[]>([]);
   const latestServerState = useRef<any>(null);
   const lastRound = useRef<number | null>(null);
+  const acceptedServerRound = useRef<number | null>(null);
+  const acceptedServerPhase = useRef("");
   const requestInFlight = useRef<Record<PanelKey, boolean>>({ f: false, s: false });
   const pollInFlight = useRef(false);
 
@@ -165,6 +191,16 @@ export const Provider = ({ children }: any) => {
   }, []);
 
   const applyServerState = useCallback((data: any) => {
+    const incomingRound = Number(data.round_number);
+    const incomingPhase = String(data.phase || "").toUpperCase();
+    if (!shouldAcceptAviatorSnapshot(
+      acceptedServerRound.current,
+      acceptedServerPhase.current,
+      incomingRound,
+      incomingPhase,
+    )) return;
+    acceptedServerRound.current = incomingRound;
+    acceptedServerPhase.current = incomingPhase;
     latestServerState.current = data;
     setErrorBackend(false);
     const phase = data.phase === "BETTING" ? "BET" : data.phase === "FLYING" ? "PLAYING" : "GAMEEND";
