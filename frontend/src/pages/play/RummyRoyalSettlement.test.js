@@ -139,6 +139,7 @@ test("server settlement drives a gated in-table celebration and exact premium su
   expect(container.querySelector('[data-testid="rrs-summary-stage"]')).not.toBeNull();
   expect(container.querySelector(".rrs-final-hand")?.querySelectorAll(".rrs-card")).toHaveLength(13);
   expect(container.querySelectorAll(".rrs-standing-rows > article")).toHaveLength(2);
+  expect(container.querySelector(".rrs-standing-hand")).toBeNull();
   expect(container.querySelector(".rrs-summary-hero .rrs-payout")?.dataset.payoutChips).toBe("725");
   const lobbyButton = container.querySelector(".rrs-summary-actions button");
   expect(document.activeElement).toBe(lobbyButton);

@@ -1208,9 +1208,16 @@ export default function RummyGame({ game }) {
     setJoinFailure(null);
     void settleAudio(() => rummyAudioRef.current?.enableFromGesture?.());
     try {
+      // The server's unique active-membership lock makes join idempotent. The
+      // explicit key also allows the API transport to retry a no-response join
+      // against a healthy alternate host without creating a second seat.
+      const joinRequestId = uuid();
       const data = preview
         ? createRummyDemoState(categoryId)
-        : (await api.post("/games/rummy/join", { categoryId, mode }, { timeout: 22000 })).data;
+        : (await api.post("/games/rummy/join", { categoryId, mode }, {
+          timeout: 22000,
+          headers: { "Idempotency-Key": joinRequestId },
+        })).data;
       acceptAuthoritativeState(data); setBalance(data.balance ?? balance); setJoinFailure(null); sfx.deal?.();
     } catch (error) {
       const message = error?.response
@@ -1255,7 +1262,10 @@ export default function RummyGame({ game }) {
           roomId: current.roomId, roundId: current.roundId, actionId,
           expectedVersion: current.version, actionType, actionPayload,
           clientTimestamp: Date.now() / 1000,
-        }, { timeout: 22000 })).data;
+        }, {
+          timeout: 22000,
+          headers: { "Idempotency-Key": actionId },
+        })).data;
       const next = data.state || { ...data.publicState, privateState: data.privateState };
       acceptAuthoritativeState(next); setReconnecting(false);
       return next;

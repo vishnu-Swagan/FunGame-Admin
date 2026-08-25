@@ -591,7 +591,6 @@ test("royal settlement CSS preserves portrait hierarchy, visible short-landscape
   const landscapeSummary = cssRuleWithin(landscape, ".rrs-summary");
   const landscapeFinalHand = cssRuleWithin(landscape, ".rrs-final-hand");
   const landscapeStandingRow = cssRuleWithin(landscape, ".rrs-standing-rows article");
-  const landscapeStandingHand = cssRuleWithin(landscape, ".rrs-standing-hand");
   const landscapeActions = cssRuleWithin(landscape, ".rrs-summary-actions");
   const landscapeCta = cssRuleWithin(landscape, ".rrs-summary-actions button");
   const baseCta = cssRuleWithin(css, ".rrs-summary-actions button");
@@ -602,15 +601,14 @@ test("royal settlement CSS preserves portrait hierarchy, visible short-landscape
   expect(portraitRows).toMatch(/grid-template-areas:\s*[\s\S]*"position player delta"[\s\S]*"position stats stats"[\s\S]*"hand hand hand"/);
 
   expect(landscapeResults).toMatch(/inset-block-start:\s*44px/);
-  expect(landscapeSummary).toMatch(/grid-template-columns:\s*minmax\(210px, \.77fr\) minmax\(0, 1\.45fr\)/);
-  expect(landscapeSummary).toMatch(/grid-template-rows:\s*max-content minmax\(0, 1fr\) 44px/);
+  expect(landscapeSummary).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
+  expect(landscapeSummary).toMatch(/grid-template-rows:\s*58px 72px minmax\(0, 1fr\) 44px/);
   expect(landscapeFinalHand).toMatch(/grid-column:\s*1/);
   expect(landscapeFinalHand).toMatch(/grid-row:\s*2/);
   expect(landscapeFinalHand).not.toMatch(/display:\s*none/);
-  expect(landscapeStandingRow).toMatch(/grid-template-areas:\s*"position player stats delta" "hand hand hand hand"/);
-  expect(landscapeStandingHand).toMatch(/grid-area:\s*hand/);
+  expect(landscapeStandingRow).toMatch(/grid-template-areas:\s*"position player stats delta"/);
   expect(landscapeActions).toMatch(/grid-column:\s*1 \/ -1/);
-  expect(landscapeActions).toMatch(/grid-row:\s*3/);
+  expect(landscapeActions).toMatch(/grid-row:\s*4/);
   expect(landscapeCta).toMatch(/min-height:\s*44px/);
   expect(baseCta).toMatch(/min-height:\s*44px/);
 
@@ -784,7 +782,10 @@ test("a no-response join failure shows contextual recovery and a successful retr
   expect(api.post).toHaveBeenLastCalledWith(
     "/games/rummy/join",
     { categoryId: "LV1", mode: "PRACTICE" },
-    { timeout: 22000 },
+    {
+      timeout: 22000,
+      headers: { "Idempotency-Key": expect.stringMatching(/^rummy-/) },
+    },
   );
   expect(container.querySelector('[data-testid="rummy-live-table"]')).not.toBeNull();
   expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -876,16 +877,18 @@ test("a stale leave restores the room and retries once with the same idempotent 
   const restored = { ...initial, version: initial.version + 1 };
   const released = applyRummyDemoAction(restored, "DROP");
   const actionPayloads = [];
+  const actionConfigs = [];
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
     if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) return Promise.resolve({ data: restored });
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
-  api.post.mockImplementation((url, payload) => {
+  api.post.mockImplementation((url, payload, config) => {
     if (url === "/games/rummy/join") return Promise.resolve({ data: initial });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/actions`)) {
       actionPayloads.push(payload);
+      actionConfigs.push(config);
       if (actionPayloads.length === 1) {
         return Promise.reject({
           response: { data: { detail: { code: "RUMMY_STALE_VERSION", message: "The table changed." } } },
@@ -903,6 +906,8 @@ test("a stale leave restores the room and retries once with the same idempotent 
 
     expect(actionPayloads).toHaveLength(2);
     expect(actionPayloads[1].actionId).toBe(actionPayloads[0].actionId);
+    expect(actionConfigs[0]?.headers?.["Idempotency-Key"]).toBe(actionPayloads[0].actionId);
+    expect(actionConfigs[1]?.headers?.["Idempotency-Key"]).toBe(actionPayloads[1].actionId);
     expect(actionPayloads[0].expectedVersion).toBe(initial.version);
     expect(actionPayloads[1].expectedVersion).toBe(restored.version);
     expect(container.querySelector('[data-testid="rummy-live-table"]')).toBeNull();
@@ -983,7 +988,7 @@ test("the exact-ratio table auto-fits the safe viewport without portrait croppin
   expect(css).toMatch(/@media \(orientation: portrait\) and \(max-width: 430px\)[\s\S]*?\.rummy-only-timer\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px/s);
   expect(css).toContain("container-type: inline-size");
   expect(css).toMatch(/\.rummy-table-slot\s*\{[^}]*container-type:\s*size/s);
-  expect(css).toMatch(/\.rummy-table\s*\{[^}]*width:\s*min\(100cqw, 177\.6833cqh\);[^}]*aspect-ratio:\s*1672 \/ 941/s);
+  expect(css).toMatch(/\.rummy-table\s*\{[^}]*width:\s*min\(100cqw, 255cqh\);[^}]*aspect-ratio:\s*1672 \/ 941/s);
   expect(css).toMatch(/@media \(orientation: portrait\)[\s\S]*?\.rummy-table-slot\s*\{[^}]*aspect-ratio:\s*1672 \/ 941/s);
   expect(css).not.toContain("height: min(100%, 100vw)");
   expect(css.match(/\.rummy-seat-1\s*\{/g)).toHaveLength(1);
@@ -1128,7 +1133,7 @@ test("short mobile landscape expands the palace table above a 44px bottom action
   expect(landscapeTable).toMatch(/position:\s*absolute/);
   expect(landscapeTable).toMatch(/left:\s*50%/);
   expect(landscapeTable).toMatch(/top:\s*47%/);
-  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, 240cqh\)/);
+  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, 255cqh\)/);
   expect(landscapeTable).toMatch(/transform:\s*translate\(-50%, -50%\) translateZ\(0\)/);
   expect(landscapeHand).toMatch(/grid-column:\s*1/);
   expect(landscapeHand).toMatch(/grid-row:\s*2/);
@@ -1202,8 +1207,11 @@ test("the approved five-seat palace table asset is reserved for gameplay", () =>
 
 test("landscape gameplay extends the palace atmosphere edge to edge without altering the contained table", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*inset:\s*-18px;[^}]*var\(--rummy-palace-art\)[^}]*cover no-repeat/s);
-  expect(css).toMatch(/\.rummy-table-slot\.is-art-ready::after\s*\{\s*opacity:\s*\.94/);
+  expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*inset:\s*0;[^}]*var\(--rummy-palace-art\)[^}]*cover no-repeat/s);
+  expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*filter:\s*brightness\(\.88\) saturate\(1\.02\)/s);
+  expect(css).not.toMatch(/\.rummy-table-slot::after\s*\{[^}]*filter:[^}]*blur/s);
+  expect(css).toMatch(/\.rummy-table-slot\.is-art-ready::after\s*\{\s*opacity:\s*1/);
+  expect(css).toMatch(/\.rummy-table\s*\{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*top:\s*47%;[^}]*width:\s*min\(100cqw, 255cqh\)[^}]*transform:\s*translate\(-50%, -50%\) translateZ\(0\)/s);
   expect(css).toMatch(/\.rummy-table-art\s*\{[^}]*object-fit:\s*contain/s);
   expect(css).toMatch(/\.rummy-hand-zone\s*\{[^}]*backdrop-filter:\s*blur\(12px\) saturate\(1\.08\)/s);
 });

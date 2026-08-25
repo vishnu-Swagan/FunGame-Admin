@@ -433,18 +433,18 @@
   content: "";
   position: absolute;
   z-index: 0;
-  inset: -18px;
+  inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(18,9,8,.38), transparent 16% 84%, rgba(18,9,8,.38)),
-    linear-gradient(180deg, rgba(15,8,9,.08), rgba(7,5,7,.34)),
+    linear-gradient(90deg, rgba(18,9,8,.16), transparent 12% 88%, rgba(18,9,8,.16)),
+    linear-gradient(180deg, rgba(15,8,9,.03), rgba(7,5,7,.12)),
     var(--rummy-palace-art) center 45% / cover no-repeat;
-  filter: blur(8px) brightness(.82) saturate(.92);
-  transform: scale(1.025) translateZ(0);
+  filter: brightness(.88) saturate(1.02);
+  transform: translateZ(0);
   opacity: 0;
   transition: opacity 220ms cubic-bezier(.23,1,.32,1);
 }
-.rummy-table-slot.is-art-ready::after { opacity: .94; }
+.rummy-table-slot.is-art-ready::after { opacity: 1; }
 .rummy-table-slot.is-art-loading::before {
   content: "PREPARING ROYAL TABLE";
   position: absolute;
@@ -466,9 +466,15 @@
 .rummy-table-slot.is-art-loading .rummy-table-art { opacity: 0; }
 .rummy-table-slot.is-art-ready .rummy-table-art { opacity: 1; }
 .rummy-table {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 47%;
   width: min(100%, 1672px);
-  width: min(100cqw, 177.6833cqh);
+  /* The fixed seat anchors need more of the horizontal playfield than a strict
+     height-contained image provides on modern short landscape screens. The
+     image remains unmodified and keeps its exact aspect ratio; only the stage
+     viewport reveals a larger, centered portion so every seat stays visible. */
+  width: min(100cqw, 255cqh);
   height: auto;
   max-width: none;
   max-height: none;
@@ -478,7 +484,7 @@
   border-radius: 0;
   background: none;
   box-shadow: none;
-  transform: translateZ(0);
+  transform: translate(-50%, -50%) translateZ(0);
   transform-style: preserve-3d;
   container-type: inline-size;
 }
@@ -993,14 +999,14 @@
     box-shadow: inset 0 1px rgba(240,205,115,.18), inset 0 -1px rgba(240,205,115,.16);
   }
   .rummy-table-slot::after {
-    filter: blur(3px) brightness(.91) saturate(1.02);
-    transform: scale(1.012) translateZ(0);
+    filter: brightness(.9) saturate(1.03);
+    transform: translateZ(0);
   }
   .rummy-table {
     position: absolute;
     left: 50%;
     top: 47%;
-    width: min(100cqw, 240cqh);
+    width: min(100cqw, 255cqh);
     transform: translate(-50%, -50%) translateZ(0);
   }
   .rummy-status { left: 50%; top: 3px; max-width: calc(100% - 12px); padding: 3px 8px; font-size: 7px; }

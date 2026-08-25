@@ -208,9 +208,6 @@ function Standings({ rows, winnerSeat }) {
               <strong className={delta > 0 ? "is-positive" : delta < 0 ? "is-negative" : ""}>
                 {hasDelta ? `${delta > 0 ? "+" : ""}${formatChips(delta)}` : "—"} <small>CHIPS</small>
               </strong>
-              <div className="rrs-standing-hand">
-                <AuthoritativeHand row={row} compact ownerLabel={visibleName(row?.displayName, row?.isBot, `Seat ${seatIndex + 1}`)} />
-              </div>
             </article>
           );
         })}
