@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
   Calculator,
+  CreditCard,
   ChevronDown,
   FileText,
   Gamepad2,
@@ -12,6 +13,7 @@ import {
   Menu,
   MessagesSquare,
   Network,
+  Activity,
   Search,
   Settings,
   ShieldCheck,
@@ -35,13 +37,14 @@ const NAV_GROUPS = [
     items: [
       { to: "/Admin/players", label: "Players", icon: Users, matches: ["/Admin/players", "/Admin/users"], testId: "admin-nav-users" },
       { to: "/Admin/distributors", label: "Distributors", icon: Network, permission: ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW, testId: "admin-nav-distributors" },
-      { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
     ],
   },
   {
-    label: "Virtual chips",
+    label: "Operations",
     items: [
-      { to: "/Admin/bonuses", label: "Chip requests", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
+      { to: "/Admin/payment-gateways", label: "Payment gateways", icon: CreditCard, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-payment-gateways" },
+      { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
+      { to: "/Admin/bonuses", label: "Bonuses", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
     ],
   },
   {
@@ -64,6 +67,7 @@ const NAV_GROUPS = [
         matches: ["/Admin/security", "/Admin/payment-audit", "/Admin/kyc"],
         testId: "admin-nav-payment-audit",
       },
+      { to: "/Admin/monitoring", label: "System monitoring", icon: Activity, testId: "admin-nav-monitoring" },
       { to: "/Admin/settings", label: "Settings", icon: Settings, testId: "admin-nav-settings" },
     ],
   },

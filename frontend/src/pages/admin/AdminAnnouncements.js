@@ -91,7 +91,10 @@ export default function AdminAnnouncements() {
   return (
     <PageTransition className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Announcements</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
+          <p className="mt-1 text-sm text-white/50">Publish and manage player-facing platform messages.</p>
+        </div>
         <Button data-testid="admin-create-announcement-button" size="sm" onClick={() => setEditor({ mode: "create", data: { ...EMPTY } })} className="rounded-xl font-bold">
           <Plus className="h-4 w-4 mr-1" /> New
         </Button>

@@ -729,6 +729,16 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         allowed = await routes.payments_reconcile_and_pay(user=legacy)
         self.assertEqual(allowed["id"], "admin-1")
 
+        pre_rbac = {
+            "id": "admin-legacy", "role": "ADMIN", "status": "ACTIVE",
+            "admin_role": "OPERATIONS",
+        }
+        self.assertEqual((await routes.payments_view(user=pre_rbac))["id"], "admin-legacy")
+        self.assertEqual((await routes.audit_view(user=pre_rbac))["id"], "admin-legacy")
+        with self.assertRaises(HTTPException) as mutation_denied:
+            await routes.withdrawals_approve(user=pre_rbac)
+        self.assertEqual(mutation_denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
+
         class OversizedRequest:
             headers = {}
 

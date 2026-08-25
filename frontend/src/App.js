@@ -59,6 +59,7 @@ import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
 import { AdminPaymentAudit, AdminKyc } from "@/pages/admin/AdminPaymentPages";
+import { AdminMonitoring, AdminPaymentGateways, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
 
 // Partner portal (distributors)
 import PartnerLayout from "@/pages/partner/PartnerLayout";
@@ -109,13 +110,13 @@ function AdminConsoleApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
             <Route path="bonuses" element={<AdminChipRequests />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
             <Route path="notifications" element={<AdminAnnouncements />} />
-            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
-            <Route path="monitoring" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminSecurityAudit /></RequirePermission>} />
+            <Route path="monitoring" element={<AdminMonitoring />} />
             <Route path="signups" element={<Navigate to="/Admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />
@@ -192,13 +193,13 @@ function PlayerApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
             <Route path="bonuses" element={<AdminChipRequests />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
             <Route path="notifications" element={<AdminAnnouncements />} />
-            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
-            <Route path="monitoring" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="security" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminSecurityAudit /></RequirePermission>} />
+            <Route path="monitoring" element={<AdminMonitoring />} />
             <Route path="signups" element={<Navigate to="/Admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="chip-requests" element={<AdminChipRequests />} />

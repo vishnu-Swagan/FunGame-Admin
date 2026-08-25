@@ -163,6 +163,11 @@ async def require_withdrawal_player(user: dict = Depends(get_current_user)):
 
 
 def _permissions(user: dict) -> set[str]:
+    if "admin_permissions" not in user and "permissions" not in user:
+        # Pre-RBAC production administrators retain read-only access to the
+        # provider-readiness and audit surfaces during migration. No payment
+        # mutation grant is implied by this compatibility path.
+        return {"PAYMENTS_VIEW", "AUDIT_VIEW"}
     values = (
         user.get("admin_permissions")
         if "admin_permissions" in user

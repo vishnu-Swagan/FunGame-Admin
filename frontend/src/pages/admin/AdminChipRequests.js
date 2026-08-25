@@ -64,7 +64,10 @@ export default function AdminChipRequests() {
 
   return (
     <PageTransition className="space-y-4">
-      <h1 className="text-2xl font-bold tracking-tight">Chip requests</h1>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Bonuses</h1>
+        <p className="mt-1 text-sm text-white/50">Review promotional virtual-chip credits and player chip requests.</p>
+      </div>
 
       <div className="fg-rail flex gap-2 overflow-x-auto">
         {FILTERS.map((f) => (
