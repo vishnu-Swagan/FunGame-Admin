@@ -50,9 +50,12 @@
 }
 
 .j7-table {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 0;
   width: 500px;
   min-height: 881px;
+  margin-left: -250px;
   overflow: hidden;
   color: #fff6cf;
   border-inline: 1px solid rgba(255, 216, 118, .24);
@@ -715,6 +718,7 @@
     flex: none;
     width: 500px;
     min-height: 881px;
+    margin-left: -250px;
     transform-origin: top center;
   }
 }
