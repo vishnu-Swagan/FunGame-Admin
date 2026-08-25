@@ -35,6 +35,15 @@ test("distributor CRM permissions remain independently scoped", () => {
   expect(hasPermission(viewer, ADMIN_PERMISSIONS.DISTRIBUTORS_CREDENTIALS)).toBe(false);
 });
 
+test("pre-RBAC administrators retain the CRM read surfaces during migration", () => {
+  const legacyAdmin = { role: "ADMIN", status: "ACTIVE" };
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.PAYMENTS_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.AUDIT_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.WITHDRAWALS_APPROVE)).toBe(false);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE)).toBe(false);
+});
+
 test("an empty canonical permission list does not revive legacy permissions", () => {
   const revoked = {
     role: "ADMIN",
