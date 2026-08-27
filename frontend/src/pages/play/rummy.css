@@ -349,7 +349,17 @@
 .rummy-opponent-disclosure svg { flex: 0 0 auto; width: 14px; height: 14px; color: #68d8ae; }
 
 /* ---------------- Live table ---------------- */
-.rummy-game { display: grid; grid-template-rows: clamp(50px, 7.2vh, 72px) minmax(0, 1fr); }
+.rummy-game {
+  /* Paint the game across the complete visual viewport. Safe-area insets are
+     applied to the controls below instead of shrinking the palace canvas and
+     leaving a dark strip beside notched Android/iOS landscape screens. */
+  left: var(--fg-viewport-left, 0px);
+  top: var(--fg-viewport-top, 0px);
+  width: var(--fg-viewport-w, 100vw);
+  height: var(--fg-viewport-h, 100dvh);
+  display: grid;
+  grid-template-rows: calc(clamp(50px, 7.2vh, 72px) + var(--fg-safe-top, 0px)) minmax(0, 1fr);
+}
 .rummy-game-head {
   position: relative;
   z-index: 60;
@@ -357,7 +367,10 @@
   grid-template-columns: 50px minmax(0, 1fr) auto auto;
   gap: clamp(7px, 1.2vw, 18px);
   align-items: center;
-  padding: 5px clamp(8px, 1.5vw, 22px);
+  padding-top: max(5px, var(--fg-safe-top, 0px));
+  padding-right: max(clamp(8px, 1.5vw, 22px), var(--fg-safe-right, 0px));
+  padding-bottom: 5px;
+  padding-left: max(clamp(8px, 1.5vw, 22px), var(--fg-safe-left, 0px));
   border-bottom: 1px solid rgba(240,205,115,.34);
   background: linear-gradient(180deg, #2d201d, #100c12 86%);
   box-shadow: 0 7px 20px rgba(0,0,0,.46), inset 0 1px rgba(255,255,255,.1);
@@ -416,8 +429,8 @@
     radial-gradient(ellipse at 50% 32%, rgba(190, 136, 52, .12), transparent 47%),
     linear-gradient(180deg, #110b12, #070608 72%);
 }
-.rummy-status { position: absolute; z-index: 35; top: 7px; left: 50%; transform: translateX(-50%); max-width: min(80%, 680px); padding: 6px 15px; border: 1px solid rgba(240,205,115,.3); border-radius: 999px; color: #ffe8a8; background: rgba(8,6,10,.72); backdrop-filter: blur(8px); font-size: clamp(9px, .9vw, 13px); font-weight: 800; letter-spacing: .08em; text-align: center; box-shadow: 0 5px 16px rgba(0,0,0,.42); }
-.rummy-table-opponent-disclosure { position: absolute; z-index: 34; top: 9px; right: 8px; max-width: 220px; justify-content: flex-start; padding: 5px 8px; border: 1px solid rgba(104,216,174,.18); border-radius: 999px; background: rgba(5,22,17,.68); backdrop-filter: blur(7px); text-align: left; pointer-events: none; }
+.rummy-status { position: absolute; z-index: 35; top: 7px; left: 50%; transform: translateX(-50%); max-width: min(calc(80% - var(--fg-safe-left, 0px) - var(--fg-safe-right, 0px)), 680px); padding: 6px 15px; border: 1px solid rgba(240,205,115,.3); border-radius: 999px; color: #ffe8a8; background: rgba(8,6,10,.72); backdrop-filter: blur(8px); font-size: clamp(9px, .9vw, 13px); font-weight: 800; letter-spacing: .08em; text-align: center; box-shadow: 0 5px 16px rgba(0,0,0,.42); }
+.rummy-table-opponent-disclosure { position: absolute; z-index: 34; top: 9px; right: max(8px, var(--fg-safe-right, 0px)); max-width: 220px; justify-content: flex-start; padding: 5px 8px; border: 1px solid rgba(104,216,174,.18); border-radius: 999px; background: rgba(5,22,17,.68); backdrop-filter: blur(7px); text-align: left; pointer-events: none; }
 .rummy-sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .rummy-table-slot {
   position: relative;
@@ -438,10 +451,10 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(18,9,8,.16), transparent 12% 88%, rgba(18,9,8,.16)),
-    linear-gradient(180deg, rgba(15,8,9,.03), rgba(7,5,7,.12)),
-    var(--rummy-palace-art) center 45% / cover no-repeat;
-  filter: brightness(.88) saturate(1.02);
+    linear-gradient(90deg, rgba(18,9,8,.08), transparent 12% 88%, rgba(18,9,8,.08)),
+    linear-gradient(180deg, rgba(15,8,9,.02), rgba(7,5,7,.08)),
+    var(--rummy-palace-art) center 47% / cover no-repeat;
+  filter: none;
   transform: translateZ(0);
   opacity: 0;
   transition: opacity 220ms cubic-bezier(.23,1,.32,1);
@@ -471,11 +484,9 @@
   position: absolute;
   left: 50%;
   top: 47%;
-  width: min(100%, 1672px);
-  /* The fixed seat anchors need more of the horizontal playfield than a strict
-     height-contained image provides on modern short landscape screens. The
-     image remains unmodified and keeps its exact aspect ratio; only the stage
-     viewport reveals a larger, centered portion so every seat stays visible. */
+  /* Keep the fixed player anchors visible on very short landscape phones.
+     The edge-to-edge palace atmosphere behind this layer fills the remaining
+     width without cropping the top and bottom seats. */
   width: min(100cqw, 255cqh);
   height: auto;
   max-width: none;
@@ -587,7 +598,7 @@
 .rummy-jester { position: absolute; inset: 0; display: grid !important; place-items: center; color: #d1a126; font-size: clamp(21px, 2.2vw, 35px); }
 .rummy-card > small { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); color: #861425; font-size: 6px; font-weight: 900; letter-spacing: .05em; }
 
-.rummy-hand-zone { min-width: 0; min-height: 0; position: relative; z-index: 16; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 3px; padding: 4px clamp(6px, 1.3vw, 18px) max(5px, var(--fg-safe-bottom)); border-top: 1px solid rgba(236,197,102,.52); background: radial-gradient(ellipse at 50% -18%, rgba(49,144,104,.2), transparent 46%), linear-gradient(180deg, rgba(24,17,25,.82), rgba(8,7,10,.97)); box-shadow: inset 0 1px rgba(255,244,201,.14), inset 0 12px 30px rgba(0,0,0,.38), 0 -16px 34px rgba(5,4,6,.3); backdrop-filter: blur(12px) saturate(1.08); }
+.rummy-hand-zone { min-width: 0; min-height: 0; position: relative; z-index: 16; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 3px; padding-top: 4px; padding-right: max(clamp(6px, 1.3vw, 18px), var(--fg-safe-right, 0px)); padding-bottom: max(5px, var(--fg-safe-bottom)); padding-left: max(clamp(6px, 1.3vw, 18px), var(--fg-safe-left, 0px)); border-top: 1px solid rgba(236,197,102,.52); background: radial-gradient(ellipse at 50% -18%, rgba(49,144,104,.2), transparent 46%), linear-gradient(180deg, rgba(24,17,25,.82), rgba(8,7,10,.97)); box-shadow: inset 0 1px rgba(255,244,201,.14), inset 0 12px 30px rgba(0,0,0,.38), 0 -16px 34px rgba(5,4,6,.3); backdrop-filter: blur(12px) saturate(1.08); }
 .rummy-group-rail { min-width: 0; display: flex; gap: clamp(8px, .7vw, 12px); align-items: flex-start; justify-content: safe center; overflow-x: auto; overflow-y: hidden; padding: 17px 2px 5px; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #94703b transparent; }
 .rummy-group-rail:focus-visible { outline: 2px solid rgba(255,232,163,.78); outline-offset: -2px; }
 .rummy-group { min-width: max-content; align-self: flex-start; display: grid; grid-template-rows: auto 22px; border: 1px solid rgba(124,219,173,.3); border-radius: 6px 6px 11px 11px; background: linear-gradient(180deg, rgba(5,45,33,.22), rgba(19,96,68,.36)); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 6px 18px rgba(0,0,0,.16); scroll-snap-align: center; transform: translateZ(0); transition: border-color 180ms cubic-bezier(.23,1,.32,1), box-shadow 180ms cubic-bezier(.23,1,.32,1); }
@@ -640,8 +651,8 @@
   position: absolute;
   z-index: 72;
   top: clamp(58px, 8vh, 78px);
-  right: clamp(7px, 1.4vw, 20px);
-  bottom: clamp(8px, 2vh, 20px);
+  right: max(clamp(7px, 1.4vw, 20px), var(--fg-safe-right, 0px));
+  bottom: max(clamp(8px, 2vh, 20px), var(--fg-safe-bottom, 0px));
   width: min(386px, calc(100% - 14px));
   min-height: 0;
   display: grid;
@@ -754,7 +765,10 @@
   --result-ink: #120d15;
   position: absolute;
   z-index: 95;
-  inset: clamp(54px, 7vh, 76px) max(10px, calc((100% - 1120px) / 2)) max(10px, var(--fg-safe-bottom));
+  top: clamp(54px, 7vh, 76px);
+  right: max(10px, var(--fg-safe-right, 0px), calc((100% - 1120px) / 2));
+  bottom: max(10px, var(--fg-safe-bottom, 0px));
+  left: max(10px, var(--fg-safe-left, 0px), calc((100% - 1120px) / 2));
   display: grid;
   grid-template-rows: max-content minmax(0, 1fr) max-content;
   gap: 9px;
@@ -866,7 +880,7 @@
   .rummy-stage { grid-template-rows: minmax(0, 1fr) auto; }
   .rummy-actions { grid-template-columns: repeat(6, minmax(68px, 1fr)); }
   .rummy-actions button { min-height: 44px; }
-  .rummy-social-drawer { top: 55px; bottom: 5px; width: min(360px, calc(100% - 10px)); }
+  .rummy-social-drawer { top: 55px; bottom: max(5px, var(--fg-safe-bottom, 0px)); width: min(360px, calc(100% - 10px - var(--fg-safe-left, 0px) - var(--fg-safe-right, 0px))); }
   .rummy-social-drawer > header { padding-block: 9px 6px; }
   .rummy-social-drawer > header b { font-size: 18px; }
   .rummy-chat-pane { gap: 5px; }
@@ -931,7 +945,7 @@
   .rummy-actions { grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .rummy-actions button { min-height: 44px; font-size: 8px; }
   .rummy-validation { bottom: calc(max(5px, var(--fg-safe-bottom)) + 96px); right: 7px; max-width: calc(100% - 14px); font-size: 7px; }
-  .rummy-results { inset: 66px 7px max(7px, var(--fg-safe-bottom)); gap: 7px; padding: 7px; }
+  .rummy-results { top: 66px; right: max(7px, var(--fg-safe-right, 0px)); bottom: max(7px, var(--fg-safe-bottom, 0px)); left: max(7px, var(--fg-safe-left, 0px)); gap: 7px; padding: 7px; }
   .rummy-result-hero { min-height: 92px; grid-template-columns: 54px minmax(0, 1fr) minmax(92px, 108px); gap: 8px; padding: 9px; }
   .rummy-result-seal { width: 50px; }
   .rummy-result-seal span { font-size: 24px; }
@@ -963,7 +977,7 @@
   .rummy-result-actions { min-height: 44px; padding-inline: 2px; }
   .rummy-result-actions p { font-size: 9px; }
   .rummy-result-actions button { min-width: 154px; min-height: 44px; }
-  .rummy-social-drawer { top: 63px; right: 5px; bottom: 5px; width: calc(100% - 10px); border-radius: 20px; }
+  .rummy-social-drawer { top: 63px; right: max(5px, var(--fg-safe-right, 0px)); bottom: max(5px, var(--fg-safe-bottom, 0px)); width: min(calc(100% - 10px - var(--fg-safe-left, 0px) - var(--fg-safe-right, 0px)), 386px); border-radius: 20px; }
   .rummy-reaction-grid { grid-template-columns: repeat(5, 1fr); }
   .rummy-reaction-grid button { min-height: 46px; }
   .rummy-reaction-grid button small { font-size: 5px; }
@@ -971,8 +985,15 @@
 }
 
 @media (orientation: landscape) and (max-height: 430px) {
-  .rummy-game { grid-template-rows: 44px minmax(0, 1fr); }
-  .rummy-game-head { grid-template-columns: 44px minmax(0, 1fr) auto auto; gap: 4px; padding: 0 6px; }
+  .rummy-game { grid-template-rows: calc(50px + var(--fg-safe-top, 0px)) minmax(0, 1fr); }
+  .rummy-game-head {
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    gap: 4px;
+    padding-top: var(--fg-safe-top, 0px);
+    padding-right: max(6px, var(--fg-safe-right, 0px));
+    padding-bottom: 0;
+    padding-left: max(6px, var(--fg-safe-left, 0px));
+  }
   .rummy-game-head > button,
   .rummy-table-utilities > button { min-width: 44px; width: 44px; height: 44px; padding: 0; }
   .rummy-brand-lockup { gap: 5px; }
@@ -1005,7 +1026,7 @@
     box-shadow: inset 0 1px rgba(240,205,115,.18), inset 0 -1px rgba(240,205,115,.16);
   }
   .rummy-table-slot::after {
-    filter: brightness(.9) saturate(1.03);
+    filter: none;
     transform: translateZ(0);
   }
   .rummy-table {
@@ -1018,7 +1039,7 @@
     width: min(100cqw, 285cqh);
     transform: translate(-50%, -50%) translateZ(0);
   }
-  .rummy-status { left: 6px; top: 3px; max-width: 34%; padding: 3px 8px; overflow: hidden; transform: none; text-overflow: ellipsis; white-space: nowrap; font-size: 7px; }
+  .rummy-status { left: max(6px, var(--fg-safe-left, 0px)); top: 3px; max-width: calc(34% - var(--fg-safe-left, 0px)); padding: 3px 8px; overflow: hidden; transform: none; text-overflow: ellipsis; white-space: nowrap; font-size: 7px; }
   .rummy-table-hud { display: none; }
   .rummy-seat { width: clamp(48px, 17cqw, 60px); }
   .rummy-avatar-ring { width: clamp(32px, 10.5cqw, 38px); height: clamp(32px, 10.5cqw, 38px); padding: 3px; }
@@ -1039,7 +1060,10 @@
     min-height: calc(126px + var(--fg-safe-bottom));
     height: calc(126px + var(--fg-safe-bottom));
     max-height: calc(126px + var(--fg-safe-bottom));
-    padding: 2px 5px max(3px, var(--fg-safe-bottom));
+    padding-top: 2px;
+    padding-right: max(5px, var(--fg-safe-right, 0px));
+    padding-bottom: max(3px, var(--fg-safe-bottom));
+    padding-left: max(5px, var(--fg-safe-left, 0px));
     overflow: hidden;
     border-top: 1px solid rgba(236,197,102,.52);
     border-left: 0;
@@ -1078,10 +1102,13 @@
   .rummy-actions button svg { width: 13px; }
   .rummy-validation { left: 50%; right: auto; top: 1px; bottom: auto; max-width: calc(100% - 16px); min-height: 14px; padding: 2px 7px; border: 1px solid rgba(255,190,202,.22); border-radius: 999px; transform: translateX(-50%); color: #ffd1d7; background: rgba(22,10,15,.84); font-size: 6px; line-height: 1.15; text-align: center; }
   .rummy-validation.is-valid { border-color: rgba(130,233,189,.28); background: rgba(4,42,30,.78); }
-  .rummy-table-opponent-disclosure { top: 25px; right: 5px; max-width: 190px; padding: 3px 6px; font-size: 6px; }
+  .rummy-table-opponent-disclosure { top: 25px; right: max(5px, var(--fg-safe-right, 0px)); max-width: 190px; padding: 3px 6px; font-size: 6px; }
   .rummy-table-opponent-disclosure svg { width: 10px; height: 10px; }
   .rummy-results {
-    inset: 49px 5px max(5px, var(--fg-safe-bottom));
+    top: 49px;
+    right: max(5px, var(--fg-safe-right, 0px));
+    bottom: max(5px, var(--fg-safe-bottom, 0px));
+    left: max(5px, var(--fg-safe-left, 0px));
     grid-template-columns: minmax(218px, .82fr) minmax(0, 1.45fr);
     grid-template-rows: minmax(0, 1fr) 44px;
     gap: 6px;
@@ -1125,8 +1152,8 @@
 @media (orientation: landscape) and (min-height: 431px) and (max-height: 620px) and (max-width: 1180px) {
   .rummy-stage,
   .rummy-table-slot { width: 100%; height: 100%; }
-  .rummy-table { width: min(100cqw, 260cqh); }
-  .rummy-status { left: 8px; max-width: 34%; overflow: hidden; transform: none; text-overflow: ellipsis; white-space: nowrap; }
+  .rummy-table { width: min(100cqw, 255cqh); }
+  .rummy-status { left: max(8px, var(--fg-safe-left, 0px)); max-width: calc(34% - var(--fg-safe-left, 0px)); overflow: hidden; transform: none; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 @media (orientation: landscape) and (max-height: 430px) and (max-width: 600px) {
@@ -1368,6 +1395,13 @@
 }
 
 @media (orientation: landscape) and (max-height: 430px) {
-  .rummy-game-head { grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 4px; padding: 3px 6px; }
+  .rummy-game-head {
+    grid-template-columns: 40px minmax(0, 1fr) auto auto;
+    gap: 4px;
+    padding-top: max(3px, var(--fg-safe-top, 0px));
+    padding-right: max(6px, var(--fg-safe-right, 0px));
+    padding-bottom: 3px;
+    padding-left: max(6px, var(--fg-safe-left, 0px));
+  }
   .rummy-seat > strong { margin-top: 2px; font-size: clamp(6px, 2.2cqw, 8px); }
 }
