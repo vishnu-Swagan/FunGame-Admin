@@ -70,13 +70,19 @@ test.each([
   "play/PlayShell.js",
   "play/GameStage.js",
   "play/arcade/Cabinet.js",
+  "play/GameIntro.js",
   "../pages/play/RummyGame.js",
   "../pages/play/AviatorGame.js",
   "../pages/play/cabinet/SevenUpDownCabinet.js",
   "../pages/play/cabinet/PappuPicturesCabinet.js",
   "../pages/play/cabinet/KenoCabinet.js",
-])("%s carries the shared brand lockup", (relativePath) => {
+])("%s keeps the website wordmark outside live gameplay", (relativePath) => {
   const source = fs.readFileSync(path.join(__dirname, relativePath), "utf8");
+  expect(source).not.toContain("BrandWordmark");
+});
+
+test("the Rummy table-selection lobby keeps the approved website branding", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../pages/play/RummyPremiumLobby.js"), "utf8");
   expect(source).toContain("BrandWordmark");
 });
 

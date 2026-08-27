@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 import { api, errCode, errMsg } from "@/lib/api";
 import { formatChips } from "@/components/common";
-import { BrandWordmark } from "@/components/Brand";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import {
@@ -916,7 +915,6 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
     <main className="rummy-game" style={RUMMY_ART} data-testid="rummy-live-table" data-state={state.state} data-mode={state.mode} onPointerDownCapture={unlockTableAudio} onKeyDownCapture={unlockTableAudio}>
       <header className="rummy-game-head">
         <button type="button" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
-        <BrandWordmark className="rummy-brand-lockup" logoClassName="rummy-brand-logo" />
         <div className={`rummy-live-pill ${state.walletNeutral ? "is-bot-table" : ""}`}><i />{
           state.mode === "BOT_TABLE" ? "PRACTICE TABLE · FREE" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
         }</div>

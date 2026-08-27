@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { BrandWordmark } from "@/components/Brand";
 
 /**
  * The reference Aviator is deliberately built as an isolated React 18 app.
@@ -34,7 +33,6 @@ export default function AviatorGame() {
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#08090b]">
-      <BrandWordmark className="standalone-game-brand" logoClassName="standalone-game-brand-logo" />
       {/* Version the document URL so browsers that cached Render's former
           X-Frame-Options: DENY response do not keep showing a blocked frame. */}
       <iframe

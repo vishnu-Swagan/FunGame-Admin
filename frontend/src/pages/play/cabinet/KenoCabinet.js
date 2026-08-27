@@ -7,7 +7,6 @@ import {
 import { useLiveRound } from "@/lib/useLiveRound";
 import { isMuted, kenoMusic, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import { CLIENT_BETTING_GUARD_SECONDS } from "@/lib/serverClock";
-import { BrandWordmark } from "@/components/Brand";
 import { formatRoundClock, kenoPayoutLabel } from "./kenoResult";
 import "./keno.css";
 
@@ -443,7 +442,7 @@ function KenoTable({ game, live, demo = false }) {
           <button type="button" className="keno-help-button" onClick={() => setRulesOpen(true)}>
             <CircleHelp /><span>How to Play?</span>
           </button>
-          <div className="keno-live-mode"><BrandWordmark logoClassName="keno-brand-logo" /><span><i />LIVE</span></div>
+          <div className="keno-live-mode"><span><i />LIVE</span></div>
           <div className="keno-balance" data-testid="keno-balance">{balance == null ? "…" : money(balance)} <span>CHIPS</span></div>
           <button
             type="button"

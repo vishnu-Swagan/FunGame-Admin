@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Globe } from "lucide-react";
-import { BrandWordmark } from "@/components/Brand";
 
 /* Cinematic opening shown EVERY time you enter a game (3–5s, tap to skip).
    The game's key art animates up over a scanlit stage with a LIVE · synced-
@@ -98,16 +97,6 @@ export const GameIntro = ({ game }) => {
             <div aria-hidden="true" className="fg-home-sheen-el absolute inset-y-0 -left-1/3 w-1/3 pointer-events-none" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent)" }} />
           )}
           {!reduced && <Sparks />}
-
-          {/* brand wordmark */}
-          <motion.div
-            className="absolute top-[5%] drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <BrandWordmark logoClassName="h-auto w-[min(78vw,360px)]" />
-          </motion.div>
 
           {/* soft radial glow behind the art */}
           <motion.div

@@ -23,8 +23,7 @@
   border-bottom: 1px solid #282828;
   background: #151515;
 }
-.j7-title-brand { display: flex; justify-content: center; min-width: 0; }
-.j7-title-brand-logo { display: block; width: min(170px, 80%); height: auto; filter: drop-shadow(0 3px 7px rgba(0,0,0,.72)); }
+.j7-title-brand { min-width: 0; margin: 0; overflow: hidden; color: #f5e3ad; font-size: 16px; font-weight: 900; letter-spacing: .12em; text-align: center; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .j7-titlebar button { width: 58px; height: 58px; display: grid; place-items: center; color: #d9d9d9; background: transparent; }
 .j7-titlebar button:last-child { grid-column: 3; }
 .j7-titlebar svg { width: 21px; height: 21px; stroke-width: 2.1; }

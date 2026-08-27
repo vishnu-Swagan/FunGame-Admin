@@ -8,7 +8,6 @@ import { BetDock } from "@/components/play/BetDock";
 import { ExtrasSheet } from "@/components/play/ExtrasSheet";
 import { FitToStage } from "@/components/play/FitToStage";
 import { useBettingAlarm } from "@/lib/useBettingAlarm";
-import { BrandWordmark } from "@/components/Brand";
 
 /**
  * `fit` scales the table down until it fits the stage, which is right for a
@@ -29,14 +28,13 @@ export const GameStage = ({ game, balance, live, betDock, extras, labels, alarm 
       style={{ height: "calc(var(--fg-viewport-h, 100dvh) - var(--fg-header-h, 56px) - var(--fg-safe-bottom, 0px))" }}
       data-testid="game-stage"
     >
-      {/* sticky game bar (below the Chakri.Casino logo) */}
+      {/* Sticky game controls. Branding stays in the website and game lobby. */}
       <div className="shrink-0 px-3 pt-2 pb-2 border-b border-white/10 bg-[hsl(var(--background)/0.9)] backdrop-blur-xl space-y-1.5">
         <div className="flex items-center gap-2">
           <button data-testid="play-back-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back"
             className="h-8 w-8 flex items-center justify-center rounded-full border border-white/10 bg-white/5 active:scale-95">
             <ArrowLeft className="h-4 w-4 text-white/85" />
           </button>
-          <BrandWordmark logoClassName="h-auto w-24" />
           <h1 className="flex-1 truncate font-display text-lg text-white">{game.name}</h1>
           <button data-testid="play-sound-toggle" onClick={toggleMuted} aria-label={muted ? "Unmute" : "Mute"}
             className={`h-8 w-8 flex items-center justify-center rounded-full border ${muted ? "border-white/10 bg-white/5" : "border-primary/35 bg-primary/10"}`}>

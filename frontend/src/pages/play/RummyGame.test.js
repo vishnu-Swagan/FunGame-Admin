@@ -335,11 +335,10 @@ test("partial server seat arrays still render all five visible table positions",
   act(() => root.unmount());
 });
 
-test("the live Rummy table uses the shared Chakri brand lockup", () => {
+test("the live Rummy table leaves Chakri branding in the lobby", () => {
   const source = fs.readFileSync(path.join(__dirname, "RummyGame.js"), "utf8");
-  expect(source).toContain('import { BrandWordmark } from "@/components/Brand"');
-  expect(source).toContain('className="rummy-brand-lockup"');
-  expect(source).not.toContain('className="rummy-brand-monogram"');
+  expect(source).not.toContain("BrandWordmark");
+  expect(source).not.toContain('className="rummy-brand-lockup"');
 });
 
 test("the Rummy lobby presents all five levels without showing the gameplay table", async () => {
