@@ -9,6 +9,14 @@ import { aviatorUnityContext } from "../../unity";
 import { playGameSound } from "../../sound";
 
 const RENDERER_STARTUP_LIMIT_MS = 3500;
+const FLIGHT_HOVER_PROGRESS = 0.82;
+const flightCurveValue = (seconds: number) => (
+	1
+	+ (0.06 * seconds)
+	+ Math.pow(0.06 * seconds, 2)
+	- Math.pow(0.04 * seconds, 3)
+	+ Math.pow(0.04 * seconds, 4)
+);
 
 export default function WebGLStarter() {
 	const { GameState, currentNum, time, setCurrentTarget, latestRoundNumber } = React.useContext(Context)
@@ -71,7 +79,7 @@ export default function WebGLStarter() {
 			const getCurrentTime = () => {
 				currentTime = (Date.now() - startTime) / 1000;
 				setFlightSeconds(currentTime);
-				const curve = 1 + 0.06 * currentTime + Math.pow((0.06 * currentTime), 2) - Math.pow((0.04 * currentTime), 3) + Math.pow((0.04 * currentTime), 4);
+				const curve = flightCurveValue(currentTime);
 				computedMultiplier = Math.max(1, Math.floor(curve * 100) / 100);
 				setTarget(computedMultiplier);
 				setCurrentTarget(computedMultiplier);
@@ -120,14 +128,28 @@ export default function WebGLStarter() {
 	const displayedMultiplier = GameState === "PLAYING"
 		? Math.max(target || 1, 1)
 		: Math.max(Number(currentNum) || 1, 1);
-	const flightProgress = GameState === "PLAYING"
-		? Math.min(0.96, Math.max(0.04, flightSeconds / 14))
-		: GameState === "GAMEEND" ? 1 : 0;
-	const curveRemaining = 820 * (1 - flightProgress);
+	// Keep the aircraft motion tied to the already displayed, server-synchronised
+	// multiplier. This changes presentation only; round outcomes remain wholly
+	// server-authoritative. Reusing the same value at GAMEEND also prevents the
+	// aircraft from jumping to a different position when a round settles.
+	const continuousFlightMultiplier = flightCurveValue(Math.max(0, flightSeconds));
+	const multiplierProgress = Math.min(
+		FLIGHT_HOVER_PROGRESS,
+		Math.max(0.035, Math.sqrt(Math.max(0, continuousFlightMultiplier - 1) / 1.2)),
+	);
+	const flightProgress = GameState === "PLAYING" || GameState === "GAMEEND"
+		? multiplierProgress
+		: 0;
+	const verticalProgress = Math.min(
+		0.88,
+		(1.165 * Math.pow(flightProgress, 2)) + (0.35 * Math.pow(flightProgress, 3)),
+	);
+	const curveRemaining = 1 - flightProgress;
+	const horizontalProgress = 1 - Math.pow(1 - flightProgress, 1.3);
 	const planeStyle = {
-		left: `${4.5 + (82 * flightProgress)}%`,
-		bottom: `${7.5 + (68 * Math.pow(flightProgress, 1.35))}%`,
-		transform: `translate(-35%, 45%) rotate(${-8 - (12 * flightProgress)}deg)`,
+		left: `${Math.min(78, 4 + (82 * horizontalProgress))}%`,
+		bottom: `${4 + (94 * verticalProgress)}%`,
+		transform: `translate(-2%, 55%) rotate(${-5 - (2.5 * flightProgress)}deg)`,
 	};
 
 	React.useLayoutEffect(() => {
@@ -175,9 +197,9 @@ export default function WebGLStarter() {
 								<stop offset="1" stopColor="#e11942" stopOpacity="0.24" />
 							</linearGradient>
 						</defs>
-						<path className="curve-fill" style={{ clipPath: `inset(0 ${100 - (flightProgress * 100)}% 0 0)` }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12 L820 420 L0 420 Z" />
-						<path className="curve-shadow" style={{ strokeDasharray: 820, strokeDashoffset: curveRemaining }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12" />
-						<path className="curve-line" style={{ strokeDashoffset: curveRemaining }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12" />
+						<path className="curve-fill" style={{ clipPath: `inset(0 ${100 - (horizontalProgress * 100)}% 0 0)` }} d="M0 420 C273 420 546 265 820 -186 L820 420 Z" />
+						<path className="curve-shadow" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
+						<path className="curve-line" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
 					</svg>
 					<img
 						src={aviatorCraft}

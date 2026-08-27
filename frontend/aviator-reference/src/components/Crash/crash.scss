@@ -251,6 +251,9 @@
     fill: none;
     stroke: rgba(225, 25, 66, 0.12);
     stroke-width: 20;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    transition: stroke-dashoffset 80ms linear;
     filter: blur(9px);
   }
 
@@ -259,7 +262,7 @@
     stroke: #e11942;
     stroke-width: 4;
     stroke-linecap: round;
-    stroke-dasharray: 820;
+    stroke-dasharray: 1;
     transition: stroke-dashoffset 80ms linear;
     filter: drop-shadow(0 0 5px rgba(225, 25, 66, 0.58));
   }
@@ -270,12 +273,12 @@
   left: 4.5%;
   bottom: 7.5%;
   z-index: 7;
-  width: clamp(102px, 14vw, 164px);
+  width: clamp(116px, 18.5%, 220px);
   height: auto;
   opacity: 0;
-  transform-origin: 58% 50%;
-  transition: opacity 180ms ease, transform 80ms linear;
-  filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 10px rgba(237, 23, 66, 0.34));
+  transform-origin: 10% 52%;
+  transition: opacity 180ms ease, left 80ms linear, bottom 80ms linear, transform 80ms linear;
+  filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 7px rgba(237, 23, 66, 0.26));
   pointer-events: none;
 
   &.visible {
@@ -421,17 +424,17 @@
 @keyframes aviatorEscape {
   0% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) rotate(-14deg) scale(1);
+    transform: translate(-2%, 55%) translate3d(0, 0, 0) rotate(-7.5deg) scale(1);
   }
 
-  18% {
+  16% {
     opacity: 1;
-    transform: translate3d(34px, -18px, 0) rotate(-17deg) scale(0.98);
+    transform: translate(-2%, 55%) translate3d(58px, -22px, 0) rotate(-8deg) scale(0.99);
   }
 
   100% {
     opacity: 0;
-    transform: translate3d(46vw, -34vh, 0) rotate(-24deg) scale(0.72);
+    transform: translate(-2%, 55%) translate3d(58vw, -42vh, 0) rotate(-10deg) scale(0.76);
   }
 }
 
@@ -478,7 +481,7 @@
   }
 
   .plane {
-    width: clamp(66px, 13vw, 100px);
+    width: clamp(68px, 18.5%, 170px);
   }
 }
 

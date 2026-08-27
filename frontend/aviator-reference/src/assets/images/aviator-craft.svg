@@ -1,11 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 92" role="img" aria-labelledby="title">
-  <title id="title">Aviator craft</title>
-  <g fill="#ed1742">
-    <path d="M18 48c8-5 17-8 29-9l49-3 29-22h18l-13 21 43-2 14-13h12l-5 14c14 2 22 7 22 12s-8 10-22 12l5 14h-12l-14-13-43-2 13 21h-18L96 56l-49-3c-12-1-21-4-29-5Z"/>
-    <path d="M70 29 52 11h17l31 24-23 1-7-7Zm0 34L52 81h17l31-24-23-1-7 7Z"/>
-    <rect x="198" y="13" width="5" height="66" rx="2.5"/>
-    <rect x="185" y="43" width="32" height="5" rx="2.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 112" role="img" aria-labelledby="title" data-flight-profile="side-view">
+  <title id="title">Red vintage Aviator aircraft</title>
+  <g fill="#ed0b42">
+    <!-- Original, compact side-profile vintage aircraft silhouette. -->
+    <path d="M20 54 43 50 31 29 45 25 68 49l33-1 27-25 28-1-19 25 59-2 25 7c11 3 17 7 17 11s-7 8-19 10l-26 3-58-5 20 19-27-2-30-19-62-2c-19-1-31-5-38-10Z"/>
+    <path d="m14 57 50-3-25 22-19-1 19-15-25 2Z"/>
+    <path d="m85 64 70-2 38 24-33 3-75-25Z"/>
+    <path d="m154 45 17-18 25 1 16 19-58-2Z"/>
+    <ellipse cx="229" cy="62" rx="13" ry="12"/>
+    <circle cx="241" cy="62" r="5"/>
   </g>
-  <circle cx="151" cy="43" r="7" fill="#0b0c0f"/>
-  <circle cx="151" cy="43" r="3" fill="#ed1742"/>
+  <path fill="#101216" d="m172 42 7-10h14l9 13-30-3Z"/>
+  <path fill="#ed0b42" d="M185 28h5v8h-5z"/>
+  <path fill="#101216" d="m47 50 6-12 6 11-12 1Zm79 11 9-4 10 5-10 5-9-6Z" opacity=".72"/>
+  <g>
+    <g id="propeller" transform-origin="244px 61px">
+      <path fill="#ed0b42" d="M240 18c3-8 7-8 9 0l-4 39h-6l1-39Zm-1 48h6l4 38c-2 8-6 8-9 0l-1-38Z"/>
+      <circle cx="244" cy="62" r="5" fill="#ed0b42"/>
+      <circle cx="244" cy="62" r="2" fill="#101216"/>
+    </g>
+  </g>
+  <style>
+    #propeller { animation: propeller-spin .19s linear infinite; }
+    @keyframes propeller-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #propeller { animation: none; } }
+  </style>
 </svg>

@@ -1,4 +1,6 @@
 import React from "react";
+import fs from "fs";
+import path from "path";
 import { act, render } from "@testing-library/react";
 import Context from "../../context";
 import WebGLStarter from ".";
@@ -28,6 +30,19 @@ beforeEach(() => {
 	jest.clearAllMocks();
 });
 afterEach(() => jest.useRealTimers());
+
+test("the fallback uses the approved side-profile propeller aircraft", () => {
+	const craft = fs.readFileSync(
+		path.resolve(__dirname, "../../assets/images/aviator-craft.svg"),
+		"utf8",
+	);
+
+	expect(craft).toContain('data-flight-profile="side-view"');
+	expect(craft).toContain('viewBox="0 0 300 112"');
+	expect(craft).toContain('id="propeller"');
+	expect(craft).toContain("propeller-spin");
+	expect(craft).not.toContain('viewBox="0 0 220 92"');
+});
 
 test("cold startup without server state keeps the neutral renderer gate", () => {
   const { container } = render(
@@ -82,6 +97,7 @@ test("a stalled Unity load falls back to the server-driven aircraft and multipli
 	expect(container.querySelector(".fallback-flight-visual")).not.toBeNull();
 	expect(container.querySelector(".flight-curve")).not.toBeNull();
 	expect(container.querySelector(".plane.visible")).not.toBeNull();
+	expect(container.querySelectorAll(".plane")).toHaveLength(1);
 	expect(container.querySelector(".multiplier")?.textContent).toMatch(/x$/);
 	expect(aviatorUnityContext.send).not.toHaveBeenCalled();
 });
