@@ -47,6 +47,8 @@ services:
         value: production                            # production requires live-only account flows
       - key: REGISTRATION_MODE
         sync: false                                  # preserve the live PHONE_OTP rollout managed in Render
+      - key: REGISTRATION_EMAIL_OTP_REQUIRED
+        sync: false                                  # enable only after Telesign Verify email is ready
       - key: OTP_PEPPER
         sync: false                                  # secret used by persistent auth rate-limit hashes
       - key: OTP_EMAIL_ADAPTER
@@ -67,6 +69,8 @@ services:
         sync: false                                  # preserve the already-reviewed account capability
       - key: TELESIGN_VERIFY_PLUS_ENABLED
         sync: false                                  # must match My Telesign; do not overwrite from source
+      - key: TELESIGN_VERIFY_TEMPLATE
+        sync: false                                  # optional approved multi-channel Verify API template name
       - key: TELESIGN_ENGAGEMENT_SMS_ENABLED
         sync: false                                  # requires sender/compliance/consent workflow
       - key: OTP_EXPOSE_DEV_CODE

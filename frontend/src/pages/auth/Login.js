@@ -60,7 +60,11 @@ export default function Login() {
         try {
           const { data: capabilityData } = await api.get("/auth/capabilities");
           const latestCapabilities = normalizeAuthCapabilities(capabilityData);
-          const recovery = loginVerificationRecovery(latestCapabilities, detail?.channel, identifier);
+          const recovery = loginVerificationRecovery(
+            latestCapabilities,
+            detail?.channel,
+            detail?.identifier || identifier,
+          );
           const requestedChannel = normalizeContactChannel(detail?.channel, identifier);
           if (!recovery) {
             toast.info(`Verification by ${requestedChannel === "PHONE" ? "mobile" : "email"} is temporarily unavailable. Contact an administrator.`);

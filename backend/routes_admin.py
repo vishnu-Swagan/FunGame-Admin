@@ -49,6 +49,7 @@ from otp_service import (
     issue_challenge,
     normalize_identity,
     prepare_challenge_verification,
+    report_delivery_completion,
     require_configured_pepper,
     require_otp_indexes,
 )
@@ -433,6 +434,7 @@ async def verify_admin_step_up(body: AdminStepUpVerify,
         return completed_at
 
     completed_at = await _run_account_transaction(commit)
+    await report_delivery_completion(prepared, body.code, database=db)
     try:
         expires_in = min(
             max(int(os.environ.get('ADMIN_FINANCIAL_STEP_UP_SECONDS', '300')), 60),

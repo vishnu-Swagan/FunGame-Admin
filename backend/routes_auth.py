@@ -47,6 +47,7 @@ from otp_service import (
     masked_destination,
     normalize_identity,
     prepare_challenge_verification,
+    report_delivery_completion,
     registration_storage_ready,
     require_configured_pepper,
     require_identity_indexes,
@@ -105,6 +106,10 @@ def _telesign_mode(name: str) -> str:
 
 def _telesign_flag(name: str) -> bool:
     return (os.environ.get(name) or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _registration_email_otp_required() -> bool:
+    return _telesign_flag('REGISTRATION_EMAIL_OTP_REQUIRED')
 
 
 async def _telesign_onboarding_screen(
@@ -303,7 +308,7 @@ async def _active_challenge_response(user: dict, identity: Identity) -> dict | N
     return {
         'challenge_id': challenge['id'],
         'verification_id': challenge['id'],
-        'channel': 'PHONE',
+        'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
         'destination': destination,
         'destination_masked': destination,
         'expires_in': expires_in,
@@ -413,8 +418,11 @@ async def authentication_capabilities():
     otp_storage_ready = await registration_storage_ready()
     email_otp_ready = otp_storage_ready and delivery_adapter_ready('EMAIL')
     phone_otp_ready = otp_storage_ready and delivery_adapter_ready('SMS')
+    email_required = _registration_email_otp_required()
     otp_registration_ready = (
-        otp_storage_ready and await crm.registration_attribution_ready()
+        otp_storage_ready
+        and await crm.registration_attribution_ready()
+        and (email_otp_ready or not email_required)
     )
 
     if mode == ADMIN_REVIEW_ACTIVATION_MODE:
@@ -439,10 +447,11 @@ async def authentication_capabilities():
         'email_registration': False,
         'phone_registration': mode == PHONE_OTP_ACTIVATION_MODE and otp_registration_ready and phone_otp_ready,
         'phone_verification_required': True,
+        'email_verification_required': email_required,
         'email_contact_verification': email_otp_ready,
         'phone_contact_verification': phone_otp_ready,
         # Legacy verified-email accounts may still use their existing recovery
-        # channel. New self-service accounts are activated only by phone OTP.
+        # channel. Dual-verification registrations use both delivery channels.
         'email_password_reset': email_otp_ready,
         'phone_password_reset': phone_otp_ready,
         'verification_required': True,
@@ -453,7 +462,8 @@ async def authentication_capabilities():
 async def _register_phone_otp(body: RegisterRequest):
     """Create a phone-OTP-pending self-service player.
 
-    Email is optional profile data. It is never used as the activation proof.
+    Email remains optional for the legacy phone-only rollout. When the
+    dual-verification flag is enabled it becomes a second activation proof.
     """
     if body.password is not None or body.password_confirmation is not None:
         raise HTTPException(status_code=422, detail={
@@ -467,6 +477,12 @@ async def _register_phone_otp(body: RegisterRequest):
             'message': 'Register with a mobile number that can receive an OTP.',
         })
 
+    email_required = _registration_email_otp_required()
+    if email_required and not body.email:
+        raise HTTPException(status_code=422, detail={
+            'code': 'EMAIL_REQUIRED',
+            'message': 'A valid email address is required for verification.',
+        })
     try:
         await require_registration_readiness()
         await crm.require_registration_attribution_readiness()
@@ -479,6 +495,8 @@ async def _register_phone_otp(body: RegisterRequest):
     # contact. Runtime provider failures remain opaque below.
     if not delivery_adapter_ready(identity.channel):
         _raise_otp(OtpConfigurationError('Requested OTP channel is not configured'))
+    if email_required and not delivery_adapter_ready('EMAIL'):
+        _raise_otp(OtpConfigurationError('Email OTP delivery is not configured'))
     full_name = (body.full_name or '').strip()
     country = (body.country or '').strip()
     country_code = compliance.normalise_country(country)
@@ -546,6 +564,35 @@ async def _register_phone_otp(body: RegisterRequest):
                 'verification_required': True,
                 **challenge,
             }
+        recoverable_email = bool(
+            email_required
+            and email_identity
+            and phone_existing.get('role') == 'PLAYER'
+            and phone_existing.get('status') == 'PENDING'
+            and phone_existing.get('registration_source') == 'SELF_SERVICE'
+            and phone_existing.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
+            and phone_existing.get('phone_verified') is True
+            and phone_existing.get('email_verified') is not True
+            and phone_existing.get('email_normalized') == email_identity.value
+        )
+        if recoverable_email:
+            active_challenge = await _active_challenge_response(
+                phone_existing, email_identity,
+            )
+            if active_challenge:
+                return {
+                    'message': GENERIC_REGISTER_MESSAGE,
+                    'verification_required': True,
+                    **active_challenge,
+                }
+            challenge = await _issue_or_raise(
+                phone_existing, email_identity, VERIFY_CONTACT,
+            )
+            return {
+                'message': GENERIC_REGISTER_MESSAGE,
+                'verification_required': True,
+                **challenge,
+            }
     if phone_existing or email_existing:
         # Verified phone and optional-email collisions use the exact opaque
         # public response shape. It deliberately does not claim unconditional
@@ -568,6 +615,7 @@ async def _register_phone_otp(body: RegisterRequest):
         'contact_verified': False,
         'email_verified': False,
         'phone_verified': False,
+        'email_verification_required': email_required,
         'display_name': full_name,
         'full_name': full_name,
         'country': country,
@@ -904,38 +952,79 @@ async def verify_contact(body: VerifyEmailRequest):
 
         contact_field = identity.verified_field
         verified_at = _now().isoformat()
-        updates = {
-            contact_field: True,
-            'contact_verified': True,
-            'contact_verification_status': 'VERIFIED',
-            'contact_verified_at': verified_at,
-            'primary_identity': identity.value,
-            'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
-            'password_hash': verifier_password_hash,
-            'password_set_at': verified_at,
-            'password_failed_attempts': 0,
-            'active_session_id': session_id,
-        }
         phone_self_service = bool(
             user.get('registration_source') == 'SELF_SERVICE'
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
         )
+        dual_email_required = bool(
+            phone_self_service and user.get('email_verification_required') is True
+        )
+        phone_step = bool(phone_self_service and identity.channel == 'SMS')
+        email_step = bool(
+            dual_email_required
+            and identity.channel == 'EMAIL'
+            and user.get('phone_verified') is True
+            and user.get('email_normalized') == identity.value
+        )
+        if phone_self_service and not (phone_step or email_step):
+            raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        updates = {
+            contact_field: True,
+            'password_hash': verifier_password_hash,
+            'password_set_at': verified_at,
+            'password_failed_attempts': 0,
+        }
         if phone_self_service:
-            if identity.channel != 'SMS':
-                raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
-            # The full eligible profile and terms were recorded before the SMS
-            # was sent, so proof of phone ownership is the final activation
-            # gate. approved_at prevents a later reactivation bonus.
             updates.update({
-                'status': 'ACTIVE',
-                'activated_at': verified_at,
-                'approved_at': verified_at,
-                'approved_by': 'SELF_SERVICE_PHONE_OTP',
+                'primary_identity': user.get('phone_normalized') or user.get('phone'),
+                'primary_identity_channel': 'PHONE',
                 'activation_mode': PHONE_OTP_ACTIVATION_MODE,
-                'email_verified': False,
             })
+            if phone_step and dual_email_required:
+                updates.update({
+                    'status': 'PENDING',
+                    'contact_verified': False,
+                    'contact_verification_status': 'PHONE_VERIFIED_EMAIL_PENDING',
+                    'phone_verified_at': verified_at,
+                })
+            else:
+                # Existing phone-only registrations retain their original
+                # activation contract. New dual-verification registrations
+                # become active only after the email step succeeds.
+                updates.update({
+                    'status': 'ACTIVE',
+                    'contact_verified': True,
+                    'contact_verification_status': 'VERIFIED',
+                    'contact_verified_at': verified_at,
+                    'activated_at': verified_at,
+                    'approved_at': verified_at,
+                    'approved_by': (
+                        'SELF_SERVICE_PHONE_EMAIL_OTP'
+                        if email_step else 'SELF_SERVICE_PHONE_OTP'
+                    ),
+                    'active_session_id': session_id,
+                })
+                if not dual_email_required:
+                    updates['email_verified'] = False
         elif _self_service_needs_profile(user):
-            updates['status'] = 'VERIFIED'
+            updates.update({
+                'status': 'VERIFIED',
+                'contact_verified': True,
+                'contact_verification_status': 'VERIFIED',
+                'contact_verified_at': verified_at,
+                'primary_identity': identity.value,
+                'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+                'active_session_id': session_id,
+            })
+        else:
+            updates.update({
+                'contact_verified': True,
+                'contact_verification_status': 'VERIFIED',
+                'contact_verified_at': verified_at,
+                'primary_identity': identity.value,
+                'primary_identity_channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+                'active_session_id': session_id,
+            })
         kwargs = {'session': session} if session is not None else {}
         verification_query = {'id': user['id'], contact_field: {'$ne': True}}
         if phone_self_service:
@@ -945,9 +1034,16 @@ async def verify_contact(body: VerifyEmailRequest):
                 'registration_source': 'SELF_SERVICE',
                 'activation_mode': PHONE_OTP_ACTIVATION_MODE,
                 'primary_identity_channel': 'PHONE',
-                'phone_normalized': identity.value,
                 'accepted_terms': True,
             })
+            if phone_step:
+                verification_query['phone_normalized'] = identity.value
+            else:
+                verification_query.update({
+                    'phone_verified': True,
+                    'email_normalized': identity.value,
+                    'email_verification_required': True,
+                })
         updated = await db.users.find_one_and_update(
             verification_query,
             {
@@ -968,10 +1064,28 @@ async def verify_contact(body: VerifyEmailRequest):
         user = await _run_auth_transaction(commit_verification)
     except OtpError as exc:
         _raise_public_code_error(exc, 'The verification code is invalid or expired.')
+    await report_delivery_completion(prepared, body.code.strip(), database=db)
+    if (identity.channel == 'SMS'
+            and user.get('email_verification_required') is True
+            and user.get('email_verified') is not True):
+        try:
+            email_identity = normalize_identity(user.get('email_normalized') or user.get('email'))
+            challenge = await issue_challenge(user, email_identity, VERIFY_CONTACT)
+        except (ValueError, OtpError) as exc:
+            if isinstance(exc, OtpError):
+                _raise_otp(exc)
+            _raise_otp(OtpConfigurationError('Email verification identity is unavailable'))
+        return {
+            'message': 'Mobile number verified. Enter the code sent to your email.',
+            'verification_required': True,
+            'next_verification': challenge,
+        }
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {
         'message': (
-            'Mobile number verified. Your account is active.'
+            'Mobile number and email verified. Your account is active.'
+            if user.get('email_verification_required') is True
+            else 'Mobile number verified. Your account is active.'
             if user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
             else 'Contact verified. Complete your profile to continue.'
         ),
@@ -997,12 +1111,18 @@ async def resend_verification(body: ResendVerificationRequest):
     if not user or user.get('role') != 'PLAYER' or _identity_is_verified(user, identity):
         return {'message': GENERIC_RESEND_MESSAGE, **_dummy_challenge(identity)}
     if (user.get('registration_source') == 'SELF_SERVICE'
-            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
-            and identity.channel != 'SMS'):
-        raise HTTPException(status_code=422, detail={
-            'code': 'PHONE_REQUIRED',
-            'message': 'This account must be verified by mobile OTP.',
-        })
+            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
+        email_followup = bool(
+            identity.channel == 'EMAIL'
+            and user.get('email_verification_required') is True
+            and user.get('phone_verified') is True
+            and user.get('email_normalized') == identity.value
+        )
+        if identity.channel != 'SMS' and not email_followup:
+            raise HTTPException(status_code=422, detail={
+                'code': 'PHONE_REQUIRED',
+                'message': 'This account must begin verification by mobile OTP.',
+            })
     try:
         challenge = await issue_challenge(
             user, identity, VERIFY_CONTACT, consume_limit=False,
@@ -1143,6 +1263,13 @@ async def login(body: LoginRequest):
             except ValueError:
                 primary = None
         player_contact_verified = bool(primary and _identity_is_verified(user, primary))
+        email_followup_required = bool(
+            phone_self_service
+            and user.get('email_verification_required') is True
+            and user.get('email_verified') is not True
+        )
+        if email_followup_required:
+            player_contact_verified = False
         # In the temporary ADMIN_REVIEW mode an explicit operator decision,
         # not an OTP, is the activation gate. Contact flags deliberately stay
         # false so the UI and future verification migration remain truthful.
@@ -1157,13 +1284,20 @@ async def login(body: LoginRequest):
             legacy_operator_repair = True
         if not player_contact_verified:
             channel = (
-                'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
+                'EMAIL' if email_followup_required
+                else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
             )
-            raise HTTPException(status_code=403, detail={
+            detail = {
                 'code': 'CONTACT_NOT_VERIFIED',
                 'message': 'Verify your contact method before logging in.',
                 'channel': channel,
-            })
+            }
+            # A correct password has already been proved. Supplying the stored
+            # follow-up email lets the client recover an interrupted second
+            # verification step without exposing it to unauthenticated probes.
+            if email_followup_required:
+                detail['identifier'] = user.get('email_normalized') or user.get('email')
+            raise HTTPException(status_code=403, detail=detail)
 
     telesign_sign_in = None
     if user.get('role') == 'PLAYER':
@@ -1205,6 +1339,11 @@ async def login(body: LoginRequest):
             'phone_verified': True,
             'contact_verified': True,
         })
+        if user.get('email_verification_required') is True:
+            login_query.update({
+                'status': 'ACTIVE',
+                'email_verified': True,
+            })
     elif user.get('role') == 'PLAYER' and manual_review_account:
         # Prevent a concurrent suspension/rejection from minting a session
         # after the password check but before the write.
@@ -1261,11 +1400,23 @@ async def login(body: LoginRequest):
                 'message': 'Your account is not currently approved for login.',
             })
         if legacy_operator_repair or phone_self_service:
-            raise HTTPException(status_code=403, detail={
+            dual_pending = bool(
+                phone_self_service
+                and user
+                and user.get('email_verification_required') is True
+                and user.get('email_verified') is not True
+            )
+            detail = {
                 'code': 'CONTACT_NOT_VERIFIED',
                 'message': 'Verify your contact method before logging in.',
-                'channel': 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL',
-            })
+                'channel': (
+                    'EMAIL' if dual_pending
+                    else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
+                ),
+            }
+            if dual_pending:
+                detail['identifier'] = user.get('email_normalized') or user.get('email')
+            raise HTTPException(status_code=403, detail=detail)
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':
         current_dist = await db.distributors.find_one({
@@ -1366,6 +1517,7 @@ async def reset_password(body: ResetPasswordRequest):
         await _run_auth_transaction(commit_reset)
     except OtpError as exc:
         _raise_public_code_error(exc, 'The reset request is invalid or expired.')
+    await report_delivery_completion(prepared, body.code.strip(), database=db)
     return {'message': 'Password reset. Please log in with your new password.'}
 
 

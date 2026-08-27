@@ -26,6 +26,7 @@ export default function Register() {
   const selectedChannelAvailable = registrationChannelAvailable(capabilities, "PHONE");
   const registrationAvailable = selectedChannelAvailable;
   const manualReview = capabilities?.registration_mode === "ADMIN_REVIEW";
+  const emailVerificationRequired = !manualReview && capabilities?.email_verification_required === true;
 
   const submit = async (event) => {
     event.preventDefault();
@@ -36,7 +37,7 @@ export default function Register() {
     if (!isValidE164Phone(phone)) {
       return toast.error("Enter your mobile number with country code, for example +919876543210");
     }
-    if (manualReview && !email.trim()) return toast.error("Enter your email address");
+    if ((manualReview || emailVerificationRequired) && !email.trim()) return toast.error("Enter your email address");
     if (manualReview && password.length < 8) return toast.error("Password must contain at least 8 characters");
     if (manualReview && password !== passwordConfirmation) return toast.error("Password confirmation does not match");
     setBusy(true);
@@ -64,6 +65,7 @@ export default function Register() {
           identifier: normalized,
           destinationMasked: data?.destination_masked,
           resendAfter: data?.resend_after_seconds,
+          secondaryIdentifier: email.trim().toLowerCase(),
         },
       });
     } catch (error) {
@@ -78,11 +80,13 @@ export default function Register() {
       title="Create your account"
       subtitle={manualReview
         ? "Enter your details and create a password. An administrator will review your account before you can play."
-        : "Register with your mobile number. We will send a one-time SMS code before you create your password."}
+        : emailVerificationRequired
+          ? "Verify your mobile number and email address with secure one-time codes before entering the lounge."
+          : "Register with your mobile number. We will send a one-time SMS code before you create your password."}
     >
       <div className="mb-5 flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
         {manualReview ? <UserCheck className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
-        {manualReview ? "Administrator account review" : "Mobile OTP verification"}
+        {manualReview ? "Administrator account review" : emailVerificationRequired ? "Mobile + email verification" : "Mobile OTP verification"}
       </div>
 
       <form onSubmit={submit} className="space-y-4">
@@ -103,8 +107,8 @@ export default function Register() {
             className="h-12 rounded-xl bg-white/5 border-white/12"
           />
         </Field>
-        <Field label={manualReview ? "Email address" : "Email address (optional, no verification)"} htmlFor="reg-email">
-          <Input id="reg-email" data-testid="register-email-input" required={manualReview} type="email" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className="h-12 rounded-xl bg-white/5 border-white/12" />
+        <Field label={manualReview || emailVerificationRequired ? "Email address" : "Email address (optional, no verification)"} htmlFor="reg-email">
+          <Input id="reg-email" data-testid="register-email-input" required={manualReview || emailVerificationRequired} type="email" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className="h-12 rounded-xl bg-white/5 border-white/12" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date of birth" htmlFor="reg-dob">
@@ -138,7 +142,9 @@ export default function Register() {
         <p data-testid="register-verification-copy" className="text-[11px] text-white/45 leading-relaxed">
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
-            : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
+            : emailVerificationRequired
+              ? "First verify the SMS code, then verify the code sent to your email. Your account activates only after both steps succeed."
+              : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
         </p>
         <p className="text-[11px] text-white/45 leading-relaxed">Virtual chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.</p>
         <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || !selectedChannelAvailable || !termsAccepted} className="w-full h-12 rounded-xl text-base font-bold">

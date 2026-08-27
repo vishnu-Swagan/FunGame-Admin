@@ -265,6 +265,53 @@ async def main():
     assert crm_player['email_verified'] is False
     assert 'password_hash' not in crm_player
 
+    # New dual-verification registrations require both independently delivered
+    # codes, while the phone-only account above keeps its original contract.
+    os.environ['REGISTRATION_EMAIL_OTP_REQUIRED'] = 'true'
+    os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
+    dual_capabilities = await routes_auth.authentication_capabilities()
+    assert dual_capabilities['registration_enabled'] is True
+    assert dual_capabilities['email_contact_verification'] is True
+    assert dual_capabilities['email_verification_required'] is True
+
+    dual_phone = '+919876543213'
+    dual_email = 'dual.player@example.com'
+    dual_challenge = await routes_auth.register(registration(
+        identifier=dual_phone, phone=dual_phone, email=dual_email,
+    ))
+    phone_result = await routes_auth.verify_contact(VerifyEmailRequest(
+        channel='PHONE', identifier=dual_phone, phone=dual_phone,
+        code=dual_challenge['dev_code'], password='Dual-Verified-Password-9',
+    ))
+    assert 'access_token' not in phone_result
+    assert phone_result['next_verification']['channel'] == 'EMAIL'
+    assert phone_result['next_verification']['dev_code']
+    dual_row = await database.users.find_one({'phone_normalized': dual_phone})
+    assert dual_row['status'] == 'PENDING'
+    assert dual_row['phone_verified'] is True
+    assert dual_row['email_verified'] is False
+    assert dual_row['contact_verified'] is False
+
+    pending_login = await expect_http_error(routes_auth.login(LoginRequest(
+        identifier=dual_phone, phone=dual_phone,
+        password='Dual-Verified-Password-9',
+    )), 403, 'CONTACT_NOT_VERIFIED')
+    assert pending_login.detail['channel'] == 'EMAIL'
+    assert pending_login.detail['identifier'] == dual_email
+
+    dual_verified = await routes_auth.verify_contact(VerifyEmailRequest(
+        channel='EMAIL', identifier=dual_email, email=dual_email,
+        code=phone_result['next_verification']['dev_code'],
+        password='Dual-Verified-Password-9',
+    ))
+    assert dual_verified['access_token']
+    assert dual_verified['user']['status'] == 'ACTIVE'
+    assert dual_verified['user']['phone_verified'] is True
+    assert dual_verified['user']['email_verified'] is True
+    dual_row = await database.users.find_one({'phone_normalized': dual_phone})
+    assert dual_row['contact_verified'] is True
+    assert dual_row['approved_by'] == 'SELF_SERVICE_PHONE_EMAIL_OTP'
+
     print('Phone OTP registration: all focused checks passed')
 
 

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.modules.setdefault('db', types.SimpleNamespace(db=None))
 
 import otp_service
+import telesign_service
 
 
 class FakeResponse:
@@ -110,3 +111,83 @@ def test_telesign_readiness_requires_both_credentials(monkeypatch):
     monkeypatch.setenv('TELESIGN_API_KEY', 'provider-secret')
     assert otp_service.delivery_adapter_ready('SMS') is True
     assert isinstance(otp_service.delivery_adapter('SMS'), otp_service.TelesignSmsAdapter)
+
+
+def test_telesign_verify_email_adapter_and_completion(monkeypatch):
+    monkeypatch.setenv('TELESIGN_CUSTOMER_ID', 'customer-id')
+    monkeypatch.setenv('TELESIGN_API_KEY', 'provider-secret')
+    monkeypatch.setenv('OTP_EMAIL_ADAPTER', 'telesign_verify')
+    monkeypatch.setenv('TELESIGN_VERIFY_TEMPLATE', 'chakri_verification')
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(request)
+        if request.get_method() == 'PATCH':
+            return FakeResponse({'status': {'code': 3900, 'description': 'Verified'}})
+        return FakeResponse({
+            'reference_id': '0123456789ABCDEF0123456789ABCDEF',
+            'state': 'ONGOING',
+            'errors': [],
+            'status': {'code': 3901, 'description': 'Request in progress'},
+        })
+
+    monkeypatch.setattr(otp_service.urllib.request, 'urlopen', fake_urlopen)
+    assert otp_service.delivery_adapter_ready('EMAIL') is True
+    result = asyncio.run(otp_service.delivery_adapter('EMAIL').send(
+        otp_service.Identity('EMAIL', 'player@example.com'),
+        '654321',
+        otp_service.VERIFY_CONTACT,
+    ))
+    assert result == {
+        'sent': True,
+        'provider': 'telesign_verify',
+        'reference_id': '0123456789ABCDEF0123456789ABCDEF',
+    }
+    request = captured[0]
+    assert request.full_url == telesign_service.VERIFY_API_URL
+    assert request.get_method() == 'POST'
+    assert json.loads(request.data) == {
+        'recipient': {'email': 'player@example.com'},
+        'security_factor': '654321',
+        'verification_policy': [{'method': 'email'}],
+        'message_template': {'name': 'chakri_verification'},
+    }
+
+    completion = asyncio.run(telesign_service.finalize_verification(
+        result['reference_id'], '654321',
+    ))
+    assert completion == {'status_code': 3900}
+    completion_request = captured[1]
+    assert completion_request.get_method() == 'PATCH'
+    assert completion_request.full_url.endswith(
+        '/0123456789ABCDEF0123456789ABCDEF/state'
+    )
+    assert json.loads(completion_request.data) == {
+        'action': 'finalize', 'security_factor': '654321',
+    }
+
+
+def test_legacy_sms_completion_uses_provider_reference(monkeypatch):
+    monkeypatch.setenv('TELESIGN_CUSTOMER_ID', 'customer-id')
+    monkeypatch.setenv('TELESIGN_API_KEY', 'provider-secret')
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(request)
+        return FakeResponse({
+            'reference_id': '0123456789ABCDEF0123456789ABCDEF',
+            'errors': [],
+            'status': {'code': 1900, 'description': 'Completion recorded'},
+        })
+
+    monkeypatch.setattr(otp_service.urllib.request, 'urlopen', fake_urlopen)
+    result = asyncio.run(telesign_service.report_sms_completion(
+        '0123456789ABCDEF0123456789ABCDEF',
+    ))
+    assert result == {'status_code': 1900}
+    request = captured[0]
+    assert request.get_method() == 'PUT'
+    assert request.data == b''
+    assert request.full_url.endswith(
+        '/v1/verify/completion/0123456789ABCDEF0123456789ABCDEF'
+    )

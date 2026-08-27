@@ -17,6 +17,7 @@ test("auth capabilities fail closed for missing, malformed or inconsistent respo
     email_password_reset: false,
     phone_password_reset: false,
     phone_verification_required: true,
+    email_verification_required: false,
     manual_admin_review: false,
     registration_mode: "PHONE_OTP",
     verification_required: true,
@@ -80,6 +81,7 @@ test("manual admin review is accepted only when the server names the mode and bo
     email_password_reset: false,
     phone_password_reset: false,
     phone_verification_required: false,
+    email_verification_required: false,
     verification_required: false,
     manual_admin_review: true,
     registration_mode: "ADMIN_REVIEW",
@@ -98,6 +100,19 @@ test("only an explicitly ready phone channel can register", () => {
   const capabilities = normalizeAuthCapabilities({ registration_enabled: true, email_registration: true, phone_registration: true });
   expect(registrationChannelAvailable(capabilities, "EMAIL")).toBe(false);
   expect(registrationChannelAvailable(capabilities, "PHONE")).toBe(true);
+});
+
+test("dual registration preserves the server email-verification requirement", () => {
+  const capabilities = normalizeAuthCapabilities({
+    registration_enabled: true,
+    phone_registration: true,
+    email_contact_verification: true,
+    phone_contact_verification: true,
+    email_verification_required: true,
+  });
+  expect(capabilities.registration_enabled).toBe(true);
+  expect(capabilities.email_verification_required).toBe(true);
+  expect(verificationChannelState(capabilities, "EMAIL", false).deliveryAvailable).toBe(true);
 });
 
 test("contact normalization matches backend email and E.164 phone rules", () => {

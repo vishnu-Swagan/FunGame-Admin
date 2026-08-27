@@ -17,6 +17,7 @@ import urllib.request
 
 
 VERIFY_SMS_URL = 'https://rest-ww.telesign.com/v1/verify/sms'
+VERIFY_API_URL = 'https://verify.telesign.com/verification'
 INTELLIGENCE_URL = 'https://detect.telesign.com/intelligence/phone'
 PHONE_ID_URL = 'https://rest-ww.telesign.com/v1/phoneid/{phone_number}'
 MAX_RESPONSE_BYTES = 65_536
@@ -52,6 +53,7 @@ def product_status() -> dict:
     intelligence_mode = _mode('TELESIGN_INTELLIGENCE_MODE')
     phone_id_mode = _mode('TELESIGN_PHONE_ID_MODE')
     sms_adapter = (os.environ.get('OTP_SMS_ADAPTER') or 'disabled').strip().lower()
+    email_adapter = (os.environ.get('OTP_EMAIL_ADAPTER') or 'disabled').strip().lower()
     return {
         'provider': 'telesign',
         'plan': (os.environ.get('TELESIGN_PLAN') or 'self-service').strip(),
@@ -80,6 +82,12 @@ def product_status() -> dict:
                 'available': credentials,
                 'enabled': credentials and sms_adapter == 'telesign',
             },
+            'email_verify': {
+                'available': credentials,
+                'enabled': credentials and email_adapter in {
+                    'telesign_verify', 'telesign-verify',
+                },
+            },
             'verify_plus': {
                 'available': credentials,
                 # Verify Plus is configured in My Telesign and then applies to
@@ -107,7 +115,9 @@ def _authorization() -> str:
     return f'Basic {encoded}'
 
 
-async def _request_json(url: str, *, body: bytes, content_type: str) -> tuple[int, dict]:
+async def _request_json(
+    url: str, *, body: bytes, content_type: str, method: str = 'POST',
+) -> tuple[int, dict]:
     request = urllib.request.Request(
         url,
         data=body,
@@ -116,7 +126,7 @@ async def _request_json(url: str, *, body: bytes, content_type: str) -> tuple[in
             'Authorization': _authorization(),
             'Content-Type': content_type,
         },
-        method='POST',
+        method=method,
     )
 
     def perform_request() -> tuple[int, bytes]:
@@ -136,6 +146,82 @@ async def _request_json(url: str, *, body: bytes, content_type: str) -> tuple[in
     if not isinstance(parsed, dict):
         raise TelesignServiceError('invalid_response')
     return http_status, parsed
+
+
+async def create_verification(
+    destination: str, code: str, *, method: str, template_name: str | None = None,
+) -> dict:
+    """Create one full-service Verify API process with an app-owned OTP."""
+    method = str(method or '').strip().lower()
+    if method not in {'email', 'sms'}:
+        raise TelesignServiceError('invalid_verification_method')
+    recipient = (
+        {'email': str(destination).strip().casefold()}
+        if method == 'email'
+        else {'phone_number': phone_digits(destination)}
+    )
+    payload = {
+        'recipient': recipient,
+        'security_factor': str(code),
+        'verification_policy': [{'method': method}],
+    }
+    template = str(template_name or '').strip()
+    if template:
+        if not re.fullmatch(r'[a-z_]+', template):
+            raise TelesignServiceError('invalid_template')
+        payload['message_template'] = {'name': template}
+    http_status, response = await _request_json(
+        VERIFY_API_URL,
+        body=json.dumps(payload, separators=(',', ':')).encode('utf-8'),
+        content_type='application/json; charset=utf-8',
+    )
+    provider_code = (response.get('status') or {}).get('code')
+    reference_id = str(response.get('reference_id') or '').strip()
+    if not (
+        200 <= http_status < 300
+        and provider_code in {3900, 3901}
+        and reference_id
+        and not (response.get('errors') or [])
+    ):
+        raise TelesignServiceError('provider_rejected')
+    return {'reference_id': reference_id, 'status_code': provider_code}
+
+
+async def finalize_verification(reference_id: str, code: str) -> dict:
+    """Report a successful app-owned OTP to the full-service Verify API."""
+    reference = str(reference_id or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9-]{16,80}', reference):
+        raise TelesignServiceError('invalid_reference')
+    http_status, response = await _request_json(
+        f'{VERIFY_API_URL}/{reference}/state',
+        body=json.dumps({
+            'action': 'finalize',
+            'security_factor': str(code),
+        }, separators=(',', ':')).encode('utf-8'),
+        content_type='application/json; charset=utf-8',
+        method='PATCH',
+    )
+    provider_code = (response.get('status') or {}).get('code')
+    if not (200 <= http_status < 300 and provider_code == 3900):
+        raise TelesignServiceError('completion_rejected')
+    return {'status_code': provider_code}
+
+
+async def report_sms_completion(reference_id: str) -> dict:
+    """Report a successful app-owned OTP to the legacy SMS Verify API."""
+    reference = str(reference_id or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,80}', reference):
+        raise TelesignServiceError('invalid_reference')
+    http_status, response = await _request_json(
+        f'https://rest-ww.telesign.com/v1/verify/completion/{reference}',
+        body=b'',
+        content_type='application/x-www-form-urlencoded; charset=utf-8',
+        method='PUT',
+    )
+    provider_code = (response.get('status') or {}).get('code')
+    if not (200 <= http_status < 300 and provider_code == 1900):
+        raise TelesignServiceError('completion_rejected')
+    return {'status_code': provider_code}
 
 
 async def send_verify_sms(phone: str, code: str, purpose: str) -> dict:

@@ -10,6 +10,7 @@ const CLOSED_CAPABILITIES = Object.freeze({
   email_password_reset: false,
   phone_password_reset: false,
   verification_required: true,
+  email_verification_required: false,
   registration_mode: "PHONE_OTP",
 });
 
@@ -31,6 +32,7 @@ export function normalizeAuthCapabilities(value) {
       phone_password_reset: value?.phone_password_reset === true,
       phone_verification_required: false,
       verification_required: false,
+      email_verification_required: false,
       manual_admin_review: true,
       registration_mode: "ADMIN_REVIEW",
     };
@@ -51,6 +53,7 @@ export function normalizeAuthCapabilities(value) {
     phone_password_reset: value?.phone_password_reset === true,
     phone_verification_required: true,
     verification_required: true,
+    email_verification_required: value?.email_verification_required === true,
     manual_admin_review: false,
     registration_mode: "PHONE_OTP",
   };

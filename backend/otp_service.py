@@ -576,6 +576,31 @@ class TelesignSmsAdapter:
             return {'sent': False, 'provider': 'telesign', 'error': exc.reason}
 
 
+class TelesignVerifyAdapter:
+    """Deliver app-owned OTPs through Telesign's multi-channel Verify API."""
+
+    async def send(self, identity: Identity, code: str, purpose: str) -> dict:
+        method = 'email' if identity.channel == 'EMAIL' else 'sms'
+        template = (os.environ.get('TELESIGN_VERIFY_TEMPLATE') or '').strip()
+        try:
+            result = await telesign_service.create_verification(
+                identity.value, code, method=method,
+                template_name=template or None,
+            )
+            return {
+                'sent': True,
+                'provider': 'telesign_verify',
+                'reference_id': result['reference_id'],
+            }
+        except telesign_service.TelesignServiceError as exc:
+            logger.error('Telesign Verify delivery failed: %s', exc.reason)
+            return {
+                'sent': False,
+                'provider': 'telesign_verify',
+                'error': exc.reason,
+            }
+
+
 class MockOtpAdapter:
     async def send(self, identity: Identity, code: str, purpose: str) -> dict:
         if _is_production():
@@ -598,6 +623,8 @@ def delivery_adapter(channel: str) -> OtpDeliveryAdapter:
         return MockOtpAdapter()
     if channel == 'EMAIL' and adapter in {'email', 'email_service'}:
         return EmailOtpAdapter()
+    if adapter in {'telesign_verify', 'telesign-verify'}:
+        return TelesignVerifyAdapter()
     if channel == 'SMS' and adapter == 'twilio':
         return TwilioSmsAdapter()
     if channel == 'SMS' and adapter == 'telesign':
@@ -636,6 +663,10 @@ def delivery_adapter_ready(channel: str) -> bool:
                 'SMTP_HOST', 'SMTP_USERNAME', 'SMTP_PASSWORD',
             ))
         return False
+    if adapter in {'telesign_verify', 'telesign-verify'}:
+        return all((os.environ.get(name) or '').strip() for name in (
+            'TELESIGN_CUSTOMER_ID', 'TELESIGN_API_KEY',
+        ))
     if channel == 'SMS' and adapter == 'twilio':
         return all((os.environ.get(name) or '').strip() for name in (
             'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER',
@@ -645,6 +676,39 @@ def delivery_adapter_ready(channel: str) -> bool:
             'TELESIGN_CUSTOMER_ID', 'TELESIGN_API_KEY',
         ))
     return False
+
+
+async def report_delivery_completion(challenge: dict, code: str, *, database=None) -> None:
+    """Best-effort provider completion reporting after the Mongo commit wins."""
+    if database is None:
+        database = db
+    provider = str(challenge.get('delivery_provider') or '')
+    reference = str(challenge.get('delivery_reference_id') or '')
+    if not reference or provider not in {'telesign', 'telesign_verify'}:
+        return
+    try:
+        if provider == 'telesign_verify':
+            result = await telesign_service.finalize_verification(reference, code)
+        else:
+            result = await telesign_service.report_sms_completion(reference)
+    except telesign_service.TelesignServiceError as exc:
+        logger.warning('Telesign completion reporting failed: %s', exc.reason)
+        await database.otp_challenges.update_one(
+            {'id': challenge['id'], 'status': 'VERIFIED'},
+            {'$set': {
+                'provider_completion_status': 'FAILED',
+                'provider_completion_updated_at': _now(),
+            }},
+        )
+        return
+    await database.otp_challenges.update_one(
+        {'id': challenge['id'], 'status': 'VERIFIED'},
+        {'$set': {
+            'provider_completion_status': 'REPORTED',
+            'provider_completion_code': result.get('status_code'),
+            'provider_completion_updated_at': _now(),
+        }},
+    )
 
 
 async def _restore_previous_challenge(database, previous: dict | None,

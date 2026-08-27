@@ -21,6 +21,7 @@ export default function VerifyEmail() {
   const issuedChallenge = Boolean(initial.identifier || initial.email);
   const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "PHONE", initial.identifier || initial.email));
   const [identifier, setIdentifier] = useState(initial.identifier || initial.email || "");
+  const [secondaryIdentifier] = useState(initial.secondaryIdentifier || "");
   const [destinationMasked, setDestinationMasked] = useState(initial.destinationMasked || "");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -69,6 +70,23 @@ export default function VerifyEmail() {
         code,
         password,
       });
+      if (data?.next_verification) {
+        const next = data.next_verification;
+        const nextChannel = normalizeContactChannel(next.channel || "EMAIL", secondaryIdentifier);
+        const nextIdentifier = secondaryIdentifier || next.identifier || "";
+        if (!nextIdentifier) {
+          toast.info("Mobile verified. Sign in again to continue email verification.");
+          navigate("/login", { replace: true });
+          return;
+        }
+        setChannel(nextChannel);
+        setIdentifier(nextIdentifier);
+        setDestinationMasked(next.destination_masked || next.destination || "");
+        setResendIn(Number(next.resend_after_seconds || next.resend_in || DEFAULT_RESEND_SECONDS));
+        setCode("");
+        toast.success(data.message || "Mobile verified. Check your email for the next code.");
+        return;
+      }
       if (data.access_token) {
         login(data.access_token, data.user);
         toast.success("Contact verified");
