@@ -4,8 +4,11 @@ import Unity from "react-unity-webgl";
 import "./crash.scss";
 import Context from "../../context";
 import aviatorLogo from "../../assets/images/logo.svg";
+import aviatorCraft from "../../assets/images/aviator-craft.svg";
 import { aviatorUnityContext } from "../../unity";
 import { playGameSound } from "../../sound";
+
+const RENDERER_STARTUP_LIMIT_MS = 3500;
 
 export default function WebGLStarter() {
 	const { GameState, currentNum, time, setCurrentTarget, latestRoundNumber } = React.useContext(Context)
@@ -14,11 +17,13 @@ export default function WebGLStarter() {
 	const [flightSeconds, setFlightSeconds] = React.useState(0);
 	const [unityLoaded, setUnityLoaded] = React.useState(false);
 	const [unityFailed, setUnityFailed] = React.useState(false);
+	const [fallbackActive, setFallbackActive] = React.useState(false);
 	const lastUnityState = React.useRef(0);
 	const [rendererSyncKey, setRendererSyncKey] = React.useState("");
 	const stateReady = GameState === "BET" || GameState === "PLAYING" || GameState === "GAMEEND";
 	const phaseSyncKey = `${latestRoundNumber || 0}:${GameState}`;
-	const rendererReady = stateReady && unityLoaded && !unityFailed && rendererSyncKey === phaseSyncKey;
+	const unityRendererReady = stateReady && unityLoaded && !unityFailed && !fallbackActive && rendererSyncKey === phaseSyncKey;
+	const rendererReady = stateReady && (unityRendererReady || fallbackActive);
 
 	React.useEffect(() => {
 		const handleLoaded = () => setUnityLoaded(true);
@@ -31,6 +36,7 @@ export default function WebGLStarter() {
 			if (String(error).includes("Pointer_stringify")) return;
 			console.error("Original Aviator renderer failed to load", error);
 			setUnityFailed(true);
+			setFallbackActive(true);
 		};
 
 		aviatorUnityContext.on("loaded", handleLoaded);
@@ -43,6 +49,17 @@ export default function WebGLStarter() {
 			aviatorUnityContext.removeEventListener("error");
 		};
 	}, []);
+
+	// The bundled Unity scene is an enhancement, not a reason to block a live
+	// round. Some browsers download all WebGL files successfully but never emit
+	// Unity's final `loaded` callback. Move to the deterministic, server-driven
+	// renderer after a short bounded wait and keep that renderer for this mount
+	// so a late Unity callback can never flash a second aircraft on screen.
+	React.useEffect(() => {
+		if (!stateReady || unityLoaded || fallbackActive) return undefined;
+		const timeout = window.setTimeout(() => setFallbackActive(true), RENDERER_STARTUP_LIMIT_MS);
+		return () => window.clearTimeout(timeout);
+	}, [stateReady, unityLoaded, fallbackActive]);
 
 	React.useEffect(() => {
 		let myInterval;
@@ -102,6 +119,15 @@ export default function WebGLStarter() {
 	const displayedMultiplier = GameState === "PLAYING"
 		? Math.max(target || 1, 1)
 		: Math.max(Number(currentNum) || 1, 1);
+	const flightProgress = GameState === "PLAYING"
+		? Math.min(0.96, Math.max(0.04, flightSeconds / 14))
+		: GameState === "GAMEEND" ? 1 : 0;
+	const curveRemaining = 820 * (1 - flightProgress);
+	const planeStyle = {
+		left: `${4.5 + (82 * flightProgress)}%`,
+		bottom: `${7.5 + (68 * Math.pow(flightProgress, 1.35))}%`,
+		transform: `translate(-35%, 45%) rotate(${-8 - (12 * flightProgress)}deg)`,
+	};
 
 	React.useLayoutEffect(() => {
 		if (!stateReady || !unityLoaded || unityFailed) return undefined;
@@ -119,21 +145,44 @@ export default function WebGLStarter() {
 	}, [GameState, phaseSyncKey, stateReady, unityLoaded, unityFailed]);
 
 	React.useEffect(() => {
-		if (!rendererReady || GameState !== "PLAYING") return;
+		if (!unityRendererReady || GameState !== "PLAYING") return;
 		const nextState = target > 10 ? 4 : target > 2 ? 3 : 2;
 		if (lastUnityState.current === nextState) return;
 		lastUnityState.current = nextState;
 		aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: nextState }));
-	}, [GameState, rendererReady, target]);
+	}, [GameState, unityRendererReady, target]);
 
 	return (
 		<div className="crash-container">
-			<div className={`space-box ${rendererReady ? "github-visual-ready" : "renderer-pending"}`} id="space" data-server-state-ready={stateReady ? "true" : "false"} data-renderer-ready={rendererReady ? "true" : "false"}>
+			<div className={`space-box ${unityRendererReady ? "github-visual-ready" : fallbackActive && stateReady ? "fallback-visual-ready" : "renderer-pending"}`} id="space" data-server-state-ready={stateReady ? "true" : "false"} data-renderer-ready={rendererReady ? "true" : "false"} data-renderer-mode={unityRendererReady ? "unity" : fallbackActive && stateReady ? "fallback" : "pending"}>
 				<Unity
 					unityContext={aviatorUnityContext}
 					matchWebGLToCanvasSize={true}
 					className="github-unity-stage"
 				/>
+				{fallbackActive && stateReady && <div className="fallback-flight-visual" aria-hidden="true">
+					<svg className="flight-curve" viewBox="0 0 820 420" preserveAspectRatio="none">
+						<defs>
+							<linearGradient id="flight-area" x1="0" y1="1" x2="1" y2="0">
+								<stop offset="0" stopColor="#e11942" stopOpacity="0.04" />
+								<stop offset="1" stopColor="#e11942" stopOpacity="0.24" />
+							</linearGradient>
+						</defs>
+						<path className="curve-fill" style={{ clipPath: `inset(0 ${100 - (flightProgress * 100)}% 0 0)` }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12 L820 420 L0 420 Z" />
+						<path className="curve-shadow" style={{ strokeDasharray: 820, strokeDashoffset: curveRemaining }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12" />
+						<path className="curve-line" style={{ strokeDashoffset: curveRemaining }} d="M0 405 C150 396 274 330 388 230 C503 130 622 50 820 12" />
+					</svg>
+					<img
+						src={aviatorCraft}
+						alt=""
+						className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""} ${GameState === "GAMEEND" ? "crashed" : ""}`}
+						style={planeStyle}
+					/>
+					<div className={`center-logo ${GameState !== "BET" ? "hide" : ""}`}>
+						<img src={aviatorLogo} alt="" />
+						<span>Preparing live round</span>
+					</div>
+				</div>}
 				<div className="aviator-renderer-gate" aria-live="polite">
 					<img src={aviatorLogo} alt="Aviator" />
 					<span>{unityFailed ? "Live renderer unavailable" : "Synchronising live round"}</span>
