@@ -85,3 +85,32 @@ test("a stalled Unity load falls back to the server-driven aircraft and multipli
 	expect(container.querySelector(".multiplier")?.textContent).toMatch(/x$/);
 	expect(aviatorUnityContext.send).not.toHaveBeenCalled();
 });
+
+test("a late Unity load takes over only after the next BET phase is synchronised", () => {
+	const playingState = value({ GameState: "PLAYING", currentNum: "2.45", time: 6200, latestRoundNumber: 91 });
+	const { container, rerender } = render(
+		<Context.Provider value={playingState}>
+			<WebGLStarter />
+		</Context.Provider>,
+	);
+
+	act(() => jest.advanceTimersByTime(3500));
+	expect(container.querySelector(".space-box")?.getAttribute("data-renderer-mode")).toBe("fallback");
+
+	const loadedHandler = (aviatorUnityContext.on as jest.Mock).mock.calls.find(([event]) => event === "loaded")?.[1];
+	act(() => loadedHandler());
+	act(() => jest.advanceTimersByTime(40));
+
+	expect(container.querySelector(".space-box")?.getAttribute("data-renderer-mode")).toBe("fallback");
+	expect(container.querySelector(".fallback-flight-visual")).not.toBeNull();
+
+	rerender(
+		<Context.Provider value={value({ GameState: "BET", currentNum: "1", time: 0, latestRoundNumber: 92 })}>
+			<WebGLStarter />
+		</Context.Provider>,
+	);
+	act(() => jest.advanceTimersByTime(40));
+
+	expect(container.querySelector(".space-box")?.getAttribute("data-renderer-mode")).toBe("unity");
+	expect(container.querySelector(".fallback-flight-visual")).toBeNull();
+});

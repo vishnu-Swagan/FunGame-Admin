@@ -12,13 +12,20 @@ body,
 }
 
 @supports (height: 100dvh) {
-  .game-play {
-    width: 100% !important;
-    height: 100dvh !important;
+  #root .game-container {
+    height: calc(100dvh - var(--header-height, 54px)) !important;
     min-height: 0 !important;
-    max-height: 100dvh !important;
+    max-height: calc(100dvh - var(--header-height, 54px)) !important;
+    overflow: hidden !important;
+  }
+
+  #root .game-play {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
+    overflow-y: hidden !important;
     overscroll-behavior: contain;
   }
 }
@@ -37,4 +44,96 @@ input,
 select,
 textarea {
   font-size: max(16px, 1em);
+}
+
+@media (max-width: 991.98px) and (orientation: portrait),
+  (max-width: 991.98px) and (min-height: 601px) {
+  html,
+  body,
+  #root,
+  #root > div {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  @supports (height: 100dvh) {
+    #root .game-container,
+    #root .game-play {
+      height: auto !important;
+      max-height: none !important;
+      min-height: calc(100dvh - var(--header-height, 54px)) !important;
+      overflow-x: hidden !important;
+      overflow-y: visible !important;
+    }
+  }
+}
+
+@media (min-width: 992px) and (max-height: 575px) {
+  #root .game-play {
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 991.98px) and (orientation: landscape) and (max-height: 600px) {
+  #root .info-board {
+    display: none !important;
+  }
+
+  #root .game-play {
+    padding: 5px 7px !important;
+    gap: 5px !important;
+  }
+
+  #root .game-play .history-bar {
+    flex: 0 0 30px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+  }
+
+  #root .game-play .stage-board {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 118px !important;
+  }
+
+  #root .game-play .stage-board .crash-container {
+    min-height: 0 !important;
+  }
+
+  #root .game-play .bet-controls {
+    flex: 0 0 auto !important;
+  }
+
+  #root .game-play .bet-controls > .controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #root .game-play .bet-controls .bet-control,
+  #root .game-play .bet-controls .bet-control > .controls {
+    min-height: 108px !important;
+  }
+}
+
+@media (max-width: 991.98px) and (orientation: landscape) and (max-height: 420px) {
+  #root .game-play {
+    padding-block: 4px !important;
+    gap: 4px !important;
+  }
+
+  #root .game-play .history-bar {
+    flex-basis: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+  }
+
+  #root .game-play .stage-board {
+    min-height: 82px !important;
+  }
+
+  #root .game-play .bet-controls > .controls {
+    width: 131.58% !important;
+    zoom: 0.76;
+  }
 }

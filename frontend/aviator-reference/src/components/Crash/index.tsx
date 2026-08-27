@@ -53,8 +53,9 @@ export default function WebGLStarter() {
 	// The bundled Unity scene is an enhancement, not a reason to block a live
 	// round. Some browsers download all WebGL files successfully but never emit
 	// Unity's final `loaded` callback. Move to the deterministic, server-driven
-	// renderer after a short bounded wait and keep that renderer for this mount
-	// so a late Unity callback can never flash a second aircraft on screen.
+	// renderer after a short bounded wait. If Unity finishes later, it may take
+	// over only after it has synchronised during the next BET phase. Keeping the
+	// fallback for the active flight prevents two aircraft appearing at once.
 	React.useEffect(() => {
 		if (!stateReady || unityLoaded || fallbackActive) return undefined;
 		const timeout = window.setTimeout(() => setFallbackActive(true), RENDERER_STARTUP_LIMIT_MS);
@@ -143,6 +144,12 @@ export default function WebGLStarter() {
 			window.cancelAnimationFrame(secondFrame);
 		};
 	}, [GameState, phaseSyncKey, stateReady, unityLoaded, unityFailed]);
+
+	React.useEffect(() => {
+		if (!fallbackActive || !unityLoaded || unityFailed) return;
+		if (GameState !== "BET" || rendererSyncKey !== phaseSyncKey) return;
+		setFallbackActive(false);
+	}, [fallbackActive, unityLoaded, unityFailed, GameState, rendererSyncKey, phaseSyncKey]);
 
 	React.useEffect(() => {
 		if (!unityRendererReady || GameState !== "PLAYING") return;
