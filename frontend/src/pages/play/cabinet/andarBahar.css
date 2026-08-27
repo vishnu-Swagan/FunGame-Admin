@@ -1,21 +1,22 @@
-.ab-cabinet .cab-screen {
-  background: #080c1d;
+.ab-cabinet {
+  background:
+    radial-gradient(ellipse at 50% 36%, rgba(26, 112, 79, .28), transparent 48%),
+    linear-gradient(145deg, #2b160d, #080c1d 24% 76%, #2b160d);
 }
 
-.ab-cabinet {
-  background: #080c1d;
+.ab-cabinet .cab-screen {
+  background:
+    radial-gradient(ellipse at 50% 32%, rgba(47, 147, 105, .19), transparent 46%),
+    linear-gradient(180deg, #160d10, #080c1d 70%);
 }
 
 .ab-cabinet .cab-glass {
   z-index: 18;
   background:
     linear-gradient(180deg, rgba(255,255,255,.025), transparent 32%),
-    radial-gradient(130% 110% at 50% 42%, transparent 65%, rgba(0,0,0,.32));
+    radial-gradient(130% 110% at 50% 42%, transparent 76%, rgba(0,0,0,.18));
 }
 
-.ab-dealer-poster,
-.ab-dealer-foreground,
-.ab-dealer-video,
 .ab-table-cover,
 .ab-canvas {
   position: absolute;
@@ -24,46 +25,7 @@
   height: 900px;
 }
 
-.ab-dealer-poster,
-.ab-dealer-foreground,
-.ab-dealer-video {
-  object-fit: cover;
-  object-position: center;
-  pointer-events: none;
-  /* The generated take used the left hand. Mirroring the complete dealer
-     plate puts the card shoe at her right hand without changing Canvas/UI. */
-  transform: scaleX(-1);
-  transform-origin: center;
-}
-
-.ab-dealer-poster { z-index: 0; }
 .ab-table-cover { z-index: 2; pointer-events: none; }
-.ab-dealer-foreground {
-  -webkit-mask-image: radial-gradient(ellipse 29% 68% at 50% 38%, #000 0 75%, rgba(0,0,0,.9) 84%, transparent 100%);
-  mask-image: radial-gradient(ellipse 29% 68% at 50% 38%, #000 0 75%, rgba(0,0,0,.9) 84%, transparent 100%);
-}
-.ab-dealer-video {
-  /* Keep the animated face, torso, reaching arm, and shoe action, then blend
-     back to the clean still before the generated footage's baked table cards.
-     All playable cards therefore come from the synchronized Canvas only. */
-  -webkit-mask-image:
-    linear-gradient(to bottom, #000 0 54%, rgba(0,0,0,.94) 57%, transparent 62%),
-    radial-gradient(ellipse 23% 24% at 78% 61%, #000 0 68%, rgba(0,0,0,.9) 78%, transparent 100%);
-  mask-image:
-    linear-gradient(to bottom, #000 0 54%, rgba(0,0,0,.94) 57%, transparent 62%),
-    radial-gradient(ellipse 23% 24% at 78% 61%, #000 0 68%, rgba(0,0,0,.9) 78%, transparent 100%);
-}
-.ab-dealer-video.ab-ambient-video {
-  -webkit-mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
-  mask-image: radial-gradient(ellipse 38% 72% at 50% 39%, #000 0 76%, rgba(0,0,0,.9) 86%, transparent 100%);
-}
-.ab-dealer-foreground { z-index: 3; transition: none; }
-.ab-dealer-foreground.is-hidden { opacity: 0; visibility: hidden; }
-.ab-dealer-video { z-index: 4; transition: none; }
-/* Never cross-fade two generated hands. The shared poster is aligned behind
-   every take, so an atomic layer swap stays clean without duplicate shadows. */
-.ab-dealer-video.is-idle { opacity: 0; visibility: hidden; }
-.ab-dealer-video.is-active { opacity: 1; visibility: visible; }
 .ab-canvas { z-index: 10; pointer-events: none; }
 
 .ab-more-games {
@@ -215,7 +177,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ab-dealer-video { display: none; }
   .ab-top-actions button,
   .ab-hit { transition: none !important; }
 }

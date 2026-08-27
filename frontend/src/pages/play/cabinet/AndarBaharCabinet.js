@@ -9,7 +9,6 @@ import { useLiveRound } from "@/lib/useLiveRound";
 import { CLIENT_BETTING_GUARD_SECONDS } from "@/lib/serverClock";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import {
-  ambientFrameAt,
   bettingOpenAt,
   buildDealTimeline,
   dealerActionForRound,
@@ -25,7 +24,6 @@ const PANEL_Y = 678;
 const DEMO_BET_SECONDS = 30;
 const DEMO_REVEAL_SECONDS = 24;
 const DEMO_RESULT_SECONDS = 6;
-const HAIR_GESTURE_INTERVAL_MS = 20 * 60 * 1000;
 const CHIP_RAIL_Y = 600;
 const ACTION_Y = 632;
 const MAIN_BET_Y = 710;
@@ -161,24 +159,6 @@ function selectionTotals(bets) {
     totals[bet.selection] = (totals[bet.selection] || 0) + Number(bet.amount || 0);
     return totals;
   }, {});
-}
-
-function syncVideoToFrame(video, frame, driftTolerance = 0.18) {
-  if (!video || !frame) return;
-  try {
-    if (Math.abs(video.playbackRate - frame.playbackRate) > 0.015) {
-      video.playbackRate = frame.playbackRate;
-    }
-    const current = Number(video.currentTime);
-    const outsideWindow = Number.isFinite(frame.sourceStart) && Number.isFinite(frame.sourceEnd)
-      && (current < frame.sourceStart - 0.03 || current > frame.sourceEnd + 0.03);
-    if (!Number.isFinite(current) || outsideWindow || Math.abs(current - frame.sourceTime) > driftTolerance) {
-      video.currentTime = frame.sourceTime;
-    }
-    if (video.paused) video.play().catch(() => {});
-  } catch (_error) {
-    /* The aligned still remains under every atomic video layer. */
-  }
 }
 
 function seededHistory() {
@@ -345,25 +325,18 @@ function DemoAndarBahar({ game }) {
 function AndarBaharTable({ game, live, demo = false }) {
   const navigate = useNavigate();
   const canvasRef = useRef(null);
-  const videoRef = useRef(null);
-  const idleVideoRef = useRef(null);
-  const ambientVideoRef = useRef(null);
   const sceneRef = useRef(null);
   const lastDealCountRef = useRef(0);
   const dealStoppedRoundRef = useRef(null);
-  const dealerModeRef = useRef("still");
   const previousBetsRef = useRef([]);
   const previousPhaseRef = useRef(live.phase);
   const phaseRef = useRef(live.phase);
   const bettingClockRef = useRef({ countdown: 0, capturedAt: performance.now() });
-  const pendingHairRef = useRef(false);
   const [chip, setChip] = useState(20);
   const [muted, setMuted] = useState(isMuted());
   const [modal, setModal] = useState(null);
   const [lastWin, setLastWin] = useState(0);
   const [announcement, setAnnouncement] = useState(null);
-  const [hairMoment, setHairMoment] = useState(false);
-  const [dealerMode, setDealerMode] = useState("still");
 
   const {
     state, countdown, balance, betting, phase, outcome, result,
@@ -392,12 +365,6 @@ function AndarBaharTable({ game, live, demo = false }) {
     const liveCountdown = Math.max(0, sample.countdown - (performance.now() - sample.capturedAt) / 1000);
     return bettingOpenAt(phaseRef.current, liveCountdown, CLIENT_BETTING_GUARD_SECONDS);
   }, []);
-  const switchDealerMode = useCallback((nextMode) => {
-    if (dealerModeRef.current === nextMode) return;
-    dealerModeRef.current = nextMode;
-    setDealerMode(nextMode);
-  }, []);
-
   useEffect(() => onMuteChange(setMuted), []);
   useEffect(() => {
     if (Number(result?.payout || 0) > 0) setLastWin(Number(result.payout));
@@ -405,24 +372,6 @@ function AndarBaharTable({ game, live, demo = false }) {
   useEffect(() => {
     if (phase === "BETTING") setAnnouncement(null);
   }, [phase]);
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      // A tick during the deal is held for the next betting window. The hair
-      // take therefore keeps its twenty-minute cadence without ever taking
-      // over a REVEAL frame.
-      if (phaseRef.current === "BETTING") setHairMoment(true);
-      else pendingHairRef.current = true;
-    }, HAIR_GESTURE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    if (phase === "BETTING" && pendingHairRef.current) {
-      pendingHairRef.current = false;
-      setHairMoment(true);
-    } else if (phase !== "BETTING" && hairMoment) {
-      setHairMoment(false);
-    }
-  }, [hairMoment, phase]);
   useEffect(() => {
     if (chips.length && !chips.includes(chip)) setChip(chips[0]);
   }, [chip, chips]);
@@ -432,44 +381,6 @@ function AndarBaharTable({ game, live, demo = false }) {
     }
     previousPhaseRef.current = phase;
   }, [myBets, phase]);
-  useEffect(() => {
-    if (phase === "BETTING") switchDealerMode(hairMoment ? "hair" : "ambient");
-    else if (phase === "REVEAL") switchDealerMode("setup");
-    else if (phase === "RESULT") switchDealerMode("finish");
-    else switchDealerMode("still");
-  }, [actionProfile.id, hairMoment, phase, switchDealerMode]);
-
-  useEffect(() => {
-    const dealVideo = videoRef.current;
-    const idleVideo = idleVideoRef.current;
-    const ambientVideo = ambientVideoRef.current;
-    if (!dealVideo || !idleVideo || !ambientVideo) return;
-    const videos = [dealVideo, idleVideo, ambientVideo];
-    const active = dealerMode === "deal" ? dealVideo : dealerMode === "hair" ? idleVideo
-      : ["ambient", "setup", "finish"].includes(dealerMode) ? ambientVideo : null;
-    videos.forEach((node) => {
-      if (node !== active && !node.paused) node.pause();
-    });
-    if (!active) return;
-
-    const ambientMode = dealerMode === "setup" ? "setup" : dealerMode === "finish" ? "finish" : "betting";
-    const ambientStart = ambientFrameAt(actionProfile, 0, ambientMode);
-    const startAt = dealerMode === "deal" ? (dealTimeline.cards[0]?.sourceStart || 0)
-      : ["ambient", "setup", "finish"].includes(dealerMode) ? ambientStart.sourceTime : 0;
-    const syncKey = `${state?.round_number || "demo"}:${dealerMode}:${actionProfile.id}`;
-    try {
-      if (active.dataset.abSyncKey !== syncKey) {
-        active.dataset.abSyncKey = syncKey;
-        active.currentTime = startAt;
-      }
-      active.playbackRate = ["ambient", "setup", "finish"].includes(dealerMode)
-        ? ambientStart.playbackRate : 1;
-      if (active.paused) active.play().catch(() => {});
-    } catch (_error) {
-      /* The aligned poster remains visible until media playback is available. */
-    }
-  }, [actionProfile, dealTimeline, dealerMode, state?.round_number]);
-
   const bet = useCallback((selection) => {
     if (bettingOpenNow() && chip) placeBet(selection, chip);
   }, [bettingOpenNow, chip, placeBet]);
@@ -520,45 +431,13 @@ function AndarBaharTable({ game, live, demo = false }) {
       const elapsed = scene.phase === "REVEAL"
         ? Math.min(scene.revealDuration, scene.revealElapsed + sampleAge)
         : scene.phase === "RESULT" ? scene.revealDuration : 0;
-      // Both the moving hand and each Canvas card read this exact timeline.
-      // The video's source pose is drift-corrected only when needed, which
-      // keeps it fluid without allowing a network poll to desynchronise it.
-      const dealer = videoRef.current;
-      const sourceDuration = Number.isFinite(dealer?.duration) && dealer.duration > 0 ? dealer.duration : 12.041667;
-      const actionFrame = dealerFrameAt(scene.dealTimeline, elapsed, sourceDuration);
+      // Every Canvas card reads the same deterministic round timeline, so
+      // dealing remains smooth without depending on decorative media.
+      const actionFrame = dealerFrameAt(scene.dealTimeline, elapsed, 12.041667);
       const visibleCount = scene.phase === "RESULT" ? scene.run.length
         : scene.phase === "REVEAL" ? actionFrame.visibleCount : 0;
 
-      // BETTING, setup and finish use only the gesture windows assigned to
-      // this round. We actively keep the video inside the selected segment;
-      // it can never fall through to the same full ambient loop each round.
-      const ambientDealer = ambientVideoRef.current;
-      if (scene.phase === "BETTING" && dealerModeRef.current === "ambient") {
-        const betDuration = Number(scene.state?.timings?.bet || DEMO_BET_SECONDS);
-        syncVideoToFrame(
-          ambientDealer,
-          ambientFrameAt(scene.actionProfile, Math.max(0, betDuration - phaseCountdown), "betting")
-        );
-      } else if (scene.phase === "REVEAL" && actionFrame.mode === "setup") {
-        syncVideoToFrame(ambientDealer, ambientFrameAt(scene.actionProfile, elapsed, "setup"));
-      } else if (scene.phase === "REVEAL" && actionFrame.mode === "finish") {
-        syncVideoToFrame(
-          ambientDealer,
-          ambientFrameAt(scene.actionProfile, Math.max(0, elapsed - scene.dealTimeline.dealEnd), "finish")
-        );
-      } else if (scene.phase === "RESULT") {
-        const resultDuration = Number(scene.state?.timings?.result || DEMO_RESULT_SECONDS);
-        syncVideoToFrame(
-          ambientDealer,
-          ambientFrameAt(scene.actionProfile, Math.max(0, resultDuration - phaseCountdown), "finish")
-        );
-      }
-
       if (scene.phase === "REVEAL") {
-        switchDealerMode(actionFrame.mode);
-        if (actionFrame.mode === "deal" && dealer) {
-          syncVideoToFrame(dealer, actionFrame, 0.14);
-        }
         if (actionFrame.mode === "finish" && scene.run.length) {
           const roundKey = scene.state?.round_number || `${scene.outcome?.winner}-${scene.run.length}`;
           if (dealStoppedRoundRef.current !== roundKey) {
@@ -597,8 +476,8 @@ function AndarBaharTable({ game, live, demo = false }) {
         rows.slice(-8).forEach(({ card, index }, laneIndex) => {
           const targetX = 990 - laneIndex * 54 + scene.actionProfile.drift * (index % 2 ? 0.35 : -0.35);
           const targetY = side === "andar" ? 535 : 604;
-          // Release the rendered card at the same point in every dealer hand
-          // cycle, then animate its short flight from the shoe to the lane.
+          // Release the rendered card at the same point in every deal cycle,
+          // then animate its short flight from the shoe to the lane.
           const cardBeat = scene.dealTimeline.cards[index];
           const appearedAt = cardBeat?.releaseAt || 0;
           const progress = Math.max(0, Math.min(1,
@@ -755,7 +634,7 @@ function AndarBaharTable({ game, live, demo = false }) {
     };
     animationFrame = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animationFrame);
-  }, [maxBet, minBet, switchDealerMode]);
+  }, [maxBet, minBet]);
 
   const chipStart = (DESIGN_W - (chips.length * 54 + Math.max(0, chips.length - 1) * 14)) / 2;
   return (
@@ -768,57 +647,42 @@ function AndarBaharTable({ game, live, demo = false }) {
       designHeight={DESIGN_H}
       systemControls={false}
     >
-      <img className="ab-dealer-poster" src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
       <svg className="ab-table-cover" viewBox={`0 0 ${DESIGN_W} ${DESIGN_H}`} aria-hidden="true">
         <defs>
-          <linearGradient id="ab-table-cloth" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#cdae69" />
-            <stop offset="0.5" stopColor="#af8d4c" />
-            <stop offset="1" stopColor="#785a2b" />
+          <radialGradient id="ab-royal-felt" cx="50%" cy="44%" r="72%">
+            <stop offset="0" stopColor="#16785b" />
+            <stop offset="0.58" stopColor="#075039" />
+            <stop offset="1" stopColor="#02291f" />
+          </radialGradient>
+          <linearGradient id="ab-royal-wood" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#2b140b" />
+            <stop offset="0.25" stopColor="#8a4e1e" />
+            <stop offset="0.52" stopColor="#32170b" />
+            <stop offset="0.78" stopColor="#a66024" />
+            <stop offset="1" stopColor="#211008" />
           </linearGradient>
+          <linearGradient id="ab-royal-gold" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#fff0a9" />
+            <stop offset="0.35" stopColor="#d6a94d" />
+            <stop offset="0.7" stopColor="#765016" />
+            <stop offset="1" stopColor="#e0bb63" />
+          </linearGradient>
+          <pattern id="ab-felt-grain" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M0 16 Q8 8 16 16 T32 16 M16 0 Q24 8 16 16 T16 32" fill="none" stroke="rgba(255,255,255,.035)" strokeWidth="1" />
+          </pattern>
+          <filter id="ab-table-shadow" x="-20%" y="-30%" width="140%" height="170%">
+            <feDropShadow dx="0" dy="18" stdDeviation="18" floodColor="#000" floodOpacity=".72" />
+          </filter>
         </defs>
-        <path d={`M430 ${PANEL_Y} L470 548 Q800 505 1130 548 L1170 ${PANEL_Y} Z`} fill="url(#ab-table-cloth)" stroke="#efd68f" strokeWidth="3" />
+        <rect x="18" y="68" width="1564" height="598" rx="78" fill="url(#ab-royal-wood)" stroke="#241006" strokeWidth="14" filter="url(#ab-table-shadow)" />
+        <rect x="34" y="84" width="1532" height="566" rx="66" fill="none" stroke="url(#ab-royal-gold)" strokeWidth="12" />
+        <rect x="51" y="101" width="1498" height="532" rx="54" fill="url(#ab-royal-felt)" stroke="#1a0d08" strokeWidth="8" />
+        <rect x="59" y="109" width="1482" height="516" rx="48" fill="url(#ab-felt-grain)" stroke="rgba(255,238,171,.28)" strokeWidth="2" />
+        <ellipse cx="800" cy="364" rx="520" ry="188" fill="none" stroke="rgba(228,192,107,.12)" strokeWidth="2" />
+        <path d="M340 154 Q800 102 1260 154" fill="none" stroke="rgba(255,238,171,.15)" strokeWidth="2" />
       </svg>
-      <img className={`ab-dealer-foreground ${dealerMode !== "still" ? "is-hidden" : ""}`}
-        src="/game-art/andar-bahar/dealer-stage.jpg" alt="" draggable="false" />
-      <video
-        ref={ambientVideoRef}
-        className={`ab-dealer-video ab-ambient-video ${["ambient", "setup", "finish"].includes(dealerMode) ? "is-active" : "is-idle"}`}
-        src="/game-art/andar-bahar/dealer-ambient.mp4"
-        poster="/game-art/andar-bahar/dealer-stage.jpg"
-        muted
-        playsInline
-        preload="auto"
-        aria-label="Animated live Andar Bahar dealer blinking and making calm two-hand betting gestures"
-        onError={(event) => { event.currentTarget.style.display = "none"; }}
-      />
-      <video
-        ref={idleVideoRef}
-        className={`ab-dealer-video ab-idle-video ${dealerMode === "hair" ? "is-active" : "is-idle"}`}
-        src="/game-art/andar-bahar/dealer-idle.mp4"
-        poster="/game-art/andar-bahar/dealer-stage.jpg"
-        muted
-        playsInline
-        preload="auto"
-        aria-label="Animated live Andar Bahar dealer waiting at the card shoe"
-        onEnded={() => setHairMoment(false)}
-        onError={(event) => { event.currentTarget.style.display = "none"; }}
-      />
-      <video
-        ref={videoRef}
-        className={`ab-dealer-video ${dealerMode === "deal" ? "is-active" : "is-idle"}`}
-        src="/game-art/andar-bahar/dealer-loop.mp4"
-        poster="/game-art/andar-bahar/dealer-stage.jpg"
-        muted
-        loop
-        playsInline
-        preload="auto"
-        aria-label="Animated live Andar Bahar dealer drawing each card from the shoe with her right hand"
-        onError={(event) => { event.currentTarget.style.display = "none"; }}
-      />
       <canvas ref={canvasRef} className="ab-canvas" width={DESIGN_W} height={DESIGN_H}
-        data-testid="andar-bahar-canvas" data-phase={phase} data-round={state?.round_number || ""} data-card-count={run.length}
-        data-dealer-action={actionProfile.id} data-dealer-mode={dealerMode} />
+        data-testid="andar-bahar-canvas" data-phase={phase} data-round={state?.round_number || ""} data-card-count={run.length} />
       <div className="ab-announcer" aria-live="off">
         {announcement ? `${announcement.winner} wins, ${announcement.card}, ${announcement.count} cards dealt` : ""}
       </div>
