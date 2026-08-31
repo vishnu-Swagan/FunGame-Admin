@@ -58,6 +58,70 @@ export const payments = {
 };
 
 export const adminPayments = {
+  async hubStatus() {
+    const { data } = await financialApi.get("/admin/payment-hub/status");
+    return data?.data || data;
+  },
+  async gateways() {
+    const { data } = await financialApi.get("/admin/payment-gateways");
+    return data?.data?.items || [];
+  },
+  async createGateway(body) {
+    const { data } = await financialApi.post("/admin/payment-gateways", body, { __noFailover: true });
+    return data?.data?.gateway || data?.gateway || data;
+  },
+  async writeGatewayCredentials(id, credentials) {
+    const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/credentials`, { credentials }, { __noFailover: true });
+    return data?.data || data;
+  },
+  async testGateway(id) {
+    const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/test`, {}, { __noFailover: true });
+    return data?.data || data;
+  },
+  async requestGatewayActivation(id, reason) {
+    const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/request-activation`, { reason }, { __noFailover: true });
+    return data?.data?.approval || data;
+  },
+  async approveGatewayActivation(id, approvalId) {
+    const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/approve-activation`, { approval_id: approvalId }, { __noFailover: true });
+    return data?.data?.gateway || data;
+  },
+  async disableGateway(id, reason) {
+    const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/disable`, { reason }, { __noFailover: true });
+    return data?.data?.gateway || data;
+  },
+  async routes() {
+    const { data } = await financialApi.get("/admin/payment-routes");
+    return data?.data?.items || [];
+  },
+  async createRoute(body) {
+    const { data } = await financialApi.post("/admin/payment-routes", body, { __noFailover: true });
+    return data?.data?.route || data;
+  },
+  async requestRouteActivation(id, reason) {
+    const { data } = await financialApi.post(`/admin/payment-routes/${encodeURIComponent(id)}/request-activation`, { reason }, { __noFailover: true });
+    return data?.data?.approval || data;
+  },
+  async approveRouteActivation(id, approvalId) {
+    const { data } = await financialApi.post(`/admin/payment-routes/${encodeURIComponent(id)}/approve-activation`, { approval_id: approvalId }, { __noFailover: true });
+    return data?.data?.route || data;
+  },
+  async paymentApprovals(status = "PENDING") {
+    const { data } = await financialApi.get("/admin/payment-approvals", { params: { status } });
+    return data?.data?.items || [];
+  },
+  async simulateRoute(body) {
+    const { data } = await financialApi.post("/admin/payment-routes/simulate", body, { __noFailover: true });
+    return data?.data?.decision || data;
+  },
+  async hubWebhookEvents() {
+    const { data } = await financialApi.get("/admin/webhook-events");
+    return data?.data?.items || [];
+  },
+  async hubActivity() {
+    const { data } = await financialApi.get("/admin/activity");
+    return data?.data?.items || [];
+  },
   async kyc(status) {
     const { data } = await financialApi.get(`${ADMIN_ROOT}/kyc`, { params: status ? { status } : {} });
     return responseRows(data, "players");

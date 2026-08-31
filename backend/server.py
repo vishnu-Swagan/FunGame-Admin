@@ -36,7 +36,9 @@ import routes_security
 import routes_migration_export
 import routes_game_settlement
 import routes_payments
+import routes_payment_hub
 import financial_wallet
+from payment_hub import service as payment_hub_service
 from payment_providers import load_payment_provider
 from transactions import run_game_transaction
 
@@ -258,6 +260,10 @@ async def lifespan(app: FastAPI):
     # Disabled by default; this creates no collection or index until the
     # separately reviewed Supabase game-settlement bridge is explicitly enabled.
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
+    # Additive, dormant-by-default universal gateway administration indexes.
+    # They contain configuration and operational evidence only; wallet posting
+    # remains in the established financial core.
+    await step('indexes:payment_hub', payment_hub_service.ensure_indexes())
 
     # Payment indexes and transaction support are a hard readiness gate for
     # money routes.  Unlike ordinary bootstrap steps this failure is retained
@@ -383,6 +389,8 @@ api_router.include_router(routes_migration_export.router)
 api_router.include_router(routes_game_settlement.router)
 api_router.include_router(routes_payments.router)
 api_router.include_router(routes_payments.admin_router)
+api_router.include_router(routes_payment_hub.router)
+api_router.include_router(routes_payment_hub.admin_router)
 app.include_router(api_router)
 
 # --- Security middleware ---

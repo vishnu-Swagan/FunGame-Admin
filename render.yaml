@@ -89,6 +89,18 @@ services:
         value: "false"
       - key: FINANCIAL_GAME_WALLET_INTEGRATED
         value: "false"
+      - key: PAYMENTS_V2_ENABLED
+        value: "false"
+      - key: PAYMENT_GATEWAY_ADMIN_ENABLED
+        value: "false"
+      - key: PAYMENT_LIVE_MODE_ALLOWED
+        value: "false"
+      - key: PAYMENT_CREDENTIALS_MASTER_KEY
+        sync: false          # AES-GCM key; configure in Render secrets only for sandbox/staging
+      - key: PAYMENT_WEBHOOK_PUBLIC_BASE_URL
+        sync: false          # approved API origin; never a browser return URL
+      - key: PAYMENT_PROVIDER_ALLOWED_DOMAINS
+        sync: false          # reviewed provider hosts used by Generic REST SSRF controls
       - key: SUPABASE_GAME_SETTLEMENT_ENABLED
         value: "false"
       - key: MIGRATION_EXPORT_ENABLED

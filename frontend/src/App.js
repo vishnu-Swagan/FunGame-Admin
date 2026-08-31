@@ -59,7 +59,8 @@ import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
 import { AdminPaymentAudit, AdminKyc } from "@/pages/admin/AdminPaymentPages";
-import { AdminMonitoring, AdminPaymentGateways, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
+import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
+import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
 
 // Partner portal (distributors)
 import PartnerLayout from "@/pages/partner/PartnerLayout";
@@ -110,7 +111,7 @@ function AdminConsoleApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
             <Route path="bonuses" element={<AdminChipRequests />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
@@ -193,7 +194,7 @@ function PlayerApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
             <Route path="bonuses" element={<AdminChipRequests />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
