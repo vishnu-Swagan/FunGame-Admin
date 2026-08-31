@@ -29,6 +29,7 @@ from auth_utils import (
     public_user,
     require_active_player,
     require_legacy_chip_mutation_allowed,
+    require_legacy_chip_requests_enabled,
     require_password_ready_user,
 )
 from game_access import (
@@ -479,7 +480,7 @@ async def my_points_transactions(user: dict = Depends(require_active_player)):
 
 @router.post('/chips/request')
 async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(require_active_player)):
-    require_legacy_chip_mutation_allowed()
+    require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not request chips')
     # Checked when the request is made so the player is told now, and again at
@@ -501,7 +502,7 @@ async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(requ
 async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends(require_active_player)):
     """Player asks the operator to sell chips for points (1:1).
     Chips stay in the balance until the admin approves the request."""
-    require_legacy_chip_mutation_allowed()
+    require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not sell chips')
     fresh = await db.users.find_one({'id': user['id']})
@@ -524,7 +525,7 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
 async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Depends(require_active_player)):
     """Player asks the operator to return chips to the admin. Chips are deducted
     only when the admin approves the request (nothing is credited back)."""
-    require_legacy_chip_mutation_allowed()
+    require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
         raise HTTPException(status_code=400, detail='Admins do not return chips')
     fresh = await db.users.find_one({'id': user['id']})

@@ -22,6 +22,18 @@ def _real_money_enabled() -> bool:
     return (os.environ.get('REAL_MONEY_ENABLED') or 'false').strip().lower() == 'true'
 
 
+def _legacy_chip_requests_enabled() -> bool:
+    """Return the explicit rollout state for the retired request workflow.
+
+    Missing, malformed and empty values all remain disabled.  This is kept
+    separate from ``REAL_MONEY_ENABLED`` so a dormant financial rollout can
+    never accidentally re-expose the historical manual-credit endpoints.
+    """
+    return (
+        os.environ.get('LEGACY_CHIP_REQUESTS_ENABLED') or 'false'
+    ).strip().lower() == 'true'
+
+
 def require_legacy_chip_mutation_allowed() -> None:
     """Keep legacy play-chip workflows away from a source-separated wallet.
 
@@ -35,6 +47,21 @@ def require_legacy_chip_mutation_allowed() -> None:
             'code': 'LEGACY_CHIP_FLOW_DISABLED',
             'message': 'This legacy chip operation is unavailable in real-money mode.',
         })
+
+
+def require_legacy_chip_requests_enabled() -> None:
+    """Fail closed for legacy request creation and operator resolution.
+
+    Historical request reads remain available for audit, but every action that
+    can create, approve or deny one requires the source-controlled rollout flag
+    as well as the existing real-money separation guard.
+    """
+    if not _legacy_chip_requests_enabled():
+        raise HTTPException(status_code=409, detail={
+            'code': 'LEGACY_CHIP_REQUESTS_DISABLED',
+            'message': 'Legacy chip requests are unavailable.',
+        })
+    require_legacy_chip_mutation_allowed()
 
 
 def _financial_gameplay_gate(user: dict) -> None:

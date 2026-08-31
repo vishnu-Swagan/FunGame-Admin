@@ -4,7 +4,7 @@ import os
 import uuid
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from auth_utils import get_current_user, require_recent_admin_step_up
@@ -140,12 +140,6 @@ class RouteSimulation(BaseModel):
     correlation_id: str | None = None
 
 
-class SandboxPayin(BaseModel):
-    amount_minor: int = Field(ge=1, le=10**12)
-    currency: str = Field(min_length=3, max_length=3)
-    method: str = "HOSTED_CHECKOUT"
-
-
 @admin_router.get("/payment-hub/status")
 async def hub_status(admin=Depends(require_permission("gateway.view", feature=False))):
     return envelope(service.feature_status())
@@ -205,17 +199,10 @@ async def gateway_test(gateway_id: str, admin=Depends(require_permission("gatewa
         raise_gateway(exc)
 
 
-@admin_router.post("/payment-gateways/{gateway_id}/sandbox-transaction")
-async def gateway_sandbox_transaction(gateway_id: str, body: SandboxPayin, idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=160), admin=Depends(require_permission("gateway.test", step_up=True))):
-    try:
-        return envelope({"payment": redact(await service.create_sandbox_payin(gateway_id, body.model_dump(), admin["id"], idempotency_key))})
-    except GatewayError as exc:
-        raise_gateway(exc)
-
-
 @admin_router.post("/payment-gateways/{gateway_id}/request-activation")
 async def gateway_request_activation(gateway_id: str, body: Reason, admin=Depends(require_permission("gateway.activate", step_up=True, super_admin=True))):
     try:
+        service.require_payments_v2_activation()
         gateway = await db.payment_gateways.find_one({"id": gateway_id})
         if not gateway:
             raise GatewayError("GATEWAY_NOT_FOUND", "Gateway was not found.", status_code=404)
@@ -227,6 +214,7 @@ async def gateway_request_activation(gateway_id: str, body: Reason, admin=Depend
 @admin_router.post("/payment-gateways/{gateway_id}/approve-activation")
 async def gateway_approve_activation(gateway_id: str, body: Approval, admin=Depends(require_permission("gateway.activate", step_up=True, super_admin=True))):
     try:
+        service.require_payments_v2_activation()
         return envelope({"gateway": service.gateway_dto(await service.approve_activation(gateway_id, body.approval_id, admin["id"]))})
     except GatewayError as exc:
         raise_gateway(exc)
@@ -257,6 +245,7 @@ async def route_create(body: RouteCreate, admin=Depends(require_permission("gate
 @admin_router.post("/payment-routes/{route_id}/request-activation")
 async def route_request_activation(route_id: str, body: Reason, admin=Depends(require_permission("gateway.manage_routes", step_up=True, super_admin=True))):
     try:
+        service.require_payments_v2_activation()
         route = await db.payment_routes.find_one({"id": route_id})
         if not route:
             raise GatewayError("PAYMENT_ROUTE_NOT_FOUND", "Payment route was not found.", status_code=404)
@@ -271,6 +260,7 @@ async def route_request_activation(route_id: str, body: Reason, admin=Depends(re
 @admin_router.post("/payment-routes/{route_id}/approve-activation")
 async def route_approve_activation(route_id: str, body: Approval, admin=Depends(require_permission("gateway.manage_routes", step_up=True, super_admin=True))):
     try:
+        service.require_payments_v2_activation()
         return envelope({"route": await service.approve_route_activation(route_id, body.approval_id, admin["id"])})
     except GatewayError as exc:
         raise_gateway(exc)

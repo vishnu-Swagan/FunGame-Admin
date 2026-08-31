@@ -5,6 +5,7 @@ import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
 import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
+import { LEGACY_CHIP_REQUESTS_ENABLED } from "@/lib/featureFlags";
 import { ADMIN_PERMISSIONS, PortalPublicOnly, PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner, RequirePermission } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
@@ -32,6 +33,8 @@ import ChipsPage from "@/pages/app/ChipsPage";
 import Announcements from "@/pages/app/Announcements";
 import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
+import BankDetailsPage from "@/pages/app/wallet/BankDetailsPage";
+import DepositReturn from "@/pages/app/wallet/DepositReturn";
 import Support from "@/pages/app/Support";
 import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
 import GamePlay from "@/pages/play/GamePlay";
@@ -58,7 +61,15 @@ import AdminDistributors from "@/pages/admin/AdminDistributors";
 import AdminCommission from "@/pages/admin/AdminCommission";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
-import { AdminPaymentAudit, AdminKyc } from "@/pages/admin/AdminPaymentPages";
+import {
+  AdminDeposits,
+  AdminKyc,
+  AdminPaymentAudit,
+  AdminPaymentEvents,
+  AdminPaymentSettings,
+  AdminWalletLedger,
+  AdminWithdrawals,
+} from "@/pages/admin/AdminPaymentPages";
 import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
 import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
 
@@ -112,7 +123,7 @@ function AdminConsoleApp() {
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
             <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
-            <Route path="bonuses" element={<AdminChipRequests />} />
+            <Route path="bonuses" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
             <Route path="notifications" element={<AdminAnnouncements />} />
@@ -120,14 +131,14 @@ function AdminConsoleApp() {
             <Route path="monitoring" element={<AdminMonitoring />} />
             <Route path="signups" element={<Navigate to="/Admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
-            <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="chip-requests" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="kyc" element={<RequirePermission permission={ADMIN_PERMISSIONS.KYC_VIEW}><AdminKyc /></RequirePermission>} />
-            <Route path="deposits" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="withdrawals" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-events" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="wallet-ledger" element={<Navigate to="/Admin/chip-requests" replace />} />
+            <Route path="deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
+            <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
-            <Route path="payment-settings" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
@@ -195,7 +206,7 @@ function PlayerApp() {
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
             <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
-            <Route path="bonuses" element={<AdminChipRequests />} />
+            <Route path="bonuses" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
             <Route path="notifications" element={<AdminAnnouncements />} />
@@ -203,14 +214,14 @@ function PlayerApp() {
             <Route path="monitoring" element={<AdminMonitoring />} />
             <Route path="signups" element={<Navigate to="/Admin/users?status=PENDING" replace />} />
             <Route path="users" element={<AdminUsers />} />
-            <Route path="chip-requests" element={<AdminChipRequests />} />
+            <Route path="chip-requests" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="kyc" element={<RequirePermission permission={ADMIN_PERMISSIONS.KYC_VIEW}><AdminKyc /></RequirePermission>} />
-            <Route path="deposits" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="withdrawals" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-events" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="wallet-ledger" element={<Navigate to="/Admin/chip-requests" replace />} />
+            <Route path="deposits" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminDeposits /></RequirePermission>} />
+            <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
+            <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
+            <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
-            <Route path="payment-settings" element={<Navigate to="/Admin/dashboard" replace />} />
+            <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
@@ -248,17 +259,17 @@ function PlayerApp() {
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/recent" element={<Recent />} />
             <Route path="/chips" element={<ChipsPage />} />
-            <Route path="/chips/deposit" element={<Navigate to="/chips" replace />} />
-            <Route path="/chips/deposit/return" element={<Navigate to="/chips" replace />} />
-            <Route path="/chips/deposit/return/:depositId" element={<Navigate to="/chips" replace />} />
-            <Route path="/chips/withdraw" element={<Navigate to="/chips" replace />} />
+            <Route path="/chips/deposit" element={<ChipsPage />} />
+            <Route path="/chips/deposit/return" element={<DepositReturn />} />
+            <Route path="/chips/deposit/return/:depositId" element={<DepositReturn />} />
+            <Route path="/chips/withdraw" element={<ChipsPage />} />
             <Route path="/chips/activity" element={<ChipsPage />} />
-            <Route path="/chips/request" element={<ChipsPage />} />
+            <Route path="/chips/request" element={<Navigate to="/chips" replace />} />
             <Route path="/chips/history" element={<Navigate to="/chips/activity" replace />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/profile" element={<Profile />} />
-            <Route path="/profile/bank-details" element={<Navigate to="/profile" replace />} />
+            <Route path="/profile/bank-details" element={<BankDetailsPage />} />
             <Route path="/security" element={<Security />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

@@ -77,8 +77,8 @@ services:
         value: "false"
       - key: EMAIL_PROVIDER
         sync: false                                  # preserve the production provider selection
-      # Chakri.Casino is virtual-chip-only. Source-controlled false values make
-      # an accidental dashboard drift fail closed on the next reviewed sync.
+      # Financial rollout switches are source-controlled fail-closed. A stale
+      # dashboard value must never make a release money-live accidentally.
       - key: REAL_MONEY_ENABLED
         value: "false"
       - key: DEPOSITS_ENABLED
@@ -89,6 +89,8 @@ services:
         value: "false"
       - key: FINANCIAL_GAME_WALLET_INTEGRATED
         value: "false"
+      - key: LEGACY_CHIP_REQUESTS_ENABLED
+        value: "false"
       - key: PAYMENTS_V2_ENABLED
         value: "false"
       - key: PAYMENT_GATEWAY_ADMIN_ENABLED
@@ -96,11 +98,39 @@ services:
       - key: PAYMENT_LIVE_MODE_ALLOWED
         value: "false"
       - key: PAYMENT_CREDENTIALS_MASTER_KEY
-        sync: false          # AES-GCM key; configure in Render secrets only for sandbox/staging
+        sync: false          # AES-GCM key; configure in Render secrets only
       - key: PAYMENT_WEBHOOK_PUBLIC_BASE_URL
-        sync: false          # approved API origin; never a browser return URL
+        value: https://api.chakri.casino
       - key: PAYMENT_PROVIDER_ALLOWED_DOMAINS
         sync: false          # reviewed provider hosts used by Generic REST SSRF controls
+      - key: PAYMENT_PROVIDER_CHECKOUT_ALLOWED_DOMAINS
+        sync: false          # exact reviewed HTTPS hosts permitted for player checkout redirects
+      - key: PAYMENT_PROVIDER
+        sync: false          # primary provider code; no runtime fallback exists
+      - key: PAYMENT_PROVIDER_CONFIG_JSON
+        sync: false          # approved endpoint and field mappings; never embed credential values
+      - key: PAYMENT_RETURN_URL
+        value: https://chakri.casino/chips/deposit/return
+      - key: CHIPS_PER_INR
+        sync: false          # operator-reviewed integer conversion rate
+      - key: MIN_DEPOSIT_PAISE
+        sync: false
+      - key: MAX_DEPOSIT_PAISE
+        sync: false
+      - key: MIN_WITHDRAWAL_PAISE
+        value: "100000"     # INR 1,000
+      - key: MIN_WITHDRAWAL_CHIPS
+        sync: false
+      - key: MAX_WITHDRAWAL_CHIPS
+        sync: false
+      - key: PAYOUT_DATA_ACTIVE_KEY_VERSION
+        sync: false
+      - key: PAYOUT_DATA_KEY_V1
+        sync: false          # AES-GCM bank-data key; never expose or commit
+      - key: PAYOUT_DATA_FINGERPRINT_KEY
+        sync: false
+      - key: FINANCIAL_ALLOWED_COUNTRIES
+        sync: false          # reviewed ISO alpha-2 allow-list
       - key: SUPABASE_GAME_SETTLEMENT_ENABLED
         value: "false"
       - key: MIGRATION_EXPORT_ENABLED
@@ -131,6 +161,8 @@ services:
         # Keep new builds and installed PWAs pinned to the branded production
         # origin.  The historical Render hostname no longer serves this API.
         value: https://api.chakri.casino
+      - key: REACT_APP_LEGACY_CHIP_REQUESTS_ENABLED
+        value: "false"
       - key: GENERATE_SOURCEMAP
         value: "false"
     routes:

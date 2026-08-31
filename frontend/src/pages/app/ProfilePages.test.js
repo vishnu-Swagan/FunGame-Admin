@@ -71,7 +71,7 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test("game profile exposes operator-review account state and the chip-request entry point", async () => {
+test("game profile exposes Buy Chips and bank-account entry points", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -81,8 +81,10 @@ test("game profile exposes operator-review account state and the chip-request en
   expect(container.querySelector('[data-testid="profile-contact-verification"]')?.textContent).toBe("OTP deferred");
   expect(container.querySelector('[data-testid="profile-link-settings"]')?.textContent).toMatch(/Account settings/i);
 
-  await act(async () => container.querySelector('[data-testid="profile-link-request-chips"]').click());
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/request");
+  await act(async () => container.querySelector('[data-testid="profile-link-buy-chips"]').click());
+  expect(mockNavigate).toHaveBeenCalledWith("/chips");
+  await act(async () => container.querySelector('[data-testid="profile-link-bank-account"]').click());
+  expect(mockNavigate).toHaveBeenCalledWith("/profile/bank-details");
   await act(async () => root.unmount());
 });
 

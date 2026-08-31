@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .adapters import GatewayAdapter, GenericRestAdapter, MockSandboxAdapter
+from .adapters import GatewayAdapter, GenericRestAdapter
 from .domain import GatewayError
 
 
@@ -35,5 +35,4 @@ class ProviderRegistry:
 
 
 registry = ProviderRegistry()
-registry.register("MOCK_SANDBOX", lambda config, secrets, domains: MockSandboxAdapter(config, secrets))
 registry.register("GENERIC_REST", lambda config, secrets, domains: GenericRestAdapter(config, secrets, domains))

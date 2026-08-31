@@ -23,7 +23,36 @@ DEPOSITS_ENABLED=false
 WITHDRAWALS_ENABLED=false
 AUTO_WITHDRAWALS_ENABLED=false
 FINANCIAL_GAME_WALLET_INTEGRATED=false
+PAYMENTS_V2_ENABLED=false
+PAYMENT_GATEWAY_ADMIN_ENABLED=false
+PAYMENT_LIVE_MODE_ALLOWED=false
+LEGACY_CHIP_REQUESTS_ENABLED=false
+REACT_APP_LEGACY_CHIP_REQUESTS_ENABLED=false
 ```
+
+## Current V1 flow versus V2 configuration preview
+
+There are two separate payment planes in this branch:
+
+- **Player V1:** `/api/payments/*` creates the authoritative `deposit_orders`
+  and `withdrawal_requests`, selects one explicit `PAYMENT_PROVIDER`, and posts
+  wallet value only through `financial_wallet.py` into `wallet_operations` and
+  immutable `wallet_entries`. Its signed callback is
+  `/api/payments/webhooks/{provider_name}`.
+- **CRM V2:** `/api/admin/payment-gateways` and `/api/admin/payment-routes`
+  store provider/routing configuration and operational evidence in separate V2
+  collections. The reserved callback shape is
+  `/api/webhooks/payments/{gateway_code}`, but it is not registration-ready and
+  must not be entered in a provider dashboard during Phase 0.
+
+No certified bridge currently binds a player V1 order to a V2 order, route,
+provider event and exactly one authoritative wallet source/idempotency key.
+Therefore the CRM is a **configuration preview with no player traffic**. Adding
+multiple gateway drafts, validating credentials, or seeing a V2 row marked
+enabled does not route a deposit, submit a payout, credit chips, or create
+multi-provider player traffic. The CRM intentionally exposes no activation or
+approval action until that bridge, reconciliation and rollback design passes
+the launch gates.
 
 `FINANCIAL_GAME_WALLET_INTEGRATED` is a separate prerequisite. It must not be
 enabled merely because a payment provider is configured. It confirms that all
@@ -113,13 +142,17 @@ currency, and an immutable provider payment reference; a bare `PAID` string is
 never sufficient. Payout lookup must additionally bind the provider payout to
 the original withdrawal ID, idempotency key, amount, currency, and beneficiary.
 
-## URLs to give the approved provider
+## Current player V1 URLs — only after V1 certification
 
 Replace `{provider}` with the adapter's configured, lowercase route name.
 
 - Server webhook: `https://api.chakri.casino/api/payments/webhooks/{provider}`
 - Browser return: `https://chakri.casino/chips/deposit/return`
 - Admin CRM: `https://crm.chakri.casino/admin/payments`
+
+These URLs describe the current single-provider V1 flow only. Do not give the
+provider `/api/webhooks/payments/{gateway_code}` from a V2 CRM draft, and do not
+claim that V1 supports CRM-driven multi-provider routing.
 
 The browser return page only polls a server-created deposit order. It never
 credits chips. A deposit is credited only after a valid signed server-to-server
@@ -181,12 +214,12 @@ must supply a beneficiary/token workflow that lets a least-privilege,
 step-up-authenticated operator complete the payout without exposing raw bank
 data. That handoff must be audited. Until then, keep withdrawals disabled.
 
-## Provider dashboard setup
+## Provider dashboard setup for the certified V1 provider
 
-After implementing the selected adapter:
+Only after implementing and certifying the selected single-provider V1 adapter:
 
-1. Add the production webhook URL and subscribe only to supported deposit and
-   payout events.
+1. Add the certified V1 production webhook URL and subscribe only to supported
+   deposit and payout events.
 2. Add the exact browser return URL. Do not use it as proof of payment.
 3. Configure the provider's signing secret/certificate in the API service's
    secret manager.
@@ -194,6 +227,10 @@ After implementing the selected adapter:
 5. Keep withdrawals in `MANUAL` during initial deposit certification.
 6. Verify webhook signature failures are visible in the CRM without exposing
    raw secrets or bank data.
+
+Do not register the reserved V2 callback, request V2 activation, or use a V2
+route during this procedure. Those steps require a later, separately reviewed
+V1↔V2 bridge release.
 
 ## Verification before enabling a switch
 

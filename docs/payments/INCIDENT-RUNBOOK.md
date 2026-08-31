@@ -1,5 +1,11 @@
 # Payment incident response
 
+These provider-traffic procedures apply only after a separately certified
+payment release. During Phase 0 the V2 CRM has no player traffic; an unexpected
+V2 callback or order is a release-boundary incident, and operators must keep
+wallet effects closed and investigate rather than reconcile it as a player
+payment.
+
 **Gateway down:** disable routing/gateway, preserve orders, query status before
 fallback, notify operations and record a case/correlation ID.
 

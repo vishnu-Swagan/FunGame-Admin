@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2, HandCoins, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
+  Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,8 @@ export function Profile() {
   const filteredAvatars = useMemo(() => filterCartoonAvatars(avatarSearch), [avatarSearch]);
 
   const links = [
-    { icon: HandCoins, label: "Request chips", to: "/chips/request", testId: "profile-link-request-chips" },
+    { icon: HandCoins, label: "Buy chips", to: "/chips", testId: "profile-link-buy-chips" },
+    { icon: Landmark, label: "Bank account", to: "/profile/bank-details", testId: "profile-link-bank-account" },
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
     { icon: HeartPulse, label: "Responsible play", to: "/responsible-play", testId: "profile-link-responsible" },

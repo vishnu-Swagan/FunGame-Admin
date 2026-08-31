@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import uuid
@@ -46,6 +47,12 @@ SCHEMA_VERSION = 2
 CURRENCY = "INR"
 MANUAL = "MANUAL"
 AUTOMATIC = "AUTOMATIC"
+
+# These are the request-schema ceilings enforced by the public HTTP API. Keep
+# them in the financial domain so readiness checks and published limits cannot
+# drift from route validation.
+DEPOSIT_REQUEST_MAX_PAISE = 1_000_000_000
+WITHDRAWAL_REQUEST_MAX_CHIPS = 10_000_000
 
 # This must be changed in code only after every playable game's stake, payout,
 # refund, and rollback paths have passed source-provenance certification.
@@ -379,6 +386,121 @@ def chips_to_paise(amount_chips: int, rate: Mapping[str, Any]) -> int:
     return numerator // divisor
 
 
+def _effective_withdrawal_chip_bounds(
+    *, rate: Mapping[str, Any], minimum_paise: int,
+    minimum_chips: int, maximum_chips: int,
+) -> tuple[int, int]:
+    """Return exact-conversion chip bounds after every public constraint."""
+    chips_per_inr = int(rate["chips_per_inr"])
+    paise_per_inr = int(rate["paise_per_inr"])
+    conversion_step = chips_per_inr // math.gcd(chips_per_inr, paise_per_inr)
+    currency_floor_chips = (
+        (int(minimum_paise) * chips_per_inr + paise_per_inr - 1)
+        // paise_per_inr
+    )
+    lower_bound = max(int(minimum_chips), currency_floor_chips)
+    effective_minimum = (
+        (lower_bound + conversion_step - 1) // conversion_step
+    ) * conversion_step
+    public_maximum = min(int(maximum_chips), WITHDRAWAL_REQUEST_MAX_CHIPS)
+    effective_maximum = (public_maximum // conversion_step) * conversion_step
+    if effective_minimum > effective_maximum:
+        raise ProviderConfigurationError(
+            "Withdrawal limits do not allow any request that meets the INR minimum",
+        )
+    return effective_minimum, effective_maximum
+
+
+def _effective_deposit_paise_bounds(
+    *, rate: Mapping[str, Any], minimum_paise: int, maximum_paise: int,
+) -> tuple[int, int]:
+    """Return public deposit bounds that always purchase at least one chip."""
+    chips_per_inr = int(rate["chips_per_inr"])
+    paise_per_inr = int(rate["paise_per_inr"])
+    minimum_for_one_chip = (
+        paise_per_inr + chips_per_inr - 1
+    ) // chips_per_inr
+    effective_minimum = max(int(minimum_paise), minimum_for_one_chip)
+    effective_maximum = min(int(maximum_paise), DEPOSIT_REQUEST_MAX_PAISE)
+    if effective_minimum > effective_maximum:
+        raise ProviderConfigurationError(
+            "Deposit limits do not allow any request through the public API",
+        )
+    return effective_minimum, effective_maximum
+
+
+def public_money_config(
+    environ: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """Return the non-secret conversion and transaction limits for players.
+
+    These values are derived from the same validated settings used at the
+    mutation boundary.  Provider identity, credentials, routing information,
+    and internal readiness errors are intentionally excluded.
+    """
+    env = os.environ if environ is None else environ
+    flags = requested_features(env)
+    rate = conversion_snapshot(env)
+    deposits = None
+    checkout_hosts: list[str] = []
+    if flags["deposits"]:
+        # Redirect destinations are part of the reviewed provider contract,
+        # not a client preference. Loading the provider here keeps the player
+        # surface closed when credentials or its exact host allowlist drift.
+        checkout_hosts = list(load_payment_provider(env).checkout_allowed_hosts)
+        deposit_minimum = _bounded_config_int(
+            "MIN_DEPOSIT_PAISE", 10_000, 1, 100_000_000_000, env,
+        )
+        deposit_maximum = _bounded_config_int(
+            "MAX_DEPOSIT_PAISE", 100_000_000, 1, 100_000_000_000, env,
+        )
+        effective_minimum, effective_maximum = _effective_deposit_paise_bounds(
+            rate=rate,
+            minimum_paise=deposit_minimum,
+            maximum_paise=deposit_maximum,
+        )
+        deposits = {
+            "minimum_paise": effective_minimum,
+            "maximum_paise": effective_maximum,
+        }
+
+    withdrawals = None
+    if flags["withdrawals"]:
+        withdrawal_minimum = _bounded_config_int(
+            "MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000, env,
+        )
+        withdrawal_minimum_chips = _bounded_config_int(
+            "MIN_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000, env,
+        )
+        withdrawal_maximum_chips = _bounded_config_int(
+            "MAX_WITHDRAWAL_CHIPS", 1_000_000, 1, 1_000_000_000, env,
+        )
+        effective_minimum, effective_maximum = _effective_withdrawal_chip_bounds(
+            rate=rate,
+            minimum_paise=withdrawal_minimum,
+            minimum_chips=withdrawal_minimum_chips,
+            maximum_chips=withdrawal_maximum_chips,
+        )
+        withdrawals = {
+            "minimum_paise": chips_to_paise(effective_minimum, rate),
+            "maximum_paise": chips_to_paise(effective_maximum, rate),
+            "minimum_chips": effective_minimum,
+            "maximum_chips": effective_maximum,
+            "exact_chip_conversion_required": True,
+        }
+    return {
+        "currency": CURRENCY,
+        "rate": {
+            "version": rate["version"],
+            "chips_per_inr": int(rate["chips_per_inr"]),
+            "paise_per_inr": int(rate["paise_per_inr"]),
+        },
+        "checkout_hosts": checkout_hosts,
+        "deposits": deposits,
+        "withdrawals": withdrawals,
+    }
+
+
 def _parse_optional_datetime(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -608,32 +730,67 @@ def _configuration_errors(environ: Optional[Mapping[str, str]] = None) -> list[s
     countries = [v.strip().upper() for v in str(env.get("FINANCIAL_ALLOWED_COUNTRIES", "")).split(",") if v.strip()]
     if not countries or any(not re.fullmatch(r"[A-Z]{2}", c) for c in countries):
         errors.append("FINANCIAL_ALLOWED_COUNTRIES must be a non-empty ISO alpha-2 allowlist")
+    rate = None
     try:
-        conversion_snapshot(env)
+        rate = conversion_snapshot(env)
     except ProviderConfigurationError as exc:
         errors.append(str(exc))
     parsed_limits: dict[str, int] = {}
-    for setting, default, minimum, maximum in (
-        ("MIN_DEPOSIT_PAISE", 10_000, 1, 100_000_000_000),
-        ("MAX_DEPOSIT_PAISE", 100_000_000, 1, 100_000_000_000),
-        ("MIN_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000),
-        ("MAX_WITHDRAWAL_CHIPS", 1_000_000, 1, 1_000_000_000),
+    # Reconciliation remains responsible for already-created deposits even
+    # while new deposit intake is paused, so its operational settings must
+    # always stay valid whenever the financial core is enabled.
+    limit_settings = [
         ("DEPOSIT_CHECKOUT_RESERVATION_TTL_SECONDS", 1800, 300, 86_400),
         ("DEPOSIT_REFUND_RECONCILIATION_DAYS", 120, 1, 365),
         ("DEPOSIT_REFUND_RECONCILE_SECONDS", 86400, 3600, 604_800),
-    ):
+    ]
+    if flags["deposits"]:
+        limit_settings.extend([
+            ("MIN_DEPOSIT_PAISE", 10_000, 1, 100_000_000_000),
+            ("MAX_DEPOSIT_PAISE", 100_000_000, 1, 100_000_000_000),
+        ])
+    if flags["withdrawals"]:
+        limit_settings.extend([
+            ("MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000),
+            ("MIN_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000),
+            ("MAX_WITHDRAWAL_CHIPS", 1_000_000, 1, 1_000_000_000),
+        ])
+    for setting, default, minimum, maximum in limit_settings:
         try:
             parsed_limits[setting] = _bounded_config_int(
                 setting, default, minimum, maximum, env,
             )
         except ProviderConfigurationError as exc:
             errors.append(str(exc))
-    if all(key in parsed_limits for key in ("MIN_DEPOSIT_PAISE", "MAX_DEPOSIT_PAISE")):
-        if parsed_limits["MIN_DEPOSIT_PAISE"] > parsed_limits["MAX_DEPOSIT_PAISE"]:
-            errors.append("Deposit minimum cannot exceed maximum")
-    if all(key in parsed_limits for key in ("MIN_WITHDRAWAL_CHIPS", "MAX_WITHDRAWAL_CHIPS")):
+    if flags["deposits"] and all(
+        key in parsed_limits for key in ("MIN_DEPOSIT_PAISE", "MAX_DEPOSIT_PAISE")
+    ):
+        if rate is not None:
+            try:
+                _effective_deposit_paise_bounds(
+                    rate=rate,
+                    minimum_paise=parsed_limits["MIN_DEPOSIT_PAISE"],
+                    maximum_paise=parsed_limits["MAX_DEPOSIT_PAISE"],
+                )
+            except ProviderConfigurationError as exc:
+                errors.append(str(exc))
+    if flags["withdrawals"] and all(
+        key in parsed_limits for key in ("MIN_WITHDRAWAL_CHIPS", "MAX_WITHDRAWAL_CHIPS")
+    ):
         if parsed_limits["MIN_WITHDRAWAL_CHIPS"] > parsed_limits["MAX_WITHDRAWAL_CHIPS"]:
             errors.append("Withdrawal minimum cannot exceed maximum")
+    if flags["withdrawals"] and rate is not None and all(key in parsed_limits for key in (
+        "MIN_WITHDRAWAL_PAISE", "MIN_WITHDRAWAL_CHIPS", "MAX_WITHDRAWAL_CHIPS",
+    )):
+        try:
+            _effective_withdrawal_chip_bounds(
+                rate=rate,
+                minimum_paise=parsed_limits["MIN_WITHDRAWAL_PAISE"],
+                minimum_chips=parsed_limits["MIN_WITHDRAWAL_CHIPS"],
+                maximum_chips=parsed_limits["MAX_WITHDRAWAL_CHIPS"],
+            )
+        except ProviderConfigurationError as exc:
+            errors.append(str(exc))
     try:
         _active_encryption_key(env)
         _fingerprint_key(env)
@@ -1473,6 +1630,16 @@ async def create_withdrawal(
         )
     rate = conversion_snapshot()
     amount_paise = chips_to_paise(chips, rate)
+    minimum_paise = _runtime_config_int(
+        "MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000,
+    )
+    if amount_paise < minimum_paise:
+        whole, fraction = divmod(minimum_paise, 100)
+        minimum_label = f"₹{whole:,}" + (f".{fraction:02d}" if fraction else "")
+        raise FinancialError(
+            "WITHDRAWAL_LIMIT",
+            f"Withdrawal must be at least {minimum_label}.",
+        )
     request_hash = _canonical_hash({
         "amount_chips": chips, "amount_paise": amount_paise,
         "payout_method_id": payout_method_id, "rate": rate,
@@ -1574,6 +1741,7 @@ async def _enqueue(kind: str, aggregate_id: str, dedupe_key: str, payload: Mappi
         "id": str(uuid.uuid4()), "kind": kind, "aggregate_id": aggregate_id,
         "dedupe_key": dedupe_key, "payload": dict(payload), "status": "PENDING",
         "attempts": 0, "next_attempt_at": now(), "lease_until": None,
+        "claim_id": None,
         "created_at": now(), "updated_at": now(),
     }
     try:
@@ -2130,27 +2298,39 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
 async def process_outbox_batch(provider: PaymentProvider, limit: int = 20) -> dict[str, int]:
     processed = paused = review = retry_scheduled = 0
     for _ in range(max(1, min(int(limit), 100))):
-        lease = now() + timedelta(minutes=2)
+        claim_time = now()
+        claim_id = str(uuid.uuid4())
+        lease = claim_time + timedelta(minutes=2)
         row = await db.financial_outbox.find_one_and_update(
             {"$or": [
-                {"status": {"$in": ["PENDING", "RETRY"]}, "next_attempt_at": {"$lte": now()}},
-                {"status": "PROCESSING", "lease_until": {"$lte": now()}},
+                {"status": {"$in": ["PENDING", "RETRY"]}, "next_attempt_at": {"$lte": claim_time}},
+                {"status": "PROCESSING", "lease_until": {"$lte": claim_time}},
             ]},
-            {"$set": {"status": "PROCESSING", "lease_until": lease, "updated_at": now()},
+            {"$set": {
+                "status": "PROCESSING", "claim_id": claim_id,
+                "lease_until": lease, "updated_at": claim_time,
+            },
              "$inc": {"attempts": 1}},
             sort=[("created_at", 1)], return_document=ReturnDocument.AFTER,
         )
         if not row:
             break
+        ownership = {
+            "id": row["id"], "status": "PROCESSING", "claim_id": claim_id,
+        }
         try:
             if row["kind"] != "SUBMIT_PAYOUT":
                 raise FinancialError("UNKNOWN_OUTBOX_EVENT", "Unknown financial outbox event.", 409)
             await submit_automatic_withdrawal(row["aggregate_id"], provider)
-            await db.financial_outbox.update_one(
-                {"id": row["id"], "status": "PROCESSING"},
-                {"$set": {"status": "COMPLETED", "completed_at": now(), "updated_at": now()}},
+            completed = await db.financial_outbox.update_one(
+                ownership,
+                {"$set": {
+                    "status": "COMPLETED", "claim_id": None, "lease_until": None,
+                    "completed_at": now(), "updated_at": now(),
+                }},
             )
-            processed += 1
+            if completed.matched_count:
+                processed += 1
         except FinancialError as exc:
             if exc.code == "AUTO_WITHDRAWALS_PAUSED":
                 status = "PAUSED"
@@ -2162,14 +2342,16 @@ async def process_outbox_batch(provider: PaymentProvider, limit: int = 20) -> di
                 status = "RECONCILIATION_REQUIRED"
             updates: dict[str, Any] = {
                 "status": status, "last_error_code": exc.code,
-                "lease_until": None, "updated_at": now(),
+                "claim_id": None, "lease_until": None, "updated_at": now(),
             }
             if status == "RETRY":
                 updates["next_attempt_at"] = now() + _reconciliation_delay(int(row.get("attempts", 1)))
-            await db.financial_outbox.update_one(
-                {"id": row["id"], "status": "PROCESSING"},
+            finalized = await db.financial_outbox.update_one(
+                ownership,
                 {"$set": updates},
             )
+            if not finalized.matched_count:
+                continue
             if status == "PAUSED":
                 paused += 1
             elif status == "RETRY":
@@ -2215,6 +2397,46 @@ async def _close_unpaid_deposit(
         )
 
     return await _run_transaction(work)
+
+
+async def _route_deposit_event_mismatch(
+    order: Mapping[str, Any], event: ProviderEvent,
+    actor: str = "provider-webhook",
+) -> None:
+    """Keep a mismatched terminal webhook from releasing a deposit reservation."""
+    async def work(session):
+        kwargs = _session_kwargs(session)
+        current = await db.deposit_orders.find_one(
+            {"id": order["id"]}, {"_id": 0}, **kwargs,
+        )
+        if not current:
+            raise FinancialError("DEPOSIT_NOT_FOUND", "Deposit order was not found.", 404)
+        terminal = current.get("status") in {
+            "CREDITED", "REFUNDED", "REFUND_REVIEW_REQUIRED",
+        }
+        updates: dict[str, Any] = {
+            "reconciliation_error_code": "PAYMENT_MISMATCH",
+            "next_reconcile_at": now(), "updated_at": now(),
+        }
+        if not terminal:
+            updates["status"] = "RECONCILIATION_REQUIRED"
+        else:
+            await db.users.update_one(
+                {"id": current["user_id"]},
+                {"$set": {"financial_status": "REVIEW_REQUIRED"}}, **kwargs,
+            )
+        await db.deposit_orders.update_one(
+            {"id": current["id"]}, {"$set": updates}, **kwargs,
+        )
+        await financial_audit(
+            actor, "DEPOSIT_EVENT_MISMATCH", "DEPOSIT", str(current["id"]),
+            reason="Provider terminal event amount or currency did not match the deposit",
+            metadata={"provider_event_id": event.event_id, "event_type": event.event_type},
+            session=session,
+            audit_id=f"deposit:{current['id']}:event-mismatch:{event.event_id}",
+        )
+
+    await _run_transaction(work)
 
 
 async def _refund_deposit(
@@ -2752,7 +2974,8 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
         "amount_paise": event.amount_paise, "currency": event.currency,
         "provider_reference": event.provider_reference, "occurred_at": event.occurred_at,
         "raw_body_sha256": body_hash, "status": "RECEIVED", "attempts": 0,
-        "lease_until": None, "received_at": now(), "processed_at": None,
+        "lease_until": None, "claim_id": None,
+        "received_at": now(), "processed_at": None,
     }
     try:
         await db.provider_webhook_events.insert_one(event_doc)
@@ -2767,6 +2990,7 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
         if existing.get("status") == "PROCESSED":
             return {"event_id": event.event_id, "duplicate": True, "status": "PROCESSED"}
     claim_time = now()
+    claim_id = str(uuid.uuid4())
     claimed = await db.provider_webhook_events.find_one_and_update(
         {
             "provider": provider.name, "event_id": event.event_id,
@@ -2777,7 +3001,8 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
             ],
         },
         {"$set": {
-            "status": "PROCESSING", "lease_until": claim_time + timedelta(minutes=2),
+            "status": "PROCESSING", "claim_id": claim_id,
+            "lease_until": claim_time + timedelta(minutes=2),
             "last_attempt_at": claim_time,
         }, "$inc": {"attempts": 1}},
         return_document=ReturnDocument.AFTER,
@@ -2790,6 +3015,12 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
             "event_id": event.event_id, "duplicate": True,
             "status": (existing or {}).get("status", "PROCESSING"),
         }
+
+    ownership = {
+        "provider": provider.name, "event_id": event.event_id,
+        "raw_body_sha256": body_hash, "status": "PROCESSING",
+        "claim_id": claim_id,
+    }
 
     try:
         result: dict[str, Any]
@@ -2807,6 +3038,16 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
             )
             if not order:
                 raise FinancialError("DEPOSIT_NOT_FOUND", "Deposit order was not found.", 404)
+            if (
+                event.amount_paise != int(order["amount_paise"])
+                or event.currency != order.get("currency", CURRENCY)
+            ):
+                await _route_deposit_event_mismatch(order, event)
+                raise FinancialError(
+                    "PAYMENT_MISMATCH",
+                    "Provider terminal event amount or currency does not match the deposit.",
+                    409,
+                )
             stored = await _close_unpaid_deposit(order["id"], target)
             result = {"status": stored.get("status", target)}
         elif event.event_type == "deposit.refunded":
@@ -2881,24 +3122,33 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
                 result = {"status": failed["status"]}
         else:
             result = {"status": "IGNORED", "event_type": event.event_type}
-        await db.provider_webhook_events.update_one(
-            {"provider": provider.name, "event_id": event.event_id},
+        completed = await db.provider_webhook_events.update_one(
+            ownership,
             {"$set": {"status": "PROCESSED", "result": result,
-                      "processed_at": now(), "lease_until": None, "error_code": None}},
+                      "processed_at": now(), "lease_until": None,
+                      "claim_id": None, "error_code": None}},
         )
+        if not completed.matched_count:
+            current = await db.provider_webhook_events.find_one(
+                {"provider": provider.name, "event_id": event.event_id}, {"_id": 0},
+            )
+            return {
+                "event_id": event.event_id, "duplicate": True,
+                "status": (current or {}).get("status", "PROCESSING"),
+            }
         return {"event_id": event.event_id, "duplicate": False, **result}
     except FinancialError as exc:
         await db.provider_webhook_events.update_one(
-            {"provider": provider.name, "event_id": event.event_id},
+            ownership,
             {"$set": {"status": "REVIEW_REQUIRED", "error_code": exc.code,
-                      "processed_at": now(), "lease_until": None}},
+                      "processed_at": now(), "lease_until": None, "claim_id": None}},
         )
         raise
     except Exception as exc:  # noqa: BLE001 - preserve retry without leaking internals
         await db.provider_webhook_events.update_one(
-            {"provider": provider.name, "event_id": event.event_id},
+            ownership,
             {"$set": {"status": "RETRY", "error_code": type(exc).__name__,
-                      "processed_at": now(), "lease_until": None}},
+                      "processed_at": now(), "lease_until": None, "claim_id": None}},
         )
         raise
 

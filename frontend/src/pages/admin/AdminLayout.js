@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
   Bell,
+  BookOpenCheck,
   Calculator,
   CreditCard,
   ChevronDown,
@@ -22,6 +25,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_LOGOUT_PATH } from "@/lib/adminConsole";
+import { LEGACY_CHIP_REQUESTS_ENABLED } from "@/lib/featureFlags";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
 import { BrandWordmark } from "@/components/Brand";
 import "@/pages/admin/admin-crm.css";
@@ -43,8 +47,14 @@ const NAV_GROUPS = [
     label: "Operations",
     items: [
       { to: "/Admin/payment-gateways", label: "Payment gateways", icon: CreditCard, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-payment-gateways" },
+      { to: "/Admin/deposits", label: "Deposits", icon: ArrowDownToLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-deposits" },
+      { to: "/Admin/withdrawals", label: "Withdrawals", icon: ArrowUpFromLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-withdrawals" },
+      { to: "/Admin/wallet-ledger", label: "Wallet ledger", icon: BookOpenCheck, permission: ADMIN_PERMISSIONS.LEDGER_VIEW, testId: "admin-nav-wallet-ledger" },
+      { to: "/Admin/payment-settings", label: "Payment controls", icon: Settings, permission: ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE, testId: "admin-nav-payment-settings" },
       { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
-      { to: "/Admin/bonuses", label: "Bonuses", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
+      ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
+        { to: "/Admin/bonuses", label: "Bonuses", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
+      ] : []),
     ],
   },
   {

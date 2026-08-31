@@ -30,6 +30,10 @@ os.environ['OTP_SMS_ADAPTER'] = 'mock'
 os.environ['OTP_EXPOSE_DEV_CODE'] = 'true'
 os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
 os.environ['REGISTRATION_MODE'] = 'PHONE_OTP'
+# This registration regression intentionally exercises the retired request
+# workflow after activation; enable it explicitly instead of relying on a
+# permissive test default.
+os.environ['LEGACY_CHIP_REQUESTS_ENABLED'] = 'true'
 # A stale production setting must not reopen the retired no-OTP path.
 os.environ['SELF_SERVICE_NO_OTP_ENABLED'] = 'true'
 

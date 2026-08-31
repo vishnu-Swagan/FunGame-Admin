@@ -28,7 +28,7 @@ admin_router = APIRouter(prefix="/admin", tags=["admin-payments"])
 
 
 class DepositCreate(BaseModel):
-    amount_paise: int = Field(ge=1, le=1_000_000_000)
+    amount_paise: int = Field(ge=1, le=finance.DEPOSIT_REQUEST_MAX_PAISE)
 
 
 class BankDetailsCreate(BaseModel):
@@ -40,7 +40,7 @@ class BankDetailsCreate(BaseModel):
 
 
 class WithdrawalCreate(BaseModel):
-    amount_chips: int = Field(ge=1, le=10_000_000)
+    amount_chips: int = Field(ge=1, le=finance.WITHDRAWAL_REQUEST_MAX_CHIPS)
     bank_detail_id: str = Field(min_length=8, max_length=80)
 
 
@@ -222,11 +222,11 @@ def _require_recent_step_up(admin: dict) -> None:
 
 payments_view = _admin_dependency("PAYMENTS_VIEW")
 withdrawals_approve = _admin_dependency("WITHDRAWALS_APPROVE")
-withdrawals_pay = _admin_dependency("WITHDRAWALS_MARK_PAID")
+withdrawals_pay = _admin_dependency("WITHDRAWALS_MARK_PAID", step_up=True)
 ledger_view = _admin_dependency("LEDGER_VIEW")
 audit_view = _admin_dependency("AUDIT_VIEW")
 settings_write = _admin_dependency("PAYMENT_SETTINGS_WRITE", super_only=True, step_up=True)
-payments_reconcile = _admin_dependency("PAYMENTS_RECONCILE")
+payments_reconcile = _admin_dependency("PAYMENTS_RECONCILE", step_up=True)
 payments_reconcile_and_pay = _admin_dependency(
     ("PAYMENTS_RECONCILE", "WITHDRAWALS_MARK_PAID"), step_up=True,
 )
@@ -268,12 +268,27 @@ async def _financial_rate_limit(user_id: str, action: str, limit: int, window_se
 @router.get("/payments/wallet")
 async def payment_wallet(user: dict = Depends(require_payment_reader)):
     internal = finance.financial_status()
+    try:
+        money_config = finance.public_money_config()
+    except ProviderConfigurationError:
+        # Wallet balance reads remain available while a malformed runtime
+        # payment setting fails the mutation surfaces closed. Do not expose the
+        # invalid value or internal configuration diagnostics to the player.
+        money_config = None
+    config_ready = money_config is not None
     return {
         "wallet": await finance.wallet_public(user["id"]),
+        "money_config": money_config,
         "financial": {
-            "ready": bool(internal["ready"]),
-            "features": internal["features"],
-            "availability_code": "AVAILABLE" if internal["ready"] else "PAYMENTS_UNAVAILABLE",
+            "ready": bool(internal["ready"] and config_ready),
+            "features": (
+                internal["features"] if config_ready
+                else {name: False for name in internal["features"]}
+            ),
+            "availability_code": (
+                "AVAILABLE" if internal["ready"] and config_ready
+                else "PAYMENTS_UNAVAILABLE"
+            ),
         },
     }
 
@@ -309,7 +324,7 @@ async def deposit_detail(deposit_id: str, user: dict = Depends(require_payment_r
 
 
 @router.get("/payments/bank-details")
-async def bank_details(user: dict = Depends(require_payment_reader)):
+async def bank_details(user: dict = Depends(require_withdrawal_player)):
     return {"bank_details": await finance.list_payout_methods(user["id"])}
 
 
@@ -325,7 +340,7 @@ async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require
 
 @router.delete("/payments/bank-details/{method_id}")
 async def remove_bank_details(
-    method_id: str, user: dict = Depends(require_payment_reader),
+    method_id: str, user: dict = Depends(require_withdrawal_player),
 ):
     try:
         await _financial_rate_limit(user["id"], "bank-details-remove", 5, 3600)

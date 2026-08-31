@@ -19,11 +19,18 @@ os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
 os.environ['REAL_MONEY_ENABLED'] = 'false'
 
 import routes_admin
-from models import AdminChipRequestAction
+import routes_player
+from models import AdminChipRequestAction, ChipRequestCreate
 
 
 class ChipRequestAtomicityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.original_real_money_enabled = os.environ.get('REAL_MONEY_ENABLED')
+        self.original_legacy_requests_enabled = os.environ.get(
+            'LEGACY_CHIP_REQUESTS_ENABLED',
+        )
+        os.environ['REAL_MONEY_ENABLED'] = 'false'
+        os.environ['LEGACY_CHIP_REQUESTS_ENABLED'] = 'true'
         self.client = AsyncMongoMockClient()
         self.database = self.client['chip_request_atomicity']
         self.original_database = routes_admin.db
@@ -44,6 +51,16 @@ class ChipRequestAtomicityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         routes_admin.db = self.original_database
         routes_admin.ledger.db = self.original_ledger_database
+        if self.original_real_money_enabled is None:
+            os.environ.pop('REAL_MONEY_ENABLED', None)
+        else:
+            os.environ['REAL_MONEY_ENABLED'] = self.original_real_money_enabled
+        if self.original_legacy_requests_enabled is None:
+            os.environ.pop('LEGACY_CHIP_REQUESTS_ENABLED', None)
+        else:
+            os.environ['LEGACY_CHIP_REQUESTS_ENABLED'] = (
+                self.original_legacy_requests_enabled
+            )
         self.client.close()
 
     @staticmethod
@@ -173,6 +190,49 @@ class ChipRequestAtomicityTests(unittest.IsolatedAsyncioTestCase):
         )
         stored = await self.database.chip_requests.find_one({'id': request['id']})
         self.assertEqual(stored['status'], 'PENDING')
+
+    async def test_legacy_request_mutations_default_off_for_player_and_admin(self):
+        request = await self.insert_request('BUY', 500)
+        transaction_runner = AsyncMock()
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch.object(
+                routes_admin, '_run_account_transaction',
+                new=transaction_runner,
+            ),
+        ):
+            os.environ.pop('LEGACY_CHIP_REQUESTS_ENABLED', None)
+            operations = (
+                lambda: routes_player.create_chip_request(
+                    ChipRequestCreate(amount=500), self.player,
+                ),
+                lambda: routes_admin.approve_chip_request(
+                    request['id'], None, self.admin,
+                ),
+                lambda: routes_admin.deny_chip_request(
+                    request['id'], None, self.admin,
+                ),
+            )
+            for operation in operations:
+                with self.assertRaises(HTTPException) as caught:
+                    await operation()
+                self.assertEqual(caught.exception.status_code, 409)
+                self.assertEqual(
+                    caught.exception.detail.get('code'),
+                    'LEGACY_CHIP_REQUESTS_DISABLED',
+                )
+
+        transaction_runner.assert_not_awaited()
+        stored = await self.database.chip_requests.find_one({
+            'id': request['id'],
+        })
+        self.assertEqual(stored['status'], 'PENDING')
+        player = await self.database.users.find_one({'id': self.player['id']})
+        self.assertEqual(player['chip_balance'], 100)
+        self.assertEqual(
+            await self.database.notifications.count_documents({}), 0,
+        )
 
     async def test_legacy_deferred_reactivation_never_grants_welcome_bonus_again(self):
         await self.database.users.insert_one({

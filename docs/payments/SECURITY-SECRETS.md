@@ -10,5 +10,9 @@ maker-checker controls where applicable. Generic REST requests enforce HTTPS,
 domain allow-lists, public DNS addresses, no redirects, bounded timeouts and
 bounded response bodies. Logs and activity snapshots use recursive redaction.
 
-Never store PAN, CVV, PIN, OTP, raw bank details or authorization headers.
+Those backend activation controls are defense in depth, not a Phase 0 operating
+procedure. While the V1↔V2 bridge is uncertified, the CRM exposes configuration
+drafts and validation only—no activation, approval or callback-registration
+control—even to a Super Admin.
 
+Never store PAN, CVV, PIN, OTP, raw bank details or authorization headers.

@@ -28,7 +28,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AdminStepUpStart,
                     AdminStepUpVerify)
 from auth_utils import (require_admin, hash_password, verify_password,
-                        require_legacy_chip_mutation_allowed,
+                        require_legacy_chip_requests_enabled,
                         require_recent_admin_step_up)
 from ledger import debit_chips, InsufficientChips
 import ledger
@@ -1218,7 +1218,7 @@ async def _settle_chip_request(request_id: str, note: str | None,
 
 @router.post('/chip-requests/{request_id}/approve')
 async def approve_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
-    require_legacy_chip_mutation_allowed()
+    require_legacy_chip_requests_enabled()
     note = (body.note if body else None)
     async def commit_approval(session):
         return await _settle_chip_request(
@@ -1230,6 +1230,7 @@ async def approve_chip_request(request_id: str, body: AdminChipRequestAction = N
 
 @router.post('/chip-requests/{request_id}/deny')
 async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None, admin: dict = Depends(require_admin)):
+    require_legacy_chip_requests_enabled()
     note = (body.note if body else None) or 'Not approved by operator'
 
     async def commit_denial(session):
