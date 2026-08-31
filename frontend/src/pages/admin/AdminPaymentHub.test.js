@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import AdminPaymentHub from "./AdminPaymentHub";
+import AdminPaymentHub, { v1WebhookUrlFor } from "./AdminPaymentHub";
 import { adminPayments } from "@/lib/paymentApi";
 
 let mockUser;
@@ -74,64 +74,69 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-test("payment hub fails closed and identifies the CRM as a no-traffic preview", async () => {
+test("payment hub keeps configuration visible while the gateway admin API is disabled", async () => {
   adminPayments.hubStatus.mockResolvedValue({
     payments_v2: false, admin: false, live_allowed: false,
     installed_adapters: ["GENERIC_REST"],
   });
   const { container, root } = await renderHub();
 
-  expect(container.textContent).toContain("Payment gateway configuration preview");
-  expect(container.querySelector('[data-testid="payment-preview-boundary"]')?.textContent)
-    .toContain("Configuration preview · no player traffic");
-  expect(container.textContent).toContain("Gateway configuration API is disabled");
-  expect(container.textContent).toContain("Player wallet ↔ V2 bridge uncertified");
-  expect(container.textContent).not.toContain("Active providers");
-  expect(container.textContent).not.toContain("Live traffic activation");
+  expect(container.textContent).toContain("Payment gateways");
+  expect(container.querySelector('[data-testid="payment-hub-boundary"]')?.textContent)
+    .toContain("Provider registration is available here");
+  expect(container.textContent).toContain("PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render");
+  expect(container.textContent).toContain("wallet credit/debit");
   expect(adminPayments.gateways).not.toHaveBeenCalled();
   await act(async () => root.unmount());
 });
 
-test("even enabled V2 records expose no callback or payment-enablement control", async () => {
+test("shows provider webhook URLs and copy controls while V2 activation remains blocked", async () => {
   mockUser = { role: "ADMIN", status: "ACTIVE", admin_role: "SUPER_ADMIN", admin_permissions: [] };
   adminPayments.hubStatus.mockResolvedValue({
-    payments_v2: true, admin: true, live_allowed: true,
+    payments_v2: false, admin: true, live_allowed: false,
     webhook_base_url: "https://api.chakri.test",
+    v1_provider_code: "provider_one",
+    v1_webhook_url: "https://api.chakri.test/api/payments/webhooks/provider_one",
   });
   adminPayments.gateways.mockResolvedValue([{
     id: "gateway-1", code: "PROVIDER_ONE", display_name: "Provider One",
     environment: "LIVE", adapter_type: "GENERIC_REST", health_status: "HEALTHY",
-    status: "ACTIVE", is_enabled: true,
+    status: "DRAFT", is_enabled: false,
     webhook_url: "https://api.chakri.test/api/webhooks/payments/PROVIDER_ONE",
-  }]);
-  adminPayments.routes.mockResolvedValue([{
-    id: "route-1", name: "Primary pay-in", direction: "PAYIN",
-    payment_method: "ALL", currency: "INR", priority: 10, is_enabled: true,
-  }]);
-  adminPayments.paymentApprovals.mockResolvedValue([{
-    id: "approval-1", action_type: "ACTIVATE", target_type: "PAYMENT_GATEWAY",
-    target_id: "gateway-1",
+  }, {
+    id: "gateway-2", code: "PROVIDER_TWO", display_name: "Provider Two",
+    environment: "SANDBOX", adapter_type: "GENERIC_REST", health_status: "NOT_RUN",
+    status: "DRAFT", is_enabled: false,
+    webhook_url: "https://api.chakri.test/api/webhooks/payments/PROVIDER_TWO",
   }]);
   const { container, root } = await renderHub();
   const text = container.textContent;
-  const buttonLabels = [...container.querySelectorAll("button")].map((button) => button.textContent).join(" | ");
 
-  expect(text).toContain("Configuration preview · no player traffic");
-  expect(text).toContain("Production contract metadata · draft only");
-  expect(text).toContain("Config check: HEALTHY · not traffic readiness");
-  expect(text).toContain("Stored enabled · not player-routed");
-  expect(text).toContain("V2 callback registration blocked");
-  expect(text).toContain("No V2 callback is registration-ready");
-  expect(text).toContain("The CRM cannot approve or enable a provider or route");
-  expect(text).toContain("Save disabled provider draft");
-  expect(text).not.toContain("https://api.chakri.test/api/webhooks/payments/PROVIDER_ONE");
-  expect(text).not.toContain("LIVE contract");
-  expect(buttonLabels).not.toMatch(/request activation|approve|enable|copy webhook/i);
+  expect(text).toContain("https://api.chakri.test/api/webhooks/payments/PROVIDER_ONE");
+  expect(text).toContain("https://api.chakri.test/api/webhooks/payments/PROVIDER_TWO");
+  expect(text).toContain("https://api.chakri.test/api/payments/webhooks/provider_one");
+  expect(container.querySelector('[data-testid="gateway-v1-webhook-url-PROVIDER_TWO"]')).toBeNull();
+  expect(container.querySelectorAll('[aria-label="Copy Provider webhook URL"]')).toHaveLength(2);
+  expect(container.querySelector('[aria-label="Copy V1 callback (if this provider still uses it)"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="gateway-enable-blocked-PROVIDER_ONE"]')?.disabled).toBe(true);
+  expect(container.querySelector('[data-testid="gateway-enable-blocked-PROVIDER_TWO"]')?.disabled).toBe(true);
+  expect(text).toContain("Enable/activation requires PAYMENTS_V2_ENABLED in Render");
   expect(adminPayments.requestGatewayActivation).not.toHaveBeenCalled();
   expect(adminPayments.approveGatewayActivation).not.toHaveBeenCalled();
-  expect(adminPayments.requestRouteActivation).not.toHaveBeenCalled();
-  expect(adminPayments.approveRouteActivation).not.toHaveBeenCalled();
   await act(async () => root.unmount());
+});
+
+test("never constructs a V1 callback for an unconfigured provider", () => {
+  const status = {
+    webhook_base_url: "https://api.chakri.test",
+    v1_provider_code: "provider_one",
+    v1_webhook_url: "https://api.chakri.test/api/payments/webhooks/provider_one",
+  };
+
+  expect(v1WebhookUrlFor({ code: "PROVIDER_ONE" }, status))
+    .toBe("https://api.chakri.test/api/payments/webhooks/provider_one");
+  expect(v1WebhookUrlFor({ code: "PROVIDER_TWO" }, status)).toBe("");
+  expect(v1WebhookUrlFor({ code: "PROVIDER_TWO" }, { webhook_base_url: "https://api.chakri.test" })).toBe("");
 });
 
 test("provider onboarding submits a sandbox configuration-only disabled draft", async () => {

@@ -460,9 +460,21 @@ class PaymentHubTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(
                 service.gateway_dto(first)["webhook_url"], service.gateway_dto(second)["webhook_url"],
             )
-            with patch.dict(os.environ, {"PAYMENTS_V2_ENABLED": "false"}):
-                self.assertIsNone(service.feature_status()["webhook_base_url"])
-                self.assertIsNone(service.gateway_dto(first)["webhook_url"])
+            with patch.dict(os.environ, {"PAYMENTS_V2_ENABLED": "false", "PAYMENT_PROVIDER": ""}):
+                self.assertEqual(service.feature_status()["webhook_base_url"], "https://api.chakri.casino")
+                self.assertIsNone(service.feature_status()["v1_provider_code"])
+                self.assertIsNone(service.feature_status()["v1_webhook_url"])
+                self.assertEqual(
+                    service.gateway_dto(first)["webhook_url"],
+                    "https://api.chakri.casino/api/webhooks/payments/PROVIDER_ONE",
+                )
+                self.assertFalse(service.feature_status()["payments_v2"])
+            with patch.dict(os.environ, {"PAYMENT_PROVIDER": "provider_one"}):
+                self.assertEqual(service.feature_status()["v1_provider_code"], "provider_one")
+                self.assertEqual(
+                    service.feature_status()["v1_webhook_url"],
+                    "https://api.chakri.casino/api/payments/webhooks/provider_one",
+                )
             os.environ["PAYMENT_WEBHOOK_PUBLIC_BASE_URL"] = "http://127.0.0.1:8000/path"
             self.assertIsNone(service.feature_status()["webhook_base_url"])
             self.assertIsNone(service.gateway_dto(first)["webhook_url"])

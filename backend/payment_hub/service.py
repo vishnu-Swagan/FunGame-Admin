@@ -81,12 +81,22 @@ def _public_webhook_base_url() -> str | None:
 
 def feature_status() -> dict[str, Any]:
     payments_v2 = enabled("PAYMENTS_V2_ENABLED")
+    base_url = _public_webhook_base_url()
+    provider = str(os.environ.get("PAYMENT_PROVIDER", "")).strip().lower()
+    v1_provider_code = provider if re.fullmatch(r"[a-z][a-z0-9_-]{1,39}", provider) else None
+    v1_webhook_url = (
+        f"{base_url}/api/payments/webhooks/{urllib.parse.quote(provider, safe='')}"
+        if base_url and v1_provider_code
+        else None
+    )
     return {
         "payments_v2": payments_v2,
         "admin": enabled("PAYMENT_GATEWAY_ADMIN_ENABLED"),
         "live_allowed": enabled("PAYMENT_LIVE_MODE_ALLOWED"),
         "installed_adapters": registry.codes(),
-        "webhook_base_url": _public_webhook_base_url() if payments_v2 else None,
+        "webhook_base_url": base_url,
+        "v1_provider_code": v1_provider_code,
+        "v1_webhook_url": v1_webhook_url,
     }
 
 
@@ -101,7 +111,7 @@ def require_payments_v2_activation() -> None:
     if not enabled("PAYMENTS_V2_ENABLED"):
         raise GatewayError(
             "PAYMENTS_V2_DISABLED",
-            "Payment gateway activation is unavailable while the payment hub is in preview mode.",
+            "Payment gateway activation requires PAYMENTS_V2_ENABLED in Render. Stored configuration and webhook URLs remain available.",
             status_code=404,
         )
 
@@ -156,7 +166,7 @@ def gateway_dto(row: Mapping[str, Any]) -> dict[str, Any]:
         str(key): str(value)[:20] for key, value in hints.items()
         if re.fullmatch(r"[a-z][a-z0-9_]{1,63}", str(key))
     }
-    base_url = _public_webhook_base_url() if enabled("PAYMENTS_V2_ENABLED") else None
+    base_url = _public_webhook_base_url()
     code = str(row.get("code", "")).strip().upper()
     result["webhook_url"] = (
         f"{base_url}/api/webhooks/payments/{urllib.parse.quote(code, safe='')}"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, AlertTriangle, CreditCard, GitBranch, KeyRound, Plus, RefreshCw,
+  Activity, AlertTriangle, Copy, CreditCard, GitBranch, KeyRound, Plus, Power, PowerOff, RefreshCw,
   Route, ShieldCheck, TestTube2, Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,6 +54,34 @@ function when(value) {
     : "—";
 }
 
+function publicBase(status) {
+  return String(status?.webhook_base_url || "").replace(/\/$/, "");
+}
+
+export function webhookUrlFor(gateway, status) {
+  if (gateway?.webhook_url) return gateway.webhook_url;
+  const base = publicBase(status);
+  const code = String(gateway?.code || "").trim().toUpperCase();
+  return base && code ? `${base}/api/webhooks/payments/${encodeURIComponent(code)}` : "";
+}
+
+export function v1WebhookUrlFor(gateway, status) {
+  const configuredProvider = String(status?.v1_provider_code || "").trim().toLowerCase();
+  const gatewayCode = String(gateway?.code || "").trim().toLowerCase();
+  return configuredProvider && gatewayCode === configuredProvider
+    ? String(status?.v1_webhook_url || "")
+    : "";
+}
+
+async function copyValue(value, label = "Webhook URL") {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(`${label} copied`);
+  } catch {
+    toast.error("Copy failed");
+  }
+}
+
 function Status({ children, tone = "neutral" }) {
   const tones = {
     healthy: "border-emerald-400/25 bg-emerald-400/10 text-emerald-200",
@@ -71,6 +99,21 @@ function Panel({ title, subtitle, actions, children }) {
     </header>
     <div className="p-4">{children}</div>
   </section>;
+}
+
+function CopyableUrl({ label, value, testId }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3" data-testid={testId}>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-white/55">{label}</p>
+      <div className="mt-1 flex items-start gap-2">
+        <code className="min-w-0 flex-1 break-all font-mono text-xs text-emerald-100">{value}</code>
+        <Button type="button" size="sm" variant="outline" onClick={() => copyValue(value, label)} aria-label={`Copy ${label}`}>
+          <Copy className="mr-1.5 h-3.5 w-3.5" />Copy
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function AdminPaymentHub() {
@@ -120,6 +163,11 @@ export default function AdminPaymentHub() {
   const canRotateCredentials = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_ROTATE_CREDENTIALS);
   const canTestGateway = hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_TEST);
   const canManageRoutes = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_MANAGE_ROUTES);
+  const canActivateGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE);
+  const canDisableGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_DISABLE);
+  const adminEnabled = Boolean(status?.admin);
+  const paymentsV2 = Boolean(status?.payments_v2);
+  const webhookBase = publicBase(status);
 
   const toggleCapability = (capability, checked) => {
     setGatewayForm((current) => ({
@@ -141,7 +189,7 @@ export default function AdminPaymentHub() {
       }
       const { config_json: _ignored, ...body } = gatewayForm;
       await adminPayments.createGateway({ ...body, non_secret_config: nonSecretConfig });
-      toast.success("Provider configuration saved as a disabled draft; player traffic is unchanged");
+      toast.success("Provider saved. Copy its webhook URL for the provider dashboard; live wallet posting stays gated.");
       setGatewayForm({ ...EMPTY_GATEWAY });
       await load();
     } catch (error) { toast.error(errMsg(error)); }
@@ -177,10 +225,52 @@ export default function AdminPaymentHub() {
     setBusy(`${gateway.id}:test`);
     try {
       await adminPayments.testGateway(gateway.id);
-      toast.success("Configuration validation passed; this does not enable player traffic");
+      toast.success("Configuration validation passed; this does not credit player wallets");
       await load();
     }
     catch (error) { toast.error(errMsg(error)); }
+    finally { setBusy(""); }
+  };
+
+  const requestEnable = async (gateway) => {
+    if (!paymentsV2) {
+      toast.error("Set PAYMENTS_V2_ENABLED=true in Render before enabling a gateway. Webhook URLs can still be copied.");
+      return;
+    }
+    const reason = window.prompt("Reason for enabling this gateway", "Approved provider configuration");
+    if (!reason) return;
+    setBusy(`${gateway.id}:enable`);
+    try {
+      await adminPayments.requestGatewayActivation(gateway.id, reason);
+      toast.success("Enable requested. A second Super Admin must approve it.");
+      await load();
+    } catch (error) { toast.error(errMsg(error)); }
+    finally { setBusy(""); }
+  };
+
+  const approveEnable = async (gateway, approvalId) => {
+    if (!paymentsV2) {
+      toast.error("Set PAYMENTS_V2_ENABLED=true in Render before enabling a gateway.");
+      return;
+    }
+    setBusy(`${gateway.id}:approve`);
+    try {
+      await adminPayments.approveGatewayActivation(gateway.id, approvalId);
+      toast.success("Gateway enabled as stored configuration. Live wallet posting still follows real-money flags.");
+      await load();
+    } catch (error) { toast.error(errMsg(error)); }
+    finally { setBusy(""); }
+  };
+
+  const disableGateway = async (gateway) => {
+    const reason = window.prompt("Reason for disabling this gateway", "Operator requested disable");
+    if (!reason) return;
+    setBusy(`${gateway.id}:disable`);
+    try {
+      await adminPayments.disableGateway(gateway.id, reason);
+      toast.success("Gateway disabled");
+      await load();
+    } catch (error) { toast.error(errMsg(error)); }
     finally { setBusy(""); }
   };
 
@@ -192,7 +282,7 @@ export default function AdminPaymentHub() {
         min_amount_minor: Number(routeForm.min_amount_minor), max_amount_minor: Number(routeForm.max_amount_minor),
         priority: Number(routeForm.priority), weight: Number(routeForm.weight),
       });
-      toast.success("Routing configuration saved as a disabled draft; player traffic is unchanged");
+      toast.success("Routing record saved. Player traffic still follows certified real-money flags.");
       setRouteForm((current) => ({ ...EMPTY_ROUTE, gateway_id: current.gateway_id }));
       await load();
     } catch (error) { toast.error(errMsg(error)); }
@@ -202,74 +292,86 @@ export default function AdminPaymentHub() {
   return <PageTransition className="space-y-4" data-testid="payment-hub">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="text-xs font-bold uppercase tracking-[.22em] text-primary">Payments · configuration control plane</p>
-        <h1 className="mt-1 text-2xl font-black">Payment gateway configuration preview</h1>
-        <p className="mt-1 max-w-3xl text-sm text-white/50">Record provider contracts, protect credentials, and prepare routing drafts without connecting them to player deposits, withdrawals, or wallet posting.</p>
+        <p className="text-xs font-bold uppercase tracking-[.22em] text-primary">Payments · gateway control plane</p>
+        <h1 className="mt-1 text-2xl font-black">Payment gateways</h1>
+        <p className="mt-1 max-w-3xl text-sm text-white/50">Add approved providers, store encrypted credentials, and copy each gateway webhook URL for the provider dashboard.</p>
       </div>
       <Button variant="outline" onClick={load} disabled={loading} className="rounded-xl border-white/15"><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
     </div>
 
-    <div data-testid="payment-preview-boundary" className="flex gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-50">
-      <AlertTriangle className="h-5 w-5 shrink-0" />
-      <div><strong>Configuration preview · no player traffic.</strong><p className="mt-1 text-xs opacity-85">The CRM V2 registry is not certified to the player wallet. Saving providers, credentials, capability claims, or routes here cannot create a player payment, credit chips, submit a withdrawal, or activate a provider callback. The current single-provider V1 callback is a separate integration.</p></div>
+    <div data-testid="payment-hub-boundary" className="flex gap-3 rounded-2xl border border-sky-300/25 bg-sky-300/8 p-4 text-sm text-sky-50">
+      <ShieldCheck className="h-5 w-5 shrink-0" />
+      <div><strong>Provider registration is available here.</strong><p className="mt-1 text-xs opacity-85">This release exposes configuration and callback URLs only. Player pay-ins, payouts, wallet credit/debit, and V2 activation remain disabled by source-controlled rollout flags.</p></div>
     </div>
 
-    {!status?.admin && !loading && <div className="flex gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm text-amber-100"><ShieldCheck className="h-5 w-5 shrink-0" /><div><strong>Gateway configuration API is disabled.</strong><p className="mt-1 text-xs opacity-80">Keep it disabled for Phase 0. A future staging-only configuration review does not authorize player traffic or callback registration.</p></div></div>}
+    {!adminEnabled && !loading && <div data-testid="payment-admin-disabled" className="flex gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm text-amber-100"><AlertTriangle className="h-5 w-5 shrink-0" /><div><strong>PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render.</strong><p className="mt-1 text-xs opacity-80">Turn that API flag on so Super Admins can add providers, save credentials, and load webhook URLs. This page still renders so operators can confirm the flag.</p></div></div>}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><CreditCard className="h-5 w-5 text-primary" /><p className="mt-3 text-2xl font-black">{gateways.length}</p><p className="text-xs text-white/45">Provider configuration records</p></div>
-      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><ShieldCheck className="h-5 w-5 text-amber-200" /><p className="mt-3 text-lg font-black">Blocked</p><p className="text-xs text-white/45">Player wallet ↔ V2 bridge uncertified</p></div>
-      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><GitBranch className="h-5 w-5 text-sky-300" /><p className="mt-3 text-2xl font-black">{routes.length}</p><p className="text-xs text-white/45">Routing configuration records</p></div>
-      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><Webhook className="h-5 w-5 text-amber-200" /><p className="mt-3 text-lg font-black">Blocked</p><p className="text-xs text-white/45">V2 callback registration</p></div>
+      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><CreditCard className="h-5 w-5 text-primary" /><p className="mt-3 text-2xl font-black">{gateways.length}</p><p className="text-xs text-white/45">Stored providers</p></div>
+      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><ShieldCheck className="h-5 w-5 text-amber-200" /><p className="mt-3 text-lg font-black">{adminEnabled ? "On" : "Off"}</p><p className="text-xs text-white/45">CRM gateway admin API</p></div>
+      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><GitBranch className="h-5 w-5 text-sky-300" /><p className="mt-3 text-2xl font-black">{routes.length}</p><p className="text-xs text-white/45">Routing records</p></div>
+      <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><Webhook className="h-5 w-5 text-emerald-200" /><p className="mt-3 text-lg font-black">{webhookBase ? "Ready" : "Unset"}</p><p className="text-xs text-white/45">Webhook public base URL</p></div>
     </div>
 
     <Tabs defaultValue="gateways" className="space-y-4">
-      <TabsList className="h-auto flex-wrap rounded-xl bg-white/5 p-1"><TabsTrigger value="gateways">Provider drafts</TabsTrigger><TabsTrigger value="routing">Routing preview</TabsTrigger><TabsTrigger value="webhooks">V2 webhook evidence</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger></TabsList>
+      <TabsList className="h-auto flex-wrap rounded-xl bg-white/5 p-1"><TabsTrigger value="gateways">Providers</TabsTrigger><TabsTrigger value="routing">Routing</TabsTrigger><TabsTrigger value="webhooks">Webhooks</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger></TabsList>
 
       <TabsContent value="gateways" className="space-y-4">
-        <Panel title="Provider configuration registry" subtitle="Configuration and credentials only. Records shown here do not carry player traffic.">
+        <Panel title="Provider registry" subtitle="Super Admins add providers, save credentials, and copy webhook URLs for registration.">
           {gateways.length ? <div className="space-y-3">{gateways.map((gateway) => {
-            return <article key={gateway.id} className="rounded-xl border border-white/8 bg-black/10 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{gateway.display_name}</p><p className="font-mono text-[10px] text-white/40">{gateway.code} · {gateway.environment === "LIVE" ? "Production" : "Sandbox"} contract metadata · draft only · {gateway.adapter_type}</p></div><div className="flex flex-wrap gap-2"><Status tone="neutral">Config check: {gateway.health_status || "NOT_RUN"} · not traffic readiness</Status><Status tone="warning">{gateway.is_enabled ? "Stored enabled · not player-routed" : "Disabled draft"}</Status></div></div>
-              <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-amber-100/80">V2 callback registration blocked</p><p className="mt-1 text-xs text-amber-50/80">No provider webhook URL is exposed from this preview. Do not register the V2 callback until the player-wallet bridge, ledger posting, reconciliation, and rollback gates are certified.</p></div>
+            const v2Url = webhookUrlFor(gateway, status);
+            const v1Url = v1WebhookUrlFor(gateway, status);
+            const pending = approvals.find((item) => item.target_type === "PAYMENT_GATEWAY" && item.target_id === gateway.id);
+            return <article key={gateway.id} className="rounded-xl border border-white/8 bg-black/10 p-4" data-testid={`payment-gateway-${gateway.code}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{gateway.display_name}</p><p className="font-mono text-[10px] text-white/40">{gateway.code} · {gateway.environment === "LIVE" ? "Production" : "Sandbox"} · {gateway.adapter_type}</p></div><div className="flex flex-wrap gap-2"><Status tone="neutral">Health: {gateway.health_status || "NOT_RUN"}</Status><Status tone={gateway.is_enabled ? "healthy" : "warning"}>{gateway.is_enabled ? "Enabled" : "Disabled"}</Status></div></div>
+              <div className="mt-3 space-y-2">
+                <CopyableUrl label="Provider webhook URL" value={v2Url} testId={`gateway-webhook-url-${gateway.code}`} />
+                <CopyableUrl label="V1 callback (if this provider still uses it)" value={v1Url} testId={`gateway-v1-webhook-url-${gateway.code}`} />
+                {!v2Url && <p className="text-xs text-amber-100">Set PAYMENT_WEBHOOK_PUBLIC_BASE_URL to a public https origin in Render to display the webhook URL.</p>}
+                {!paymentsV2 && <p className="text-xs text-white/50">Enable/activation requires PAYMENTS_V2_ENABLED in Render. Webhook URLs can still be copied for provider registration.</p>}
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {canRotateCredentials && <Button size="sm" variant="outline" onClick={() => openCredentials(gateway)} disabled={Boolean(busy)}><KeyRound className="mr-1.5 h-3.5 w-3.5" />Credentials</Button>}
                 {canTestGateway && <Button size="sm" variant="outline" onClick={() => validateGateway(gateway)} disabled={Boolean(busy)}><TestTube2 className="mr-1.5 h-3.5 w-3.5" />Validate configuration</Button>}
+                {canActivateGateway && !gateway.is_enabled && paymentsV2 && !pending && <Button size="sm" variant="outline" onClick={() => requestEnable(gateway)} disabled={Boolean(busy)}><Power className="mr-1.5 h-3.5 w-3.5" />Enable</Button>}
+                {canActivateGateway && !gateway.is_enabled && paymentsV2 && pending && <Button size="sm" variant="outline" onClick={() => approveEnable(gateway, pending.id)} disabled={Boolean(busy)}><Power className="mr-1.5 h-3.5 w-3.5" />Approve enable</Button>}
+                {canActivateGateway && !gateway.is_enabled && !paymentsV2 && <Button size="sm" variant="outline" disabled data-testid={`gateway-enable-blocked-${gateway.code}`}><Power className="mr-1.5 h-3.5 w-3.5" />Enable requires PAYMENTS_V2_ENABLED</Button>}
+                {canDisableGateway && gateway.is_enabled && <Button size="sm" variant="outline" onClick={() => disableGateway(gateway)} disabled={Boolean(busy)}><PowerOff className="mr-1.5 h-3.5 w-3.5" />Disable</Button>}
               </div>
             </article>;
-          })}</div> : <p className="text-sm text-white/45">No payment providers have been added.</p>}
+          })}</div> : <p className="text-sm text-white/45">{adminEnabled ? "No payment providers have been added." : "Provider records load after PAYMENT_GATEWAY_ADMIN_ENABLED is on."}</p>}
         </Panel>
 
-        <Panel title="Add provider configuration draft" subtitle="Stores a disabled draft only; it cannot enable a gateway, register a callback, or carry player traffic.">
+        <Panel title="Add provider configuration" subtitle="Stores an encrypted provider record and its callback URL. It cannot create player payments or post to wallets.">
           {canCreateGateway ? <form data-testid="provider-draft-form" onSubmit={createGateway} className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5"><Label htmlFor="gateway-code">Provider code</Label><Input id="gateway-code" required placeholder="APPROVED_GATEWAY" value={gatewayForm.code} onChange={(event) => setGatewayForm({ ...gatewayForm, code: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} /></div>
               <div className="space-y-1.5"><Label htmlFor="gateway-name">Display name</Label><Input id="gateway-name" required placeholder="Provider display name" value={gatewayForm.display_name} onChange={(event) => setGatewayForm({ ...gatewayForm, display_name: event.target.value })} /></div>
               <div className="space-y-1.5"><Label htmlFor="gateway-url">Approved API base URL</Label><Input id="gateway-url" required type="url" placeholder="https://api.provider.example" value={gatewayForm.base_url} onChange={(event) => setGatewayForm({ ...gatewayForm, base_url: event.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Provider contract environment (metadata only)</Label><Select value={gatewayForm.environment} onValueChange={(value) => setGatewayForm({ ...gatewayForm, environment: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="SANDBOX">Sandbox contract · draft only</SelectItem><SelectItem value="LIVE">Production contract · draft only</SelectItem></SelectContent></Select></div>
+              <div className="space-y-1.5"><Label>Provider contract environment (metadata only)</Label><Select value={gatewayForm.environment} onValueChange={(value) => setGatewayForm({ ...gatewayForm, environment: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="SANDBOX">Sandbox contract</SelectItem><SelectItem value="LIVE">Production contract</SelectItem></SelectContent></Select></div>
               <div className="space-y-1.5 md:col-span-2"><Label htmlFor="gateway-merchant">Merchant reference (masked or non-secret)</Label><Input id="gateway-merchant" placeholder="Merchant account label" value={gatewayForm.merchant_reference_masked} onChange={(event) => setGatewayForm({ ...gatewayForm, merchant_reference_masked: event.target.value })} /></div>
             </div>
             <fieldset className="rounded-xl border border-white/10 p-3"><legend className="px-1 text-xs font-bold uppercase tracking-wider text-white/55">Claimed provider capabilities · configuration only</legend><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{CAPABILITY_OPTIONS.map(([value, label]) => <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-white/8 px-3 text-sm"><Checkbox checked={gatewayForm.capabilities.includes(value)} onCheckedChange={(checked) => toggleCapability(value, Boolean(checked))} /><span>{label}</span></label>)}</div></fieldset>
             <div className="space-y-1.5"><Label htmlFor="gateway-config">Provider contract mapping (non-secret JSON)</Label><Textarea id="gateway-config" rows={7} spellCheck={false} className="font-mono text-xs" value={gatewayForm.config_json} onChange={(event) => setGatewayForm({ ...gatewayForm, config_json: event.target.value })} /><p className="text-xs text-white/40">Endpoint paths, request fields, response mappings, and webhook header mappings belong here. Keep API keys and webhook secrets in the encrypted Credentials dialog.</p></div>
-            <p className="rounded-lg border border-amber-300/20 bg-amber-300/8 p-3 text-xs text-amber-100">Every provider saved here remains a disabled configuration draft. Activation and approval controls are intentionally unavailable until the V1↔V2 player-wallet bridge is separately certified and released.</p>
-            <Button disabled={Boolean(busy)}><Plus className="mr-2 h-4 w-4" />{busy === "create-gateway" ? "Saving draft…" : "Save disabled provider draft"}</Button>
+            <p className="rounded-lg border border-amber-300/20 bg-amber-300/8 p-3 text-xs text-amber-100">Providers are stored disabled. The enable control remains blocked until PAYMENTS_V2_ENABLED is explicitly released, and no gateway configuration can credit or debit a player wallet.</p>
+            <Button disabled={Boolean(busy)}><Plus className="mr-2 h-4 w-4" />{busy === "create-gateway" ? "Saving provider…" : "Save provider configuration"}</Button>
           </form> : <p className="text-sm text-white/45">Read-only access. A Super Admin with provider-create permission must add providers.</p>}
         </Panel>
       </TabsContent>
 
       <TabsContent value="routing" className="space-y-4">
-        <Panel title="Routing configuration preview" subtitle="Priority and weights are draft metadata. The player wallet does not consult this V2 registry.">
-          {routes.length ? <div className="space-y-2">{routes.map((item) => <div key={item.id} className="grid items-center gap-2 rounded-xl border border-white/8 bg-black/10 p-3 text-sm sm:grid-cols-[1fr_.7fr_.7fr_auto]"><strong>{item.name}</strong><span>{item.direction} · {item.payment_method}</span><span>{item.currency} · priority {item.priority}</span><Status tone="warning">{item.is_enabled ? "Stored enabled · not player-routed" : "Disabled draft"}</Status></div>)}</div> : <p className="text-sm text-white/45">No routing configuration records.</p>}
+        <Panel title="Routing configuration" subtitle="Priority and weights are stored configuration. The player wallet does not consult this V2 registry.">
+          {routes.length ? <div className="space-y-2">{routes.map((item) => <div key={item.id} className="grid items-center gap-2 rounded-xl border border-white/8 bg-black/10 p-3 text-sm sm:grid-cols-[1fr_.7fr_.7fr_auto]"><strong>{item.name}</strong><span>{item.direction} · {item.payment_method}</span><span>{item.currency} · priority {item.priority}</span><Status tone="warning">{item.is_enabled ? "Stored enabled · not player-routed" : "Stored disabled"}</Status></div>)}</div> : <p className="text-sm text-white/45">No routing configuration records.</p>}
         </Panel>
-        <Panel title="Stored approval evidence" subtitle="Read-only during Phase 0. The CRM cannot approve or enable a provider or route while the bridge gate is blocked.">
-          {approvals.length ? <div className="space-y-2">{approvals.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/10 p-3 text-sm"><div><strong>{item.action_type}</strong><p className="font-mono text-[10px] text-white/40">{item.target_type} · {item.target_id}</p></div><Status tone="warning">Blocked by bridge gate</Status></div>)}</div> : <p className="text-sm text-white/45">No stored approval requests.</p>}
+        <Panel title="Stored approval evidence" subtitle="Activation requests need PAYMENTS_V2_ENABLED and a second Super Admin; they still do not authorize wallet posting.">
+          {approvals.length ? <div className="space-y-2">{approvals.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/10 p-3 text-sm"><div><strong>{item.action_type}</strong><p className="font-mono text-[10px] text-white/40">{item.target_type} · {item.target_id}</p></div><Status tone="warning">Awaiting separate approval</Status></div>)}</div> : <p className="text-sm text-white/45">No stored approval requests.</p>}
         </Panel>
         <Panel title="Create routing configuration draft" subtitle="Amounts are in paise; ₹1,000 is entered as 100000. Saving does not affect player traffic.">
           {canManageRoutes ? <form onSubmit={createRoute} className="grid gap-3 md:grid-cols-3"><Input required placeholder="Route name" value={routeForm.name} onChange={(event) => setRouteForm({ ...routeForm, name: event.target.value })} /><Select value={routeForm.gateway_id} onValueChange={(value) => setRouteForm({ ...routeForm, gateway_id: value })}><SelectTrigger><SelectValue placeholder="Provider" /></SelectTrigger><SelectContent>{gateways.map((gateway) => <SelectItem key={gateway.id} value={gateway.id}>{gateway.display_name}</SelectItem>)}</SelectContent></Select><Select value={routeForm.direction} onValueChange={(value) => setRouteForm({ ...routeForm, direction: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="PAYIN">Pay-in</SelectItem><SelectItem value="PAYOUT">Payout</SelectItem></SelectContent></Select><Input aria-label="Minimum amount in paise" type="number" min="1" value={routeForm.min_amount_minor} onChange={(event) => setRouteForm({ ...routeForm, min_amount_minor: event.target.value })} /><Input aria-label="Maximum amount in paise" type="number" min="1" value={routeForm.max_amount_minor} onChange={(event) => setRouteForm({ ...routeForm, max_amount_minor: event.target.value })} /><Button disabled={Boolean(busy) || !routeForm.gateway_id}><Route className="mr-2 h-4 w-4" />Create route draft</Button></form> : <p className="text-sm text-white/45">Read-only access. Route changes require a Super Admin with route-management permission.</p>}
         </Panel>
       </TabsContent>
 
-      <TabsContent value="webhooks"><Panel title="V2 webhook evidence preview" subtitle="No V2 callback is registration-ready or connected to player wallet posting."><div className="mb-3 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3 text-xs text-amber-100">Any rows shown here are configuration or staging evidence only. They do not prove player payment traffic and cannot credit a player wallet through the uncertified V2 bridge.</div>{events.length ? <div className="space-y-2">{events.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border border-white/8 bg-black/10 p-3 text-sm sm:grid-cols-[1fr_1fr_auto]"><div><strong>{item.provider_event_type}</strong><p className="font-mono text-[10px] text-white/40">{item.provider_event_id}</p></div><span>{when(item.received_at)}</span><Status tone={item.processing_status === "DEAD_LETTER" ? "danger" : "neutral"}>Evidence: {item.processing_status}</Status></div>)}</div> : <div className="py-8 text-center text-sm text-white/45"><Webhook className="mx-auto mb-2 h-6 w-6" />No V2 preview events. No callback is ready to register.</div>}</Panel></TabsContent>
+      <TabsContent value="webhooks"><Panel title="V2 webhook evidence" subtitle="Callback URLs can be registered while V2 processing remains disabled."><div className="mb-3 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3 text-xs text-amber-100">Webhook URLs are provider-registration metadata only while PAYMENTS_V2_ENABLED is false. They cannot create a payment order or credit a player wallet.</div>{events.length ? <div className="space-y-2">{events.map((item) => <div key={item.id} className="grid gap-2 rounded-xl border border-white/8 bg-black/10 p-3 text-sm sm:grid-cols-[1fr_1fr_auto]"><div><strong>{item.provider_event_type}</strong><p className="font-mono text-[10px] text-white/40">{item.provider_event_id}</p></div><span>{when(item.received_at)}</span><Status tone={item.processing_status === "DEAD_LETTER" ? "danger" : "neutral"}>Evidence: {item.processing_status}</Status></div>)}</div> : <div className="py-8 text-center text-sm text-white/45"><Webhook className="mx-auto mb-2 h-6 w-6" />No V2 webhook events have been received.</div>}</Panel></TabsContent>
       <TabsContent value="activity"><Panel title="Immutable activity timeline" subtitle="Sensitive before/after values are redacted server-side.">{activity.length ? <div className="space-y-2">{activity.map((item) => <div key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-white/8 bg-black/10 p-3"><div><p className="text-sm font-bold">{item.event_type}</p><p className="font-mono text-[10px] text-white/40">{item.target_type} · {item.target_id}</p></div><span className="text-xs text-white/45">{when(item.occurred_at)}</span></div>)}</div> : <div className="py-8 text-center text-sm text-white/45"><Activity className="mx-auto mb-2 h-6 w-6" />No payment activity.</div>}</Panel></TabsContent>
     </Tabs>
 
