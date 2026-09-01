@@ -449,9 +449,14 @@ async def require_hosted_deposit_eligible(user: Mapping[str, Any]) -> Mapping[st
             "code": "CONTACT_NOT_VERIFIED",
             "message": "Verify your mobile number before using UPI.",
         })
-    if user.get("age_verified") is not True:
+    # Age is satisfied by the one-tap 18+ self-attestation (accepted_terms) or an
+    # explicit operator age flag; UPI chip purchases no longer require an operator
+    # to hand-verify age. compliance.assert_playable below still refuses an actual
+    # under-minimum date of birth.
+    if not (user.get("age_verified") is True or user.get("accepted_terms") is True):
         raise HTTPException(status_code=403, detail={
-            "code": "AGE_NOT_VERIFIED", "message": "Age verification is required.",
+            "code": "AGE_NOT_VERIFIED",
+            "message": "Please confirm you are at least 18 to continue.",
         })
     if str(user.get("kyc_status") or "").upper() != "VERIFIED":
         raise HTTPException(status_code=403, detail={

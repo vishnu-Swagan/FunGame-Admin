@@ -136,7 +136,12 @@ def _payment_verification_state(user: Mapping[str, Any]) -> dict[str, bool]:
     return {
         "contact_verified": contact["phone_verified"] or contact["email_verified"],
         "phone_verified": contact["phone_verified"],
-        "age_verified": user.get("age_verified") is True,
+        # Age is satisfied by the one-tap 18+ self-attestation (accepted_terms)
+        # or an explicit operator age flag; an operator no longer has to
+        # hand-verify age to let a player deposit. Actual under-minimum dates of
+        # birth are still refused by compliance.assert_playable on the deposit
+        # feature.
+        "age_verified": user.get("age_verified") is True or user.get("accepted_terms") is True,
         "kyc_verified": str(user.get("kyc_status") or "").upper() == "VERIFIED",
     }
 

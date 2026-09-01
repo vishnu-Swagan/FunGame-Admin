@@ -139,7 +139,11 @@ async function handleApiError(error, allowFailover) {
        every page with nothing to do about it. Per-bet refusals (LOSS_LIMIT,
        DEPOSIT_LIMIT) are deliberately NOT here — those belong inline, next to
        the bet that was refused. */
-    const CLOSED_CODES = ["SELF_EXCLUDED", "MARKET_BLOCKED", "AGE_NOT_VERIFIED", "UNDERAGE"];
+    // AGE_NOT_VERIFIED is intentionally NOT here: age is a one-tap 18+
+    // self-attest, not a hard account-closing block. An actual under-age date of
+    // birth still surfaces as UNDERAGE and closes the app. This keeps a Telesign
+    // risk score or a missing operator age flag from stranding a real player.
+    const CLOSED_CODES = ["SELF_EXCLUDED", "MARKET_BLOCKED", "UNDERAGE"];
     if (status === 403 && detail && CLOSED_CODES.includes(detail.code)) {
       try { localStorage.setItem("cc_block", JSON.stringify(detail)); } catch (e) { /* private mode */ }
       if (!path.startsWith("/account-closed") && !path.startsWith("/responsible-play") && !path.startsWith("/support")) {
