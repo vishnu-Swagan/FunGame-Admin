@@ -136,8 +136,11 @@ async def request_age_verification(
             'code': 'ACTIVE_PLAYER_REQUIRED',
             'message': 'An active player account is required.',
         })
-    if user.get('age_verified') is True:
-        return {'message': 'Your age is already verified.', 'user': public_user(user)}
+    if user.get('age_verified') is True or user.get('accepted_terms') is True:
+        return {
+            'message': 'Your 18+ confirmation is already recorded.',
+            'user': public_user(user),
+        }
     ok, code, message = await compliance.check_eligibility(
         user.get('country'), user.get('date_of_birth'), require_dob=True,
     )
