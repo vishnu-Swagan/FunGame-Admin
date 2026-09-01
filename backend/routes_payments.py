@@ -302,7 +302,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         # invalid value or internal configuration diagnostics to the player.
         money_config = None
     config_ready = money_config is not None
-    operator = operator_rail.operator_status()
+    operator = await operator_rail.operator_status()
     return {
         "wallet": await finance.wallet_public(user["id"]),
         "money_config": money_config,
@@ -362,6 +362,7 @@ async def bank_details(user: dict = Depends(require_operator_player)):
 
 @router.post("/payments/bank-details", status_code=201)
 async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require_operator_player)):
+    await operator_rail.require_crm_feature("WITHDRAWAL")
     try:
         await _financial_rate_limit(user["id"], "bank-details-create", 5, 3600)
         method = await finance.create_payout_method(user["id"], **body.model_dump())
@@ -435,11 +436,17 @@ async def create_operator_deposit(
     body: OperatorDepositCreate,
     user: dict = Depends(require_operator_player),
 ):
+    flags = await operator_rail.require_crm_feature("DEPOSIT")
     await _financial_rate_limit(user["id"], "operator-deposit-create", 10, 900)
     row = await operator_rail.create_request(
         user, kind="DEPOSIT", amount_paise=body.amount_paise, note=body.note or "",
     )
-    return {"deposit": operator_rail.as_player_deposit(row), "source": "ADMIN_REVIEW"}
+    if flags.get("auto_approve_deposits"):
+        row = await operator_rail.resolve_request(
+            row["id"], {"id": "crm-auto-approve"},
+            approve=True, note="CRM auto-approve deposits",
+        )
+    return {"deposit": operator_rail.as_player_deposit(row), "source": "CRM"}
 
 
 @router.post("/payments/operator/withdrawals", status_code=201)
@@ -447,6 +454,7 @@ async def create_operator_withdrawal(
     body: OperatorWithdrawalCreate,
     user: dict = Depends(require_operator_player),
 ):
+    flags = await operator_rail.require_crm_feature("WITHDRAWAL")
     await _financial_rate_limit(user["id"], "operator-withdrawal-create", 5, 3600)
     paise = (int(body.amount_chips) * 100) // operator_rail.OPERATOR_LIMITS["chips_per_inr"]
     row = await operator_rail.create_request(
@@ -457,7 +465,12 @@ async def create_operator_withdrawal(
         bank_detail_id=body.bank_detail_id,
         note=body.note or "",
     )
-    return {"withdrawal": operator_rail.as_player_withdrawal(row), "source": "ADMIN_REVIEW"}
+    if flags.get("auto_approve_withdrawals"):
+        row = await operator_rail.resolve_request(
+            row["id"], {"id": "crm-auto-approve"},
+            approve=True, note="CRM auto-approve withdrawals",
+        )
+    return {"withdrawal": operator_rail.as_player_withdrawal(row), "source": "CRM"}
 
 
 @router.post("/payments/webhooks/{provider_name}")

@@ -112,6 +112,7 @@ db = client["financial_core_test"]
 sys.modules["db"] = types.SimpleNamespace(db=db, client=client)
 
 import financial_wallet as finance  # noqa: E402
+import operator_rail  # noqa: E402
 import routes_payments as routes  # noqa: E402
 from payment_providers import (  # noqa: E402
     _PinnedHTTPSConnection as ProviderPinnedHTTPSConnection,
@@ -1573,20 +1574,64 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
             "admin_role": "SUPER_ADMIN",
         }
 
-    async def test_wallet_publishes_operator_rail_while_financial_core_is_closed(self):
+    async def _enable_crm(self, *, deposits=True, withdrawals=True, auto_deposits=False, auto_withdrawals=False):
+        await db.payment_platform_settings.update_one(
+            {"id": "main"},
+            {"$set": {
+                "id": "main",
+                "deposits_enabled": deposits,
+                "withdrawals_enabled": withdrawals,
+                "deposit_auto_approve": auto_deposits,
+                "withdrawal_auto_approve": auto_withdrawals,
+            }},
+            upsert=True,
+        )
+
+    async def test_wallet_stays_closed_until_crm_enables_payments(self):
         response = await routes.payment_wallet(user=self.user)
         self.assertFalse(response["financial"]["ready"])
         self.assertEqual(response["financial"]["availability_code"], "PAYMENTS_UNAVAILABLE")
-        self.assertTrue(response["financial"]["operator"]["enabled"])
-        self.assertEqual(response["financial"]["operator"]["rail"], "ADMIN_REVIEW")
-        self.assertEqual(response["financial"]["operator"]["limits"]["min_deposit_paise"], 50_000)
+        self.assertFalse(response["financial"]["operator"]["enabled"])
+        self.assertFalse(response["financial"]["operator"]["deposits_enabled"])
+        self.assertEqual(response["financial"]["operator"]["rail"], "CRM")
+
+        await self._enable_crm(deposits=True, withdrawals=False)
+        opened = await routes.payment_wallet(user=self.user)
+        self.assertTrue(opened["financial"]["operator"]["enabled"])
+        self.assertTrue(opened["financial"]["operator"]["deposits_enabled"])
+        self.assertFalse(opened["financial"]["operator"]["withdrawals_enabled"])
+        self.assertEqual(opened["financial"]["operator"]["limits"]["min_deposit_paise"], 50_000)
+
+    async def test_buy_chips_rejected_until_crm_enables_deposits(self):
+        with self.assertRaises(HTTPException) as blocked:
+            await routes.create_operator_deposit(
+                routes.OperatorDepositCreate(amount_paise=50_000),
+                user=self.user,
+            )
+        self.assertEqual(blocked.exception.status_code, 403)
+
+    async def test_buy_chips_unlocks_when_a_crm_gateway_enables_deposits(self):
+        await db.payment_gateways.insert_one({
+            "id": "gw-1", "code": "PHONEPE", "display_name": "PhonePe",
+            "deposits_enabled": True, "withdrawals_enabled": False,
+        })
+        status = await operator_rail.operator_status()
+        self.assertTrue(status["deposits_enabled"])
+        self.assertEqual(status["methods"][0]["code"], "PHONEPE")
+        with self.assertRaises(HTTPException) as blocked:
+            await routes.create_operator_withdrawal(
+                routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id="missing-bank-id"),
+                user=self.user,
+            )
+        self.assertEqual(blocked.exception.status_code, 403)
 
     async def test_operator_buy_and_withdraw_sync_to_admin_and_move_chips_on_approve(self):
+        await self._enable_crm()
         buy = await routes.create_operator_deposit(
             routes.OperatorDepositCreate(amount_paise=100_000),
             user=self.user,
         )
-        self.assertEqual(buy["source"], "ADMIN_REVIEW")
+        self.assertEqual(buy["source"], "CRM")
         self.assertEqual(buy["deposit"]["status"], "PENDING")
         self.assertEqual(buy["deposit"]["chips"], 1000)
 
@@ -1632,7 +1677,18 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         user = await db.users.find_one({"id": self.user["id"]})
         self.assertEqual(user["chip_balance"], 5000)
 
+    async def test_crm_auto_approve_credits_buy_chips_immediately(self):
+        await self._enable_crm(deposits=True, withdrawals=False, auto_deposits=True)
+        buy = await routes.create_operator_deposit(
+            routes.OperatorDepositCreate(amount_paise=50_000),
+            user=self.user,
+        )
+        self.assertEqual(buy["deposit"]["status"], "APPROVED")
+        user = await db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(user["chip_balance"], 5500)
+
     async def test_operator_reject_does_not_move_chips(self):
+        await self._enable_crm()
         buy = await routes.create_operator_deposit(
             routes.OperatorDepositCreate(amount_paise=50_000),
             user=self.user,
@@ -1646,6 +1702,7 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user["chip_balance"], 5000)
 
     async def test_operator_withdrawal_requires_bank_and_balance(self):
+        await self._enable_crm()
         with self.assertRaises(HTTPException) as missing_bank:
             await routes.create_operator_withdrawal(
                 routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id="missing-bank-id"),

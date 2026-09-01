@@ -157,6 +157,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const hostedWithdrawAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
   const operatorBuyAvailable = isOperatorRailAvailable(financial, "deposits");
   const operatorWithdrawAvailable = isOperatorRailAvailable(financial, "withdrawals");
+  const crmMethods = Array.isArray(financial?.operator?.methods) ? financial.operator.methods : [];
   const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
   const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
   const providerReadinessCopy = hostedBuyAvailable && hostedWithdrawAvailable
@@ -166,8 +167,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
       : hostedWithdrawAvailable
         ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
         : operatorBuyAvailable || operatorWithdrawAvailable
-          ? "Buy Chips and withdrawals are submitted for Admin review. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
-          : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
+          ? "Buy Chips and withdrawals follow the payment methods enabled in Admin. Requests sync to Admin; chips update after approval, or immediately when CRM auto-approve is on."
+          : "Payment services are not active yet. Enable Deposits or Withdrawals in Admin payment settings to open these options for players.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
@@ -274,8 +275,9 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Buy chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."}</p></div></div>
-            {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Buy Chips is temporarily unavailable."} />}
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Buy chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : operatorBuyAvailable ? "Pay in INR using the payment method enabled in Admin. Your wallet updates after Admin approval or CRM auto-approve." : "Buy Chips opens after deposits are enabled in Admin payment settings."}</p></div></div>
+            {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Buy Chips is temporarily unavailable. Enable Deposits in Admin payment settings."} />}
+            {!hostedBuyAvailable && operatorBuyAvailable && crmMethods.length > 0 && <p className="text-xs text-white/50" data-testid="crm-deposit-methods">Enabled payment methods: {crmMethods.map((method) => method.name || method.code).filter(Boolean).join(", ")}</p>}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
             <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">You receive</span><strong className="tabular-nums text-primary">{formatChips(buyChips)} chips</strong></div>

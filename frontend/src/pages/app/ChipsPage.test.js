@@ -207,7 +207,7 @@ test("does not claim an active approved provider while financial readiness is do
   const { container, root } = await renderPage();
 
   expect(container.textContent).toContain("Payment services are not active yet");
-  expect(container.textContent).toContain("remain unavailable");
+  expect(container.textContent).toContain("Enable Deposits or Withdrawals in Admin payment settings");
   expect(container.textContent).not.toContain("completed by the approved provider");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(true);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(true);
@@ -298,6 +298,7 @@ const OPERATOR_WALLET = {
       rail: "ADMIN_REVIEW",
       deposits_enabled: true,
       withdrawals_enabled: true,
+      methods: [{ code: "PHONEPE", name: "PhonePe" }],
       limits: {
         chips_per_inr: 1,
         min_deposit_paise: 50000,
@@ -321,7 +322,8 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
     minDepositPaise: 50000,
     minWithdrawalPaise: 100000,
   });
-  expect(container.textContent).toContain("submitted for Admin review");
+  expect(container.textContent).toContain("follow the payment methods enabled in Admin");
+  expect(container.textContent).toContain("Enabled payment methods: PhonePe");
   expect(container.textContent).not.toContain("Payment services are not active yet");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit buy request");

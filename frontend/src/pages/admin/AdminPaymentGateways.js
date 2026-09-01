@@ -490,7 +490,7 @@ function SettingsPanel({ settings, canManage, adminEnabled, onSaved }) {
       <header className="crm-panel-header">
         <div>
           <h2>Payment platform settings</h2>
-          <p>Controls shared by hosted returns, local deposits, and wallet transfers.</p>
+          <p>Turning on Deposits or Withdrawals here opens Buy Chips and bank withdrawals for players. Requests appear on Admin deposits and withdrawals.</p>
         </div>
       </header>
       <div className="crm-panel-body" style={{ padding: "16px 18px 18px" }}>
@@ -500,7 +500,7 @@ function SettingsPanel({ settings, canManage, adminEnabled, onSaved }) {
             <Field label="Failure / cancel page" placeholder="/play/wallet or https://..." value={form.returnPages.failurePath} onChange={(value) => setForm((current) => ({ ...current, returnPages: { ...current.returnPages, failurePath: value } }))} />
           </div>
           <div className="gateway-settings-row">
-            <strong>Local deposits</strong>
+            <strong>Player payments</strong>
             <Toggle id="settings-deposits" label="Deposits" checked={form.localSettings.depositsEnabled} disabled={!canManage} onChange={(value) => setForm((current) => ({ ...current, localSettings: { ...current.localSettings, depositsEnabled: value } }))} />
             <Toggle id="settings-withdrawals" label="Withdrawals" checked={form.localSettings.withdrawalsEnabled} disabled={!canManage} onChange={(value) => setForm((current) => ({ ...current, localSettings: { ...current.localSettings, withdrawalsEnabled: value } }))} />
             <Toggle id="settings-deposit-auto" label="Auto-approve deposits" checked={form.localSettings.depositAutoApprove} disabled={!canManage} onChange={(value) => setForm((current) => ({ ...current, localSettings: { ...current.localSettings, depositAutoApprove: value } }))} />

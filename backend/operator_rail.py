@@ -35,14 +35,77 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def operator_status() -> dict[str, Any]:
+def _crm_method(row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
     return {
-        "enabled": True,
-        "rail": "ADMIN_REVIEW",
-        "deposits_enabled": True,
-        "withdrawals_enabled": True,
+        "code": row.get("code") or row.get("agent_type") or row.get("agentType"),
+        "name": row.get("display_name") or row.get("agent_name") or row.get("agentName"),
+        "category": row.get("category") or row.get("agent_type") or row.get("agentType"),
+        "kind": kind,
+    }
+
+
+async def crm_payment_flags() -> dict[str, Any]:
+    """Player money actions follow CRM payment-gateway settings, not env flags."""
+    settings = await db.payment_platform_settings.find_one({}, {"_id": 0}) or {}
+    platform_deposits = bool(settings.get("deposits_enabled") or settings.get("depositsEnabled"))
+    platform_withdrawals = bool(settings.get("withdrawals_enabled") or settings.get("withdrawalsEnabled"))
+    auto_deposits = bool(settings.get("deposit_auto_approve") or settings.get("depositAutoApprove"))
+    auto_withdrawals = bool(settings.get("withdrawal_auto_approve") or settings.get("withdrawalAutoApprove"))
+
+    gateways = await db.payment_gateways.find(
+        {"$or": [{"deposits_enabled": True}, {"withdrawals_enabled": True}]},
+        {
+            "_id": 0, "code": 1, "display_name": 1, "category": 1,
+            "deposits_enabled": 1, "withdrawals_enabled": 1,
+            "auto_approve_deposits": 1, "auto_approve_withdrawals": 1,
+        },
+    ).to_list(200)
+    deposit_gateways = [row for row in gateways if row.get("deposits_enabled")]
+    withdrawal_gateways = [row for row in gateways if row.get("withdrawals_enabled")]
+    auto_deposits = auto_deposits or any(row.get("auto_approve_deposits") for row in deposit_gateways)
+    auto_withdrawals = auto_withdrawals or any(row.get("auto_approve_withdrawals") for row in withdrawal_gateways)
+
+    agents = await db.payment_local_agents.find(
+        {"$or": [{"deposit_enabled": True}, {"withdrawal_enabled": True}, {"depositEnabled": True}, {"withdrawalEnabled": True}]},
+        {"_id": 0, "agent_type": 1, "agentType": 1, "agent_name": 1, "agentName": 1,
+         "deposit_enabled": 1, "depositEnabled": 1, "withdrawal_enabled": 1, "withdrawalEnabled": 1},
+    ).to_list(200)
+    deposit_agents = [row for row in agents if row.get("deposit_enabled") or row.get("depositEnabled")]
+    withdrawal_agents = [row for row in agents if row.get("withdrawal_enabled") or row.get("withdrawalEnabled")]
+
+    deposits_enabled = platform_deposits or bool(deposit_gateways) or bool(deposit_agents)
+    withdrawals_enabled = platform_withdrawals or bool(withdrawal_gateways) or bool(withdrawal_agents)
+    methods = [_crm_method(row, kind="DEPOSIT") for row in deposit_gateways + deposit_agents]
+    return {
+        "enabled": deposits_enabled or withdrawals_enabled,
+        "rail": "CRM",
+        "deposits_enabled": deposits_enabled,
+        "withdrawals_enabled": withdrawals_enabled,
+        "auto_approve_deposits": bool(auto_deposits) and deposits_enabled,
+        "auto_approve_withdrawals": bool(auto_withdrawals) and withdrawals_enabled,
+        "methods": methods,
         "limits": dict(OPERATOR_LIMITS),
     }
+
+
+async def operator_status() -> dict[str, Any]:
+    return await crm_payment_flags()
+
+
+async def require_crm_feature(kind: str) -> dict[str, Any]:
+    flags = await crm_payment_flags()
+    wanted = str(kind or "").upper()
+    if wanted == "DEPOSIT" and not flags["deposits_enabled"]:
+        raise HTTPException(status_code=403, detail={
+            "code": "CRM_DEPOSITS_DISABLED",
+            "message": "Buy Chips opens after deposits are enabled in Admin payment settings.",
+        })
+    if wanted == "WITHDRAWAL" and not flags["withdrawals_enabled"]:
+        raise HTTPException(status_code=403, detail={
+            "code": "CRM_WITHDRAWALS_DISABLED",
+            "message": "Withdrawals open after they are enabled in Admin payment settings.",
+        })
+    return flags
 
 
 def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
