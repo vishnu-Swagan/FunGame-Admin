@@ -293,7 +293,45 @@ export function AdminKyc() {
     }
   };
 
-  return <PageTransition className="space-y-4"><PageHead icon={ShieldCheck} title="KYC review" subtitle="Review masked player identities. Every decision requires step-up authentication and an audit reason." onRefresh={load} loading={loading} /><FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />{shown.length ? <div className="space-y-3">{shown.map((player) => <article key={player.id} className="rounded-2xl border border-white/10 bg-card/55 p-4"><div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.75fr_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{player.email_masked || player.phone_masked || "Masked player"}</p><p className="truncate font-mono text-[10px] text-white/35">{player.id}</p></div><div><p className="text-xs text-white/60">{player.country || "Country unavailable"}</p><p className={`text-[10px] ${player.contact_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.contact_verified ? "Contact verified" : "Contact not verified"}</p></div><div><p className={`text-xs ${player.age_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.age_verified ? "Age verified" : "Age not verified"}</p><p className="text-[10px] text-white/35">{player.reviewed_at ? when(player.reviewed_at) : "Not reviewed"}</p></div><PaymentStatus status={player.kyc_status} /></div>{canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[player.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [player.id]: event.target.value }))} placeholder="Review reason (required)" minLength={5} maxLength={500} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" onClick={() => review(player, "VERIFIED")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${player.id}:VERIFIED` ? "Saving…" : "Verify"}</Button><Button type="button" size="sm" variant="destructive" onClick={() => review(player, "REJECTED")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${player.id}:REJECTED` ? "Saving…" : "Reject"}</Button></div>}</article>)}</div> : <Empty icon={ShieldCheck} loading={loading} noun="KYC records" />}</PageTransition>;
+  const verificationAction = async (player, action) => {
+    const reason = String(drafts[player.id] || "").trim();
+    if (reason.length < 5) return toast.error("Enter a clear verification reason");
+    const key = `${player.id}:${action}`;
+    setActing(key);
+    try {
+      if (action === "REQUEST_AGE") await adminPayments.requestPlayerVerification(player.id, "AGE", reason);
+      if (action === "REQUEST_MOBILE") await adminPayments.requestPlayerVerification(player.id, "MOBILE", reason);
+      if (action === "VERIFY_AGE") await adminPayments.reviewPlayerAge(player.id, true, reason);
+      if (action === "VERIFY_MOBILE") await adminPayments.reviewPlayerMobile(player.id, true, reason);
+      toast.success("Verification action recorded and player notified");
+      setDrafts((current) => ({ ...current, [player.id]: "" }));
+      await load();
+    } catch (error) { toast.error(errMsg(error)); } finally { setActing(""); }
+  };
+
+  return <PageTransition className="space-y-4">
+    <PageHead icon={ShieldCheck} title="Player verification" subtitle="Request mobile or age checks, record manual reviews, and complete KYC with an audit reason." onRefresh={load} loading={loading} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />
+    {shown.length ? <div className="space-y-3">{shown.map((player) => <article key={player.id} className="rounded-2xl border border-white/10 bg-card/55 p-4">
+      <div className="grid gap-3 sm:grid-cols-[1.2fr_.8fr_.8fr_auto] sm:items-center">
+        <div className="min-w-0"><p className="truncate text-sm font-semibold">{player.email_masked || player.phone_masked || "Masked player"}</p><p className="truncate font-mono text-[10px] text-white/35">{player.id}</p></div>
+        <div><p className="text-xs text-white/60">{player.phone_masked || "No mobile"}</p><p className={`text-[10px] ${player.contact_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.mobile_manually_verified ? "Mobile admin reviewed" : player.contact_verified ? "Contact verified" : player.mobile_verification_status === "REQUESTED" ? "Mobile requested" : "Mobile not verified"}</p></div>
+        <div><p className={`text-xs ${player.age_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.age_verified ? "Age verified" : player.age_verification_status === "REQUESTED" || player.age_verification_status === "PENDING" ? "Age review pending" : "Age not verified"}</p><p className="text-[10px] text-white/35">{player.country || "Country unavailable"}</p></div>
+        <PaymentStatus status={player.kyc_status} />
+      </div>
+      {canReview && <div className="mt-4 space-y-2 border-t border-white/5 pt-3">
+        <Input value={drafts[player.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [player.id]: event.target.value }))} placeholder="Verification reason / instructions (required)" minLength={5} maxLength={500} className="h-10 rounded-xl border-white/10 bg-white/5" />
+        <div className="flex flex-wrap gap-2">
+          {!player.age_verified && <Button type="button" size="sm" variant="outline" onClick={() => verificationAction(player, "REQUEST_AGE")} disabled={Boolean(acting)}>Request age</Button>}
+          {!player.age_verified && <Button type="button" size="sm" onClick={() => verificationAction(player, "VERIFY_AGE")} disabled={Boolean(acting)}>Verify age</Button>}
+          {!player.contact_verified && player.phone_available && <Button type="button" size="sm" variant="outline" onClick={() => verificationAction(player, "REQUEST_MOBILE")} disabled={Boolean(acting)}>Request mobile OTP</Button>}
+          {!player.contact_verified && player.phone_available && <Button type="button" size="sm" onClick={() => verificationAction(player, "VERIFY_MOBILE")} disabled={Boolean(acting)}>Approve mobile manually</Button>}
+          <Button type="button" size="sm" onClick={() => review(player, "VERIFIED")} disabled={Boolean(acting)}>Verify KYC</Button>
+          <Button type="button" size="sm" variant="destructive" onClick={() => review(player, "REJECTED")} disabled={Boolean(acting)}>Reject KYC</Button>
+        </div>
+      </div>}
+    </article>)}</div> : <Empty icon={ShieldCheck} loading={loading} noun="verification records" />}
+  </PageTransition>;
 }
 
 export function AdminPaymentSettings() {

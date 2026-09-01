@@ -314,6 +314,66 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(wallet["withdrawable_chips"], 0)
         self.assertEqual(await db.wallet_accounts.count_documents({}), 0)
 
+    async def test_payment_verification_accepts_phone_evidence_and_keeps_age_fail_closed(self):
+        stale_phone_aggregate = {
+            **self.user,
+            "contact_verified": False,
+            "phone_verified": True,
+            "email_verified": False,
+        }
+        self.assertIs(
+            await routes._require_player("withdrawals", stale_phone_aggregate),
+            stale_phone_aggregate,
+        )
+
+        noncanonical_age = {
+            **stale_phone_aggregate,
+            "age_verified": None,
+            "age_verified_at": finance.now(),
+            "age_verified_by": "kyc-admin",
+        }
+        with self.assertRaises(HTTPException) as age_blocked:
+            await routes._require_player("withdrawals", noncanonical_age)
+        self.assertEqual(age_blocked.exception.detail["code"], "AGE_NOT_VERIFIED")
+
+    async def test_upi_accepts_audited_manual_contact_review_but_not_partial_state(self):
+        reviewed = {
+            **self.user,
+            "contact_verified": False,
+            "phone_verified": False,
+            "email_verified": False,
+            "registration_source": "SELF_SERVICE",
+            "activation_mode": "ADMIN_REVIEW",
+            "manual_contact_reviewed": True,
+            "contact_verification_status": "ADMIN_APPROVED",
+            "accepted_terms": True,
+            "submitted_at": finance.now(),
+            "email": "manual-review@example.test",
+            "email_normalized": "manual-review@example.test",
+            "phone_normalized": "+919876543210",
+            "primary_identity": "+919876543210",
+            "primary_identity_channel": "PHONE",
+            "approved_at": finance.now(),
+            "manual_contact_reviewed_by": "registration-admin",
+            "phone": "+919876543210",
+        }
+        reviewed["manual_contact_reviewed_at"] = reviewed["approved_at"]
+        reviewed["approved_by"] = reviewed["manual_contact_reviewed_by"]
+        with patch.object(routes.operator_rail, "hosted_upi_requested", return_value=True):
+            self.assertIs(await routes.require_operator_deposit_player(reviewed), reviewed)
+
+            partial = {**reviewed, "manual_contact_reviewed_by": None}
+            with self.assertRaises(HTTPException) as contact_blocked:
+                await routes.require_operator_deposit_player(partial)
+            self.assertEqual(
+                contact_blocked.exception.detail["code"], "CONTACT_NOT_VERIFIED",
+            )
+
+            no_kyc = {**reviewed, "kyc_status": "UNVERIFIED"}
+            with self.assertRaises(HTTPException) as kyc_blocked:
+                await routes.require_operator_deposit_player(no_kyc)
+            self.assertEqual(kyc_blocked.exception.detail["code"], "KYC_REQUIRED")
+
     async def test_deposit_retries_provider_gap_and_webhook_credits_exactly_once(self):
         self.provider.deposit_failures = 1
         with self.assertRaises(finance.FinancialError) as failed:
@@ -1583,7 +1643,7 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["financial"]["availability_code"], "PAYMENTS_UNAVAILABLE")
         self.assertTrue(response["financial"]["operator"]["enabled"])
         self.assertEqual(response["financial"]["operator"]["rail"], "ADMIN_REVIEW")
-        self.assertEqual(response["financial"]["operator"]["limits"]["min_deposit_paise"], 50_000)
+        self.assertEqual(response["financial"]["operator"]["limits"]["min_deposit_paise"], 10_000)
 
     async def test_operator_buy_and_withdraw_sync_to_admin_and_move_chips_on_approve(self):
         buy = await routes.create_operator_deposit(

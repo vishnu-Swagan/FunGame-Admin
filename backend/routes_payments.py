@@ -120,6 +120,27 @@ def _country_allowlist() -> set[str]:
     }
 
 
+def _payment_verification_state(user: Mapping[str, Any]) -> dict[str, bool]:
+    """Resolve verified evidence without trusting stale aggregate flags.
+
+    Older phone-OTP accounts can have ``phone_verified=True`` while the later
+    ``contact_verified`` aggregate is absent or stale.  Temporary admin-review
+    registrations carry an explicit, audited contact decision instead of
+    pretending an OTP occurred.  Both are valid evidence for payments; an
+    unreviewed contact or a bare aggregate flag is not.
+
+    Age and identity/KYC remain fail-closed on their canonical explicit
+    approvals so the payment, gameplay and compliance gates cannot disagree.
+    """
+    contact = operator_rail.payment_contact_state(user)
+    return {
+        "contact_verified": contact["phone_verified"] or contact["email_verified"],
+        "phone_verified": contact["phone_verified"],
+        "age_verified": user.get("age_verified") is True,
+        "kyc_verified": str(user.get("kyc_status") or "").upper() == "VERIFIED",
+    }
+
+
 async def _require_player(feature: str, user: dict) -> dict:
     try:
         finance.require_financial_feature(feature)
@@ -130,21 +151,20 @@ async def _require_player(feature: str, user: dict) -> dict:
             status_code=403,
             detail={"code": "FINANCIAL_ACCOUNT_NOT_ACTIVE", "message": "An active player account is required."},
         )
-    if not user.get("contact_verified") or not (
-        user.get("email_verified") or user.get("phone_verified")
-    ):
+    verification = _payment_verification_state(user)
+    if not verification["contact_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "CONTACT_NOT_VERIFIED", "message": "Verify your email address or phone number first."},
         )
-    if not user.get("age_verified"):
+    if not verification["age_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "AGE_NOT_VERIFIED", "message": "Age verification is required."},
         )
     # Contact OTP verification is not KYC.  Until an audited identity workflow
     # writes this explicit status, money mutations remain fail-closed.
-    if str(user.get("kyc_status", "")).upper() != "VERIFIED":
+    if not verification["kyc_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "KYC_REQUIRED", "message": "Identity verification is required."},
@@ -190,35 +210,7 @@ async def require_operator_deposit_player(user: dict = Depends(get_current_user)
     user = await require_operator_player(user)
     if not operator_rail.hosted_upi_requested():
         return user
-    if not user.get("contact_verified") or not user.get("phone_verified"):
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "CONTACT_NOT_VERIFIED", "message": "Verify your mobile number before using UPI."},
-        )
-    if not user.get("age_verified"):
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "AGE_NOT_VERIFIED", "message": "Age verification is required."},
-        )
-    if str(user.get("kyc_status", "")).upper() != "VERIFIED":
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "KYC_REQUIRED", "message": "Identity verification is required."},
-        )
-    if user.get("financial_status") in {"BLOCKED", "FROZEN", "REVIEW_REQUIRED"}:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "FINANCIAL_ACCOUNT_RESTRICTED", "message": "Financial activity is restricted on this account."},
-        )
-    country = compliance.normalise_country(user.get("country"))
-    allowed = _country_allowlist()
-    if not country or country not in allowed:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "FINANCIAL_MARKET_BLOCKED", "message": "UPI purchases are unavailable in your registered country."},
-        )
-    await compliance.assert_playable(user)
-    return user
+    return await operator_rail.require_hosted_deposit_eligible(user)
 
 
 async def require_deposit_player(user: dict = Depends(get_current_user)):
@@ -791,15 +783,33 @@ async def admin_kyc_queue(
         "_id": 0, "id": 1, "email": 1, "phone": 1, "country": 1,
         "age_verified": 1, "email_verified": 1, "phone_verified": 1,
         "kyc_status": 1, "kyc_reviewed_at": 1,
+        "age_verification_status": 1, "mobile_verification_status": 1,
+        "mobile_review_status": 1, "mobile_reviewed_at": 1,
+        "mobile_reviewed_by": 1, "mobile_review_note": 1,
+        "mobile_review_phone_snapshot": 1, "phone_normalized": 1,
+        "registration_source": 1, "activation_mode": 1,
+        "manual_contact_reviewed": 1, "contact_verification_status": 1,
+        "manual_contact_reviewed_at": 1, "manual_contact_reviewed_by": 1,
+        "approved_at": 1, "approved_by": 1, "accepted_terms": 1,
+        "submitted_at": 1, "email_normalized": 1, "primary_identity": 1,
+        "primary_identity_channel": 1, "pending_email": 1, "pending_phone": 1,
     }).sort("created_at", -1).to_list(500)
-    return {"players": [{
-        "id": row.get("id"), "email_masked": _mask_email(row.get("email")),
-        "phone_masked": _mask_phone(row.get("phone")), "country": row.get("country"),
-        "age_verified": bool(row.get("age_verified")),
-        "contact_verified": bool(row.get("email_verified") or row.get("phone_verified")),
-        "kyc_status": str(row.get("kyc_status") or "UNVERIFIED").upper(),
-        "reviewed_at": row.get("kyc_reviewed_at"),
-    } for row in rows]}
+    players = []
+    for row in rows:
+        contact = operator_rail.payment_contact_state(row)
+        players.append({
+            "id": row.get("id"), "email_masked": _mask_email(row.get("email")),
+            "phone_masked": _mask_phone(row.get("phone")), "country": row.get("country"),
+            "phone_available": bool(row.get("phone_normalized") or row.get("phone")),
+            "age_verified": bool(row.get("age_verified")),
+            "age_verification_status": row.get("age_verification_status") or "NOT_REQUESTED",
+            "mobile_verification_status": row.get("mobile_verification_status") or "NOT_REQUESTED",
+            "mobile_manually_verified": row.get("mobile_review_status") == "ADMIN_APPROVED",
+            "contact_verified": contact["phone_verified"] or contact["email_verified"],
+            "kyc_status": str(row.get("kyc_status") or "UNVERIFIED").upper(),
+            "reviewed_at": row.get("kyc_reviewed_at"),
+        })
+    return {"players": players}
 
 
 @admin_router.patch("/payments/kyc/{user_id}")

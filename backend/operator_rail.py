@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
+import compliance
 import ledger
 import financial_wallet as finance
 from ledger import InsufficientChips
@@ -386,11 +387,104 @@ def _hosted_idempotency(value: str) -> str:
     return key
 
 
+def payment_contact_state(user: Mapping[str, Any]) -> dict[str, bool]:
+    """Return contact evidence accepted by the payment rails.
+
+    Phone/email OTP flags are canonical.  The only non-OTP alternative is the
+    explicit, fully audited contact approval written by the manual-registration
+    workflow; partial or legacy-looking records remain unverified.
+    """
+    manual_reviewed_at = user.get("manual_contact_reviewed_at")
+    manual_reviewed_by = user.get("manual_contact_reviewed_by")
+    email = user.get("email_normalized")
+    phone = user.get("phone_normalized")
+    manual_contact_reviewed = bool(
+        user.get("registration_source") == "SELF_SERVICE"
+        and user.get("activation_mode") == "ADMIN_REVIEW"
+        and user.get("manual_contact_reviewed") is True
+        and user.get("contact_verification_status") == "ADMIN_APPROVED"
+        and manual_reviewed_at
+        and manual_reviewed_by
+        and user.get("approved_at") == manual_reviewed_at
+        and user.get("approved_by") == manual_reviewed_by
+        and user.get("accepted_terms") is True
+        and user.get("submitted_at")
+        and email
+        and user.get("email") == email
+        and phone
+        and user.get("phone") == phone
+        and user.get("primary_identity") == phone
+        and user.get("primary_identity_channel") == "PHONE"
+        and not user.get("pending_email")
+        and not user.get("pending_phone")
+    )
+    mobile_reviewed = bool(
+        user.get("mobile_review_status") == "ADMIN_APPROVED"
+        and user.get("mobile_reviewed_at")
+        and user.get("mobile_reviewed_by")
+        and user.get("mobile_review_note")
+        and phone
+        and user.get("mobile_review_phone_snapshot") == phone
+    )
+    return {
+        "phone_verified": (
+            user.get("phone_verified") is True
+            or manual_contact_reviewed
+            or mobile_reviewed
+        ),
+        "email_verified": user.get("email_verified") is True or manual_contact_reviewed,
+    }
+
+
+async def require_hosted_deposit_eligible(user: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Apply the complete hosted-UPI eligibility contract to a fresh user row."""
+    if user.get("role") != "PLAYER" or user.get("status") != "ACTIVE":
+        raise HTTPException(status_code=403, detail={
+            "code": "FINANCIAL_ACCOUNT_NOT_ACTIVE",
+            "message": "An active player account is required.",
+        })
+    contact = payment_contact_state(user)
+    if not contact["phone_verified"]:
+        raise HTTPException(status_code=403, detail={
+            "code": "CONTACT_NOT_VERIFIED",
+            "message": "Verify your mobile number before using UPI.",
+        })
+    if user.get("age_verified") is not True:
+        raise HTTPException(status_code=403, detail={
+            "code": "AGE_NOT_VERIFIED", "message": "Age verification is required.",
+        })
+    if str(user.get("kyc_status") or "").upper() != "VERIFIED":
+        raise HTTPException(status_code=403, detail={
+            "code": "KYC_REQUIRED", "message": "Identity verification is required.",
+        })
+    if str(user.get("financial_status") or "").upper() in {
+        "BLOCKED", "FROZEN", "REVIEW_REQUIRED",
+    }:
+        raise HTTPException(status_code=403, detail={
+            "code": "FINANCIAL_ACCOUNT_RESTRICTED",
+            "message": "Financial activity is restricted on this account.",
+        })
+    country = compliance.normalise_country(user.get("country"))
+    allowed = {
+        item.strip().upper()
+        for item in os.environ.get("FINANCIAL_ALLOWED_COUNTRIES", "").split(",")
+        if item.strip()
+    }
+    if not country or country not in allowed:
+        raise HTTPException(status_code=403, detail={
+            "code": "FINANCIAL_MARKET_BLOCKED",
+            "message": "UPI purchases are unavailable in your registered country.",
+        })
+    await compliance.assert_playable(user)
+    return user
+
+
 def _hosted_customer(user: Mapping[str, Any]) -> dict[str, Any]:
     digits = re.sub(r"\D", "", str(user.get("phone") or user.get("phone_normalized") or ""))
     if len(digits) == 12 and digits.startswith("91"):
         digits = digits[2:]
-    if not user.get("phone_verified") or len(digits) != 10 or digits[0] not in "6789":
+    contact = payment_contact_state(user)
+    if not contact["phone_verified"] or len(digits) != 10 or digits[0] not in "6789":
         raise HTTPException(status_code=400, detail={
             "code": "UPI_PHONE_REQUIRED",
             "message": "Verify a valid Indian mobile number before using UPI checkout.",
@@ -398,7 +492,7 @@ def _hosted_customer(user: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "full_name": user.get("full_name") or user.get("display_name"),
         "email": user.get("email"),
-        "email_verified": bool(user.get("email_verified")),
+        "email_verified": contact["email_verified"],
         "phone": digits,
         "phone_verified": True,
     }
@@ -413,13 +507,51 @@ async def _ensure_hosted_checkout(
         })
     if str(row.get("status") or "").upper() in HOSTED_TERMINAL:
         return dict(row), ""
-    if row.get("checkout_url") and row.get("provider_order_id"):
-        return dict(row), str(row["checkout_url"])
     user = await db.users.find_one({"id": row["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail={
             "code": "PLAYER_NOT_FOUND", "message": "The player account was not found.",
         })
+    try:
+        await require_hosted_deposit_eligible(user)
+    except HTTPException as exc:
+        error = f"ELIGIBILITY_{(exc.detail or {}).get('code', 'BLOCKED')}"
+        # Decide from the current database row, not the possibly stale row
+        # passed by an overlapping idempotent request. Once an external order
+        # exists it must stay visible to reconciliation even if eligibility is
+        # revoked while checkout creation is racing.
+        transition = await db[COLLECTION].update_one(
+            {
+                "id": row["id"], "source": UPI_SOURCE,
+                "status": {"$in": ["CREATED", "PENDING"]},
+                "provider_order_id": {"$nin": [None, ""]},
+            },
+            {"$set": {
+                "status": "RECONCILIATION_REQUIRED",
+                "last_error": error,
+                "resolved_at": utcnow(),
+                "updated_at": utcnow(),
+            }},
+        )
+        if transition.matched_count == 0:
+            await db[COLLECTION].update_one(
+                {
+                    "id": row["id"], "source": UPI_SOURCE,
+                    "status": {"$in": ["CREATED", "PENDING"]},
+                    "$or": [
+                        {"provider_order_id": {"$exists": False}},
+                        {"provider_order_id": None},
+                        {"provider_order_id": ""},
+                    ],
+                },
+                {"$set": {
+                    "status": "FAILED", "last_error": error,
+                    "resolved_at": utcnow(), "updated_at": utcnow(),
+                }},
+            )
+        raise
+    if row.get("checkout_url") and row.get("provider_order_id"):
+        return dict(row), str(row["checkout_url"])
     try:
         checkout = await provider.create_deposit_order(
             deposit_id=str(row["id"]),
@@ -477,6 +609,13 @@ async def create_hosted_deposit(
             "message": "Choose an INR amount that converts to a whole chip amount.",
         })
     chips = (paise * rate) // 100
+    fresh_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not fresh_user:
+        raise HTTPException(status_code=404, detail={
+            "code": "PLAYER_NOT_FOUND", "message": "The player account was not found.",
+        })
+    await require_hosted_deposit_eligible(fresh_user)
+    user = fresh_user
     _hosted_customer(user)
     existing = await db[COLLECTION].find_one({
         "user_id": user["id"], "source": UPI_SOURCE, "idempotency_key": key,
@@ -703,11 +842,41 @@ async def settle_hosted_deposit(
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
-        user = await db.users.find_one({"id": current["user_id"]}, {"_id": 0, "id": 1}, **kwargs)
+        user = await db.users.find_one({"id": current["user_id"]}, {"_id": 0}, **kwargs)
         if not user:
             raise HTTPException(status_code=409, detail={
                 "code": "UPI_PLAYER_MISSING", "message": "The purchase needs operator review.",
             })
+        try:
+            await require_hosted_deposit_eligible(user)
+        except HTTPException as exc:
+            try:
+                await db[COLLECTION].update_one(
+                    {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+                    {"$set": {
+                        "status": "RECONCILIATION_REQUIRED",
+                        # Preserve the authoritative paid reference so the
+                        # unique provider-reference index continues to protect
+                        # every other order from duplicate credit.
+                        "provider_reference": reference,
+                        "last_error": f"ELIGIBILITY_{(exc.detail or {}).get('code', 'BLOCKED')}",
+                        "resolved_at": utcnow(),
+                        "updated_at": utcnow(),
+                    }},
+                    **kwargs,
+                )
+            except DuplicateKeyError:
+                await db[COLLECTION].update_one(
+                    {"id": request_id, "source": UPI_SOURCE},
+                    {"$set": {
+                        "status": "RECONCILIATION_REQUIRED",
+                        "last_error": "DUPLICATE_UTR",
+                        "resolved_at": utcnow(),
+                        "updated_at": utcnow(),
+                    }},
+                    **kwargs,
+                )
+            return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
         await ledger.credit_chips(
             current["user_id"], int(current["chips"]),
             "Verified UPI chip purchase",

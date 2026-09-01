@@ -185,6 +185,30 @@ export const adminPayments = {
     const { data } = await financialApi.patch(`${ADMIN_ROOT}/kyc/${encodeURIComponent(userId)}`, { status, reason }, { __noFailover: true });
     return data;
   },
+  async requestPlayerVerification(userId, kind, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/verification-request`,
+      { kind, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
+  async reviewPlayerAge(userId, verified, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/age-verify`,
+      { verified, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
+  async reviewPlayerMobile(userId, verified, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/mobile-verify`,
+      { verified, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
   async deposits(params = {}) {
     const { data } = await financialApi.get(`${ADMIN_ROOT}/deposits`, { params });
     return responseRows(data, "deposits");
