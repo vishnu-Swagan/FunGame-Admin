@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, AlertTriangle, Copy, CreditCard, GitBranch, KeyRound, Plus, Power, PowerOff, RefreshCw,
+  Activity, Copy, CreditCard, GitBranch, KeyRound, Plus, Power, PowerOff, RefreshCw,
   Route, ShieldCheck, TestTube2, Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -136,14 +136,12 @@ export default function AdminPaymentHub() {
     try {
       const hub = await adminPayments.hubStatus();
       setStatus(hub);
-      if (hub?.admin) {
-        const [gatewayRows, routeRows, eventRows, activityRows, approvalRows] = await Promise.all([
-          adminPayments.gateways(), adminPayments.routes(), adminPayments.hubWebhookEvents(),
-          adminPayments.hubActivity(), adminPayments.paymentApprovals(),
-        ]);
-        setGateways(gatewayRows); setRoutes(routeRows); setEvents(eventRows);
-        setActivity(activityRows); setApprovals(approvalRows);
-      }
+      const [gatewayRows, routeRows, eventRows, activityRows, approvalRows] = await Promise.all([
+        adminPayments.gateways(), adminPayments.routes(), adminPayments.hubWebhookEvents(),
+        adminPayments.hubActivity(), adminPayments.paymentApprovals(),
+      ]);
+      setGateways(gatewayRows); setRoutes(routeRows); setEvents(eventRows);
+      setActivity(activityRows); setApprovals(approvalRows);
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
@@ -165,7 +163,7 @@ export default function AdminPaymentHub() {
   const canManageRoutes = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_MANAGE_ROUTES);
   const canActivateGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE);
   const canDisableGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_DISABLE);
-  const adminEnabled = Boolean(status?.admin);
+  const adminEnabled = Boolean(status);
   const paymentsV2 = Boolean(status?.payments_v2);
   const webhookBase = publicBase(status);
 
@@ -304,8 +302,6 @@ export default function AdminPaymentHub() {
       <div><strong>Provider registration is available here.</strong><p className="mt-1 text-xs opacity-85">This release exposes configuration and callback URLs only. Player pay-ins, payouts, wallet credit/debit, and V2 activation remain disabled by source-controlled rollout flags.</p></div>
     </div>
 
-    {!adminEnabled && !loading && <div data-testid="payment-admin-disabled" className="flex gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm text-amber-100"><AlertTriangle className="h-5 w-5 shrink-0" /><div><strong>PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render.</strong><p className="mt-1 text-xs opacity-80">Turn that API flag on so Super Admins can add providers, save credentials, and load webhook URLs. This page still renders so operators can confirm the flag.</p></div></div>}
-
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><CreditCard className="h-5 w-5 text-primary" /><p className="mt-3 text-2xl font-black">{gateways.length}</p><p className="text-xs text-white/45">Stored providers</p></div>
       <div className="rounded-2xl border border-white/10 bg-card/55 p-4"><ShieldCheck className="h-5 w-5 text-amber-200" /><p className="mt-3 text-lg font-black">{adminEnabled ? "On" : "Off"}</p><p className="text-xs text-white/45">CRM gateway admin API</p></div>
@@ -339,7 +335,7 @@ export default function AdminPaymentHub() {
                 {canDisableGateway && gateway.is_enabled && <Button size="sm" variant="outline" onClick={() => disableGateway(gateway)} disabled={Boolean(busy)}><PowerOff className="mr-1.5 h-3.5 w-3.5" />Disable</Button>}
               </div>
             </article>;
-          })}</div> : <p className="text-sm text-white/45">{adminEnabled ? "No payment providers have been added." : "Provider records load after PAYMENT_GATEWAY_ADMIN_ENABLED is on."}</p>}
+          })}</div> : <p className="text-sm text-white/45">No payment providers have been added.</p>}
         </Panel>
 
         <Panel title="Add provider configuration" subtitle="Stores an encrypted provider record and its callback URL. It cannot create player payments or post to wallets.">

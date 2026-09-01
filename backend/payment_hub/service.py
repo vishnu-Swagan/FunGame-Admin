@@ -38,12 +38,14 @@ def enabled(name: str, default: str = "false") -> bool:
 
 
 def admin_feature_enabled() -> bool:
-    """Operator configuration surface. On unless Render sets the flag to false.
+    """Operator configuration surface is always on.
 
-    This does not authorize wallet credit/debit. PAYMENTS_V2_ENABLED,
-    REAL_MONEY_ENABLED, and the financial readiness flags stay fail-closed.
+    A stale Render ``PAYMENT_GATEWAY_ADMIN_ENABLED=false`` must not hide
+    provider setup. This still does not authorize wallet credit/debit:
+    PAYMENTS_V2_ENABLED, REAL_MONEY_ENABLED, and the financial readiness
+    flags stay fail-closed.
     """
-    return enabled("PAYMENT_GATEWAY_ADMIN_ENABLED", default="true")
+    return True
 
 
 def _public_webhook_base_url() -> str | None:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, Banknote, Bitcoin, Building2, Copy, CreditCard, LayoutGrid,
+  Banknote, Bitcoin, Building2, Copy, CreditCard, LayoutGrid,
   Plus, RefreshCw, ShieldCheck, TestTube2, Trash2, Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -169,16 +169,14 @@ export default function AdminPaymentGateways() {
     try {
       const hub = await adminPayments.hubStatus();
       setStatus(hub);
-      if (hub?.admin) {
-        const [gatewayRows, settingsRow, agentRows] = await Promise.all([
-          adminPayments.gateways(),
-          adminPayments.paymentGatewaySettings(),
-          adminPayments.localAgents(),
-        ]);
-        setGateways(gatewayRows.map(coerceGateway));
-        setSettings(coerceSettings(settingsRow || {}));
-        setAgents(agentRows);
-      }
+      const [gatewayRows, settingsRow, agentRows] = await Promise.all([
+        adminPayments.gateways(),
+        adminPayments.paymentGatewaySettings(),
+        adminPayments.localAgents(),
+      ]);
+      setGateways(gatewayRows.map(coerceGateway));
+      setSettings(coerceSettings(settingsRow || {}));
+      setAgents(agentRows);
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
@@ -188,7 +186,7 @@ export default function AdminPaymentGateways() {
 
   useEffect(() => { load(); }, [load]);
 
-  const adminEnabled = Boolean(status?.admin);
+  const adminEnabled = Boolean(status);
   const liveCount = gateways.filter((item) => !item.sandboxMode).length;
   const shown = useMemo(() => gateways.filter((item) => item.category === category), [gateways, category]);
 
@@ -214,16 +212,6 @@ export default function AdminPaymentGateways() {
           <p>Credentials are stored encrypted and callback URLs are ready to register. Connection tests verify the configured endpoint; hosted checkout, provider certification, and wallet credit/debit stay behind the financial readiness flags.</p>
         </div>
       </div>
-
-      {!adminEnabled && !loading && (
-        <div data-testid="payment-admin-disabled" className="crm-inline-notice">
-          <AlertTriangle size={16} />
-          <div>
-            <strong>PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render.</strong>
-            <p>Turn that API flag on so operators can configure methods, save credentials, and load webhook URLs.</p>
-          </div>
-        </div>
-      )}
 
       <nav className="gateway-tabs" aria-label="Payment method categories">
         {CATEGORIES.map(({ key, label, icon: Icon }) => (

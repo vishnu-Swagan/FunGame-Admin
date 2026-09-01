@@ -74,7 +74,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-test("payment hub keeps configuration visible while the gateway admin API is disabled", async () => {
+test("payment hub loads providers even when a stale hub.admin flag is false", async () => {
   adminPayments.hubStatus.mockResolvedValue({
     payments_v2: false, admin: false, live_allowed: false,
     installed_adapters: ["GENERIC_REST"],
@@ -84,9 +84,9 @@ test("payment hub keeps configuration visible while the gateway admin API is dis
   expect(container.textContent).toContain("Payment gateways");
   expect(container.querySelector('[data-testid="payment-hub-boundary"]')?.textContent)
     .toContain("Provider registration is available here");
-  expect(container.textContent).toContain("PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render");
+  expect(container.textContent).not.toContain("PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render");
   expect(container.textContent).toContain("wallet credit/debit");
-  expect(adminPayments.gateways).not.toHaveBeenCalled();
+  expect(adminPayments.gateways).toHaveBeenCalled();
   await act(async () => root.unmount());
 });
 
