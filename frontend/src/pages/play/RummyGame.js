@@ -25,8 +25,8 @@ export { RummyRoyalSettlement as Results } from "./RummyRoyalSettlement";
 
 
 const SUITS = {
-  S: { symbol: "♠", red: false }, H: { symbol: "♥", red: true },
-  D: { symbol: "♦", red: true }, C: { symbol: "♣", red: false },
+  S: { symbol: "♠", name: "spades", red: false }, H: { symbol: "♥", name: "hearts", red: true },
+  D: { symbol: "♦", name: "diamonds", red: true }, C: { symbol: "♣", name: "clubs", red: false },
 };
 
 const uuid = () => globalThis.crypto?.randomUUID?.() || `rummy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -516,9 +516,11 @@ export function RummyCard({ card, selected, raised, entering = false, motionId =
     );
   }
   const joker = card?.printedJoker || card?.code === "PJ";
-  const wild = joker || (wildRank != null && Number(card?.rank) === Number(wildRank));
+  const rankWild = !joker && wildRank != null && Number(card?.rank) === Number(wildRank);
+  const wild = joker || rankWild;
   const suit = SUITS[card?.suit];
   const rank = joker ? "J" : String(card?.code || "").slice(0, -1);
+  const accessibleName = joker ? "Printed joker" : `${rank} of ${suit?.name || "unknown suit"}${wild ? ", wild joker" : ""}`;
   const Root = onSelect ? motion.button : motion.div;
   const restingLift = raised ? -16 : selected ? -12 : 0;
   const pressedLift = raised || selected ? -14 : -9;
@@ -544,20 +546,26 @@ export function RummyCard({ card, selected, raised, entering = false, motionId =
       draggable={Boolean(onDragStart)}
       onDragStart={(event) => onDragStart?.(event, card.id)}
       onClick={() => onSelect?.(card.id)}
-      className={`rummy-card ${selected ? "is-selected" : ""} ${raised ? "is-raised" : ""} ${compact ? "is-compact" : ""} ${wild ? "is-wild-card" : ""}`}
+      className={`rummy-card ${selected ? "is-selected" : ""} ${raised ? "is-raised" : ""} ${compact ? "is-compact" : ""} ${wild ? "is-wild-card" : ""} ${joker ? "is-printed-joker" : ""} ${rankWild ? "is-rank-wild" : ""}`}
+      role={onSelect ? undefined : "img"}
       aria-pressed={selected}
-      aria-label={joker ? "Printed joker" : `${rank} of ${card.suit}${wild ? ", wild joker" : ""}`}
+      aria-label={accessibleName}
       data-card-id={card.id}
       data-wild={wild ? "true" : "false"}
+      data-joker-kind={joker ? "printed" : rankWild ? "rank-wild" : "none"}
     >
       {joker ? (
-        <><b className="rummy-joker-letter">J</b><span className="rummy-jester">♛</span><small>JOKER</small></>
+        <>
+          <span className="rummy-joker-corner" aria-hidden="true"><b>J</b><em>✦</em></span>
+          <span className="rummy-joker-emblem" aria-hidden="true"><i>J</i><b>JOKER</b></span>
+          <span className="rummy-joker-corner is-lower" aria-hidden="true"><b>J</b><em>✦</em></span>
+        </>
       ) : (
         <>
-          {wild && <span className="rummy-wild-crown" aria-hidden="true">♛</span>}
           <span className={suit?.red ? "is-red" : ""}><b>{rank}</b><em>{suit?.symbol}</em></span>
           <strong className={suit?.red ? "is-red" : ""}>{suit?.symbol}</strong>
           <span className={`rummy-card-corner ${suit?.red ? "is-red" : ""}`}><b>{rank}</b><em>{suit?.symbol}</em></span>
+          {rankWild && <span className="rummy-wild-badge" aria-hidden="true">W</span>}
         </>
       )}
     </Root>
@@ -623,10 +631,15 @@ export function rummyTurnAnnouncement(activeSeat, viewerSeatIndex, timer, turnDu
   return ownTurn ? "Your turn started." : `${playerName}'s turn started.`;
 }
 
-function Deck({ label, card, count, disabled, onClick, open = false, reducedMotion = false }) {
+function Deck({ label, card, count, disabled, onClick, open = false, reducedMotion = false, wildRank = null }) {
+  const joker = card?.printedJoker || card?.code === "PJ";
+  const rankWild = !joker && wildRank != null && Number(card?.rank) === Number(wildRank);
+  const suit = SUITS[card?.suit];
+  const rank = joker ? "J" : String(card?.code || "").slice(0, -1);
+  const cardLabel = joker ? "printed joker" : `${rank} of ${suit?.name || "unknown suit"}${rankWild ? ", wild joker" : ""}`;
   return (
-    <button type="button" className={`rummy-deck ${open ? "is-open" : ""}`} disabled={disabled} onClick={onClick} aria-label={label}>
-      {open && card ? <RummyCard card={card} compact reducedMotion={reducedMotion} /> : <CardBack count={count} />}
+    <button type="button" className={`rummy-deck ${open ? "is-open" : ""}`} disabled={disabled} onClick={onClick} aria-label={open && card ? `${label}: ${cardLabel}` : label}>
+      {open && card ? <RummyCard card={card} compact reducedMotion={reducedMotion} wildRank={wildRank} /> : <CardBack count={count} />}
       <b>{label}</b>
     </button>
   );
@@ -987,8 +1000,8 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
                 <div className="rummy-local-hint is-draw" role="status">Draw from either pile</div>
               )}
               <Deck label="CLOSED DECK" count={state.closedDeckCount} disabled={busy || !privateState?.canDraw} onClick={() => performAction("DRAW_CLOSED")} reducedMotion={reducedMotion} />
-              <Deck label="OPEN CARD" card={state.openDiscard} open disabled={busy || !privateState?.canDraw || !state.openDiscard} onClick={() => performAction("DRAW_DISCARD")} reducedMotion={reducedMotion} />
-              <div className="rummy-wild"><RummyCard card={state.wildJoker} compact reducedMotion={reducedMotion} /><span>WILD JOKER</span></div>
+              <Deck label="OPEN CARD" card={state.openDiscard} open disabled={busy || !privateState?.canDraw || !state.openDiscard} onClick={() => performAction("DRAW_DISCARD")} reducedMotion={reducedMotion} wildRank={state.wildJoker?.rank} />
+              <div className="rummy-wild" role="group" aria-label={`Wild-rank indicator: ${String(state.wildJoker?.code || "").slice(0, -1)} of ${SUITS[state.wildJoker?.suit]?.name || "unknown suit"}`}><RummyCard card={state.wildJoker} compact reducedMotion={reducedMotion} /><span>WILD JOKER</span></div>
             </div>
           </div>
         </div>
@@ -1068,6 +1081,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           key={resultKey || "result"}
           result={state.result}
           viewerSeatIndex={viewerSeatIndex}
+          wildRank={state.wildJoker?.rank}
           onLobby={onExit}
           onCue={(cue) => audioController?.playSettlementCue?.(cue)}
           reducedMotion={reducedMotion}
