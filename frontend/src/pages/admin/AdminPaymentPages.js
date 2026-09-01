@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
 import { auditState, formatAuditValue, reconciliationSummary } from "@/lib/adminPaymentUtils";
 import { useSearchParams } from "react-router-dom";
+import AdminStepUpDialog, { requiresAdminStepUp } from "@/components/AdminStepUpDialog";
 
 const ALL = "ALL";
 
@@ -270,39 +271,76 @@ export function AdminKyc() {
   const [query, setQuery] = useState("");
   const [drafts, setDrafts] = useState({});
   const [acting, setActing] = useState("");
+  const [pendingSensitiveAction, setPendingSensitiveAction] = useState(null);
   const loader = useCallback(() => adminPayments.kyc(status === ALL ? undefined : status), [status]);
   const { rows, loading, load } = useAdminRows(loader);
   const canReview = hasPermission(user, ADMIN_PERMISSIONS.KYC_REVIEW);
   const needle = query.trim().toLowerCase();
   const shown = rows.filter((item) => !needle || [item.id, item.email_masked, item.phone_masked, item.country].some((value) => String(value || "").toLowerCase().includes(needle)));
 
-  const review = async (player, decision) => {
-    const reason = String(drafts[player.id] || "").trim();
-    if (reason.length < 5) return toast.error("Enter a clear review reason");
-    const key = `${player.id}:${decision}`;
-    setActing(key);
+  const performSensitiveAction = async (action) => {
+    if (action.kind === "KYC") {
+      await adminPayments.reviewKyc(action.playerId, action.decision, action.reason);
+      toast.success(`KYC marked ${action.decision.toLowerCase()}`);
+    } else if (action.kind === "VERIFY_AGE") {
+      await adminPayments.reviewPlayerAge(action.playerId, true, action.reason);
+      toast.success("Age verification recorded and player notified");
+    } else if (action.kind === "VERIFY_MOBILE") {
+      await adminPayments.reviewPlayerMobile(action.playerId, true, action.reason);
+      toast.success("Mobile verification recorded and player notified");
+    }
+    setDrafts((current) => ({ ...current, [action.playerId]: "" }));
+    await load();
+  };
+
+  const runSensitiveAction = async (action, offerStepUp = true) => {
+    setActing(action.key);
     try {
-      await adminPayments.reviewKyc(player.id, decision, reason);
-      toast.success(`KYC marked ${decision.toLowerCase()}`);
-      setDrafts((current) => ({ ...current, [player.id]: "" }));
-      await load();
+      await performSensitiveAction(action);
     } catch (error) {
-      toast.error(errMsg(error));
+      if (offerStepUp && requiresAdminStepUp(error)) {
+        // The rejected request made no mutation. Preserve its exact player,
+        // decision and audit reason while the admin completes password + OTP,
+        // then retry it once.
+        setPendingSensitiveAction(action);
+      } else {
+        toast.error(errMsg(error));
+      }
     } finally {
       setActing("");
     }
   };
 
+  const retryPendingSensitiveAction = async () => {
+    const action = pendingSensitiveAction;
+    if (!action) return;
+    await runSensitiveAction(action, false);
+  };
+
+  const review = async (player, decision) => {
+    const reason = String(drafts[player.id] || "").trim();
+    if (reason.length < 5) return toast.error("Enter a clear review reason");
+    await runSensitiveAction({
+      kind: "KYC", playerId: player.id, decision, reason,
+      key: `${player.id}:${decision}`,
+    });
+  };
+
   const verificationAction = async (player, action) => {
     const reason = String(drafts[player.id] || "").trim();
     if (reason.length < 5) return toast.error("Enter a clear verification reason");
+    if (action === "VERIFY_AGE" || action === "VERIFY_MOBILE") {
+      await runSensitiveAction({
+        kind: action, playerId: player.id, reason,
+        key: `${player.id}:${action}`,
+      });
+      return;
+    }
     const key = `${player.id}:${action}`;
     setActing(key);
     try {
       if (action === "REQUEST_AGE") await adminPayments.requestPlayerVerification(player.id, "AGE", reason);
       if (action === "REQUEST_MOBILE") await adminPayments.requestPlayerVerification(player.id, "MOBILE", reason);
-      if (action === "VERIFY_AGE") await adminPayments.reviewPlayerAge(player.id, true, reason);
-      if (action === "VERIFY_MOBILE") await adminPayments.reviewPlayerMobile(player.id, true, reason);
       toast.success("Verification action recorded and player notified");
       setDrafts((current) => ({ ...current, [player.id]: "" }));
       await load();
@@ -331,6 +369,12 @@ export function AdminKyc() {
         </div>
       </div>}
     </article>)}</div> : <Empty icon={ShieldCheck} loading={loading} noun="verification records" />}
+    <AdminStepUpDialog
+      open={Boolean(pendingSensitiveAction)}
+      actionLabel={pendingSensitiveAction?.kind === "KYC" ? "completing this KYC decision" : "recording this manual verification"}
+      onCancel={() => setPendingSensitiveAction(null)}
+      onVerified={retryPendingSensitiveAction}
+    />
   </PageTransition>;
 }
 

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { AdminDeposits, AdminWithdrawals } from "./AdminPaymentPages";
+import { AdminDeposits, AdminKyc, AdminWithdrawals } from "./AdminPaymentPages";
 import { adminPayments } from "@/lib/paymentApi";
 
 let mockUser;
@@ -10,7 +10,22 @@ jest.mock("@/lib/paymentApi", () => ({ adminPayments: {
   withdrawals: jest.fn(),
   resolveOperatorRequest: jest.fn(),
   withdrawalAction: jest.fn(),
+  kyc: jest.fn(),
+  reviewKyc: jest.fn(),
+  requestPlayerVerification: jest.fn(),
+  reviewPlayerAge: jest.fn(),
+  reviewPlayerMobile: jest.fn(),
 } }));
+jest.mock("@/components/AdminStepUpDialog", () => ({
+  __esModule: true,
+  default: ({ open, onCancel, onVerified }) => open ? (
+    <button data-testid="mock-admin-step-up" onClick={async () => { await onVerified(); onCancel(); }}>
+      Complete administrator verification
+    </button>
+  ) : null,
+  requiresAdminStepUp: (error) => ["ADMIN_MFA_REQUIRED", "ADMIN_STEP_UP_REQUIRED"]
+    .includes(error?.response?.data?.detail?.code),
+}));
 jest.mock("@/components/common", () => ({
   PageTransition: ({ children }) => <div>{children}</div>,
   EmptyState: ({ title }) => <div>{title}</div>,
@@ -20,6 +35,7 @@ jest.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: mockUser }) 
 jest.mock("@/components/RouteGuards", () => ({
   ADMIN_PERMISSIONS: {
     PAYMENTS_VIEW: "PAYMENTS_VIEW",
+    KYC_REVIEW: "KYC_REVIEW",
     WITHDRAWALS_APPROVE: "WITHDRAWALS_APPROVE",
     WITHDRAWALS_MARK_PAID: "WITHDRAWALS_MARK_PAID",
   },
@@ -88,6 +104,17 @@ beforeEach(() => {
     created_at: "2026-09-01T02:05:00Z",
   }]);
   adminPayments.resolveOperatorRequest.mockResolvedValue({ request: { status: "APPROVED" } });
+  adminPayments.kyc.mockResolvedValue([{
+    id: "player-kyc-1",
+    email_masked: "p•••@example.test",
+    phone_masked: "••••1234",
+    phone_available: true,
+    contact_verified: true,
+    age_verified: false,
+    age_verification_status: "NOT_REQUESTED",
+    country: "India",
+    kyc_status: "UNVERIFIED",
+  }]);
 });
 
 afterEach(() => {
@@ -117,5 +144,44 @@ test("admin withdrawals can approve operator payout requests", async () => {
   });
   expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledWith("op-wd-1", "approve", { note: null });
   expect(adminPayments.withdrawalAction).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("age verification opens admin step-up and retries the exact action", async () => {
+  adminPayments.reviewPlayerAge
+    .mockRejectedValueOnce({
+      response: { data: { detail: {
+        code: "ADMIN_MFA_REQUIRED",
+        message: "Administrator 2FA enrollment and verification are required.",
+      } } },
+    })
+    .mockResolvedValueOnce({ message: "Age verified" });
+  const { container, root } = await render(AdminKyc);
+  const reason = container.querySelector('input[placeholder="Verification reason / instructions (required)"]');
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  await act(async () => {
+    valueSetter.call(reason, "Passport checked");
+    reason.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+  });
+  const verifyAge = Array.from(container.querySelectorAll("button"))
+    .find((button) => button.textContent === "Verify age");
+  await act(async () => {
+    verifyAge.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  expect(container.querySelector('[data-testid="mock-admin-step-up"]')).not.toBeNull();
+  expect(adminPayments.reviewPlayerAge).toHaveBeenCalledWith(
+    "player-kyc-1", true, "Passport checked",
+  );
+  await act(async () => {
+    container.querySelector('[data-testid="mock-admin-step-up"]')
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  expect(adminPayments.reviewPlayerAge).toHaveBeenCalledTimes(2);
+  expect(adminPayments.reviewPlayerAge).toHaveBeenLastCalledWith(
+    "player-kyc-1", true, "Passport checked",
+  );
   await act(async () => root.unmount());
 });
