@@ -218,33 +218,67 @@
 
   .curve-line {
     fill: none;
-    stroke: #e11942;
+    stroke: #ff2436;
     stroke-width: 4;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 5px rgba(225, 25, 66, 0.58));
+    filter: drop-shadow(0 0 5px rgba(255, 36, 54, 0.62));
   }
 
   .curve-tip {
-    fill: #ed1747;
-    filter: drop-shadow(0 0 8px rgba(237, 23, 71, 0.9));
+    fill: #ff2436;
+    filter: drop-shadow(0 0 8px rgba(255, 36, 54, 0.9));
+  }
+}
+
+.aircraft-sprite {
+  transform-box: fill-box;
+  transform-origin: 13.5% 94.7%;
+
+  &.visible {
+    animation: planeCruise 1.18s ease-in-out infinite;
   }
 }
 
 .plane {
   opacity: 0;
-  transform-box: fill-box;
-  transform-origin: 6% 55%;
   transition: opacity 160ms ease;
-  filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 7px rgba(237, 23, 66, 0.26));
+  filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 8px rgba(255, 36, 54, 0.34));
   pointer-events: none;
 
   &.visible {
     opacity: 1;
-    animation: planeCruise 1.18s ease-in-out infinite;
   }
 }
 
-.plane-flight.crashed .plane {
+.aircraft-propeller {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+
+  &.visible {
+    opacity: 1;
+    animation: propellerSpin 140ms linear infinite;
+  }
+
+  .propeller-blade {
+    fill: rgba(255, 36, 54, 0.16);
+    stroke: #ff2436;
+    stroke-width: 4;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 4px rgba(255, 36, 54, 0.62));
+  }
+
+  .propeller-hub {
+    fill: #ff2436;
+    stroke: #080a0d;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+}
+
+.plane-flight.crashed .aircraft-sprite {
   animation: aviatorEscapeVector 460ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
 }
 
@@ -416,6 +450,12 @@
   }
 }
 
+@keyframes propellerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes aviatorEscapeVector {
   0% {
     opacity: 1;
@@ -495,14 +535,16 @@
 @media (prefers-reduced-motion: reduce) {
   .round-state .state-dot,
   .plane,
+  .aircraft-propeller,
   .multiplier,
   .center-logo,
   .flight-timer {
     transition-duration: 1ms !important;
   }
 
-  .plane.visible,
-  .plane-flight.crashed .plane {
+  .aircraft-sprite.visible,
+  .plane-flight.crashed .aircraft-sprite,
+  .aircraft-propeller.visible {
     animation: none !important;
   }
 }

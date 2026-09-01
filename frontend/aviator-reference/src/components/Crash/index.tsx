@@ -2,17 +2,22 @@
 import React from "react";
 import "./crash.scss";
 import Context from "../../context";
-import aviatorCraft from "../../assets/images/aviator-craft.svg";
+import aviatorCraft from "../../assets/images/aviator-craft-attachment.png";
 import { playGameSound } from "../../sound";
 
 const BETTING_WINDOW_MS = 5000;
 const FLIGHT_HOVER_PROGRESS = 0.82;
 const FLIGHT_VIEWBOX_WIDTH = 1000;
 const FLIGHT_FLOOR_Y = 532;
-const PLANE_WIDTH = 174;
-const PLANE_HEIGHT = PLANE_WIDTH * (112 / 300);
-const PLANE_TAIL_X = PLANE_WIDTH * (18 / 300);
-const PLANE_TAIL_Y = PLANE_HEIGHT * (62 / 112);
+const PLANE_WIDTH = 190;
+const PLANE_HEIGHT = PLANE_WIDTH * (887 / 1774);
+// The supplied aircraft's trail visually meets the lower rear spar, not the
+// transparent image edge. Keep that attachment point locked to the curve tip.
+const PLANE_TAIL_X = PLANE_WIDTH * (240 / 1774);
+const PLANE_TAIL_Y = PLANE_HEIGHT * (840 / 887);
+const PLANE_PROPELLER_X = PLANE_WIDTH * (1508 / 1774);
+const PLANE_PROPELLER_Y = PLANE_HEIGHT * (354 / 887);
+const PLANE_PROPELLER_RADIUS = PLANE_HEIGHT * 0.47;
 
 export const flightCurveValue = (seconds: number) => (
 	1
@@ -51,6 +56,9 @@ export const flightGeometryFor = (rawProgress: number) => {
 		planeRotation: -7 - (5 * progress),
 		planeWidth: PLANE_WIDTH,
 		planeHeight: PLANE_HEIGHT,
+		propellerX: tailX - PLANE_TAIL_X + PLANE_PROPELLER_X,
+		propellerY: tailY - PLANE_TAIL_Y + PLANE_PROPELLER_Y,
+		propellerRadius: PLANE_PROPELLER_RADIUS,
 	};
 };
 
@@ -149,14 +157,30 @@ export default function CrashStage() {
 								data-tail-y={flightGeometry.tailY.toFixed(2)}
 								transform={`rotate(${flightGeometry.planeRotation.toFixed(2)} ${flightGeometry.tailX.toFixed(2)} ${flightGeometry.tailY.toFixed(2)})`}
 							>
-								<image
-									href={aviatorCraft}
-									x={flightGeometry.planeX}
-									y={flightGeometry.planeY}
-									width={flightGeometry.planeWidth}
-									height={flightGeometry.planeHeight}
-									className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
-								/>
+								<g className={`aircraft-sprite ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}>
+									<image
+										href={aviatorCraft}
+										data-flight-style="attachment-line-art"
+										data-aircraft-asset="transparent-png"
+										x={flightGeometry.planeX}
+										y={flightGeometry.planeY}
+										width={flightGeometry.planeWidth}
+										height={flightGeometry.planeHeight}
+										className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
+									/>
+									<g transform={`translate(${flightGeometry.propellerX.toFixed(2)} ${flightGeometry.propellerY.toFixed(2)})`}>
+										<g
+											className={`aircraft-propeller ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
+											data-propeller="spinning"
+										>
+											<path
+												className="propeller-blade"
+												d={`M -2 -5 C -7 -18 -7 -33 0 -${flightGeometry.propellerRadius.toFixed(2)} C 8 -34 8 -18 3 -5 Z M 2 5 C 8 18 8 34 0 ${flightGeometry.propellerRadius.toFixed(2)} C -8 34 -8 18 -3 5 Z`}
+											/>
+											<circle className="propeller-hub" cx="0" cy="0" r="5" />
+										</g>
+									</g>
+								</g>
 							</g>
 						</svg>
 						<div className={`center-logo ${GameState !== "BET" ? "hide" : ""}`}>
