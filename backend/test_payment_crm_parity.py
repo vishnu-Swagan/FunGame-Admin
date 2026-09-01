@@ -12,7 +12,9 @@ import base64
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from mongomock_motor import AsyncMongoMockClient
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -357,6 +359,70 @@ class AdminFeatureDefaultTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(service.feature_status()["admin"])
             service.require_admin_feature()
             self.assertFalse(service.feature_status()["payments_v2"])
+
+
+class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
+    def _step_up(self, admin):
+        now = datetime.now(timezone.utc)
+        admin.update({
+            "mfa_enabled": True,
+            "mfa_verified_at": now,
+            "reauthenticated_at": now,
+            "active_session_id": "payment-admin-session",
+            "admin_step_up_session_id": "payment-admin-session",
+        })
+        return admin
+
+    async def test_pre_rbac_admin_can_view_and_configure_gateways(self):
+        admin = {"id": "legacy-admin", "role": "ADMIN", "status": "ACTIVE"}
+        viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(viewed["id"], "legacy-admin")
+        self._step_up(admin)
+        created = await routes_payment_hub.require_permission(
+            "gateway.create", step_up=True, super_admin=True,
+        )(user=admin)
+        self.assertEqual(created["id"], "legacy-admin")
+        updated = await routes_payment_hub.require_permission(
+            "gateway.update_non_secret_config", step_up=True, super_admin=True,
+        )(user=admin)
+        self.assertEqual(updated["id"], "legacy-admin")
+
+    async def test_empty_grant_list_without_role_is_treated_as_bootstrap_admin(self):
+        admin = {"id": "bootstrap", "role": "ADMIN", "status": "ACTIVE", "admin_permissions": []}
+        viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(viewed["id"], "bootstrap")
+
+    async def test_operations_admin_with_empty_grants_is_still_denied(self):
+        admin = {
+            "id": "ops", "role": "ADMIN", "status": "ACTIVE",
+            "admin_role": "OPERATIONS", "admin_permissions": [],
+        }
+        with self.assertRaises(HTTPException) as denied:
+            await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(denied.exception.status_code, 403)
+        self.assertEqual(denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
+
+    async def test_operations_view_grant_cannot_create_gateways(self):
+        admin = {
+            "id": "ops-view", "role": "ADMIN", "status": "ACTIVE",
+            "admin_role": "OPERATIONS",
+            "admin_permissions": ["PAYMENTS_VIEW", "GATEWAY_VIEW"],
+        }
+        viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(viewed["id"], "ops-view")
+        with self.assertRaises(HTTPException) as denied:
+            await routes_payment_hub.require_permission(
+                "gateway.create", step_up=True, super_admin=True,
+            )(user=admin)
+        self.assertEqual(denied.exception.detail["code"], "SUPER_ADMIN_REQUIRED")
+
+    async def test_super_admin_with_empty_grants_can_view(self):
+        admin = {
+            "id": "super", "role": "ADMIN", "status": "ACTIVE",
+            "admin_role": "SUPER_ADMIN", "admin_permissions": [],
+        }
+        viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(viewed["id"], "super")
 
 
 class AdminPasswordGuardTests(unittest.IsolatedAsyncioTestCase):

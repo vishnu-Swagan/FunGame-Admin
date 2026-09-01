@@ -39,19 +39,48 @@ PERMISSION_ALIASES = {
 }
 
 
+# First production admin rows predate admin_permissions. Keep the CRM
+# configuration surfaces available until those documents are migrated.
+# An explicitly present empty canonical list still means revoked.
+_PRE_RBAC_PAYMENT_GRANTS = {
+    "PAYMENTS_VIEW", "GATEWAY_VIEW", "GATEWAY_CREATE",
+    "GATEWAY_UPDATE_NON_SECRET_CONFIG", "GATEWAY_TEST", "AUDIT_VIEW",
+}
+
+
 def _permissions(user: Mapping[str, Any]) -> set[str]:
+    if "admin_permissions" not in user and "permissions" not in user:
+        return set(_PRE_RBAC_PAYMENT_GRANTS)
     values = user.get("admin_permissions") if "admin_permissions" in user else user.get("permissions", [])
-    return {str(value).strip().upper() for value in (values or [])}
+    return {str(value).strip().upper() for value in (values or []) if value}
+
+
+def _is_super_admin(user: Mapping[str, Any]) -> bool:
+    return str(user.get("admin_role") or "").upper() == "SUPER_ADMIN"
+
+
+def _is_pre_rbac_admin(user: Mapping[str, Any]) -> bool:
+    """Bootstrap operator: no designated admin_role and no migrated grant list.
+
+    A named role with an empty canonical list stays revoked. A leftover
+    ``permissions`` key next to an empty ``admin_permissions`` list is also
+    treated as an explicit migration, not a bootstrap row.
+    """
+    if str(user.get("admin_role") or "").strip():
+        return False
+    if "admin_permissions" in user:
+        return not bool(user.get("admin_permissions") or []) and "permissions" not in user
+    return "permissions" not in user
 
 
 def require_permission(permission: str, *, step_up: bool = False, super_admin: bool = False, feature: bool = True):
     async def dependency(user: dict = Depends(get_current_user)):
         if user.get("role") != "ADMIN" or user.get("status") != "ACTIVE":
             raise HTTPException(status_code=403, detail={"code": "ADMIN_REQUIRED", "message": "Administrator access is required."})
-        is_super = str(user.get("admin_role", "")).upper() == "SUPER_ADMIN"
-        if super_admin and not is_super:
+        privileged = _is_super_admin(user) or _is_pre_rbac_admin(user)
+        if super_admin and not privileged:
             raise HTTPException(status_code=403, detail={"code": "SUPER_ADMIN_REQUIRED", "message": "A designated Super Admin is required."})
-        if not is_super and not (_permissions(user) & PERMISSION_ALIASES[permission]):
+        if not privileged and not (_permissions(user) & PERMISSION_ALIASES[permission]):
             raise HTTPException(status_code=403, detail={"code": "ADMIN_PERMISSION_REQUIRED", "message": "This payment permission is required."})
         if step_up:
             require_recent_admin_step_up(user)
