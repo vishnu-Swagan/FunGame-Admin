@@ -73,10 +73,21 @@
   background: rgba(17,22,47,.88);
   color: #d8deef;
   box-shadow: 0 5px 15px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.08);
+  transition:
+    transform 140ms cubic-bezier(.23,1,.32,1),
+    background-color 180ms cubic-bezier(.23,1,.32,1),
+    border-color 180ms cubic-bezier(.23,1,.32,1);
 }
 
 .ab-top-actions svg { width: 20px; height: 20px; }
-.ab-top-actions button:active { transform: scale(.94); }
+.ab-top-actions button:active { transform: scale(.97); }
+
+@media (hover: hover) and (pointer: fine) {
+  .ab-top-actions button:hover {
+    border-color: rgba(228,192,107,.46);
+    background: rgba(28,36,70,.96);
+  }
+}
 
 .ab-hit {
   position: absolute;
@@ -179,4 +190,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ab-top-actions button,
   .ab-hit { transition: none !important; }
+
+  .ab-top-actions button:active { transform: none; }
 }
+
+body.rm .ab-top-actions button,
+body.rm .ab-hit { transition: none !important; }
+
+body.rm .ab-top-actions button:active { transform: none; }

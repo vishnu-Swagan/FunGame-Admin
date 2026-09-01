@@ -150,7 +150,7 @@ SIDE_OPTIONS = {
         # the printed 2.5:1 price therefore settles at 3.5x including stake.
         "count_1_5": 3.5, "count_6_10": 4.5,
         "count_11_15": 5.5, "count_16_25": 4.5,
-        "count_26_30": 5.0, "count_31_35": 25.0,
+        "count_26_30": 15.0, "count_31_35": 25.0,
         "count_36_40": 50.0, "count_41_49": 120.0,
     },
     # House-favorable ~70% RTP: Player/Dealer pay 1.40x, and a tie is a house

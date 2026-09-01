@@ -37,7 +37,7 @@ def test_reference_side_and_card_count_prices():
         "count_6_10": 4.5,
         "count_11_15": 5.5,
         "count_16_25": 4.5,
-        "count_26_30": 5.0,
+        "count_26_30": 15.0,
         "count_31_35": 25.0,
         "count_36_40": 50.0,
         "count_41_49": 120.0,
@@ -54,6 +54,22 @@ def test_side_and_card_count_bets_settle_independently():
     assert settle_bet("andar-bahar", outcome, "bahar", 100)[0] == 0
     assert settle_bet("andar-bahar", outcome, "count_6_10", 100)[0] == 450
     assert settle_bet("andar-bahar", outcome, "count_1_5", 100)[0] == 0
+
+
+def test_long_card_count_prices_match_the_felt_boundaries():
+    def outcome_with_count(count):
+        return {
+            "joker": "8d",
+            "winner": "andar",
+            "sequence": [{"card": f"{(index % 13) + 1}s", "side": "andar"} for index in range(count)],
+        }
+
+    for count in (16, 25):
+        assert settle_bet("andar-bahar", outcome_with_count(count), "count_16_25", 100)[0] == 450
+        assert settle_bet("andar-bahar", outcome_with_count(count), "count_26_30", 100)[0] == 0
+    for count in (26, 30):
+        assert settle_bet("andar-bahar", outcome_with_count(count), "count_16_25", 100)[0] == 0
+        assert settle_bet("andar-bahar", outcome_with_count(count), "count_26_30", 100)[0] == 1500
 
 
 def test_generated_round_has_valid_alternating_sequence_and_count_range():
