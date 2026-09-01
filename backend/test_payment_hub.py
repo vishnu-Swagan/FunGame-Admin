@@ -183,6 +183,9 @@ def generic_rest_config():
 
 class PaymentHubTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # Rebind the shared service database so this suite is isolated from any
+        # other module that also points ``service.db`` at its own mock client.
+        service.db = db
         for name in await db.list_collection_names():
             await db[name].delete_many({})
         await service.ensure_indexes()
