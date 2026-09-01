@@ -458,10 +458,12 @@ async def require_hosted_deposit_eligible(user: Mapping[str, Any]) -> Mapping[st
             "code": "AGE_NOT_VERIFIED",
             "message": "Please confirm you are at least 18 to continue.",
         })
-    if str(user.get("kyc_status") or "").upper() != "VERIFIED":
-        raise HTTPException(status_code=403, detail={
-            "code": "KYC_REQUIRED", "message": "Identity verification is required.",
-        })
+    # KYC is a cash-OUT control, not a chip-purchase control. A hosted UPI deposit
+    # only adds value to the game wallet, so a self-serve player (phone-verified,
+    # 18+ self-attested, in an allowed market, not restricted/excluded) can buy
+    # chips without an operator hand-verifying identity first. Identity/KYC remains
+    # required on the withdrawal path. Self-exclusion, market, frozen-account and
+    # deposit-limit gates below still apply.
     if str(user.get("financial_status") or "").upper() in {
         "BLOCKED", "FROZEN", "REVIEW_REQUIRED",
     }:

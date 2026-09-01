@@ -369,10 +369,11 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
                 contact_blocked.exception.detail["code"], "CONTACT_NOT_VERIFIED",
             )
 
+            # KYC is a cash-out control, not a chip-purchase control: a hosted UPI
+            # deposit only adds value, so an un-KYC'd but otherwise eligible
+            # self-serve player can still buy chips.
             no_kyc = {**reviewed, "kyc_status": "UNVERIFIED"}
-            with self.assertRaises(HTTPException) as kyc_blocked:
-                await routes.require_operator_deposit_player(no_kyc)
-            self.assertEqual(kyc_blocked.exception.detail["code"], "KYC_REQUIRED")
+            self.assertIs(await routes.require_operator_deposit_player(no_kyc), no_kyc)
 
     async def test_deposit_retries_provider_gap_and_webhook_credits_exactly_once(self):
         self.provider.deposit_failures = 1
@@ -1504,9 +1505,12 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         finance.GAME_WALLET_INTEGRATION_READY = True
         self.assertTrue((await finance.prepare_financial_core())["ready"])
 
+        # KYC gates cash-out, not chip purchases: an un-KYC'd but otherwise
+        # eligible player can deposit, while withdrawals stay fail-closed on KYC.
         no_kyc = {**self.user, "kyc_status": "UNVERIFIED", "identity_verified": True}
+        self.assertIs(await routes._require_player("deposits", no_kyc), no_kyc)
         with self.assertRaises(HTTPException) as blocked:
-            await routes._require_player("deposits", no_kyc)
+            await routes._require_player("withdrawals", no_kyc)
         self.assertEqual(blocked.exception.detail["code"], "KYC_REQUIRED")
         with self.assertRaises(HTTPException) as no_mfa:
             routes._require_recent_step_up({"role": "ADMIN", "admin_role": "SUPER_ADMIN"})
