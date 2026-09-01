@@ -166,6 +166,33 @@ test("an undealt wild joker renders a placeholder instead of crashing the table"
   act(() => root.unmount());
 });
 
+test("printed and rank wild jokers remain distinct, readable card faces", () => {
+  const printedContainer = document.createElement("div");
+  const printedRoot = createRoot(printedContainer);
+  act(() => printedRoot.render(<RummyCard card={{ id: "pj-1", code: "PJ", printedJoker: true }} />));
+  const printed = printedContainer.querySelector(".rummy-card");
+  expect(printed?.classList.contains("is-printed-joker")).toBe(true);
+  expect(printed?.classList.contains("is-rank-wild")).toBe(false);
+  expect(printed?.dataset.jokerKind).toBe("printed");
+  expect(printed?.getAttribute("aria-label")).toBe("Printed joker");
+  expect(printedContainer.querySelector(".rummy-joker-emblem")?.textContent).toContain("JOKER");
+  expect(printedContainer.querySelector(".rummy-wild-badge")).toBeNull();
+  act(() => printedRoot.unmount());
+
+  const rankContainer = document.createElement("div");
+  const rankRoot = createRoot(rankContainer);
+  act(() => rankRoot.render(<RummyCard card={{ id: "7d", code: "7D", rank: 7, suit: "D" }} wildRank={7} />));
+  const rankWild = rankContainer.querySelector(".rummy-card");
+  expect(rankWild?.classList.contains("is-rank-wild")).toBe(true);
+  expect(rankWild?.classList.contains("is-printed-joker")).toBe(false);
+  expect(rankWild?.dataset.jokerKind).toBe("rank-wild");
+  expect(rankWild?.getAttribute("role")).toBe("img");
+  expect(rankWild?.getAttribute("aria-label")).toBe("7 of diamonds, wild joker");
+  expect(rankContainer.querySelector(".rummy-wild-badge")?.textContent).toBe("W");
+  expect(rankContainer.querySelector(".rummy-joker-emblem")).toBeNull();
+  act(() => rankRoot.unmount());
+});
+
 test("non-player seat metadata never appears as a technical badge", () => {
   const bot = { seatIndex: 1, status: "ACTIVE", displayName: "Mira", avatar: "avatar-37", isBot: true, botLabel: "Expert bot", cardCount: 13 };
   const { container, root } = renderSeat(bot, 3);
@@ -967,7 +994,7 @@ test("the exact-ratio table fills landscape while controls respect the safe view
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
   expect(css).toContain("width: var(--fg-usable-w, 100vw)");
   expect(css).toContain("height: var(--fg-usable-h, 100dvh)");
-  expect(css).toMatch(/\.rummy-game\s*\{[^}]*left:\s*var\(--fg-viewport-left, 0px\);[^}]*width:\s*var\(--fg-viewport-w, 100vw\);[^}]*height:\s*var\(--fg-viewport-h, 100dvh\)/s);
+  expect(css).toMatch(/\.rummy-game\s*\{[^}]*left:\s*var\(--fg-viewport-left, 0px\);[^}]*width:\s*min\(var\(--fg-viewport-w, 100vw\), 100vw\);[^}]*height:\s*min\(var\(--fg-viewport-h, 100dvh\), 100dvh\)/s);
   expect(css).toMatch(/\.rummy-game\s*\{[^}]*grid-template-rows:\s*calc\(clamp\(50px, 7\.2vh, 72px\) \+ var\(--fg-safe-top, 0px\)\)/s);
   expect(css).toMatch(/\.rummy-game-head\s*\{[^}]*padding-right:\s*max\([^;]*var\(--fg-safe-right, 0px\)\);[^}]*padding-left:\s*max\([^;]*var\(--fg-safe-left, 0px\)\)/s);
   expect(css).toMatch(/\.rummy-game-head\s*\{[^}]*padding-top:\s*max\(5px, var\(--fg-safe-top, 0px\)\)/s);
@@ -1025,6 +1052,8 @@ test("the rendered practice table keeps the stable auto-fit layer hierarchy with
   expect(art?.getAttribute("draggable")).toBe("false");
   expect(table?.querySelectorAll(":scope > .rummy-seat")).toHaveLength(5);
   expect(hand).not.toBeNull();
+  expect(stage?.querySelector('button[aria-label="OPEN CARD: 10 of diamonds"]')).not.toBeNull();
+  expect(stage?.querySelector('[role="group"][aria-label="Wild-rank indicator: A of spades"]')).not.toBeNull();
   expect(stage?.querySelector(".rummy-bot-table-notice")).toBeNull();
   expect(stage?.querySelector(".rummy-table-opponent-disclosure")).toBeNull();
   expect(stage?.textContent).not.toMatch(/\bauto\b/i);
@@ -1133,7 +1162,9 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   const landscapeHud = cssRuleWithin(landscape, ".rummy-table-hud");
   const landscapeSeatBack = cssRuleWithin(landscape, ".rummy-seat > small,\n  .rummy-seat .rummy-card-back");
 
-  expect(landscapeGame).toMatch(/grid-template-rows:\s*calc\(50px \+ var\(--fg-safe-top, 0px\)\) minmax\(0, 1fr\)/);
+  expect(landscapeGame).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\)/);
+  expect(landscapeHeader).toMatch(/position:\s*absolute/);
+  expect(landscapeHeader).toMatch(/height:\s*calc\(50px \+ var\(--fg-safe-top, 0px\)\)/);
   expect(landscapeHeader).toMatch(/padding-right:\s*max\(6px, var\(--fg-safe-right, 0px\)\)/);
   expect(landscapeHeader).toMatch(/padding-left:\s*max\(6px, var\(--fg-safe-left, 0px\)\)/);
   expect(landscapeStage).not.toMatch(/--rummy-mobile-dock-w/);
@@ -1144,8 +1175,8 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeSlotAtmosphere).toMatch(/filter:\s*none/);
   expect(landscapeTable).toMatch(/position:\s*absolute/);
   expect(landscapeTable).toMatch(/left:\s*50%/);
-  expect(landscapeTable).toMatch(/top:\s*47%/);
-  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, 285cqh\)/);
+  expect(landscapeTable).toMatch(/top:\s*49%/);
+  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, calc\(290cqh - 150px\)\)/);
   expect(landscapeTable).toMatch(/transform:\s*translate\(-50%, -50%\) translateZ\(0\)/);
   expect(landscapeHand).toMatch(/grid-column:\s*1/);
   expect(landscapeHand).toMatch(/grid-row:\s*2/);
@@ -1153,9 +1184,9 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeHand).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\) 44px/);
   expect(landscapeHand).toMatch(/align-content:\s*start/);
   expect(landscapeHand).toMatch(/overflow:\s*hidden/);
-  expect(landscapeHand).toMatch(/min-height:\s*calc\(126px \+ var\(--fg-safe-bottom\)\)/);
-  expect(landscapeHand).toMatch(/height:\s*calc\(126px \+ var\(--fg-safe-bottom\)\)/);
-  expect(landscapeHand).toMatch(/max-height:\s*calc\(126px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/min-height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/max-height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
   expect(landscapeHand).toMatch(/border-top:\s*1px solid/);
   expect(landscapeHand).toMatch(/border-left:\s*0/);
   expect(landscapeHand).toMatch(/padding-right:\s*max\(5px, var\(--fg-safe-right, 0px\)\)/);
@@ -1165,10 +1196,10 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeRail).toMatch(/height:\s*100%/);
   expect(landscapeRail).toMatch(/gap:\s*7px/);
   expect(landscapeRail).toMatch(/scroll-snap-type:\s*x proximity/);
-  expect(landscapeGroup).toMatch(/grid-template-rows:\s*auto 16px/);
-  expect(landscapeGroupCards).toMatch(/min-height:\s*58px/);
-  expect(landscapeCard).toMatch(/width:\s*clamp\(42px, 5\.45vw, 48px\)/);
-  expect(landscapeCard).toMatch(/height:\s*clamp\(54px, 14svh, 60px\)/);
+  expect(landscapeGroup).toMatch(/grid-template-rows:\s*auto 14px/);
+  expect(landscapeGroupCards).toMatch(/min-height:\s*50px/);
+  expect(landscapeCard).toMatch(/width:\s*clamp\(39px, 5\.2vw, 46px\)/);
+  expect(landscapeCard).toMatch(/height:\s*clamp\(48px, 13svh, 54px\)/);
   expect(landscapeOverlap).toMatch(/margin-left:\s*-14px/);
   expect(landscapeActions).toMatch(/position:\s*static/);
   expect(landscapeActions).toMatch(/grid-row:\s*2/);
@@ -1201,7 +1232,19 @@ test("taller mobile landscape viewports keep the palace presentation fitted to t
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
   const mobileLandscape = cssBlock(css, "@media (orientation: landscape) and (min-height: 431px) and (max-height: 620px) and (max-width: 1180px)");
   expect(cssRuleWithin(mobileLandscape, ".rummy-stage,\n  .rummy-table-slot")).toMatch(/width:\s*100%;\s*height:\s*100%/);
-  expect(cssRuleWithin(mobileLandscape, ".rummy-table")).toMatch(/width:\s*min\(100cqw, 255cqh\)/);
+  expect(cssRuleWithin(mobileLandscape, ".rummy-table")).toMatch(/top:\s*49%;\s*width:\s*min\(100cqw, calc\(290cqh - 232px\)\)/);
+});
+
+test("mobile Joker styling keeps rank suits visible and printed Jokers self-contained", () => {
+  const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
+  expect(css).toMatch(/\.rummy-card\.is-rank-wild\s*\{[^}]*background:/s);
+  expect(css).toMatch(/\.rummy-wild-badge\s*\{[^}]*right:\s*4px;[^}]*top:\s*4px[^}]*border-radius:\s*50%/s);
+  expect(css).toMatch(/\.rummy-card\.is-printed-joker\s*\{[^}]*overflow:\s*hidden;[^}]*border-color:/s);
+  expect(css).toMatch(/\.rummy-joker-emblem\s*\{[^}]*inset:\s*18% 13%/s);
+  expect(css).not.toContain(".rummy-wild-crown");
+  expect(css.indexOf(".rummy-card:not(.rummy-card-placeholder)")).toBeLessThan(css.indexOf(".rummy-card.is-selected"));
+  expect(css.indexOf(".rummy-card:not(.rummy-card-placeholder)")).toBeLessThan(css.indexOf(".rummy-card.is-rank-wild"));
+  expect(css.indexOf(".rummy-card:not(.rummy-card-placeholder)")).toBeLessThan(css.indexOf(".rummy-card.is-printed-joker"));
 });
 
 test("the deterministic preview demonstrates visibly varied avatar families", () => {

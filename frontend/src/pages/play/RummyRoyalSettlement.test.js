@@ -97,6 +97,7 @@ test("server settlement drives a gated in-table celebration and exact premium su
     <RummyRoyalSettlement
       result={result}
       viewerSeatIndex={0}
+      wildRank={11}
       onLobby={onLobby}
       onSkip={onSkip}
       onPhaseChange={onPhaseChange}
@@ -113,6 +114,10 @@ test("server settlement drives a gated in-table celebration and exact premium su
   expect(container.querySelector(".rrs-win-ribbon")?.textContent).toContain("CHAKRI WIN");
   expect(container.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 chips payout");
   expect(container.querySelector(".rrs-showcase-hand")?.querySelectorAll(".rrs-card")).toHaveLength(13);
+  expect(container.querySelectorAll('.rrs-showcase-hand [data-joker-kind="rank-wild"]')).toHaveLength(3);
+  expect(container.querySelectorAll('.rrs-showcase-hand [data-joker-kind="printed"]')).toHaveLength(1);
+  expect(container.querySelector('.rrs-showcase-hand [data-card-id="c7"]')?.getAttribute("aria-label")).toBe("J of spades, wild joker");
+  expect(container.querySelector('.rrs-showcase-hand [data-card-id="c13"]')?.textContent).toContain("JOKER");
   expect(container.querySelector(".rrs-showcase-hand")?.textContent).toContain("PURE SEQUENCE");
   expect(container.querySelector(".rrs-skip")).toBeNull();
 
