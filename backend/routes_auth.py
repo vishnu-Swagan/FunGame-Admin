@@ -86,18 +86,27 @@ ADMIN_REVIEW_APPROVED = 'ADMIN_APPROVED'
 
 
 def _registration_mode() -> str:
-    """Return the explicit registration gate currently selected by operations.
+    """Return the registration gate currently selected by operations.
 
-    ADMIN_REVIEW is the temporary default requested by the operator.  Switching
-    back to the retained SMS flow is a configuration-only change after the OTP
-    provider is ready.  Unknown values fail closed instead of silently choosing
-    the less restrictive path.
+    An explicit ``REGISTRATION_MODE`` always wins: ``PHONE_OTP`` runs the retained
+    SMS-verification flow (user creates a password after the OTP), ``ADMIN_REVIEW``
+    holds sign-ups for manual approval, and any other non-empty value fails closed
+    to ``DISABLED`` rather than silently choosing the less restrictive path.
+
+    When the operator has NOT pinned a mode, prefer the self-serve phone-OTP flow
+    as soon as the SMS OTP channel is actually configured (adapter + credentials),
+    so mobile verification turns on the moment Telesign SMS is wired up. If the
+    SMS channel is not ready we fall back to ADMIN_REVIEW so registration is never
+    stranded behind an unconfigured provider.
     """
-    configured = (os.environ.get('REGISTRATION_MODE') or ADMIN_REVIEW_ACTIVATION_MODE)
-    configured = configured.strip().upper()
+    configured = (os.environ.get('REGISTRATION_MODE') or '').strip().upper()
     if configured in (ADMIN_REVIEW_ACTIVATION_MODE, PHONE_OTP_ACTIVATION_MODE):
         return configured
-    return 'DISABLED'
+    if configured:
+        return 'DISABLED'
+    if delivery_adapter_ready('SMS'):
+        return PHONE_OTP_ACTIVATION_MODE
+    return ADMIN_REVIEW_ACTIVATION_MODE
 
 
 def _telesign_mode(name: str) -> str:
