@@ -608,6 +608,86 @@ async def _sum_amount_paise(collection, match: dict) -> dict:
     return {'amount_paise': int(rows[0].get('amount_paise', 0)), 'count': int(rows[0].get('count', 0))}
 
 
+def _combine_amounts(*totals: dict) -> dict:
+    return {
+        'amount_paise': sum(int(item.get('amount_paise', 0)) for item in totals),
+        'count': sum(int(item.get('count', 0)) for item in totals),
+    }
+
+
+def _cash_event_time(row: dict, *fields: str):
+    for field in fields:
+        if row.get(field) is not None:
+            return row[field]
+    return None
+
+
+def _cash_event_sort_key(row: dict) -> float:
+    value = row.get('occurred_at')
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.timestamp()
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _cash_event(row: dict, direction: str, default_source: str) -> dict:
+    if direction == 'DEPOSIT':
+        occurred_at = _cash_event_time(row, 'credited_at', 'paid_at', 'resolved_at', 'updated_at', 'created_at')
+    else:
+        occurred_at = _cash_event_time(row, 'paid_at', 'resolved_at', 'updated_at', 'created_at')
+    return {
+        'id': row.get('id'),
+        'user_id': row.get('user_id'),
+        'direction': direction,
+        'status': row.get('status'),
+        'amount_paise': int(row.get('amount_paise') or 0),
+        'currency': row.get('currency') or 'INR',
+        'source': row.get('provider') or row.get('source') or default_source,
+        'reference': row.get('provider_reference') or row.get('provider_order_id') or row.get('id'),
+        'occurred_at': occurred_at,
+    }
+
+
+async def _recent_cash_movement(operator_deposit_match: dict, operator_withdrawal_match: dict) -> list[dict]:
+    projection = {
+        '_id': 0, 'id': 1, 'user_id': 1, 'status': 1, 'amount_paise': 1,
+        'currency': 1, 'provider': 1, 'source': 1, 'provider_reference': 1,
+        'provider_order_id': 1, 'credited_at': 1, 'paid_at': 1,
+        'resolved_at': 1, 'updated_at': 1, 'created_at': 1,
+    }
+    deposit_rows, withdrawal_rows, operator_deposits, operator_withdrawals = await asyncio.gather(
+        db.deposit_orders.find(
+            {'status': 'CREDITED'}, projection,
+        ).sort('credited_at', -1).to_list(25),
+        db.withdrawal_requests.find(
+            {'status': 'PAID'}, projection,
+        ).sort('paid_at', -1).to_list(25),
+        db.operator_payment_requests.find(
+            operator_deposit_match, projection,
+        ).sort('resolved_at', -1).to_list(25),
+        db.operator_payment_requests.find(
+            operator_withdrawal_match, projection,
+        ).sort('resolved_at', -1).to_list(25),
+    )
+    events = [
+        *[_cash_event(row, 'DEPOSIT', 'PAYMENT_PROVIDER') for row in deposit_rows],
+        *[_cash_event(row, 'WITHDRAWAL', 'PAYMENT_PROVIDER') for row in withdrawal_rows],
+        *[_cash_event(row, 'DEPOSIT', 'OPERATOR') for row in operator_deposits],
+        *[_cash_event(row, 'WITHDRAWAL', 'OPERATOR') for row in operator_withdrawals],
+    ]
+    events.sort(key=_cash_event_sort_key, reverse=True)
+    return events[:12]
+
+
 async def _oldest_created_at(collection, match: dict, field: str = 'created_at'):
     row = await collection.find(match, {'_id': 0, field: 1}).sort(field, 1).limit(1).to_list(1)
     return row[0].get(field) if row else None
@@ -634,9 +714,36 @@ async def dashboard(admin: dict = Depends(require_admin)):
     pending_chip_requests = await db.chip_requests.count_documents({'status': 'PENDING'})
     cfg = await db.system_config.find_one({'key': 'main'})
 
-    # Cash movement — real stored deposit/withdrawal amounts only.
-    credited_deposits = await _sum_amount_paise(db.deposit_orders, {'status': 'CREDITED'})
-    paid_withdrawals = await _sum_amount_paise(db.withdrawal_requests, {'status': 'PAID'})
+    # Cash movement — terminal, stored provider and operator payment records.
+    # Hosted SgPay24 UPI purchases live in operator_payment_requests rather than
+    # deposit_orders, so both rails must be composed for complete CRM totals.
+    operator_deposit_settled = {
+        'kind': 'DEPOSIT',
+        '$or': [
+            {'source': 'SGPAY24_UPI', 'status': 'CREDITED'},
+            {'source': {'$in': ['ADMIN_REVIEW', None]}, 'status': 'APPROVED'},
+        ],
+    }
+    operator_withdrawal_settled = {
+        'kind': 'WITHDRAWAL',
+        'source': {'$in': ['ADMIN_REVIEW', None]},
+        'status': {'$in': ['APPROVED', 'PAID']},
+    }
+    (
+        provider_deposits,
+        operator_deposits,
+        provider_withdrawals,
+        operator_withdrawals,
+        recent_cash_movement,
+    ) = await asyncio.gather(
+        _sum_amount_paise(db.deposit_orders, {'status': 'CREDITED'}),
+        _sum_amount_paise(db.operator_payment_requests, operator_deposit_settled),
+        _sum_amount_paise(db.withdrawal_requests, {'status': 'PAID'}),
+        _sum_amount_paise(db.operator_payment_requests, operator_withdrawal_settled),
+        _recent_cash_movement(operator_deposit_settled, operator_withdrawal_settled),
+    )
+    credited_deposits = _combine_amounts(provider_deposits, operator_deposits)
+    paid_withdrawals = _combine_amounts(provider_withdrawals, operator_withdrawals)
     pending_operator_deposits = await db.operator_payment_requests.count_documents({'kind': 'DEPOSIT', 'status': 'PENDING'})
     pending_operator_withdrawals = await db.operator_payment_requests.count_documents({'kind': 'WITHDRAWAL', 'status': {'$in': ['PENDING', 'PROCESSING']}})
     pending_deposits = (
@@ -747,6 +854,7 @@ async def dashboard(admin: dict = Depends(require_admin)):
             'net_paise': credited_deposits['amount_paise'] - paid_withdrawals['amount_paise'],
             'pending_deposits': int(pending_deposits),
             'pending_withdrawals': int(pending_withdrawals),
+            'recent': recent_cash_movement,
         },
         'action_queue': action_queue,
         'distributors': {

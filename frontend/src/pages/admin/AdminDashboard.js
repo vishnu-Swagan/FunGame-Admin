@@ -16,15 +16,9 @@ import {
   Wrench,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatInrPaise } from "@/lib/walletUtils";
 
 const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
-
-/** Present stored paise as ₹ millions when there is real movement to show.
- * Never fabricates a figure — an empty source renders the empty state. */
-function millionsFromPaise(paise) {
-  const rupees = number(paise) / 100;
-  return `₹${(rupees / 1_000_000).toFixed(2)}M`;
-}
 
 function chips(value) {
   return new Intl.NumberFormat("en-IN").format(number(value));
@@ -80,7 +74,7 @@ async function loadDashboard() {
           total: number(stats.total_users), active: number(stats.active_users),
           pending: number(stats.pending_users), suspended: number(stats.suspended_users),
         },
-        cash_movement: { deposits: { amount_paise: 0, count: 0 }, withdrawals: { amount_paise: 0, count: 0 }, net_paise: 0 },
+        cash_movement: { deposits: { amount_paise: 0, count: 0 }, withdrawals: { amount_paise: 0, count: 0 }, net_paise: 0, recent: [] },
         action_queue: number(stats.pending_users) > 0
           ? [{ key: "player_approvals", label: "Player approvals", count: number(stats.pending_users), oldest: null, severity: "critical", to: "/Admin/users?status=PENDING" }]
           : [],
@@ -130,6 +124,7 @@ export default function AdminDashboard() {
   const metrics = useMemo(() => data?.metrics || [], [data]);
   const queue = useMemo(() => data?.action_queue || [], [data]);
   const cash = data?.cash_movement || {};
+  const cashTransactions = cash?.recent || [];
   const distributors = data?.distributors || { count: 0, top: [] };
   const transactions = data?.recent_transactions || [];
   const audit = data?.audit_activity || [];
@@ -206,9 +201,22 @@ export default function AdminDashboard() {
         >
           {hasCashMovement ? (
             <div className="compact-list" data-testid="cash-movement">
-              <div className="compact-row"><span className="transaction-glyph"><Landmark size={15} /></span><span className="compact-main"><strong>Deposits credited</strong><small>{chips(cash.deposits.count)} settled</small></span><strong>{millionsFromPaise(cash.deposits.amount_paise)}</strong></div>
-              <div className="compact-row"><span className="transaction-glyph"><Receipt size={15} /></span><span className="compact-main"><strong>Withdrawals paid</strong><small>{chips(cash.withdrawals.count)} settled</small></span><strong>{millionsFromPaise(cash.withdrawals.amount_paise)}</strong></div>
-              <div className="compact-row"><span className="transaction-glyph"><Database size={15} /></span><span className="compact-main"><strong>Net movement</strong><small>Deposits minus payouts</small></span><strong>{millionsFromPaise(cash.net_paise)}</strong></div>
+              <div className="compact-row"><span className="transaction-glyph"><Landmark size={15} /></span><span className="compact-main"><strong>Deposits credited</strong><small>{chips(cash.deposits.count)} settled</small></span><strong>{formatInrPaise(cash.deposits.amount_paise)}</strong></div>
+              <div className="compact-row"><span className="transaction-glyph"><Receipt size={15} /></span><span className="compact-main"><strong>Withdrawals paid</strong><small>{chips(cash.withdrawals.count)} settled</small></span><strong>{formatInrPaise(cash.withdrawals.amount_paise)}</strong></div>
+              <div className="compact-row"><span className="transaction-glyph"><Database size={15} /></span><span className="compact-main"><strong>Net movement</strong><small>Deposits minus payouts</small></span><strong>{formatInrPaise(cash.net_paise)}</strong></div>
+              {cashTransactions.length > 0 && <div className="cash-movement-history" data-testid="cash-movement-transactions">
+                <div className="cash-movement-history-label">Recent transactions</div>
+                {cashTransactions.map((item) => {
+                  const deposit = String(item.direction || "").toUpperCase() === "DEPOSIT";
+                  const source = String(item.source || "Payment provider").replaceAll("_", " ");
+                  const reference = item.reference ? ` · Ref ${item.reference}` : "";
+                  return <div className="compact-row" key={`${item.direction}-${item.id}`}>
+                    <span className="transaction-glyph">{deposit ? <Landmark size={15} /> : <Receipt size={15} />}</span>
+                    <span className="compact-main"><strong>{deposit ? "Deposit credited" : "Withdrawal paid"}</strong><small>{when(item.occurred_at)} · {source}{reference}</small></span>
+                    <strong className={`cash-movement-amount ${deposit ? "is-credit" : "is-debit"}`}>{deposit ? "+" : "−"}{formatInrPaise(item.amount_paise)}</strong>
+                  </div>;
+                })}
+              </div>}
             </div>
           ) : (
             <div className="empty-state-compact" data-testid="cash-movement-empty"><span><Landmark size={19} /></span><h3>No cash movement</h3><p>Settled deposits and payouts will appear here when the platform records them.</p></div>
