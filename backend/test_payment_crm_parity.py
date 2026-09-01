@@ -322,7 +322,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                 "id": "upi-1", "user_id": "u1", "kind": "DEPOSIT", "status": "CREDITED",
                 "source": "SGPAY24_UPI", "provider": "sgpay24", "amount_paise": 10000,
                 "provider_order_id": "upi-1", "provider_reference": "624493615902",
-                "resolved_at": "2026-08-05T00:00:00+00:00", "created_at": "2026-08-03T00:00:00+00:00",
+                "resolved_at": datetime(2026, 8, 5, 0, 0, 0), "created_at": "2026-08-03T00:00:00+00:00",
             },
             {
                 "id": "cashout-1", "user_id": "u1", "kind": "WITHDRAWAL", "status": "APPROVED",
@@ -356,6 +356,10 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["cash_movement"]["net_paise"], 507000)
         self.assertEqual(result["cash_movement"]["recent"][0]["id"], "cashout-1")
         self.assertEqual(result["cash_movement"]["recent"][1]["reference"], "624493615902")
+        self.assertEqual(
+            result["cash_movement"]["recent"][1]["occurred_at"],
+            "2026-08-05T00:00:00+00:00",
+        )
         self.assertEqual(len(result["recent_transactions"]), 1)
         self.assertEqual(result["distributors"]["count"], 1)
         self.assertEqual(result["distributors"]["top"][0]["commission_chips"], 250)

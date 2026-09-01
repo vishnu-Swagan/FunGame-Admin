@@ -564,6 +564,11 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .gateway-toggle input:checked + .gateway-toggle-track span { transform: translate(14px); }
 .gateway-toggle.is-disabled { cursor: not-allowed; opacity: .45; }
 .gateway-card-body { display: grid; gap: 13px; padding: 16px 18px 18px; }
+.gateway-hosted-card { grid-column: 1 / -1; }
+.gateway-hosted-flags { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.gateway-hosted-flags span { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 8.5px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.gateway-hosted-flags .is-enabled { background: var(--success-soft); color: var(--success); }
+.gateway-hosted-flags .is-disabled { background: var(--surface-muted); color: var(--ink-faint); }
 .gateway-auto-note { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--crm-accent-soft, var(--accent-soft)); color: var(--crm-accent-ink, var(--accent-ink)); font-size: 9px; line-height: 1.4; }
 .gateway-fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .gateway-field { min-width: 0; display: grid; gap: 5px; }

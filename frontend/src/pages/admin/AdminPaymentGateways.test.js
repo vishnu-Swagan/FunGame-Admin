@@ -90,6 +90,42 @@ test("renders CRM category tabs and empty states while admin API is enabled", as
   await act(async () => root.unmount());
 });
 
+test("shows the enabled SgPay24 hosted rail as a live read-only payment method", async () => {
+  adminPayments.hubStatus.mockResolvedValue({
+    admin: true,
+    payments_v2: false,
+    hosted_provider: {
+      code: "sgpay24",
+      display_name: "SgPay24",
+      category: "EWALLET",
+      provider_type: "HOSTED_UPI",
+      configured: true,
+      live: true,
+      deposits_enabled: true,
+      withdrawals_enabled: false,
+      availability_code: "AVAILABLE",
+      webhook_url: "https://api.chakri.casino/api/payments/webhooks/sgpay24",
+      read_only: true,
+    },
+  });
+  const { container, root } = await renderPage();
+
+  expect(container.textContent).toContain("1 Method");
+  expect(container.textContent).toContain("1 Live");
+  expect(container.querySelector('[data-testid="category-tab-EWALLET"]').classList.contains("is-active")).toBe(true);
+  expect(container.querySelector('[data-testid="category-tab-EWALLET"]').textContent).toContain("1");
+  const card = container.querySelector('[data-testid="hosted-provider-sgpay24"]');
+  expect(card).not.toBeNull();
+  expect(card.textContent).toContain("SgPay24");
+  expect(card.textContent).toContain("Deposits enabled");
+  expect(card.textContent).toContain("Withdrawals not provided");
+  expect(card.textContent).toContain("Read only");
+  expect(container.querySelector('[data-testid="hosted-provider-webhook-sgpay24"] input').value)
+    .toBe("https://api.chakri.casino/api/payments/webhooks/sgpay24");
+  expect(card.querySelector('[data-testid="save-gateway-sgpay24"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
 test("a pre-RBAC platform admin can add a provider configuration", async () => {
   mockUser = { role: "ADMIN", status: "ACTIVE" };
   adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });

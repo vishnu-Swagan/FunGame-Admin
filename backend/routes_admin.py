@@ -617,8 +617,13 @@ def _combine_amounts(*totals: dict) -> dict:
 
 def _cash_event_time(row: dict, *fields: str):
     for field in fields:
-        if row.get(field) is not None:
-            return row[field]
+        value = row.get(field)
+        if value is not None:
+            # Legacy/operator rows store UTC datetimes without tzinfo. Attach
+            # UTC explicitly so browsers do not interpret them as local time.
+            if isinstance(value, datetime) and value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value
     return None
 
 
