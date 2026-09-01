@@ -147,41 +147,50 @@ test("admin withdrawals can approve operator payout requests", async () => {
   await act(async () => root.unmount());
 });
 
-test("age verification opens admin step-up and retries the exact action", async () => {
-  adminPayments.reviewPlayerAge
+test("KYC verification opens admin step-up and retries the exact action", async () => {
+  adminPayments.reviewKyc
     .mockRejectedValueOnce({
       response: { data: { detail: {
         code: "ADMIN_MFA_REQUIRED",
         message: "Administrator 2FA enrollment and verification are required.",
       } } },
     })
-    .mockResolvedValueOnce({ message: "Age verified" });
+    .mockResolvedValueOnce({ message: "KYC verified" });
   const { container, root } = await render(AdminKyc);
   const reason = container.querySelector('input[placeholder="Verification reason / instructions (required)"]');
   const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
   await act(async () => {
-    valueSetter.call(reason, "Passport checked");
+    valueSetter.call(reason, "Identity documents checked");
     reason.dispatchEvent(new Event("input", { bubbles: true }));
     await settle();
   });
-  const verifyAge = Array.from(container.querySelectorAll("button"))
-    .find((button) => button.textContent === "Verify age");
+  const verifyKyc = Array.from(container.querySelectorAll("button"))
+    .find((button) => button.textContent === "Verify KYC");
   await act(async () => {
-    verifyAge.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    verifyKyc.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
   });
   expect(container.querySelector('[data-testid="mock-admin-step-up"]')).not.toBeNull();
-  expect(adminPayments.reviewPlayerAge).toHaveBeenCalledWith(
-    "player-kyc-1", true, "Passport checked",
+  expect(adminPayments.reviewKyc).toHaveBeenCalledWith(
+    "player-kyc-1", "VERIFIED", "Identity documents checked",
   );
   await act(async () => {
     container.querySelector('[data-testid="mock-admin-step-up"]')
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
   });
-  expect(adminPayments.reviewPlayerAge).toHaveBeenCalledTimes(2);
-  expect(adminPayments.reviewPlayerAge).toHaveBeenLastCalledWith(
-    "player-kyc-1", true, "Passport checked",
+  expect(adminPayments.reviewKyc).toHaveBeenCalledTimes(2);
+  expect(adminPayments.reviewKyc).toHaveBeenLastCalledWith(
+    "player-kyc-1", "VERIFIED", "Identity documents checked",
   );
+  await act(async () => root.unmount());
+});
+
+test("admin verification page does not expose manual age controls", async () => {
+  const { container, root } = await render(AdminKyc);
+  expect(container.textContent).not.toContain("Age not verified");
+  expect(Array.from(container.querySelectorAll("button")).some(
+    (button) => ["Request age", "Verify age"].includes(button.textContent),
+  )).toBe(false);
   await act(async () => root.unmount());
 });
