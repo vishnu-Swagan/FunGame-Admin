@@ -29,7 +29,7 @@ const BASE = {
     { label: "Active players", value: 0, note: "Approved accounts", to: "/Admin/users?status=ACTIVE" },
   ],
   players: { total: 0, active: 0, pending: 0, suspended: 0 },
-  cash_movement: { deposits: { amount_paise: 0, count: 0 }, withdrawals: { amount_paise: 0, count: 0 }, net_paise: 0 },
+  cash_movement: { deposits: { amount_paise: 0, count: 0 }, withdrawals: { amount_paise: 0, count: 0 }, net_paise: 0, recent: [] },
   action_queue: [],
   distributors: { count: 0, top: [] },
   recent_transactions: [],
@@ -62,7 +62,12 @@ test("composes cash movement, queue, distributors, transactions and audit when p
     ...BASE,
     metrics: [{ label: "Active players", value: 12, note: "Approved accounts", to: "/Admin/users" }],
     players: { total: 20, active: 12, pending: 3, suspended: 1 },
-    cash_movement: { deposits: { amount_paise: 500000, count: 4 }, withdrawals: { amount_paise: 100000, count: 1 }, net_paise: 400000 },
+    cash_movement: {
+      deposits: { amount_paise: 500000, count: 4 },
+      withdrawals: { amount_paise: 100000, count: 1 },
+      net_paise: 400000,
+      recent: [{ id: "upi-1", direction: "DEPOSIT", status: "CREDITED", amount_paise: 10000, source: "sgpay24", reference: "624493615902", occurred_at: "2026-08-03T12:30:00+00:00" }],
+    },
     action_queue: [
       { key: "player_approvals", label: "Player approvals", count: 3, oldest: "2026-08-01T00:00:00+00:00", severity: "critical", to: "/Admin/users?status=PENDING" },
     ],
@@ -72,7 +77,10 @@ test("composes cash movement, queue, distributors, transactions and audit when p
   } });
   const { container, root } = await renderDashboard();
 
-  expect(container.querySelector('[data-testid="cash-movement"]')?.textContent).toContain("₹0.01M");
+  expect(container.querySelector('[data-testid="cash-movement"]')?.textContent).toContain("₹5,000");
+  expect(container.querySelector('[data-testid="cash-movement-transactions"]')?.textContent).toContain("Deposit credited");
+  expect(container.querySelector('[data-testid="cash-movement-transactions"]')?.textContent).toContain("+₹100");
+  expect(container.querySelector('[data-testid="cash-movement-transactions"]')?.textContent).toContain("624493615902");
   expect(container.querySelector('[data-testid="action-queue"]')?.textContent).toContain("Player approvals");
   expect(container.querySelector('[data-testid="distributor-performance"]')?.textContent).toContain("North Hub");
   expect(container.querySelector('[data-testid="recent-transactions"]')?.textContent).toContain("Welcome play chips");

@@ -303,6 +303,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action_queue"], [])
         self.assertEqual(result["cash_movement"]["deposits"]["amount_paise"], 0)
         self.assertEqual(result["cash_movement"]["net_paise"], 0)
+        self.assertEqual(result["cash_movement"]["recent"], [])
         self.assertEqual(result["recent_transactions"], [])
         self.assertEqual(result["audit_activity"], [])
         self.assertEqual(result["distributors"]["count"], 0)
@@ -316,6 +317,19 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         await db.deposit_orders.insert_one({
             "id": "d1", "status": "CREDITED", "amount_paise": 500000, "created_at": "2026-08-02T00:00:00+00:00",
         })
+        await db.operator_payment_requests.insert_many([
+            {
+                "id": "upi-1", "user_id": "u1", "kind": "DEPOSIT", "status": "CREDITED",
+                "source": "SGPAY24_UPI", "provider": "sgpay24", "amount_paise": 10000,
+                "provider_order_id": "upi-1", "provider_reference": "624493615902",
+                "resolved_at": "2026-08-05T00:00:00+00:00", "created_at": "2026-08-03T00:00:00+00:00",
+            },
+            {
+                "id": "cashout-1", "user_id": "u1", "kind": "WITHDRAWAL", "status": "APPROVED",
+                "source": "ADMIN_REVIEW", "amount_paise": 3000,
+                "resolved_at": "2026-08-05T01:00:00+00:00", "created_at": "2026-08-04T00:00:00+00:00",
+            },
+        ])
         await db.chip_transactions.insert_one({
             "id": "t1", "user_id": "u1", "type": "CREDIT", "kind": "ADJUST",
             "amount": 1000, "balance_after": 1000, "note": "Welcome play chips",
@@ -336,8 +350,12 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         approvals = next(item for item in result["action_queue"] if item["key"] == "player_approvals")
         self.assertEqual(approvals["count"], 1)
         self.assertEqual(approvals["severity"], "critical")
-        self.assertEqual(result["cash_movement"]["deposits"]["amount_paise"], 500000)
-        self.assertEqual(result["cash_movement"]["net_paise"], 500000)
+        self.assertEqual(result["cash_movement"]["deposits"]["amount_paise"], 510000)
+        self.assertEqual(result["cash_movement"]["deposits"]["count"], 2)
+        self.assertEqual(result["cash_movement"]["withdrawals"]["amount_paise"], 3000)
+        self.assertEqual(result["cash_movement"]["net_paise"], 507000)
+        self.assertEqual(result["cash_movement"]["recent"][0]["id"], "cashout-1")
+        self.assertEqual(result["cash_movement"]["recent"][1]["reference"], "624493615902")
         self.assertEqual(len(result["recent_transactions"]), 1)
         self.assertEqual(result["distributors"]["count"], 1)
         self.assertEqual(result["distributors"]["top"][0]["commission_chips"], 250)

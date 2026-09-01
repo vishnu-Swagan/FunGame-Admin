@@ -405,6 +405,11 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .compact-main { display: grid; min-width: 0; gap: 3px; }
 .compact-main strong { overflow: hidden; color: var(--ink); font-size: 11.5px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .compact-main small { color: var(--ink-faint); font-size: 9.5px; }
+.cash-movement-history { border-top: 1px solid var(--line-strong); }
+.cash-movement-history-label { padding: 11px 15px 6px; color: var(--ink-faint); font-size: 9px; font-weight: 720; letter-spacing: .09em; text-transform: uppercase; }
+.cash-movement-amount { font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cash-movement-amount.is-credit { color: var(--success); }
+.cash-movement-amount.is-debit { color: var(--danger); }
 .timeline-row { display: grid; min-height: 53px; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 11px; padding: 9px 15px; border-bottom: 1px solid var(--line); }
 .timeline-row:last-child { border-bottom: 0; }
 .timeline-marker { width: 8px; height: 8px; border: 2px solid var(--surface); border-radius: 50%; background: var(--success); box-shadow: 0 0 0 1px var(--line-strong); }
