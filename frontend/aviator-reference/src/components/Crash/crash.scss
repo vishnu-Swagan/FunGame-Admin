@@ -193,11 +193,10 @@
 
 .flight-curve {
   position: absolute;
-  left: 4.5%;
-  bottom: 7.5%;
+  inset: 2% 2.5% 2.5%;
   z-index: 5;
-  width: 82%;
-  height: 70%;
+  width: 95%;
+  height: 95.5%;
   overflow: visible;
   pointer-events: none;
 
@@ -207,7 +206,6 @@
 
   .curve-fill {
     fill: url(#flight-area);
-    transition: clip-path 80ms linear;
   }
 
   .curve-shadow {
@@ -215,8 +213,6 @@
     stroke: rgba(225, 25, 66, 0.12);
     stroke-width: 20;
     stroke-linecap: round;
-    stroke-dasharray: 1;
-    transition: stroke-dashoffset 80ms linear;
     filter: blur(9px);
   }
 
@@ -225,32 +221,31 @@
     stroke: #e11942;
     stroke-width: 4;
     stroke-linecap: round;
-    stroke-dasharray: 1;
-    transition: stroke-dashoffset 80ms linear;
     filter: drop-shadow(0 0 5px rgba(225, 25, 66, 0.58));
+  }
+
+  .curve-tip {
+    fill: #ed1747;
+    filter: drop-shadow(0 0 8px rgba(237, 23, 71, 0.9));
   }
 }
 
 .plane {
-  position: absolute;
-  left: 4.5%;
-  bottom: 7.5%;
-  z-index: 7;
-  width: clamp(116px, 18.5%, 220px);
-  height: auto;
   opacity: 0;
-  transform-origin: 10% 52%;
-  transition: opacity 180ms ease, left 80ms linear, bottom 80ms linear, transform 80ms linear;
+  transform-box: fill-box;
+  transform-origin: 6% 55%;
+  transition: opacity 160ms ease;
   filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 7px rgba(237, 23, 66, 0.26));
   pointer-events: none;
 
   &.visible {
     opacity: 1;
+    animation: planeCruise 1.18s ease-in-out infinite;
   }
+}
 
-  &.crashed {
-    animation: aviatorEscape 460ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
-  }
+.plane-flight.crashed .plane {
+  animation: aviatorEscapeVector 460ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
 }
 
 .multiplier,
@@ -407,20 +402,34 @@
   }
 }
 
-@keyframes aviatorEscape {
+@keyframes planeCruise {
   0% {
-    opacity: 1;
-    transform: translate(-2%, 55%) translate3d(0, 0, 0) rotate(-7.5deg) scale(1);
+    transform: rotate(-0.65deg);
   }
 
-  16% {
+  50% {
+    transform: rotate(0.8deg);
+  }
+
+  100% {
+    transform: rotate(-0.65deg);
+  }
+}
+
+@keyframes aviatorEscapeVector {
+  0% {
     opacity: 1;
-    transform: translate(-2%, 55%) translate3d(58px, -22px, 0) rotate(-8deg) scale(0.99);
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+
+  18% {
+    opacity: 1;
+    transform: translate3d(42px, -17px, 0) rotate(-2deg) scale(0.99);
   }
 
   100% {
     opacity: 0;
-    transform: translate(-2%, 55%) translate3d(58vw, -42vh, 0) rotate(-10deg) scale(0.76);
+    transform: translate3d(520px, -300px, 0) rotate(-7deg) scale(0.76);
   }
 }
 
@@ -456,9 +465,6 @@
     min-width: 114px;
   }
 
-  .plane {
-    width: clamp(68px, 18.5%, 170px);
-  }
 }
 
 @media (max-width: 520px) {
@@ -488,11 +494,15 @@
 
 @media (prefers-reduced-motion: reduce) {
   .round-state .state-dot,
-  .flight-curve .curve-line,
   .plane,
   .multiplier,
   .center-logo,
   .flight-timer {
     transition-duration: 1ms !important;
+  }
+
+  .plane.visible,
+  .plane-flight.crashed .plane {
+    animation: none !important;
   }
 }
