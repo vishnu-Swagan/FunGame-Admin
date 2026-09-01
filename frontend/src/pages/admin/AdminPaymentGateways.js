@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Banknote, Bitcoin, Building2, Copy, CreditCard, LayoutGrid,
   Plus, RefreshCw, ShieldCheck, TestTube2, Trash2, Wallet,
@@ -135,7 +135,7 @@ function Field({ label, required, value, onChange, placeholder, type = "text", r
   return (
     <label className="gateway-field">
       <span>{label}{required ? <em> *</em> : null}</span>
-      <input data-testid={testId} type={type} value={value ?? ""} placeholder={placeholder || ""} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
+      <input data-testid={testId} type={type} value={value ?? ""} placeholder={placeholder || ""} readOnly={readOnly} required={required} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -212,6 +212,11 @@ export default function AdminPaymentGateways() {
         <div className="gateway-header-actions">
           <span className="gateway-stat">{gateways.length} Methods</span>
           <span className="gateway-stat">{liveCount} Live</span>
+          {canCreate && (
+            <button type="button" className="crm-text-link" data-testid="add-provider" onClick={() => setCreating(true)}>
+              <Plus size={14} /> Add a provider configuration
+            </button>
+          )}
           <button type="button" className="icon-button" aria-label="Refresh" onClick={load} disabled={loading}><RefreshCw size={15} /></button>
         </div>
       </div>
@@ -241,6 +246,13 @@ export default function AdminPaymentGateways() {
       </nav>
 
       <div className="gateway-grid">
+        {creating && (
+          <CreateCard
+            category={category}
+            onClose={() => setCreating(false)}
+            onSaved={() => { setCreating(false); load(); }}
+          />
+        )}
         {shown.map((gateway) => (
           <GatewayCard
             key={gateway.id}
@@ -250,7 +262,7 @@ export default function AdminPaymentGateways() {
             onRefresh={load}
           />
         ))}
-        {!shown.length && !loading && (
+        {!shown.length && !loading && !creating && (
           <div className="crm-panel" data-testid="gateways-empty">
             <div className="crm-panel-body empty-state-compact">
               <h3>No methods in this category</h3>
@@ -263,8 +275,8 @@ export default function AdminPaymentGateways() {
         )}
       </div>
 
-      {canCreate && shown.length > 0 && (
-        <button type="button" className="gateway-link" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
+      {canCreate && shown.length > 0 && !creating && (
+        <button type="button" className="gateway-link" data-testid="add-provider-list" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
       )}
 
       {settings && (
@@ -277,14 +289,6 @@ export default function AdminPaymentGateways() {
       )}
 
       <AgentsPanel agents={agents} canManage={canManage} adminEnabled={adminEnabled} onRefresh={load} />
-
-      {creating && (
-        <CreateCard
-          category={category}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); load(); }}
-        />
-      )}
     </PageTransition>
   );
 }
@@ -586,11 +590,22 @@ function AgentsPanel({ agents, canManage, adminEnabled, onRefresh }) {
 }
 
 function CreateCard({ category, onClose, onSaved }) {
+  const panelRef = useRef(null);
   const [form, setForm] = useState({
     code: "", display_name: "", category, provider_type: "AUTOMATED",
     environment: "SANDBOX",
   });
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setForm((current) => ({ ...current, category }));
+  }, [category]);
+
+  useEffect(() => {
+    if (typeof panelRef.current?.scrollIntoView === "function") {
+      panelRef.current.scrollIntoView({ block: "start" });
+    }
+  }, []);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -605,26 +620,39 @@ function CreateCard({ category, onClose, onSaved }) {
         provider_type: form.provider_type,
         non_secret_config: {},
       });
-      toast.success("Provider added as a disabled draft.");
+      toast.success("Provider added as a disabled draft. Save credentials on the card to finish setup.");
       onSaved();
     } catch (error) {
-      toast.error(errMsg(error));
+      toast.error(errMsg(error, "The provider configuration was not added."));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <section className="crm-panel">
-      <header className="crm-panel-header"><div><h2>Add provider</h2><p>Stores a disabled provider record. It cannot create player payments or post to wallets.</p></div></header>
+    <section ref={panelRef} className="crm-panel gateway-create-panel" data-testid="create-provider-panel">
+      <header className="crm-panel-header"><div><h2>Add provider</h2><p>Stores a disabled provider record in this category. It cannot create player payments or post to wallets.</p></div></header>
       <form data-testid="create-form" onSubmit={submit} className="crm-panel-body" style={{ display: "grid", gap: 12, padding: 18 }}>
         <div className="gateway-fields-grid">
-          <Field label="Provider code" required value={form.code} onChange={(value) => setForm({ ...form, code: value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} placeholder="APPROVED_PROVIDER" />
-          <Field label="Display name" required value={form.display_name} onChange={(value) => setForm({ ...form, display_name: value })} />
+          <Field label="Provider code" required testId="create-code" value={form.code} onChange={(value) => setForm({ ...form, code: value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} placeholder="STRIPE_CARD" />
+          <Field label="Display name" required testId="create-name" value={form.display_name} onChange={(value) => setForm({ ...form, display_name: value })} placeholder="Stripe cards" />
+          <label className="gateway-field">
+            <span>Category</span>
+            <select data-testid="create-category" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+              {CATEGORIES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className="gateway-field">
+            <span>Integration</span>
+            <select data-testid="create-provider-type" value={form.provider_type} onChange={(event) => setForm({ ...form, provider_type: event.target.value })}>
+              <option value="AUTOMATED">Automated / API</option>
+              <option value="MANUAL">Manual / instructions</option>
+            </select>
+          </label>
         </div>
         <div className="gateway-card-actions">
           <button type="button" className="gateway-link" onClick={onClose}>Cancel</button>
-          <button type="submit" className="crm-text-link" disabled={busy}>{busy ? "Adding…" : "Add provider"}</button>
+          <button type="submit" className="crm-text-link" data-testid="create-submit" disabled={busy || !form.code || !form.display_name}>{busy ? "Adding…" : "Add provider"}</button>
         </div>
       </form>
     </section>

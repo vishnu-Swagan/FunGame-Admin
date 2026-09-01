@@ -96,6 +96,52 @@ test("a pre-RBAC platform admin can add a provider configuration", async () => {
   await act(async () => root.unmount());
 });
 
+test("clicking add a provider configuration opens the form in the category panel", async () => {
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  const { container, root } = await renderPage();
+  const add = container.querySelector('[data-testid="add-provider-empty"]');
+  expect(container.querySelector('[data-testid="create-form"]')).toBeNull();
+  await act(async () => {
+    add.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  const form = container.querySelector('[data-testid="create-form"]');
+  expect(form).not.toBeNull();
+  expect(container.querySelector('[data-testid="gateways-empty"]')).toBeNull();
+  expect(container.querySelector('[data-testid="create-provider-panel"]')).not.toBeNull();
+  expect(container.querySelector(".gateway-grid")?.contains(form)).toBe(true);
+  expect(container.querySelector('[data-testid="local-agents-empty"]')).not.toBeNull();
+  await act(async () => root.unmount());
+});
+
+test("submitting the add-provider form stores a disabled draft", async () => {
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  adminPayments.createGateway.mockResolvedValue({ id: "g-new", code: "STRIPE_CARD" });
+  const { container, root } = await renderPage();
+  await act(async () => {
+    container.querySelector('[data-testid="add-provider-empty"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  await act(async () => {
+    fillInput(container.querySelector('[data-testid="create-code"]'), "STRIPE_CARD");
+    fillInput(container.querySelector('[data-testid="create-name"]'), "Stripe cards");
+    await settle();
+  });
+  await act(async () => {
+    const form = container.querySelector('[data-testid="create-form"]');
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await settle();
+  });
+  expect(adminPayments.createGateway).toHaveBeenCalledWith(expect.objectContaining({
+    code: "STRIPE_CARD",
+    display_name: "Stripe cards",
+    adapter_type: "GENERIC_REST",
+    category: "CARD",
+    provider_type: "AUTOMATED",
+  }));
+  await act(async () => root.unmount());
+});
+
 test("a leftover permissions key next to an empty grant list cannot add a provider", async () => {
   mockUser = {
     role: "ADMIN", status: "ACTIVE",

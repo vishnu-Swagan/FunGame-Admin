@@ -244,7 +244,7 @@ async def gateways(admin=Depends(require_permission("gateway.view"))):
 
 
 @admin_router.post("/payment-gateways", status_code=201)
-async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create", step_up=True))):
+async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create"))):
     try:
         return envelope({"gateway": service.gateway_dto(await service.create_gateway(body.model_dump(exclude_none=True), admin["id"]))})
     except (GatewayError, ValueError) as exc:
