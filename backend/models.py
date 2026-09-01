@@ -206,6 +206,13 @@ class ResendVerificationRequest(BaseModel):
         return self
 
 
+class AuthenticatedOtpVerify(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    challenge_id: str = Field(min_length=32, max_length=64)
+    code: str = Field(pattern=r'^\d{6}$')
+
+
 class LoginRequest(BaseModel):
     # ``email`` is the legacy Login ID/email field and intentionally remains a
     # plain string because it also carries user-chosen Login IDs.
@@ -596,6 +603,19 @@ class ComplianceConfigUpdate(BaseModel):
 class AgeVerify(BaseModel):
     verified: bool = True
     note: Optional[str] = None
+
+
+class PlayerVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class AdminVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    kind: str = Field(pattern=r'^(AGE|MOBILE)$')
+    note: str = Field(min_length=5, max_length=500)
 
 
 class AdminExclusion(BaseModel):

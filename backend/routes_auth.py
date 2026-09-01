@@ -16,6 +16,7 @@ import compliance
 import telesign_service
 from avatar_service import deterministic_avatar_key
 from models import (
+    AuthenticatedOtpVerify,
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
@@ -1653,3 +1654,130 @@ async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_
 @router.get('/me')
 async def me(user: dict = Depends(get_current_user)):
     return {'user': public_user(user)}
+
+
+def _verified_player_mobile(user: dict) -> Identity:
+    if user.get('role') != 'PLAYER' or user.get('status') != 'ACTIVE':
+        raise HTTPException(status_code=403, detail={
+            'code': 'ACTIVE_PLAYER_REQUIRED',
+            'message': 'An active player account is required.',
+        })
+    try:
+        identity = normalize_identity(user.get('phone_normalized') or user.get('phone'))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            'code': 'MOBILE_UNAVAILABLE',
+            'message': 'No valid mobile number is recorded on this account.',
+        }) from exc
+    if identity.channel != 'SMS':
+        raise HTTPException(status_code=422, detail={
+            'code': 'MOBILE_UNAVAILABLE',
+            'message': 'No valid mobile number is recorded on this account.',
+        })
+    return identity
+
+
+@router.post('/me/mobile-verification/request')
+async def request_my_mobile_verification(user: dict = Depends(get_current_user)):
+    identity = _verified_player_mobile(user)
+    if user.get('phone_verified') is True:
+        return {'message': 'Your mobile number is already verified.', 'verified': True}
+    if not delivery_adapter_ready('SMS'):
+        _raise_otp(OtpConfigurationError('Mobile OTP delivery is not configured'))
+    try:
+        challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
+    except OtpError as exc:
+        _raise_otp(exc)
+    now = _now().isoformat()
+    await db.users.update_one(
+        {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE', 'phone_verified': {'$ne': True}},
+        {'$set': {
+            'mobile_verification_status': 'OTP_SENT',
+            'mobile_verification_requested_at': now,
+            'mobile_verification_request_source': 'PLAYER',
+        }},
+    )
+    return {
+        'message': 'A verification code was sent to your mobile number.',
+        'verified': False,
+        **challenge,
+    }
+
+
+@router.post('/me/mobile-verification/confirm')
+async def confirm_my_mobile_verification(
+    body: AuthenticatedOtpVerify,
+    user: dict = Depends(get_current_user),
+):
+    identity = _verified_player_mobile(user)
+    if user.get('phone_verified') is True:
+        return {'message': 'Your mobile number is already verified.', 'user': public_user(user)}
+    try:
+        prepared = await prepare_challenge_verification(
+            identity, body.code, VERIFY_CONTACT,
+            challenge_id=body.challenge_id,
+        )
+    except OtpError as exc:
+        _raise_otp(exc)
+
+    async def commit(session):
+        kwargs = {'session': session} if session is not None else {}
+        verified = await consume_prepared_challenge(
+            prepared, identity, body.code, VERIFY_CONTACT,
+            database=db, session=session,
+        )
+        if verified.get('user_id') != user['id']:
+            raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        verified_at = _now().isoformat()
+        updated = await db.users.find_one_and_update(
+            {
+                'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE',
+                'phone_verified': {'$ne': True},
+                '$or': [
+                    {'phone_normalized': identity.value},
+                    # Legacy accounts may store a formatted raw number and no
+                    # normalized field. Match the exact authenticated snapshot
+                    # and normalize it as part of this one-time update.
+                    {'phone': user.get('phone')},
+                ],
+            },
+            {'$set': {
+                'phone_normalized': identity.value,
+                'phone_verified': True,
+                'phone_verified_at': verified_at,
+                'contact_verified': True,
+                'contact_verified_at': verified_at,
+                'contact_verification_status': 'VERIFIED',
+                'mobile_verification_status': 'VERIFIED',
+                'mobile_verified_at': verified_at,
+            }},
+            return_document=ReturnDocument.AFTER,
+            **kwargs,
+        )
+        if not updated:
+            raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        await db.financial_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': user['id'],
+            'action': 'MOBILE_OTP_VERIFIED',
+            'target_type': 'PLAYER',
+            'target_id': user['id'],
+            'reason': 'Player completed one-time mobile verification',
+            'before': {'phone_verified': False},
+            'after': {'phone_verified': True},
+            'created_at': _now(),
+        }, **kwargs)
+        await db.notifications.insert_one({
+            'id': str(uuid.uuid4()), 'user_id': user['id'],
+            'title': 'Mobile number verified',
+            'body': 'Your mobile number has been verified successfully.',
+            'type': 'VERIFICATION', 'read': False, 'created_at': verified_at,
+        }, **kwargs)
+        return updated
+
+    try:
+        updated = await _run_auth_transaction(commit)
+    except OtpError as exc:
+        _raise_otp(exc)
+    await report_delivery_completion(prepared, body.code, database=db)
+    return {'message': 'Mobile number verified.', 'user': public_user(updated)}

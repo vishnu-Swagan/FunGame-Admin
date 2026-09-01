@@ -6,6 +6,7 @@ import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
   Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
+  Smartphone, BadgeCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,9 @@ export function Profile() {
   const [profileError, setProfileError] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [presetSelectionMade, setPresetSelectionMade] = useState(false);
+  const [mobileChallenge, setMobileChallenge] = useState(null);
+  const [mobileCode, setMobileCode] = useState("");
+  const [verificationBusy, setVerificationBusy] = useState("");
   const avatarInputRef = useRef(null);
   const filteredAvatars = useMemo(() => filterCartoonAvatars(avatarSearch), [avatarSearch]);
 
@@ -68,6 +72,46 @@ export function Profile() {
     && user?.contact_verification_status === "DEFERRED";
   const contactVerified = user?.contact_verified === true;
   const verificationLabel = contactVerified ? "Verified" : verificationDeferred ? "OTP deferred" : "Not verified";
+  const mobileVerified = user?.phone_verified === true;
+  const mobileManuallyVerified = user?.mobile_review_status === "ADMIN_APPROVED";
+  const ageVerified = user?.age_verified === true;
+
+  const requestMobileVerification = async () => {
+    setVerificationBusy("mobile-request");
+    try {
+      const { data } = await api.post("/auth/me/mobile-verification/request");
+      if (data.verified) {
+        setUser((current) => ({ ...current, phone_verified: true, mobile_verification_status: "VERIFIED" }));
+      } else {
+        setMobileChallenge(data.challenge_id || data.verification_id);
+      }
+      toast.success(data.message);
+    } catch (error) { toast.error(errMsg(error)); } finally { setVerificationBusy(""); }
+  };
+
+  const confirmMobileVerification = async () => {
+    if (!/^\d{6}$/.test(mobileCode)) return toast.error("Enter the 6-digit code");
+    setVerificationBusy("mobile-confirm");
+    try {
+      const { data } = await api.post("/auth/me/mobile-verification/confirm", {
+        challenge_id: mobileChallenge,
+        code: mobileCode,
+      });
+      if (data.user) setUser(data.user);
+      setMobileChallenge(null);
+      setMobileCode("");
+      toast.success(data.message);
+    } catch (error) { toast.error(errMsg(error)); } finally { setVerificationBusy(""); }
+  };
+
+  const requestAgeVerification = async () => {
+    setVerificationBusy("age");
+    try {
+      const { data } = await api.post("/responsible/age-verification/request", {});
+      if (data.user) setUser(data.user);
+      toast.success(data.message);
+    } catch (error) { toast.error(errMsg(error)); } finally { setVerificationBusy(""); }
+  };
 
   useEffect(() => () => {
     if (pendingAvatarPreview && typeof URL?.revokeObjectURL === "function") {
@@ -400,6 +444,23 @@ export function Profile() {
           <div className="flex items-center justify-between gap-4 py-2.5"><dt className="text-white/50">Country</dt><dd className="truncate text-xs font-medium">{user?.country || "Not provided"}</dd></div>
         </dl>
       </section>
+
+      {user?.role === "PLAYER" && (
+        <section data-testid="profile-verification-controls" className="rounded-2xl border border-white/10 bg-card/55 p-4">
+          <div><p className="text-sm font-semibold">Account verification</p><p className="mt-0.5 text-[11px] text-white/45">Complete the checks required for payments. Age approval remains an admin-reviewed decision.</p></div>
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-medium"><Smartphone className="h-4 w-4 text-primary" />Mobile number</span><span data-testid="profile-mobile-status" className={`text-xs font-semibold ${mobileVerified || mobileManuallyVerified ? "text-emerald-300" : "text-amber-300"}`}>{mobileVerified ? "OTP verified" : mobileManuallyVerified ? "Admin reviewed" : user?.mobile_verification_status === "REQUESTED" ? "Requested by admin" : "Not verified"}</span></div>
+              {!mobileVerified && !mobileChallenge && <Button type="button" size="sm" onClick={requestMobileVerification} disabled={Boolean(verificationBusy) || !user?.phone} className="mt-3 h-9 rounded-lg" data-testid="profile-mobile-request">{verificationBusy === "mobile-request" ? "Sending…" : "Send mobile OTP"}</Button>}
+              {mobileChallenge && <div className="mt-3 flex gap-2"><Input value={mobileCode} onChange={(event) => setMobileCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="6-digit OTP" className="h-10 rounded-lg border-white/12 bg-white/5" data-testid="profile-mobile-code" /><Button type="button" onClick={confirmMobileVerification} disabled={Boolean(verificationBusy)} className="h-10 rounded-lg" data-testid="profile-mobile-confirm">{verificationBusy === "mobile-confirm" ? "Verifying…" : "Verify"}</Button></div>}
+            </div>
+            <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-medium"><BadgeCheck className="h-4 w-4 text-primary" />Age</span><span data-testid="profile-age-status" className={`text-xs font-semibold ${ageVerified ? "text-emerald-300" : "text-amber-300"}`}>{ageVerified ? "Verified" : ["PENDING", "REQUESTED"].includes(user?.age_verification_status) ? "Admin review pending" : "Not verified"}</span></div>
+              {!ageVerified && !["PENDING", "REQUESTED"].includes(user?.age_verification_status) && <Button type="button" size="sm" onClick={requestAgeVerification} disabled={Boolean(verificationBusy)} className="mt-3 h-9 rounded-lg" data-testid="profile-age-request">{verificationBusy === "age" ? "Submitting…" : "Request age review"}</Button>}
+            </div>
+          </div>
+        </section>
+      )}
 
       {user?.role === "ADMIN" && (
         <button

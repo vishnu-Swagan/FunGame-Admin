@@ -42,8 +42,10 @@ import routes_compliance
 import routes_player
 from models import (
     AgeVerify,
+    AdminVerificationRequest,
     AdminExclusion,
     AdminUserAction,
+    AuthenticatedOtpVerify,
     ComplianceConfigUpdate,
     LoginRequest,
     OnboardingProfileRequest,
@@ -916,6 +918,47 @@ async def main():
     })
     assert age_audit['before']['age_verified'] is False
     assert age_audit['after']['age_verified'] is True
+
+    # Existing active players can complete mobile OTP without registering a
+    # second account, while an authorised step-up admin can request or record
+    # a manual review with a durable audit trail.
+    await database.users.insert_one({
+        'id': 'mobile-review-player', 'role': 'PLAYER', 'status': 'ACTIVE',
+        'phone': '+919876543219', 'phone_normalized': '+919876543219',
+        'phone_verified': False, 'country': 'India',
+        'date_of_birth': '1990-01-01',
+    })
+    mobile_request = await routes_auth.request_my_mobile_verification(
+        await database.users.find_one({'id': 'mobile-review-player'}),
+    )
+    mobile_confirm = await routes_auth.confirm_my_mobile_verification(
+        AuthenticatedOtpVerify(
+            challenge_id=mobile_request['challenge_id'],
+            code=mobile_request['dev_code'],
+        ),
+        await database.users.find_one({'id': 'mobile-review-player'}),
+    )
+    assert mobile_confirm['user']['phone_verified'] is True
+    await routes_compliance.admin_request_verification(
+        'mobile-review-player',
+        AdminVerificationRequest(kind='MOBILE', note='Please reconfirm this mobile'),
+        kyc_admin,
+    )
+    requested = await database.verification_requests.find_one({
+        'id': 'mobile-review-player:MOBILE',
+    })
+    assert requested['status'] == 'REQUESTED' and requested['requested_by'] == 'kyc-admin'
+    await routes_compliance.verify_mobile_manually(
+        'mobile-review-player', AgeVerify(verified=True, note='Carrier record checked'),
+        kyc_admin,
+    )
+    mobile_player = await database.users.find_one({'id': 'mobile-review-player'})
+    assert mobile_player['mobile_review_status'] == 'ADMIN_APPROVED'
+    assert mobile_player['mobile_review_phone_snapshot'] == '+919876543219'
+    mobile_audit = await database.financial_audit.find_one({
+        'target_id': 'mobile-review-player', 'action': 'MOBILE_MANUALLY_VERIFIED',
+    })
+    assert mobile_audit['reason'] == 'Carrier record checked'
 
     # The age floor is not a mutable business setting. A corrupt historical
     # config is clamped to 18, and both default and country-specific attempts

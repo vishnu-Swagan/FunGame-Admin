@@ -142,6 +142,9 @@ def public_user(user: dict) -> dict:
         'password_provisioned_at', 'password_provisioned_by',
         'created_by', 'provisioned_by', 'approved_by', 'reviewed_by',
         'updated_by', 'admin_note', 'disabled_by_distributor_status',
+        'age_verification_requested_by', 'age_verification_request_note',
+        'mobile_verification_requested_by', 'mobile_verification_request_note',
+        'mobile_reviewed_by', 'mobile_review_note', 'mobile_review_phone_snapshot',
         'admin_step_up_password_verified_at', 'admin_step_up_session_id',
         'mfa_verified_at', 'reauthenticated_at', 'admin_step_up_completed_at',
     ):

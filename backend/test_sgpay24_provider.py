@@ -357,21 +357,27 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.saved_env = {
             key: os.environ.get(key)
-            for key in (*PROVIDER_ENV, "UPI_CHIP_PURCHASES_ENABLED", "APP_ENV")
+            for key in (
+                *PROVIDER_ENV, "UPI_CHIP_PURCHASES_ENABLED", "APP_ENV",
+                "FINANCIAL_ALLOWED_COUNTRIES",
+            )
         }
         os.environ.update(PROVIDER_ENV)
         os.environ["UPI_CHIP_PURCHASES_ENABLED"] = "true"
         os.environ["APP_ENV"] = "test"
+        os.environ["FINANCIAL_ALLOWED_COUNTRIES"] = "IN"
 
         self.client = AsyncMongoMockClient()
         self.db = self.client["sgpay24_operator_rail_test"]
         self.original_operator_db = operator_rail.db
         self.original_ledger_db = operator_rail.ledger.db
         self.original_finance_db = operator_rail.finance.db
+        self.original_compliance_db = operator_rail.compliance.db
         self.original_routes_db = routes.db
         operator_rail.db = self.db
         operator_rail.ledger.db = self.db
         operator_rail.finance.db = self.db
+        operator_rail.compliance.db = self.db
         routes.db = self.db
         self.user = {
             "id": "player-sgpay24",
@@ -382,6 +388,10 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
             "email_verified": True,
             "phone": "+91 98765 43210",
             "phone_verified": True,
+            "age_verified": True,
+            "kyc_status": "VERIFIED",
+            "financial_status": "ACTIVE",
+            "country": "IN",
             "chip_balance": 100,
         }
         await self.db.users.insert_one(dict(self.user))
@@ -391,6 +401,7 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         operator_rail.db = self.original_operator_db
         operator_rail.ledger.db = self.original_ledger_db
         operator_rail.finance.db = self.original_finance_db
+        operator_rail.compliance.db = self.original_compliance_db
         routes.db = self.original_routes_db
         for key, value in self.saved_env.items():
             if value is None:
@@ -426,6 +437,71 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflict.exception.status_code, 409)
         self.assertEqual(conflict.exception.detail["code"], "IDEMPOTENCY_CONFLICT")
         self.assertEqual(len(self.gateway.create_calls), 1)
+
+    async def test_audited_manual_contact_approval_reaches_hosted_checkout(self):
+        reviewed = {
+            **self.user,
+            "phone_verified": False,
+            "email_verified": False,
+            "registration_source": "SELF_SERVICE",
+            "activation_mode": "ADMIN_REVIEW",
+            "manual_contact_reviewed": True,
+            "contact_verification_status": "ADMIN_APPROVED",
+            "accepted_terms": True,
+            "submitted_at": operator_rail.utcnow(),
+            "email_normalized": self.user["email"],
+            "phone": "+919876543210",
+            "phone_normalized": "+919876543210",
+            "primary_identity": "+919876543210",
+            "primary_identity_channel": "PHONE",
+            "approved_at": operator_rail.utcnow(),
+            "manual_contact_reviewed_by": "registration-admin",
+        }
+        reviewed["manual_contact_reviewed_at"] = reviewed["approved_at"]
+        reviewed["approved_by"] = reviewed["manual_contact_reviewed_by"]
+        await self.db.users.replace_one({"id": reviewed["id"]}, reviewed)
+
+        purchase, checkout = await operator_rail.create_hosted_deposit(
+            reviewed, 10_000, "manual-review-purchase-0001", self.gateway,
+        )
+
+        self.assertEqual(purchase["status"], "PENDING")
+        self.assertTrue(checkout.startswith("https://root.sgpay24.com/api/pay/"))
+        self.assertEqual(self.gateway.create_calls[0]["customer"]["phone"], "9876543210")
+        self.assertTrue(self.gateway.create_calls[0]["customer"]["phone_verified"])
+        self.assertEqual(
+            await self.db[operator_rail.COLLECTION].count_documents({}), 1,
+        )
+
+    async def test_hosted_retry_and_credit_recheck_fresh_eligibility(self):
+        purchase, checkout = await operator_rail.create_hosted_deposit(
+            self.user, 10_000, "fresh-eligibility-recheck-0001", self.gateway,
+        )
+        self.assertTrue(checkout)
+
+        await self.db.users.update_one(
+            {"id": self.user["id"]}, {"$set": {"age_verified": False}},
+        )
+        with self.assertRaises(HTTPException) as revoked:
+            await operator_rail.create_hosted_deposit(
+                self.user, 10_000, "fresh-eligibility-recheck-0001", self.gateway,
+            )
+        self.assertEqual(revoked.exception.detail["code"], "AGE_NOT_VERIFIED")
+
+        await self.db.users.update_one(
+            {"id": self.user["id"]},
+            {"$set": {"age_verified": True, "financial_status": "BLOCKED"}},
+        )
+        await self.db[operator_rail.COLLECTION].update_one(
+            {"id": purchase["id"]},
+            {"$set": {"status": "PENDING", "utr_claim": "RESTRICTED-UTR-1"}},
+        )
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", "RESTRICTED-UTR-1")
+        result = await operator_rail.reconcile_hosted_deposit(purchase["id"], self.gateway)
+
+        self.assertEqual(result["status"], "RECONCILIATION_REQUIRED")
+        player = await self.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(player["chip_balance"], 100)
 
     async def test_minimum_buy_is_one_hundred_rupees(self):
         purchase, _ = await operator_rail.create_hosted_deposit(
