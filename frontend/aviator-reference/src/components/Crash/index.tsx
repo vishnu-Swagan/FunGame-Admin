@@ -7,6 +7,12 @@ import { playGameSound } from "../../sound";
 
 const BETTING_WINDOW_MS = 5000;
 const FLIGHT_HOVER_PROGRESS = 0.82;
+const FLIGHT_VIEWBOX_WIDTH = 1000;
+const FLIGHT_FLOOR_Y = 532;
+const PLANE_WIDTH = 174;
+const PLANE_HEIGHT = PLANE_WIDTH * (112 / 300);
+const PLANE_TAIL_X = PLANE_WIDTH * (18 / 300);
+const PLANE_TAIL_Y = PLANE_HEIGHT * (62 / 112);
 
 export const flightCurveValue = (seconds: number) => (
 	1
@@ -15,6 +21,38 @@ export const flightCurveValue = (seconds: number) => (
 	- Math.pow(0.04 * seconds, 3)
 	+ Math.pow(0.04 * seconds, 4)
 );
+
+export const flightGeometryFor = (rawProgress: number) => {
+	const progress = Math.max(0.035, Math.min(FLIGHT_HOVER_PROGRESS, rawProgress));
+	const horizontalProgress = 1 - Math.pow(1 - progress, 1.3);
+	const verticalProgress = Math.min(
+		0.88,
+		(1.165 * Math.pow(progress, 2)) + (0.35 * Math.pow(progress, 3)),
+	);
+	const tailX = 28 + (810 * horizontalProgress);
+	const tailY = FLIGHT_FLOOR_Y - (420 * verticalProgress);
+	const firstControlX = tailX * 0.34;
+	const secondControlX = tailX * 0.76;
+	const secondControlY = tailY + Math.max(42, (FLIGHT_FLOOR_Y - tailY) * 0.42);
+	const path = [
+		`M 4 ${FLIGHT_FLOOR_Y}`,
+		`C ${firstControlX.toFixed(2)} ${FLIGHT_FLOOR_Y}`,
+		`${secondControlX.toFixed(2)} ${secondControlY.toFixed(2)}`,
+		`${tailX.toFixed(2)} ${tailY.toFixed(2)}`,
+	].join(" ");
+
+	return {
+		path,
+		fillPath: `${path} L ${tailX.toFixed(2)} ${FLIGHT_FLOOR_Y} L 4 ${FLIGHT_FLOOR_Y} Z`,
+		tailX,
+		tailY,
+		planeX: tailX - PLANE_TAIL_X,
+		planeY: tailY - PLANE_TAIL_Y,
+		planeRotation: -7 - (5 * progress),
+		planeWidth: PLANE_WIDTH,
+		planeHeight: PLANE_HEIGHT,
+	};
+};
 
 export default function CrashStage() {
 	const { GameState, currentNum, time, setCurrentTarget, latestRoundNumber } = React.useContext(Context);
@@ -74,17 +112,7 @@ export default function CrashStage() {
 	const flightProgress = GameState === "PLAYING" || GameState === "GAMEEND"
 		? multiplierProgress
 		: 0;
-	const verticalProgress = Math.min(
-		0.88,
-		(1.165 * Math.pow(flightProgress, 2)) + (0.35 * Math.pow(flightProgress, 3)),
-	);
-	const curveRemaining = 1 - flightProgress;
-	const horizontalProgress = 1 - Math.pow(1 - flightProgress, 1.3);
-	const planeStyle = {
-		left: `${Math.min(78, 4 + (82 * horizontalProgress))}%`,
-		bottom: `${4 + (94 * verticalProgress)}%`,
-		transform: `translate(-2%, 55%) rotate(${-5 - (2.5 * flightProgress)}deg)`,
-	};
+	const flightGeometry = flightGeometryFor(flightProgress);
 	const bettingProgress = Math.max(0, Math.min(100, 100 - ((waiting / BETTING_WINDOW_MS) * 100)));
 
 	return (
@@ -98,23 +126,39 @@ export default function CrashStage() {
 			>
 				{stateReady && (
 					<div className="native-flight-visual" aria-hidden="true">
-						<svg className="flight-curve" viewBox="0 0 820 420" preserveAspectRatio="none">
+						<svg className="flight-curve" viewBox={`0 0 ${FLIGHT_VIEWBOX_WIDTH} 560`} preserveAspectRatio="none">
 							<defs>
 								<linearGradient id="flight-area" x1="0" y1="1" x2="1" y2="0">
 									<stop offset="0" stopColor="#e11942" stopOpacity="0.04" />
 									<stop offset="1" stopColor="#e11942" stopOpacity="0.24" />
 								</linearGradient>
 							</defs>
-							<path className="curve-fill" style={{ clipPath: `inset(0 ${100 - (horizontalProgress * 100)}% 0 0)` }} d="M0 420 C273 420 546 265 820 -186 L820 420 Z" />
-							<path className="curve-shadow" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
-							<path className="curve-line" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
+							<path className="curve-fill" d={flightGeometry.fillPath} />
+							<path className="curve-shadow" d={flightGeometry.path} />
+							<path
+								className="curve-line"
+								data-flight-trail="tail-locked"
+								data-tail-x={flightGeometry.tailX.toFixed(2)}
+								data-tail-y={flightGeometry.tailY.toFixed(2)}
+								d={flightGeometry.path}
+							/>
+							<circle className="curve-tip" cx={flightGeometry.tailX} cy={flightGeometry.tailY} r="4" />
+							<g
+								className={`plane-flight ${GameState === "GAMEEND" ? "crashed" : ""}`}
+								data-tail-x={flightGeometry.tailX.toFixed(2)}
+								data-tail-y={flightGeometry.tailY.toFixed(2)}
+								transform={`rotate(${flightGeometry.planeRotation.toFixed(2)} ${flightGeometry.tailX.toFixed(2)} ${flightGeometry.tailY.toFixed(2)})`}
+							>
+								<image
+									href={aviatorCraft}
+									x={flightGeometry.planeX}
+									y={flightGeometry.planeY}
+									width={flightGeometry.planeWidth}
+									height={flightGeometry.planeHeight}
+									className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
+								/>
+							</g>
 						</svg>
-						<img
-							src={aviatorCraft}
-							alt=""
-							className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""} ${GameState === "GAMEEND" ? "crashed" : ""}`}
-							style={planeStyle}
-						/>
 						<div className={`center-logo ${GameState !== "BET" ? "hide" : ""}`}>
 							<div className="stage-brand" aria-hidden="true">
 								<span>Chakri</span>

@@ -29,6 +29,7 @@ test("the native renderer uses Chakri's side-profile propeller aircraft", () => 
   );
 
   expect(craft).toContain('data-flight-profile="side-view"');
+  expect(craft).toContain('data-tail-anchor="18 62"');
   expect(craft).toContain('viewBox="0 0 300 112"');
   expect(craft).toContain('id="propeller"');
   expect(craft).toContain("propeller-spin");
@@ -76,9 +77,13 @@ test("a live flight advances smoothly from the compensated server time", () => {
 
   act(() => jest.advanceTimersByTime(80));
 
-  expect(container.querySelector(".flight-curve")).not.toBeNull();
+  const trail = container.querySelector('[data-flight-trail="tail-locked"]');
+  const flightPlane = container.querySelector(".plane-flight");
+  expect(trail).not.toBeNull();
   expect(container.querySelector(".plane.visible")).not.toBeNull();
   expect(container.querySelectorAll(".plane")).toHaveLength(1);
+  expect(trail?.getAttribute("data-tail-x")).toBe(flightPlane?.getAttribute("data-tail-x"));
+  expect(trail?.getAttribute("data-tail-y")).toBe(flightPlane?.getAttribute("data-tail-y"));
   expect(container.querySelector(".multiplier")?.textContent).toMatch(/x$/);
   expect(setCurrentTarget).toHaveBeenCalled();
 });
