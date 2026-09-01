@@ -289,18 +289,36 @@ async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *
     return balance_after
 
 
-def _admin_step_up_identity(admin: dict):
-    """Use only an already verified administrator contact for the second factor."""
+def _admin_step_up_identities(admin: dict):
+    """Return normalized, already verified administrator MFA contacts."""
     candidates = []
     if admin.get('phone') and admin.get('phone_verified') is True:
         candidates.append(admin.get('phone_normalized') or admin.get('phone'))
     if admin.get('email') and admin.get('email_verified') is True:
         candidates.append(admin.get('email_normalized') or admin.get('email'))
+    identities = []
     for value in candidates:
         try:
-            return normalize_identity(value)
+            identity = normalize_identity(value)
         except ValueError:
             continue
+        if identity not in identities:
+            identities.append(identity)
+    return identities
+
+
+def _admin_step_up_identity(admin: dict, channel: str | None = None):
+    """Use only an already verified administrator contact for the second factor."""
+    identities = _admin_step_up_identities(admin)
+    if channel:
+        identity = next(
+            (candidate for candidate in identities if candidate.channel == channel),
+            None,
+        )
+        if identity:
+            return identity
+    elif identities:
+        return identities[0]
     raise HTTPException(status_code=403, detail={
         'code': 'ADMIN_MFA_CONTACT_REQUIRED',
         'message': 'Verify an administrator phone or email before requesting a security code.',
@@ -340,11 +358,23 @@ async def start_admin_step_up(body: AdminStepUpStart,
             'code': 'ADMIN_REAUTH_FAILED',
             'message': 'Administrator password is incorrect.',
         })
-    identity = _admin_step_up_identity(admin)
-    try:
-        challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
-    except OtpError as exc:
-        _raise_otp_http(exc)
+    identities = _admin_step_up_identities(admin)
+    if not identities:
+        _admin_step_up_identity(admin)
+    challenge = None
+    delivery_error = None
+    for identity in identities:
+        try:
+            challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
+            break
+        except OtpConfigurationError as exc:
+            # A configured provider can still reject delivery at runtime. Try
+            # the administrator's other verified contact without weakening MFA.
+            delivery_error = exc
+        except OtpError as exc:
+            _raise_otp_http(exc)
+    if challenge is None:
+        _raise_otp_http(delivery_error or OtpConfigurationError())
     password_verified_at = _now()
     result = await db.users.update_one({
         'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
@@ -371,7 +401,15 @@ async def start_admin_step_up(body: AdminStepUpStart,
 async def verify_admin_step_up(body: AdminStepUpVerify,
                                admin: dict = Depends(require_admin)):
     """Consume the code and server-record one short-lived MFA/reauth window."""
-    identity = _admin_step_up_identity(admin)
+    challenge_record = await db.otp_challenges.find_one({
+        'id': body.challenge_id,
+        'user_id': admin['id'],
+        'purpose': ADMIN_STEP_UP,
+    }, {'channel': 1})
+    identity = _admin_step_up_identity(
+        admin,
+        channel=challenge_record.get('channel') if challenge_record else None,
+    )
     try:
         prepared = await prepare_challenge_verification(
             identity, body.code, ADMIN_STEP_UP, challenge_id=body.challenge_id,
