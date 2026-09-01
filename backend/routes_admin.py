@@ -29,6 +29,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AdminStepUpVerify)
 from auth_utils import (require_admin, hash_password, verify_password,
                         require_legacy_chip_requests_enabled,
+                        _legacy_chip_requests_enabled,
                         require_recent_admin_step_up)
 from ledger import debit_chips, InsufficientChips
 import ledger
@@ -504,6 +505,167 @@ async def stats(admin: dict = Depends(require_admin)):
         'active_announcements': announcements_count,
         'maintenance_mode': cfg.get('maintenance_mode', False) if cfg else False,
     }
+
+
+_QUEUE_SEVERITY_RANK = {'critical': 0, 'warning': 1, 'normal': 2}
+
+
+async def _sum_amount_paise(collection, match: dict) -> dict:
+    """Sum ``amount_paise`` for a financial collection without inventing values.
+
+    Returns real totals from stored orders/requests. When a source has no data
+    the totals are simply zero, and the dashboard renders its empty state.
+    """
+    pipeline = [
+        {'$match': match},
+        {'$group': {'_id': None, 'amount_paise': {'$sum': {'$ifNull': ['$amount_paise', 0]}}, 'count': {'$sum': 1}}},
+    ]
+    rows = await collection.aggregate(pipeline).to_list(1)
+    if not rows:
+        return {'amount_paise': 0, 'count': 0}
+    return {'amount_paise': int(rows[0].get('amount_paise', 0)), 'count': int(rows[0].get('count', 0))}
+
+
+async def _oldest_created_at(collection, match: dict, field: str = 'created_at'):
+    row = await collection.find(match, {'_id': 0, field: 1}).sort(field, 1).limit(1).to_list(1)
+    return row[0].get(field) if row else None
+
+
+@router.get('/dashboard')
+async def dashboard(admin: dict = Depends(require_admin)):
+    """Compose the operations overview from existing sources.
+
+    This is additive: it aggregates the stats, recent ledger/payment activity,
+    pending queues and recent audit events that already exist. It never posts to
+    a wallet and invents no numbers — when a source is empty its section returns
+    an empty payload so the UI can render its empty state. Read-only; any active
+    administrator may view it (parity with ``/admin/stats``). Privileged payment
+    mutations continue to enforce Super Admin checks in their own routes.
+    """
+    total_users = await db.users.count_documents({'role': 'PLAYER'})
+    active_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'ACTIVE'})
+    pending_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'PENDING'})
+    suspended_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'SUSPENDED'})
+    total_games = await db.games.count_documents({})
+    enabled_games = await db.games.count_documents({'status': 'ENABLED'})
+    pending_signups = await db.signup_requests.count_documents({'status': 'PENDING'})
+    pending_chip_requests = await db.chip_requests.count_documents({'status': 'PENDING'})
+    cfg = await db.system_config.find_one({'key': 'main'})
+
+    # Cash movement — real stored deposit/withdrawal amounts only.
+    credited_deposits = await _sum_amount_paise(db.deposit_orders, {'status': 'CREDITED'})
+    paid_withdrawals = await _sum_amount_paise(db.withdrawal_requests, {'status': 'PAID'})
+    pending_deposits = await db.deposit_orders.count_documents({'status': {'$in': ['CREATED', 'PENDING', 'RECONCILIATION_REQUIRED']}})
+    pending_withdrawals = await db.withdrawal_requests.count_documents({'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}})
+    reconciliation_required = await db.deposit_orders.count_documents({'status': 'RECONCILIATION_REQUIRED'})
+    attention_events = await db.provider_webhook_events.count_documents({'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}})
+
+    metrics = [
+        {'label': 'Registered players', 'value': total_users, 'note': 'Platform database', 'to': '/Admin/users'},
+        {'label': 'Active players', 'value': active_users, 'note': 'Approved accounts', 'to': '/Admin/users?status=ACTIVE'},
+        {'label': 'Pending review', 'value': pending_users, 'note': 'Manual approval queue', 'to': '/Admin/users?status=PENDING'},
+        {'label': 'Live games', 'value': enabled_games, 'suffix': f'/{total_games}', 'note': 'Catalog availability', 'to': '/Admin/games'},
+        {'label': 'Pending deposits', 'value': pending_deposits, 'note': 'Awaiting provider confirmation', 'to': '/Admin/deposits'},
+        {'label': 'Withdrawal queue', 'value': pending_withdrawals, 'note': 'Awaiting operator action', 'to': '/Admin/withdrawals'},
+    ]
+
+    # Action queue — sorted by operational risk (critical first, then volume).
+    queue_specs = [
+        ('player_approvals', 'Player approvals', db.users, {'role': 'PLAYER', 'status': 'PENDING'}, pending_users, 'critical', '/Admin/users?status=PENDING'),
+        ('signup_requests', 'Signup requests', db.signup_requests, {'status': 'PENDING'}, pending_signups, 'critical', '/Admin/users?status=PENDING'),
+        ('withdrawals', 'Withdrawal queue', db.withdrawal_requests, {'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}}, pending_withdrawals, 'warning', '/Admin/withdrawals'),
+        ('deposit_reconciliation', 'Deposit reconciliation', db.deposit_orders, {'status': 'RECONCILIATION_REQUIRED'}, reconciliation_required, 'warning', '/Admin/deposits'),
+        ('payment_events', 'Payment events needing review', db.provider_webhook_events, {'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}}, attention_events, 'warning', '/Admin/payment-events?attention=1'),
+    ]
+    if _legacy_chip_requests_enabled():
+        queue_specs.append(('chip_requests', 'Chip requests', db.chip_requests, {'status': 'PENDING'}, pending_chip_requests, 'normal', '/Admin/chip-requests'))
+
+    action_queue = []
+    for key, label, collection, match, count, severity, to in queue_specs:
+        if count <= 0:
+            continue
+        oldest = await _oldest_created_at(collection, match)
+        action_queue.append({
+            'key': key, 'label': label, 'count': int(count),
+            'oldest': oldest, 'severity': severity, 'to': to,
+        })
+    action_queue.sort(key=lambda item: (_QUEUE_SEVERITY_RANK.get(item['severity'], 3), -item['count']))
+
+    # Distributor performance — real commission ledger sums (virtual chips).
+    distributor_count = await db.distributors.count_documents({'is_house': {'$ne': True}})
+    commission_rows = await db.commission_ledger.aggregate([
+        {'$group': {'_id': '$distributor_id',
+                    'commission': {'$sum': {'$ifNull': ['$commission', 0]}},
+                    'ngr': {'$sum': {'$ifNull': ['$ngr', 0]}},
+                    'turnover': {'$sum': {'$ifNull': ['$turnover', 0]}}}},
+        {'$sort': {'commission': -1}},
+        {'$limit': 5},
+    ]).to_list(5)
+    distributor_ids = [row['_id'] for row in commission_rows if row.get('_id')]
+    distributor_names = {}
+    if distributor_ids:
+        async for dist in db.distributors.find({'id': {'$in': distributor_ids}}, {'_id': 0, 'id': 1, 'name': 1, 'code': 1}):
+            distributor_names[dist['id']] = dist.get('name') or dist.get('code') or dist['id']
+    top_distributors = [{
+        'distributor_id': row['_id'],
+        'name': distributor_names.get(row['_id'], row['_id']),
+        'commission_chips': int(row.get('commission', 0)),
+        'ngr_chips': int(row.get('ngr', 0)),
+        'turnover_chips': int(row.get('turnover', 0)),
+    } for row in commission_rows if row.get('_id')]
+
+    # Recent transactions — immutable chip ledger, newest first.
+    tx_rows = await db.chip_transactions.find({}, {'_id': 0}).sort('created_at', -1).to_list(8)
+    recent_transactions = [{
+        'id': row.get('id'), 'user_id': row.get('user_id'), 'type': row.get('type'),
+        'kind': row.get('kind'), 'amount': int(row.get('amount', 0)),
+        'balance_after': row.get('balance_after'), 'note': row.get('note'),
+        'created_at': row.get('created_at'),
+    } for row in tx_rows]
+
+    # Audit activity — administrative financial audit, then payment-hub activity.
+    audit_rows = await db.financial_audit.find({}, {'_id': 0}).sort('created_at', -1).to_list(8)
+    audit_activity = [{
+        'id': row.get('id'),
+        'event_type': row.get('action') or row.get('event_type'),
+        'target_type': row.get('target_type'), 'target_id': row.get('target_id'),
+        'actor': row.get('actor_email') or row.get('actor_id') or row.get('admin_id'),
+        'reason': row.get('reason') or row.get('description'),
+        'created_at': row.get('created_at'),
+    } for row in audit_rows]
+    if not audit_activity:
+        activity_rows = await db.activity_events.find({}, {'_id': 0}).sort('occurred_at', -1).to_list(8)
+        audit_activity = [{
+            'id': row.get('id'), 'event_type': row.get('event_type'),
+            'target_type': row.get('target_type'), 'target_id': row.get('target_id'),
+            'actor': row.get('actor_id'), 'reason': None,
+            'created_at': row.get('occurred_at'),
+        } for row in activity_rows]
+
+    return serialize_doc({
+        'metrics': metrics,
+        'players': {
+            'total': total_users, 'active': active_users,
+            'pending': pending_users, 'suspended': suspended_users,
+        },
+        'cash_movement': {
+            'currency': 'INR',
+            'deposits': credited_deposits,
+            'withdrawals': paid_withdrawals,
+            'net_paise': credited_deposits['amount_paise'] - paid_withdrawals['amount_paise'],
+            'pending_deposits': int(pending_deposits),
+            'pending_withdrawals': int(pending_withdrawals),
+        },
+        'action_queue': action_queue,
+        'distributors': {
+            'count': int(distributor_count),
+            'top': top_distributors,
+        },
+        'recent_transactions': recent_transactions,
+        'audit_activity': audit_activity,
+        'maintenance_mode': cfg.get('maintenance_mode', False) if cfg else False,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+    })
 
 
 # ---------- Users ----------
