@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { UserCheck, UserX, Ban, RotateCcw, Search, Users } from "lucide-react";
+import { UserCheck, UserX, Ban, RotateCcw, Search, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -23,6 +24,8 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true);
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectNote, setRejectNote] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async (f) => {
@@ -66,6 +69,33 @@ export default function AdminUsers() {
     await act(rejectTarget.id, "reject", { note: rejectNote || null });
     setRejectTarget(null);
     setRejectNote("");
+  };
+
+  const openDeleteDialog = (user) => {
+    setDeleteConfirmation("");
+    setDeleteTarget(user);
+  };
+
+  const closeDeleteDialog = () => {
+    if (busyId === deleteTarget?.id) return;
+    setDeleteTarget(null);
+    setDeleteConfirmation("");
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleteConfirmation.trim().toUpperCase() !== "DELETE") return;
+    setBusyId(deleteTarget.id);
+    try {
+      const { data } = await api.delete(`/admin/users/${deleteTarget.id}`);
+      toast.success(data?.message || "Player account deleted permanently");
+      setDeleteTarget(null);
+      setDeleteConfirmation("");
+      await load(filter);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const approve = async (user) => {
@@ -229,6 +259,16 @@ export default function AdminUsers() {
                           <Ban className="h-3.5 w-3.5 mr-1" /> Suspend
                         </Button>
                       )}
+                      <Button
+                        data-testid="admin-delete-user-button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === u.id}
+                        onClick={() => openDeleteDialog(u)}
+                        className="h-8 rounded-lg text-xs font-bold border-destructive/45 bg-destructive/10 text-red-300 hover:bg-destructive/20 hover:text-red-200"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -259,6 +299,54 @@ export default function AdminUsers() {
             <Button variant="outline" onClick={() => setRejectTarget(null)} className="rounded-xl border-white/15">Cancel</Button>
             <Button data-testid="admin-reject-confirm-button" onClick={confirmReject} className="rounded-xl bg-destructive text-white hover:brightness-110">
               <RotateCcw className="h-4 w-4 mr-1.5" /> Reject user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent account deletion dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && closeDeleteDialog()}>
+        <DialogContent className="rounded-2xl border-destructive/30 bg-card">
+          <DialogHeader>
+            <DialogTitle>Delete player account permanently?</DialogTitle>
+            <DialogDescription>
+              <span className="font-semibold text-white">
+                {deleteTarget?.display_name || deleteTarget?.username || deleteTarget?.email}
+              </span>{" "}
+              will immediately lose login access. This cannot be undone. Historical game and audit records remain for reporting. Accounts with payment history or unfinished activity cannot be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="delete-player-confirmation" className="text-xs font-semibold text-white/70">
+              Type DELETE to confirm
+            </label>
+            <Input
+              id="delete-player-confirmation"
+              data-testid="admin-delete-user-confirmation-input"
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              autoComplete="off"
+              placeholder="DELETE"
+              className="rounded-xl border-destructive/30 bg-white/5"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={busyId === deleteTarget?.id}
+              onClick={closeDeleteDialog}
+              className="rounded-xl border-white/15"
+            >
+              Cancel
+            </Button>
+            <Button
+              data-testid="admin-delete-user-confirm-button"
+              disabled={busyId === deleteTarget?.id || deleteConfirmation.trim().toUpperCase() !== "DELETE"}
+              onClick={confirmDelete}
+              className="rounded-xl bg-destructive text-white hover:brightness-110"
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              {busyId === deleteTarget?.id ? "Deleting…" : "Delete permanently"}
             </Button>
           </DialogFooter>
         </DialogContent>
