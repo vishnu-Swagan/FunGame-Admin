@@ -33,7 +33,8 @@ function inputRupees(paise) {
  */
 export function publicFinancialConfig(payload) {
   const financial = payload?.financial || {};
-  const operatorLimits = financial.operator?.limits || {};
+  const operator = financial.operator || {};
+  const operatorLimits = operator.limits || {};
   const published = payload?.money_config || financial.public_config || financial.config || payload?.public_config || {};
   const limits = published.limits || financial.limits || published;
   const conversion = published.conversion || published.rate || financial.conversion || financial.rate || payload?.rate || {};
@@ -58,7 +59,14 @@ export function publicFinancialConfig(payload) {
     maxWithdrawalPaise = (maxWithdrawalChips * 100) / chipsPerInr;
   }
 
-  const checkoutHosts = published.checkout_hosts || financial.checkout_hosts || [];
+  const publishedCheckoutHosts = Array.isArray(published.checkout_hosts) ? published.checkout_hosts : [];
+  const financialCheckoutHosts = Array.isArray(financial.checkout_hosts) ? financial.checkout_hosts : [];
+  const operatorCheckoutHosts = Array.isArray(operator.checkout_hosts) ? operator.checkout_hosts : [];
+  const checkoutHosts = [...new Set([
+    ...publishedCheckoutHosts,
+    ...financialCheckoutHosts,
+    ...operatorCheckoutHosts,
+  ].map((host) => String(host || "").trim()).filter(Boolean))];
   return {
     chipsPerInr,
     minDepositPaise,
@@ -67,7 +75,8 @@ export function publicFinancialConfig(payload) {
     maxWithdrawalChips,
     minWithdrawalPaise,
     maxWithdrawalPaise,
-    checkoutHosts: Array.isArray(checkoutHosts) ? checkoutHosts : [],
+    checkoutHosts,
+    operatorCheckoutHosts,
   };
 }
 
@@ -157,22 +166,37 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const hostedWithdrawAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
   const operatorBuyAvailable = isOperatorRailAvailable(financial, "deposits");
   const operatorWithdrawAvailable = isOperatorRailAvailable(financial, "withdrawals");
+  const hostedUpiBuyAvailable = Boolean(
+    operatorBuyAvailable
+    && String(financial?.operator?.rail || "").toUpperCase() === "UPI_HOSTED"
+    && financial?.operator?.hosted_checkout === true,
+  );
   const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
   const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
-  const providerReadinessCopy = hostedBuyAvailable && hostedWithdrawAvailable
-    ? "Chip purchases and withdrawals are completed by the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-    : hostedBuyAvailable
-      ? "Chip purchases are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-      : hostedWithdrawAvailable
-        ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
-        : operatorBuyAvailable || operatorWithdrawAvailable
-          ? "Buy Chips and withdrawals are submitted for Admin review. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
-          : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
+  const providerReadinessCopy = hostedUpiBuyAvailable && hostedWithdrawAvailable
+    ? "Buy Chips securely with UPI through SgPay hosted checkout. Withdrawals use the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
+    : hostedUpiBuyAvailable && operatorWithdrawAvailable
+      ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are submitted for Admin review."
+      : hostedUpiBuyAvailable
+        ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are not active yet."
+        : hostedBuyAvailable && hostedWithdrawAvailable
+          ? "Chip purchases and withdrawals are completed by the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
+          : hostedBuyAvailable
+            ? "Chip purchases are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
+            : hostedWithdrawAvailable
+              ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
+              : operatorBuyAvailable || operatorWithdrawAvailable
+                ? "Buy Chips and withdrawals are submitted for Admin review. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
+                : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
     && config.maxDepositPaise
-    && (hostedBuyAvailable ? config.checkoutHosts.length : operatorBuyAvailable),
+    && (hostedUpiBuyAvailable
+      ? config.operatorCheckoutHosts.length
+      : hostedBuyAvailable
+        ? config.checkoutHosts.length
+        : operatorBuyAvailable),
   );
   const withdrawalConfigured = Boolean(config.chipsPerInr && config.minWithdrawalPaise && config.minWithdrawalChips && config.maxWithdrawalChips);
   const buyPaise = rupeesToPaise(buyAmount);
@@ -199,6 +223,15 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     }
     setBusy("buy");
     try {
+      if (hostedUpiBuyAvailable && config.operatorCheckoutHosts.length) {
+        const key = financialIntentKey("deposit", user?.id, `amount_paise=${buyPaise}`);
+        const result = await payments.createOperatorDeposit(buyPaise, key);
+        const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.operatorCheckoutHosts);
+        if (!checkoutUrl) throw new Error("SgPay returned an invalid UPI checkout address. No chips were credited.");
+        checkoutNavigator(checkoutUrl);
+        clearFinancialIntent("deposit", user?.id, key);
+        return;
+      }
       if (hostedBuyAvailable && config.checkoutHosts.length) {
         const key = financialIntentKey("deposit", user?.id, `amount_paise=${buyPaise}`);
         const result = await payments.createDeposit(buyPaise, key);
@@ -274,12 +307,12 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Buy chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."}</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Buy chips with UPI" : "Buy chips"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay in INR through SgPay secure UPI checkout. Your wallet updates only after the payment is verified by our server." : hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."}</p></div></div>
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Buy Chips is temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
             <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">You receive</span><strong className="tabular-nums text-primary">{formatChips(buyChips)} chips</strong></div>
-            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? (hostedBuyAvailable ? "Opening secure checkout…" : "Submitting request…") : hostedBuyAvailable ? "Continue to payment" : "Submit buy request"}</Button>
+            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? (hostedUpiBuyAvailable ? "Opening UPI checkout…" : hostedBuyAvailable ? "Opening secure checkout…" : "Submitting request…") : hostedUpiBuyAvailable ? "Pay securely with UPI" : hostedBuyAvailable ? "Continue to payment" : "Submit buy request"}</Button>
           </form>
         </TabsContent>
 

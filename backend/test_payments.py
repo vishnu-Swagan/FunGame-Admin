@@ -1563,6 +1563,10 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         for name in await db.list_collection_names():
             await db[name].delete_many({})
         finance.GAME_WALLET_INTEGRATION_READY = False
+        # FinancialCoreTests prepares the module earlier in this script. Reset
+        # its cached readiness so this class actually exercises the declared
+        # operator-only, financial-core-closed state independent of test order.
+        finance._READY = False
         self.user = {
             "id": "player-op-1", "role": "PLAYER", "status": "ACTIVE",
             "email": "player@example.test", "chip_balance": 5000,

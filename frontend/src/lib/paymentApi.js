@@ -19,6 +19,22 @@ export const payments = {
     const { data } = await financialApi.get(`${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}`);
     return data?.deposit || data;
   },
+  async refreshDeposit(id) {
+    const { data } = await financialApi.post(
+      `${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}/refresh`,
+      {},
+      { __noFailover: true },
+    );
+    return data?.deposit || data;
+  },
+  async submitDepositUtr(id, utr) {
+    const { data } = await financialApi.post(
+      `${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}/utr`,
+      { utr },
+      { __noFailover: true },
+    );
+    return data?.deposit || data;
+  },
   async createDeposit(amountPaise, idempotencyKey) {
     const { data } = await financialPost(
       `${PLAYER_ROOT}/deposits`,
@@ -55,11 +71,11 @@ export const payments = {
     }, { idempotencyKey });
     return data;
   },
-  async createOperatorDeposit(amountPaise, note) {
-    const { data } = await financialApi.post(`${PLAYER_ROOT}/operator/deposits`, {
+  async createOperatorDeposit(amountPaise, idempotencyKey, note) {
+    const { data } = await financialPost(`${PLAYER_ROOT}/operator/deposits`, {
       amount_paise: amountPaise,
       note: note || null,
-    }, { __noFailover: true });
+    }, { idempotencyKey });
     return data;
   },
   async createOperatorWithdrawal(amountChips, bankDetailId, note) {
