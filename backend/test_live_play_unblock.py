@@ -229,6 +229,42 @@ async def check_onboarding_records_age_verified():
 
 # ------------------------------------------------------- Health / game wallet
 
+def check_registration_mode_enables_phone_otp():
+    # An explicit mode always wins.
+    for value, expected in (
+        ('PHONE_OTP', 'PHONE_OTP'),
+        ('ADMIN_REVIEW', 'ADMIN_REVIEW'),
+        ('nonsense', 'DISABLED'),
+    ):
+        os.environ['REGISTRATION_MODE'] = value
+        assert routes_auth._registration_mode() == expected, value
+
+    # No explicit mode: phone OTP turns on the moment the SMS channel is wired
+    # (adapter + Telesign credentials); otherwise it falls back to admin review
+    # so registration is never stranded.
+    os.environ.pop('REGISTRATION_MODE', None)
+    saved = {k: os.environ.get(k) for k in (
+        'OTP_SMS_ADAPTER', 'TELESIGN_CUSTOMER_ID', 'TELESIGN_API_KEY',
+    )}
+    try:
+        os.environ['OTP_SMS_ADAPTER'] = 'disabled'
+        os.environ.pop('TELESIGN_CUSTOMER_ID', None)
+        os.environ.pop('TELESIGN_API_KEY', None)
+        assert routes_auth._registration_mode() == 'ADMIN_REVIEW'
+
+        os.environ['OTP_SMS_ADAPTER'] = 'telesign'
+        os.environ['TELESIGN_CUSTOMER_ID'] = 'customer-id'
+        os.environ['TELESIGN_API_KEY'] = 'provider-secret'
+        assert routes_auth._registration_mode() == 'PHONE_OTP'
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    print('  PASS  Registration auto-enables phone OTP when the SMS channel is configured')
+
+
 async def check_game_wallet_certified_and_health_gate():
     # Certified in code for the live UPI launch.
     assert finance.GAME_WALLET_INTEGRATION_READY is True
@@ -268,6 +304,7 @@ async def main():
     await check_real_money_play_allows_self_attested_player()
     await check_self_serve_player_can_buy_upi_chips()
     await check_onboarding_records_age_verified()
+    check_registration_mode_enables_phone_otp()
     await check_game_wallet_certified_and_health_gate()
     print('Live-play unblock: all focused checks passed')
 
