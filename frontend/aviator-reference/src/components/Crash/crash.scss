@@ -43,18 +43,6 @@
       pointer-events: none;
     }
 
-    &.github-visual-ready {
-      background: #050505;
-
-      &::before,
-      &::after,
-      .stage-grid,
-      .fallback-flight-visual,
-      .center-logo {
-        opacity: 0;
-        visibility: hidden;
-      }
-    }
   }
 
   .stage-grid {
@@ -67,42 +55,13 @@
 
 }
 
-.github-unity-stage {
-  position: absolute !important;
-  inset: 0;
-  z-index: 4;
-  display: block;
-  opacity: 0;
-  visibility: hidden;
-  width: 100% !important;
-  height: 100% !important;
-  background: #050505;
-
-  canvas {
-    display: block;
-    width: 100% !important;
-    height: 100% !important;
-  }
-}
-
-.space-box.github-visual-ready .github-unity-stage {
-  opacity: 1;
-  visibility: visible;
-}
-
-.fallback-flight-visual {
+.native-flight-visual {
   position: absolute;
   inset: 0;
   z-index: 5;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 180ms ease;
-  pointer-events: none;
-}
-
-.space-box.fallback-visual-ready .fallback-flight-visual {
   opacity: 1;
   visibility: visible;
+  pointer-events: none;
 }
 
 .aviator-renderer-gate {
@@ -120,10 +79,6 @@
   letter-spacing: .14em;
   text-transform: uppercase;
 
-  img {
-    width: clamp(112px, 20vw, 210px);
-    height: auto;
-  }
 }
 
 .space-box.renderer-pending .round-state,
@@ -135,8 +90,7 @@
   visibility: hidden !important;
 }
 
-.space-box.github-visual-ready .aviator-renderer-gate,
-.space-box.fallback-visual-ready .aviator-renderer-gate {
+.space-box.native-visual-ready .aviator-renderer-gate {
   display: none;
 }
 
@@ -164,6 +118,15 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+
+  small {
+    padding-left: 7px;
+    border-left: 1px solid rgba(255, 255, 255, 0.09);
+    color: #666a72;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
 
   .state-dot {
     width: 6px;
@@ -355,19 +318,42 @@
     transform: translate(-50%, -47%) scale(0.98);
   }
 
-  img {
-    width: clamp(138px, 17vw, 210px);
-    height: auto;
-    filter: drop-shadow(0 8px 22px rgba(229, 5, 57, 0.16));
-  }
-
-  span {
+  small {
     color: #777a82;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
+}
+
+.stage-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  color: #f6f7f9;
+  filter: drop-shadow(0 8px 22px rgba(229, 5, 57, 0.16));
+  letter-spacing: -0.045em;
+  line-height: 1;
+
+  span {
+    color: #e11942;
+    font-size: clamp(12px, 1.25vw, 17px);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  strong {
+    font-size: clamp(34px, 4.7vw, 64px);
+    font-style: italic;
+    font-weight: 900;
+    letter-spacing: -0.065em;
+  }
+}
+
+.aviator-renderer-gate .stage-brand strong {
+  font-size: clamp(38px, 5.2vw, 68px);
 }
 
 .crash-container .loading-container {
@@ -447,16 +433,6 @@
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
-  }
-}
-
-@keyframes loadingRightToLeft {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(-100%);
   }
 }
 

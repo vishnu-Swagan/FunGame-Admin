@@ -886,11 +886,12 @@ def play_no_hold(bet, payload):
 
 
 # ---------------- Aviator helpers ----------------
-# The flight curve is shared verbatim with the Unity-backed reference client.
-# It deliberately remains separate from the private probability configuration:
+# The flight curve is shared with Chakri's native SVG client renderer. It
+# deliberately remains separate from the private probability configuration:
 # the curve controls animation time, while the secret server setting controls
 # the distribution of immutable crash points.
 AVIATOR_GROWTH = 0.06
+AVIATOR_FAIRNESS_VERSION = 2
 
 
 def aviator_return_factor():
@@ -907,6 +908,28 @@ def aviator_return_factor():
 def aviator_uniform_from_seed(server_seed):
     digest = hashlib.sha256(f'aviator-crash-v1:{server_seed}'.encode()).hexdigest()
     return int(digest[:13], 16) / (2 ** 52)
+
+
+def aviator_factor_text(return_factor):
+    """Canonical factor text used by both the commitment and verifier."""
+    return f'{float(return_factor):.12f}'
+
+
+def aviator_commitment_payload(server_seed, return_factor, version=AVIATOR_FAIRNESS_VERSION):
+    """Bind every private crash input before bets close.
+
+    Version 1 committed only the seed. Version 2 also commits the configured
+    return factor, preventing it from being changed after the seed hash is
+    published while keeping already-settled v1 rounds verifiable.
+    """
+    if int(version) <= 1:
+        return str(server_seed)
+    return f'aviator-commit-v2:{aviator_factor_text(return_factor)}:{server_seed}'
+
+
+def aviator_commitment(server_seed, return_factor, version=AVIATOR_FAIRNESS_VERSION):
+    payload = aviator_commitment_payload(server_seed, return_factor, version)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def aviator_crash_point(server_seed=None, return_factor=None):

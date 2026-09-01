@@ -23,8 +23,9 @@ from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
-    MIN_BET, MAX_BET, AVIATOR_GROWTH, KENO_PAYTABLE,
-    aviator_crash_point, aviator_multiplier, aviator_return_factor, aviator_time_for,
+    MIN_BET, MAX_BET, AVIATOR_GROWTH, AVIATOR_FAIRNESS_VERSION, KENO_PAYTABLE,
+    aviator_commitment, aviator_commitment_payload, aviator_crash_point,
+    aviator_factor_text, aviator_multiplier, aviator_return_factor, aviator_time_for,
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
@@ -56,13 +57,13 @@ def _mask(name: str):
 
 
 # ======================================================================
-# AVIATOR - Spribe-style crash game with universal live rounds
+# AVIATOR - server-authoritative crash game with universal live rounds
 # ======================================================================
 # Aviator uses a short launch window so consecutive crash rounds keep their
-# reference-game cadence. The value is returned by /state, so every client draws
+# compact live cadence. The value is returned by /state, so every client draws
 # the same countdown from the server rather than maintaining its own schedule.
 AV_BETTING = 5.0   # seconds bets are open before takeoff
-AV_RESULT = 2.5    # reference game crash-result cadence
+AV_RESULT = 2.5    # compact crash-result cadence
 
 
 class AviatorBet(BaseModel):
@@ -77,8 +78,9 @@ class BetRef(BaseModel):
 
 async def _av_create_round(round_number: int, start_ts: float):
     server_seed = secrets.token_hex(32)
-    server_seed_hash = hashlib.sha256(server_seed.encode()).hexdigest()
     verification_factor = aviator_return_factor()
+    fairness_version = AVIATOR_FAIRNESS_VERSION
+    server_seed_hash = aviator_commitment(server_seed, verification_factor, fairness_version)
     crash = aviator_crash_point(server_seed, verification_factor)
     fly_start = start_ts + AV_BETTING
     crash_at = fly_start + aviator_time_for(crash)
@@ -89,7 +91,7 @@ async def _av_create_round(round_number: int, start_ts: float):
         # Never serialized by /state. It is revealed only after settlement by
         # the authenticated fairness endpoint below.
         'server_seed': server_seed, 'server_seed_hash': server_seed_hash,
-        'verification_factor': verification_factor,
+        'verification_factor': verification_factor, 'fairness_version': fairness_version,
     }
     try:
         await db.aviator_rounds.insert_one(dict(doc))
@@ -325,6 +327,8 @@ async def aviator_round_fairness(round_number: int, user: dict = Depends(require
         raise HTTPException(status_code=404, detail='Round not found')
     if r.get('status') != 'SETTLED' or not r.get('server_seed'):
         raise HTTPException(status_code=409, detail='The server seed is revealed after the round settles')
+    fairness_version = int(r.get('fairness_version') or 1)
+    verification_factor_text = aviator_factor_text(r['verification_factor'])
     result_hash = hashlib.sha256(f"aviator-crash-v1:{r['server_seed']}".encode()).hexdigest()
     return {
         'createdAt': r.get('created_at'),
@@ -338,6 +342,12 @@ async def aviator_round_fairness(round_number: int, user: dict = Depends(require
         # Returned only after settlement so the client can independently derive
         # and verify the published crash point. It is not shown in the game UI.
         'verificationFactor': r['verification_factor'],
+        'verificationFactorText': verification_factor_text,
+        'fairnessVersion': fairness_version,
+        'commitmentPayload': aviator_commitment_payload(
+            r['server_seed'], r['verification_factor'], fairness_version,
+        ),
+        'algorithm': 'SHA256 / crash-v1',
     }
 
 
@@ -382,7 +392,7 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
     r = await advance_aviator()
     now = time.time()
     phase, t = _av_phase(r, now)
-    # Bets during a flight/result queue for the NEXT round (Spribe behaviour)
+    # Bets during a flight/result queue for the next round.
     if phase == 'BETTING' and t > 0.3:
         target_rn = r['round_number']
     else:
