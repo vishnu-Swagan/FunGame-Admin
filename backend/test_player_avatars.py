@@ -155,6 +155,7 @@ class PlayerAvatarTests(unittest.IsolatedAsyncioTestCase):
             identifier=phone,
             phone=phone,
             email="avatar.player@example.com",
+            username="Avatar.Player",
             full_name="Avatar Player",
             date_of_birth="1990-01-01",
             country="India",
@@ -177,6 +178,14 @@ class PlayerAvatarTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 routes_auth.crm, "require_registration_attribution_readiness",
                 new=AsyncMock(),
+            ),
+            patch.object(
+                routes_auth.crm, "require_portal_identity_readiness",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                routes_auth.crm, "assert_player_login_id_available",
+                new=AsyncMock(return_value=("Avatar.Player", "avatar.player")),
             ),
             patch.object(routes_auth.crm, "attribute_user", new=AsyncMock()),
             patch.object(

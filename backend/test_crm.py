@@ -16,14 +16,58 @@ def T(name, cond):
     else: FAIL += 1
 
 async def main():
+    # Pre-index rows model identities created by the production system before
+    # the shared reservation namespace was introduced.
+    await client['test'].distributors.insert_one({
+        'id': 'legacy-distributor', 'code': 'LGC01', 'is_house': False,
+        'login_username': 'Legacy.Partner',
+        'login_username_key': 'legacy.partner',
+        'user_id': 'legacy-distributor-user', 'status': 'ACTIVE',
+    })
+    await client['test'].users.insert_one({
+        'id': 'legacy-distributor-user', 'role': 'DISTRIBUTOR',
+        # Deliberately differs from the CRM display field. Backfill must adopt
+        # it under the linked distributor owner, never silently skip it.
+        'username': 'MNOO', 'username_key': 'mnoo',
+    })
+    await client['test'].users.insert_one({
+        'id': 'legacy-player', 'role': 'PLAYER',
+        'username': 'USRO', 'username_key': 'usro',
+    })
     await crm.ensure_indexes()
+    T("legacy distributor code is backfilled", bool(
+        await client['test'].login_id_reservations.find_one({
+            'key': 'lgc01', 'owner_id': 'legacy-distributor',
+        })
+    ))
+    T("legacy independent Login ID is backfilled", bool(
+        await client['test'].login_id_reservations.find_one({
+            'key': 'legacy.partner', 'owner_id': 'legacy-distributor',
+        })
+    ))
+    T("legacy player confusable alias is backfilled", bool(
+        await client['test'].login_id_reservations.find_one({
+            'key': 'usr0', 'owner_id': 'legacy-player',
+        })
+    ))
+    T("mismatched linked partner alias is backfilled", bool(
+        await client['test'].login_id_reservations.find_one({
+            'key': 'mn00', 'owner_type': 'DISTRIBUTOR',
+            'owner_id': 'legacy-distributor',
+        })
+    ))
+    await crm.ensure_login_id_reservation_coverage()
+    T("legacy reservation backfill is idempotent",
+      await crm.portal_identity_ready())
     # --- code folding: confusables must collapse, both ways ---
     T("O folds to 0",            crm.normalise_code('abcO') == 'ABC0')
     T("I and L fold to 1",       crm.normalise_code('aIbL') == 'A1B1')
     T("spaces and dashes go",    crm.normalise_code(' ab-c1 ') == 'ABC1')
     T("too short is refused",    crm.normalise_code('ab') is None)
     T("symbols are refused",     crm.normalise_code('ab*c') is None)
-    T("HOUSE is reserved",       not crm.code_is_available('ADMIN'))
+    T("reserved codes are refused", not crm.code_is_available('ADMIN'))
+    T("reserved confusable aliases are refused",
+      not crm.code_is_available('ADM1N') and not crm.code_is_available('H0USE'))
 
     # --- house account ---
     h1 = await crm.ensure_house_account()
@@ -55,6 +99,23 @@ async def main():
     try: await crm.create_distributor('Confusable', 'NRTHI', 1000, 'admin1')
     except ValueError as e: conf = str(e)
     T("confusable dup refused",  conf is not None)   # NRTHI folds to NRTH1
+    player_alias_blocked = None
+    try:
+        await crm.reserve_player_login_id('NRTHI', 'alias-player-one')
+    except ValueError as e:
+        player_alias_blocked = str(e)
+    T("referral-code aliases are reserved from players", player_alias_blocked is not None)
+    await crm.reserve_player_login_id('ABCO', 'alias-player-two')
+    await client['test'].users.insert_one({
+        'id': 'alias-player-two', 'role': 'PLAYER',
+        'username': 'ABCO', 'username_key': 'abco',
+    })
+    distributor_alias_blocked = None
+    try:
+        await crm.create_distributor('Alias Conflict', 'ABC0', 1000, 'admin1')
+    except ValueError as e:
+        distributor_alias_blocked = str(e)
+    T("player aliases are reserved from referral codes", distributor_alias_blocked is not None)
 
     # --- rate history is a history ---
     t0 = crm.now_iso()
@@ -74,6 +135,61 @@ async def main():
     T("profile update preserves contact/note", updated['phone'] == '+441111111111'
       and updated['note'] == 'Updated internal note')
     T("login reservation can be changed", updated['login_username'] == 'north.network')
+
+    # Confusable Login-ID renames share one canonical reservation. Releasing
+    # the old display alias must not release the canonical key retained by the
+    # replacement.
+    alias_dist = await crm.create_distributor(
+        'Alias Rename', 'XYZ22', 1000, 'admin1', username='PQRO',
+    )
+    await crm.update_distributor(
+        alias_dist['id'], {'username': 'PQR0'}, 'admin2',
+    )
+    retained_alias = await client['test'].login_id_reservations.find_one({
+        'key': 'pqr0', 'owner_type': 'DISTRIBUTOR', 'owner_id': alias_dist['id'],
+    })
+    T("confusable rename retains canonical reservation", retained_alias is not None)
+    obsolete_alias = await client['test'].login_id_reservations.find_one({
+        'key': 'pqro', 'owner_type': 'DISTRIBUTOR', 'owner_id': alias_dist['id'],
+    })
+    T("confusable rename releases obsolete display alias", obsolete_alias is None)
+
+    await crm.attach_login(
+        alias_dist['id'], 'alias.rename@example.com', 'hash-one', 'admin2',
+        username='LMNO',
+    )
+    await crm.attach_login(
+        alias_dist['id'], 'alias.rename@example.com', 'hash-two', 'admin2',
+        username='LMN0',
+    )
+    attached_alias = await client['test'].login_id_reservations.find_one({
+        'key': 'lmn0', 'owner_type': 'DISTRIBUTOR', 'owner_id': alias_dist['id'],
+    })
+    attached_obsolete = await client['test'].login_id_reservations.find_one({
+        'key': 'lmno', 'owner_type': 'DISTRIBUTOR', 'owner_id': alias_dist['id'],
+    })
+    T("credential rename retains canonical reservation", attached_alias is not None)
+    T("credential rename releases obsolete display alias", attached_obsolete is None)
+
+    # The reservation index itself must be globally unique. A partial index
+    # with the expected name is not an acceptable substitute.
+    await client['test'].login_id_reservations.drop_index(
+        crm.LOGIN_ID_RESERVATION_INDEX,
+    )
+    await client['test'].login_id_reservations.create_index(
+        'key', unique=True,
+        partialFilterExpression={'owner_type': {'$type': 'string'}},
+        name=crm.LOGIN_ID_RESERVATION_INDEX,
+    )
+    malformed_ready = await crm.portal_identity_ready()
+    T("partial reservation index fails readiness", malformed_ready is False)
+    await client['test'].login_id_reservations.drop_index(
+        crm.LOGIN_ID_RESERVATION_INDEX,
+    )
+    await client['test'].login_id_reservations.create_index(
+        'key', unique=True, name=crm.LOGIN_ID_RESERVATION_INDEX,
+    )
+    T("exact reservation index restores readiness", await crm.portal_identity_ready())
 
     # --- attribution ---
     for uid in ('u-known', 'u-none', 'u-bad'):
@@ -112,6 +228,49 @@ async def main():
     T("unknown user is refused, not ignored", missing is not None)
     T("registration attribution readiness is exact",
       await crm.registration_attribution_ready())
+
+    # A legacy cross-namespace conflict must clear the migration marker and
+    # hold all new identity mutation fail-closed until the data is repaired.
+    await client['test'].distributors.insert_one({
+        'id': 'legacy-conflict-distributor', 'code': 'BACK0',
+        'is_house': False, 'status': 'ACTIVE',
+    })
+    await client['test'].users.insert_one({
+        'id': 'legacy-conflict-player', 'role': 'PLAYER',
+        'username': 'BACKO', 'username_key': 'backo',
+    })
+    coverage_conflict = None
+    try:
+        await crm.ensure_login_id_reservation_coverage()
+    except crm.CrmConfigurationError as exc:
+        coverage_conflict = exc
+    T("legacy alias conflict aborts coverage", coverage_conflict is not None)
+    T("failed coverage keeps portal identity fail-closed",
+      not await crm.portal_identity_ready())
+    await client['test'].users.delete_one({'id': 'legacy-conflict-player'})
+    await client['test'].distributors.delete_one({'id': 'legacy-conflict-distributor'})
+    await client['test'].login_id_reservations.delete_many({
+        'owner_id': {'$in': ['legacy-conflict-player', 'legacy-conflict-distributor']},
+    })
+    await crm.ensure_login_id_reservation_coverage()
+    T("coverage recovers after legacy conflict repair",
+      await crm.portal_identity_ready())
+
+    await client['test'].users.insert_one({
+        'id': 'orphan-distributor-user', 'role': 'DISTRIBUTOR',
+        'username': 'ORPHO', 'username_key': 'orpho',
+    })
+    orphan_conflict = None
+    try:
+        await crm.ensure_login_id_reservation_coverage()
+    except crm.CrmConfigurationError as exc:
+        orphan_conflict = exc
+    T("orphan partner identity fails coverage closed", orphan_conflict is not None)
+    T("orphan partner identity clears readiness", not await crm.portal_identity_ready())
+    await client['test'].users.delete_one({'id': 'orphan-distributor-user'})
+    await crm.ensure_login_id_reservation_coverage()
+    T("coverage recovers after orphan partner repair",
+      await crm.portal_identity_ready())
 
     print(f"\n  {PASS} passed, {FAIL} failed")
     return FAIL

@@ -411,6 +411,7 @@ async def authentication_capabilities():
             await require_identity_indexes()
             await require_registration_transactions()
             await crm.require_registration_attribution_readiness()
+            await crm.require_portal_identity_readiness()
             manual_storage_ready = True
         except (OtpConfigurationError, crm.CrmConfigurationError):
             manual_storage_ready = False
@@ -422,6 +423,7 @@ async def authentication_capabilities():
     otp_registration_ready = (
         otp_storage_ready
         and await crm.registration_attribution_ready()
+        and await crm.portal_identity_ready()
         and (email_otp_ready or not email_required)
     )
 
@@ -486,6 +488,7 @@ async def _register_phone_otp(body: RegisterRequest):
     try:
         await require_registration_readiness()
         await crm.require_registration_attribution_readiness()
+        await crm.require_portal_identity_readiness()
     except OtpConfigurationError as exc:
         _raise_otp(exc)
     except crm.CrmConfigurationError as exc:
@@ -522,6 +525,22 @@ async def _register_phone_otp(body: RegisterRequest):
     )
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
+    if not body.username:
+        # Enforce this before any contact lookup so the response cannot reveal
+        # whether the submitted mobile/email already belongs to an account.
+        raise HTTPException(status_code=422, detail={
+            'code': 'LOGIN_ID_REQUIRED',
+            'message': 'Choose your Login ID to create an account.',
+        })
+    try:
+        await crm.assert_player_login_id_available(body.username)
+    except ValueError as exc:
+        # Login-ID availability is evaluated before contact existence for the
+        # same anti-enumeration reason as the required-field check above.
+        raise HTTPException(status_code=409, detail={
+            'code': 'LOGIN_ID_UNAVAILABLE',
+            'message': 'That Login ID is unavailable. Choose another Login ID.',
+        }) from exc
 
     verify_plus_will_screen = bool(
         _telesign_flag('TELESIGN_VERIFY_PLUS_ENABLED')
@@ -601,6 +620,7 @@ async def _register_phone_otp(body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    login_id = body.username
     user = {
         'id': user_id,
         'role': 'PLAYER',
@@ -636,6 +656,10 @@ async def _register_phone_otp(body: RegisterRequest):
         'accepted_terms_at': created_at,
         'created_at': created_at,
     }
+    if login_id:
+        # An unauthenticated form submission must not permanently squat a Login
+        # ID. The final verified OTP transaction claims it atomically.
+        user['requested_username'] = login_id
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,
@@ -662,7 +686,7 @@ async def _register_phone_otp(body: RegisterRequest):
         user = await _run_auth_transaction(create_account)
     except DuplicateKeyError:
         # A concurrent insert won either normalized-identity guard. Keep the
-        # same non-enumerating response as a pre-existing collision.
+        # response generic so it does not disclose which identity matched.
         return _opaque_registration_response(identity)
 
     try:
@@ -703,6 +727,7 @@ async def _register_for_admin_review(body: RegisterRequest):
         await require_identity_indexes()
         await require_registration_transactions()
         await crm.require_registration_attribution_readiness()
+        await crm.require_portal_identity_readiness()
     except OtpConfigurationError as exc:
         _raise_otp(exc)
     except crm.CrmConfigurationError as exc:
@@ -755,6 +780,20 @@ async def _register_for_admin_review(body: RegisterRequest):
     )
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
+    if not body.username:
+        # Match the OTP route's uniform pre-lookup requirement. Existing and
+        # unknown contacts must expose the same response shape.
+        raise HTTPException(status_code=422, detail={
+            'code': 'LOGIN_ID_REQUIRED',
+            'message': 'Choose your Login ID to create an account.',
+        })
+    try:
+        await crm.assert_player_login_id_available(body.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={
+            'code': 'LOGIN_ID_UNAVAILABLE',
+            'message': 'That Login ID is unavailable. Choose another Login ID.',
+        }) from exc
 
     telesign_onboarding = await _telesign_onboarding_screen(
         identity,
@@ -793,6 +832,7 @@ async def _register_for_admin_review(body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    login_id = body.username
     user = {
         'id': user_id,
         'role': 'PLAYER',
@@ -836,6 +876,9 @@ async def _register_for_admin_review(body: RegisterRequest):
         'submitted_at': created_at,
         'created_at': created_at,
     }
+    if login_id:
+        # The administrator's approval is the trusted claim point in this mode.
+        user['requested_username'] = login_id
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,
@@ -855,7 +898,7 @@ async def _register_for_admin_review(body: RegisterRequest):
         await _run_auth_transaction(create_account)
     except DuplicateKeyError:
         # A simultaneous duplicate provisional contact or a vanishingly
-        # unlikely generated placeholder collision stays intentionally opaque.
+        # unlikely placeholder/Login-ID collision stays generic.
         return response
     return response
 
@@ -968,6 +1011,27 @@ async def verify_contact(body: VerifyEmailRequest):
         )
         if phone_self_service and not (phone_step or email_step):
             raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        final_phone_activation = bool(
+            phone_self_service and not (phone_step and dual_email_required)
+        )
+        login_id = body.username or user.get('requested_username')
+        login_id_key = None
+        if final_phone_activation and login_id:
+            try:
+                await crm.require_portal_identity_readiness()
+                login_id, login_id_key = await crm.reserve_player_login_id(
+                    login_id, user['id'], session=session,
+                )
+            except crm.CrmConfigurationError as exc:
+                raise HTTPException(status_code=503, detail={
+                    'code': 'LOGIN_ID_STORAGE_UNAVAILABLE',
+                    'message': 'Login ID storage is temporarily unavailable. Try again.',
+                }) from exc
+            except (ValueError, DuplicateKeyError) as exc:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'LOGIN_ID_UNAVAILABLE',
+                    'message': 'That Login ID is unavailable. Choose another Login ID.',
+                }) from exc
         updates = {
             contact_field: True,
             'password_hash': verifier_password_hash,
@@ -987,6 +1051,10 @@ async def verify_contact(body: VerifyEmailRequest):
                     'contact_verification_status': 'PHONE_VERIFIED_EMAIL_PENDING',
                     'phone_verified_at': verified_at,
                 })
+                if login_id:
+                    # Keep an authenticated edit made on the first OTP step so
+                    # interrupted email verification can recover that choice.
+                    updates['requested_username'] = login_id
             else:
                 # Existing phone-only registrations retain their original
                 # activation contract. New dual-verification registrations
@@ -1006,6 +1074,11 @@ async def verify_contact(body: VerifyEmailRequest):
                 })
                 if not dual_email_required:
                     updates['email_verified'] = False
+                if login_id:
+                    updates.update({
+                        'username': login_id,
+                        'username_key': login_id_key,
+                    })
         elif _self_service_needs_profile(user):
             updates.update({
                 'status': 'VERIFIED',
@@ -1044,14 +1117,17 @@ async def verify_contact(body: VerifyEmailRequest):
                     'email_normalized': identity.value,
                     'email_verification_required': True,
                 })
+        verification_unsets = {
+            'verification_code_hash': '', 'verification_expires_at': '',
+            'locked_until': '',
+        }
+        if final_phone_activation and login_id:
+            verification_unsets['requested_username'] = ''
         updated = await db.users.find_one_and_update(
             verification_query,
             {
                 '$set': updates,
-                '$unset': {
-                    'verification_code_hash': '', 'verification_expires_at': '',
-                    'locked_until': '',
-                },
+                '$unset': verification_unsets,
             },
             return_document=ReturnDocument.AFTER,
             **kwargs,
@@ -1174,12 +1250,19 @@ async def login(body: LoginRequest):
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
         # The optional email collected during sign-up is profile data only. It
         # must not silently become a login identifier without its own ownership
-        # proof. Phone-OTP accounts authenticate exclusively with the exact
-        # verified E.164 number.
+        # proof. Phone-OTP accounts may authenticate with the exact verified
+        # mobile number or their explicitly chosen Login ID.
         phone_self_service_identity_ok = bool(
-            contact_identity
-            and contact_identity.channel == 'SMS'
-            and contact_identity.value == user.get('phone_normalized')
+            (
+                contact_identity
+                and contact_identity.channel == 'SMS'
+                and contact_identity.value == user.get('phone_normalized')
+            )
+            or (
+                contact_identity is None
+                and user.get('username_key')
+                and user.get('username_key') == ident.casefold()
+            )
         )
     locked_until = _as_utc(user.get('locked_until')) if user else None
     if user and locked_until and locked_until <= now:
@@ -1297,6 +1380,7 @@ async def login(body: LoginRequest):
             # verification step without exposing it to unauthenticated probes.
             if email_followup_required:
                 detail['identifier'] = user.get('email_normalized') or user.get('email')
+                detail['login_id'] = user.get('requested_username') or ''
             raise HTTPException(status_code=403, detail=detail)
 
     telesign_sign_in = None
@@ -1416,6 +1500,7 @@ async def login(body: LoginRequest):
             }
             if dual_pending:
                 detail['identifier'] = user.get('email_normalized') or user.get('email')
+                detail['login_id'] = user.get('requested_username') or ''
             raise HTTPException(status_code=403, detail=detail)
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':

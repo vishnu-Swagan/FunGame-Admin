@@ -23,6 +23,7 @@ export default function VerifyEmail() {
   const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "PHONE", initial.identifier || initial.email));
   const [identifier, setIdentifier] = useState(initial.identifier || initial.email || "");
   const [secondaryIdentifier] = useState(initial.secondaryIdentifier || "");
+  const [loginId, setLoginId] = useState(initial.loginId || "");
   const [destinationMasked, setDestinationMasked] = useState(initial.destinationMasked || "");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -57,6 +58,7 @@ export default function VerifyEmail() {
     event?.preventDefault();
     if (!verificationAvailable) return toast.info("Verification is temporarily unavailable for this contact method.");
     if (!identifier.trim()) return toast.error(`Enter your ${channel === "PHONE" ? "mobile number" : "email"}`);
+    if (initial.loginId && !/^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$/.test(loginId.trim())) return toast.error("Start your Login ID with a letter or number; use 4–32 letters, numbers, dots, underscores, or hyphens");
     if (code.length !== 6) return toast.error("Enter the 6-digit code");
     if (password.length < 8) return toast.error("Password must be at least 8 characters");
     if (password !== confirmPassword) return toast.error("Passwords do not match");
@@ -68,6 +70,7 @@ export default function VerifyEmail() {
         identifier: contact,
         email: channel === "EMAIL" ? contact : undefined,
         phone: channel === "PHONE" ? contact : undefined,
+        username: loginId.trim() || undefined,
         code,
         password,
       });
@@ -167,6 +170,13 @@ export default function VerifyEmail() {
         </div>
       )}
       <form onSubmit={submit} className="space-y-5">
+        {initial.loginId && (
+          <div className="space-y-1.5">
+            <Label htmlFor="verify-login-id">Your Login ID</Label>
+            <Input id="verify-login-id" data-testid="verify-login-id-input" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} required minLength={4} maxLength={32} value={loginId} onChange={(event) => setLoginId(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+            <p className="text-[11px] leading-relaxed text-white/45">You can change it before verification if the ID becomes unavailable.</p>
+          </div>
+        )}
         <div data-testid="verify-email-otp" className="flex justify-center">
           <InputOTP maxLength={6} value={code} onChange={setCode}>
             <InputOTPGroup className="gap-2">

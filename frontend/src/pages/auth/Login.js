@@ -72,7 +72,13 @@ export default function Login() {
           }
           toast.info(`Please verify your ${requestedChannel === "PHONE" ? "mobile number" : "email"} first`);
           const { data } = await api.post("/auth/resend-otp", recovery.body);
-          navigate("/verify", { state: { channel: recovery.channel, identifier: recovery.contact, destinationMasked: data?.destination_masked, resendAfter: data?.resend_after_seconds } });
+          navigate("/verify", { state: {
+            channel: recovery.channel,
+            identifier: recovery.contact,
+            destinationMasked: data?.destination_masked,
+            resendAfter: data?.resend_after_seconds,
+            loginId: detail?.login_id || "",
+          } });
         } catch (verificationError) {
           toast.error(errMsg(verificationError));
         }
@@ -100,14 +106,14 @@ export default function Login() {
       )}
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="identifier">Email, mobile number, or Login ID</Label>
+          <Label htmlFor="identifier">Email, mobile with +country code, or Login ID</Label>
           <Input
             id="identifier"
             data-testid="login-email-input"
             type="text"
             required
             autoComplete="username"
-            placeholder="email, +country code mobile, or Login ID"
+            placeholder="Email, mobile with +country code, or your Login ID"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
             className="h-12 rounded-xl bg-white/5 border-white/12"

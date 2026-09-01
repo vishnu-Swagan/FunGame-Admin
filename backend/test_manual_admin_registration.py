@@ -58,6 +58,7 @@ def registration(**overrides):
         'identifier': '+919876543210',
         'phone': '+919876543210',
         'email': 'new.player@example.com',
+        'username': 'Default.Review.Player',
         'full_name': 'New Player',
         'date_of_birth': '1990-01-01',
         'country': 'India',
@@ -126,15 +127,39 @@ async def main():
     await expect_http_error(
         routes_auth.register(registration(accepted_terms=False)), 422, 'TERMS_REQUIRED',
     )
+    missing_login_unknown = await expect_http_error(
+        routes_auth.register(registration(
+            identifier='+919876543219', phone='+919876543219',
+            email='missing.login.id@example.com', username=None,
+        )),
+        422, 'LOGIN_ID_REQUIRED',
+    )
+    reserved_login_unknown = await expect_http_error(
+        routes_auth.register(registration(
+            identifier='+919876543218', phone='+919876543218',
+            email='reserved.login.id@example.com', username='ADM1N',
+        )),
+        409, 'LOGIN_ID_UNAVAILABLE',
+    )
     try:
         registration(password_confirmation='Different-Password-9')
         raise AssertionError('Mismatched password confirmation was accepted')
     except ValidationError:
         pass
 
-    response = await routes_auth.register(registration())
+    response = await routes_auth.register(registration(username='Royal.Player_9'))
     assert response['review_required'] is True
     assert response['verification_required'] is False
+    missing_login_known = await expect_http_error(
+        routes_auth.register(registration(username=None)),
+        422, 'LOGIN_ID_REQUIRED',
+    )
+    assert missing_login_known.detail == missing_login_unknown.detail
+    reserved_login_known = await expect_http_error(
+        routes_auth.register(registration(username='ADM1N')),
+        409, 'LOGIN_ID_UNAVAILABLE',
+    )
+    assert reserved_login_known.detail == reserved_login_unknown.detail
     assert response['registration_mode'] == routes_auth.ADMIN_REVIEW_ACTIVATION_MODE
     assert 'access_token' not in response
     assert 'challenge_id' not in response
@@ -151,6 +176,11 @@ async def main():
     assert player['phone_verified'] is False
     assert player['pending_email'] == 'new.player@example.com'
     assert player['pending_phone'] == '+919876543210'
+    assert player['requested_username'] == 'Royal.Player_9'
+    assert 'username' not in player
+    assert await database.login_id_reservations.count_documents({
+        'key': 'royal.player_9',
+    }) == 0
     assert player['email'].endswith('.manual.invalid')
     assert 'email_normalized' not in player
     assert 'phone_normalized' not in player
@@ -213,6 +243,21 @@ async def main():
     )), 401)
     assert pending.detail == routes_auth.INVALID_LOGIN_MESSAGE
 
+    # Unverified applications do not reserve a public Login ID. Two applicants
+    # may request the same value, but only the first trusted approval can claim
+    # it; this prevents unauthenticated Login-ID squatting.
+    await routes_auth.register(registration(
+        identifier='+919876543215', phone='+919876543215',
+        email='login-id-contender@example.com', username='royal.player_9',
+    ))
+    contender = await database.users.find_one({
+        'pending_email': 'login-id-contender@example.com',
+    })
+    assert contender['requested_username'] == 'royal.player_9'
+    assert await database.login_id_reservations.count_documents({
+        'key': 'royal.player_9',
+    }) == 0
+
     admin = {'id': 'admin-1', 'role': 'ADMIN', 'status': 'ACTIVE'}
     # A contact claimed by an approved account after application submission is
     # still rejected atomically before the provisional fields are promoted.
@@ -239,6 +284,20 @@ async def main():
     assert approved['user']['phone_verified'] is False
     assert approved['user']['email'] == 'new.player@example.com'
     assert approved['user']['phone'] == '+919876543210'
+    assert approved['user']['username'] == 'Royal.Player_9'
+    assert approved['user']['username_key'] == 'royal.player_9'
+    assert 'requested_username' not in approved['user']
+    assert await database.login_id_reservations.count_documents({
+        'key': 'royal.player_9', 'owner_type': 'USER', 'owner_id': player['id'],
+    }) == 1
+    await expect_http_error(
+        routes_admin.approve_user(contender['id'], AdminUserAction(), admin),
+        409, 'LOGIN_ID_UNAVAILABLE',
+    )
+    contender = await database.users.find_one({'id': contender['id']})
+    assert contender['status'] == 'PENDING'
+    assert contender['chip_balance'] == 0
+    assert 'username' not in contender
     assert 'pending_email' not in approved['user']
     assert 'pending_phone' not in approved['user']
     # Registration starts at zero; the existing explicit approval action is
@@ -255,6 +314,11 @@ async def main():
         password='Strong-Password-9',
     ))
     assert phone_login['access_token']
+    login_id_login = await routes_auth.login(LoginRequest(
+        identifier='royal.player_9', email='royal.player_9',
+        password='Strong-Password-9',
+    ))
+    assert login_id_login['access_token']
     active = await database.users.find_one({'id': player['id']})
     assert await auth_utils.require_active_player(active) is active
 
