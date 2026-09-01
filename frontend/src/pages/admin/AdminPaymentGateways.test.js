@@ -1,9 +1,12 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { toast } from "sonner";
 import AdminPaymentGateways from "./AdminPaymentGateways";
 import { adminPayments } from "@/lib/paymentApi";
 
 let mockUser;
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }));
 
 jest.mock("@/lib/paymentApi", () => ({ adminPayments: {
   hubStatus: jest.fn(), gateways: jest.fn(), paymentGatewaySettings: jest.fn(),
@@ -92,6 +95,21 @@ test("a pre-RBAC platform admin can add a provider configuration", async () => {
   adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
   const { container, root } = await renderPage();
   expect(container.querySelector('[data-testid="add-provider-empty"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="platform-settings-form"]')).not.toBeNull();
+  await act(async () => root.unmount());
+});
+
+test("catalog permission denials do not toast on payment-gateways", async () => {
+  const denied = {
+    response: { data: { detail: { code: "ADMIN_PERMISSION_REQUIRED", message: "This payment permission is required." } } },
+  };
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  adminPayments.gateways.mockRejectedValue(denied);
+  adminPayments.paymentGatewaySettings.mockRejectedValue(denied);
+  adminPayments.localAgents.mockRejectedValue(denied);
+  const { container, root } = await renderPage();
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="gateways-empty"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="platform-settings-form"]')).not.toBeNull();
   await act(async () => root.unmount());
 });

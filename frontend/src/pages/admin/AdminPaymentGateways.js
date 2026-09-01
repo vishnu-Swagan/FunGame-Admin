@@ -8,7 +8,12 @@ import { PageTransition } from "@/components/common";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/lib/adminPermissions";
 import { adminPayments } from "@/lib/paymentApi";
-import { errMsg } from "@/lib/api";
+import { errCode, errMsg } from "@/lib/api";
+
+function isCatalogPermissionError(error) {
+  if (errCode(error) === "ADMIN_PERMISSION_REQUIRED") return true;
+  return /payment permission is required/i.test(String(error?.response?.data?.detail?.message || error?.message || ""));
+}
 
 const CATEGORIES = [
   { key: "CARD", label: "Card Payments", icon: CreditCard },
@@ -175,16 +180,16 @@ export default function AdminPaymentGateways() {
       ]);
       if (gatewayResult.status === "fulfilled") {
         setGateways((gatewayResult.value || []).map(coerceGateway));
-      } else {
+      } else if (!isCatalogPermissionError(gatewayResult.reason)) {
         toast.error(errMsg(gatewayResult.reason, "Payment methods could not be loaded."));
       }
       setSettings(coerceSettings(settingsResult.status === "fulfilled" ? settingsResult.value || {} : {}));
-      if (settingsResult.status === "rejected") {
+      if (settingsResult.status === "rejected" && !isCatalogPermissionError(settingsResult.reason)) {
         toast.error(errMsg(settingsResult.reason, "Payment settings could not be loaded."));
       }
       if (agentResult.status === "fulfilled") {
         setAgents(agentResult.value || []);
-      } else {
+      } else if (!isCatalogPermissionError(agentResult.reason)) {
         toast.error(errMsg(agentResult.reason, "Local deposit methods could not be loaded."));
       }
     } catch (error) {

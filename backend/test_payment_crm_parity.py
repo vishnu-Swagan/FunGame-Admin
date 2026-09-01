@@ -362,6 +362,19 @@ class AdminFeatureDefaultTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
+    def test_crm_catalog_reads_are_open_to_any_active_admin(self):
+        from auth_utils import require_admin
+        for endpoint in (
+            routes_payment_hub.hub_status,
+            routes_payment_hub.gateways,
+            routes_payment_hub.gateway_detail,
+            routes_payment_hub.payment_gateway_settings,
+            routes_payment_hub.payment_local_agents,
+        ):
+            with self.subTest(endpoint=endpoint.__name__):
+                depends = endpoint.__defaults__[0]
+                self.assertEqual(depends.dependency, require_admin)
+
     def _step_up(self, admin):
         now = datetime.now(timezone.utc)
         admin.update({
