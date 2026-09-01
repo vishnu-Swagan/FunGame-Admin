@@ -290,25 +290,33 @@ async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *
 
 
 def _admin_step_up_identities(admin: dict):
-    """Return normalized, already verified administrator MFA contacts."""
-    candidates = []
-    if admin.get('phone') and admin.get('phone_verified') is True:
-        candidates.append(admin.get('phone_normalized') or admin.get('phone'))
-    if admin.get('email') and admin.get('email_verified') is True:
-        candidates.append(admin.get('email_normalized') or admin.get('email'))
-    identities = []
-    for value in candidates:
+    """Return trusted contacts, then stored contacts eligible for MFA enrollment."""
+    verified = []
+    enrollment = []
+    candidates = (
+        (admin.get('phone_normalized') or admin.get('phone'),
+         admin.get('phone_verified') is True),
+        (admin.get('email_normalized') or admin.get('email'),
+         admin.get('email_verified') is True),
+    )
+    for value, is_verified in candidates:
+        if not value:
+            continue
         try:
             identity = normalize_identity(value)
         except ValueError:
             continue
-        if identity not in identities:
-            identities.append(identity)
-    return identities
+        # Synthetic migration addresses must never become MFA destinations.
+        if identity.channel == 'EMAIL' and identity.value.endswith('.invalid'):
+            continue
+        destination = verified if is_verified else enrollment
+        if identity not in verified and identity not in enrollment:
+            destination.append(identity)
+    return verified + enrollment
 
 
 def _admin_step_up_identity(admin: dict, channel: str | None = None):
-    """Use only an already verified administrator contact for the second factor."""
+    """Resolve the stored administrator contact used for this challenge."""
     identities = _admin_step_up_identities(admin)
     if channel:
         identity = next(
@@ -321,7 +329,7 @@ def _admin_step_up_identity(admin: dict, channel: str | None = None):
         return identities[0]
     raise HTTPException(status_code=403, detail={
         'code': 'ADMIN_MFA_CONTACT_REQUIRED',
-        'message': 'Verify an administrator phone or email before requesting a security code.',
+        'message': 'Add a valid administrator phone or email before requesting a security code.',
     })
 
 
@@ -369,7 +377,7 @@ async def start_admin_step_up(body: AdminStepUpStart,
             break
         except OtpConfigurationError as exc:
             # A configured provider can still reject delivery at runtime. Try
-            # the administrator's other verified contact without weakening MFA.
+            # the administrator's other stored contact without weakening MFA.
             delivery_error = exc
         except OtpError as exc:
             _raise_otp_http(exc)
@@ -442,18 +450,43 @@ async def verify_admin_step_up(body: AdminStepUpVerify,
             )
         except OtpError as exc:
             _raise_otp_http(exc)
-        result = await db.users.update_one({
+        user_query = {
             'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
             'password_hash': admin.get('password_hash'),
             'active_session_id': admin.get('active_session_id'),
-        }, {
-            '$set': {
-                'mfa_enabled': True,
-                'mfa_verified_at': completed_at,
-                'reauthenticated_at': completed_at,
-                'admin_step_up_completed_at': completed_at,
-                'admin_step_up_session_id': admin.get('active_session_id'),
-            },
+        }
+        security_updates = {
+            'mfa_enabled': True,
+            'mfa_verified_at': completed_at,
+            'reauthenticated_at': completed_at,
+            'admin_step_up_completed_at': completed_at,
+            'admin_step_up_session_id': admin.get('active_session_id'),
+        }
+        enrolled_contact = False
+        if identity.channel == 'EMAIL' and admin.get('email_verified') is not True:
+            user_query['$or'] = [
+                {'email_normalized': identity.value},
+                {'email': admin.get('email')},
+            ]
+            security_updates.update({
+                'email_normalized': identity.value,
+                'email_verified': True,
+                'email_verified_at': completed_at.isoformat(),
+            })
+            enrolled_contact = True
+        elif identity.channel == 'SMS' and admin.get('phone_verified') is not True:
+            user_query['$or'] = [
+                {'phone_normalized': identity.value},
+                {'phone': admin.get('phone')},
+            ]
+            security_updates.update({
+                'phone_normalized': identity.value,
+                'phone_verified': True,
+                'phone_verified_at': completed_at.isoformat(),
+            })
+            enrolled_contact = True
+        result = await db.users.update_one(user_query, {
+            '$set': security_updates,
             '$unset': {'admin_step_up_password_verified_at': ''},
         }, **kwargs)
         if result.matched_count != 1:
@@ -467,7 +500,10 @@ async def verify_admin_step_up(body: AdminStepUpVerify,
             'action': 'ADMIN_STEP_UP_COMPLETED',
             'target_type': 'ADMIN',
             'target_id': admin['id'],
-            'metadata': {'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL'},
+            'metadata': {
+                'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+                'contact_enrolled': enrolled_contact,
+            },
             'created_at': completed_at.isoformat(),
         }, **kwargs)
         return completed_at
