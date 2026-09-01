@@ -66,7 +66,7 @@ test("manual-review registration requires both contacts and password confirmatio
   expect(screen.querySelector('#reg-password').required).toBe(true);
   expect(screen.querySelector('#reg-password-confirmation').required).toBe(true);
   expect(screen.querySelector('[data-testid="register-terms-checkbox"]')).not.toBeNull();
-  expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
+  expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
   expect(screen.querySelector('[data-testid="registration-unavailable"]')).toBeNull();
 });
 
@@ -137,6 +137,9 @@ test("verification exposes the ready mobile delivery channel", () => {
   expect(screen.querySelector('[data-testid="verification-unavailable"]')).toBeNull();
   expect(screen.querySelector('[data-testid="verify-identifier-input"]').disabled).toBe(false);
   expect(screen.querySelector('[data-testid="verify-identifier-input"]').type).toBe("tel");
+  expect(screen.querySelector('label[for="verify-identifier"]')?.textContent).toMatch(/Mobile number.*\+country code/);
+  expect(screen.querySelector('[data-testid="verify-identifier-input"]').autocomplete).toBe("tel");
+  expect(screen.querySelector('[data-testid="verify-identifier-input"]').placeholder).toBe("Enter with +country code");
 });
 
 test("an already delivered code stays verifiable while resend is unavailable", () => {

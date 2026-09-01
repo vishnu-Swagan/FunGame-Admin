@@ -57,6 +57,13 @@ function change(input, value) {
   });
 }
 
+function changeSelect(select, value) {
+  act(() => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 async function renderRegister() {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -104,6 +111,19 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
+test("registration uses globally neutral phone and country guidance", async () => {
+  const { container, root } = await renderRegister();
+
+  expect(container.querySelector('label[for="reg-contact"]')?.textContent).toBe("Mobile number (enter with +country code)");
+  expect(container.querySelector("#reg-contact")?.placeholder).toBe("Enter with +country code");
+  expect(container.querySelector("#reg-country")?.value).toBe("");
+  expect(container.querySelector("#reg-country option")?.textContent).toBe("Select your country");
+  expect(container.querySelectorAll("#reg-country option").length).toBeGreaterThan(200);
+  expect(container.querySelector("#reg-contact")?.outerHTML).not.toMatch(/\+91/);
+
+  await act(async () => root.unmount());
+});
+
 test("manual-review registration submits both contacts and confirmed password without an OTP", async () => {
   mockPost.mockResolvedValue({ data: { review_required: true, verification_required: false } });
   const { container, root } = await renderRegister();
@@ -112,7 +132,7 @@ test("manual-review registration submits both contacts and confirmed password wi
   change(container.querySelector("#reg-contact"), "+91 98765-43210");
   change(container.querySelector("#reg-email"), "New.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Strong-Password-9");
   await act(async () => {
@@ -128,7 +148,7 @@ test("manual-review registration submits both contacts and confirmed password wi
     email: "new.player@example.com",
     full_name: "New Player",
     date_of_birth: "1990-05-20",
-    country: "India",
+    country: "IN",
     accepted_terms: true,
     password: "Strong-Password-9",
     password_confirmation: "Strong-Password-9",
@@ -145,7 +165,7 @@ test("mismatched passwords are rejected before the registration API call", async
   change(container.querySelector("#reg-contact"), "+919999888877");
   change(container.querySelector("#reg-email"), "review@example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Different-Password-9");
   await act(async () => {
@@ -167,13 +187,13 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
     verification_required: true,
     registration_mode: "PHONE_OTP",
   };
-  mockPost.mockResolvedValue({ data: { destination_masked: "+91******77", resend_after_seconds: 30 } });
+  mockPost.mockResolvedValue({ data: { destination_masked: "+44******23", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
   change(container.querySelector("#reg-name"), "OTP Player");
-  change(container.querySelector("#reg-contact"), "+919999888877");
+  change(container.querySelector("#reg-contact"), "+44 7700 900123");
   change(container.querySelector("#reg-email"), "Optional@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "GB");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
     await settle();
@@ -182,7 +202,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
 
   expect(mockPost.mock.calls[0][1]).not.toHaveProperty("password");
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
-    state: expect.objectContaining({ channel: "PHONE", identifier: "+919999888877" }),
+    state: expect.objectContaining({ channel: "PHONE", identifier: "+447700900123" }),
   }));
   await act(async () => root.unmount());
 });
@@ -203,7 +223,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
   change(container.querySelector("#reg-contact"), "+91 (98765).43210");
   change(container.querySelector("#reg-email"), "Live.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "IN");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
     await settle();
@@ -218,7 +238,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
     email: "live.player@example.com",
     full_name: "Live Player",
     date_of_birth: "1990-05-20",
-    country: "India",
+    country: "IN",
     accepted_terms: true,
   });
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
@@ -246,7 +266,7 @@ test("an invalid required email is explained inline and focused without posting"
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-email"), "not-an-email");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "IN");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
     await settle();
@@ -273,7 +293,7 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
   change(container.querySelector("#reg-name"), "Terms Player");
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  change(container.querySelector("#reg-country"), "India");
+  changeSelect(container.querySelector("#reg-country"), "IN");
   expect(container.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
   await clickPrimarySubmit(container);
 

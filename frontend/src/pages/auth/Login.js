@@ -107,7 +107,7 @@ export default function Login() {
             type="text"
             required
             autoComplete="username"
-            placeholder="email, +91 mobile, or GK Login ID"
+            placeholder="email, +country code mobile, or Login ID"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
             className="h-12 rounded-xl bg-white/5 border-white/12"

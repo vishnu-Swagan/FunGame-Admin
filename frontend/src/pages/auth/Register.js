@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 import { isValidE164Phone, normalizeContactIdentifier, registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
+import { COUNTRY_OPTIONS } from "@/lib/countryOptions";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
 export default function Register() {
@@ -18,7 +19,7 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [dob, setDob] = useState("");
-  const [country, setCountry] = useState("India");
+  const [country, setCountry] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -51,7 +52,7 @@ export default function Register() {
 
     if (fullName.trim().length < 2) errors.fullName = "Enter your full name using at least 2 characters";
     else if (fullName.trim().length > 64) errors.fullName = "Full name must not exceed 64 characters";
-    if (!isValidE164Phone(phone)) errors.phone = "Enter your mobile number with country code, for example +919876543210";
+    if (!isValidE164Phone(phone)) errors.phone = "Enter your mobile number in international format, starting with + and your country code";
     if ((manualReview || emailVerificationRequired) && !normalizedEmail) errors.email = "Enter your email address";
     else if (normalizedEmail && (normalizedEmail.length > 254 || emailInput?.validity?.typeMismatch)) errors.email = "Enter a valid email address";
     if (!dob) errors.dob = "Enter your date of birth";
@@ -137,7 +138,7 @@ export default function Register() {
         <Field label="Full name" htmlFor="reg-name" error={validationErrors.fullName}>
           <Input id="reg-name" data-validation-field="fullName" required minLength={2} maxLength={64} autoComplete="name" value={fullName} onChange={(e) => { setFullName(e.target.value); clearValidationError("fullName"); }} aria-invalid={Boolean(validationErrors.fullName)} aria-describedby={validationErrors.fullName ? "reg-name-error" : undefined} className="h-12 rounded-xl bg-white/5 border-white/12" />
         </Field>
-        <Field label="Mobile number with country code" htmlFor="reg-contact" error={validationErrors.phone}>
+        <Field label="Mobile number (enter with +country code)" htmlFor="reg-contact" error={validationErrors.phone}>
           <Input
             id="reg-contact"
             data-testid="register-identifier-input"
@@ -146,7 +147,7 @@ export default function Register() {
             inputMode="tel"
             autoComplete="tel"
             required
-            placeholder="+91 98765 43210"
+            placeholder="Enter with +country code"
             value={phone}
             onChange={(e) => { setPhone(e.target.value); clearValidationError("phone"); }}
             aria-invalid={Boolean(validationErrors.phone)}
@@ -162,7 +163,22 @@ export default function Register() {
             <Input id="reg-dob" data-validation-field="dob" type="date" required max={new Date().toISOString().slice(0, 10)} value={dob} onChange={(e) => { setDob(e.target.value); clearValidationError("dob"); }} aria-invalid={Boolean(validationErrors.dob)} aria-describedby={validationErrors.dob ? "reg-dob-error" : undefined} className="h-12 rounded-xl bg-white/5 border-white/12" />
           </Field>
           <Field label="Country" htmlFor="reg-country" error={validationErrors.country}>
-            <Input id="reg-country" data-validation-field="country" required value={country} onChange={(e) => { setCountry(e.target.value); clearValidationError("country"); }} aria-invalid={Boolean(validationErrors.country)} aria-describedby={validationErrors.country ? "reg-country-error" : undefined} className="h-12 rounded-xl bg-white/5 border-white/12" />
+            <select
+              id="reg-country"
+              data-validation-field="country"
+              required
+              autoComplete="country"
+              value={country}
+              onChange={(event) => { setCountry(event.target.value); clearValidationError("country"); }}
+              aria-invalid={Boolean(validationErrors.country)}
+              aria-describedby={validationErrors.country ? "reg-country-error" : undefined}
+              className="h-12 w-full rounded-xl border border-white/12 bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Select your country</option>
+              {COUNTRY_OPTIONS.map(({ code, name }) => (
+                <option key={code} value={code}>{name}</option>
+              ))}
+            </select>
           </Field>
         </div>
         {manualReview && (

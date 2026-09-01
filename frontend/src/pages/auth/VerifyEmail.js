@@ -5,6 +5,7 @@ import { AlertTriangle, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { Label } from "@/components/ui/label";
 import { api, errMsg, routeForUser } from "@/lib/api";
 import { normalizeContactChannel, normalizeContactIdentifier, registrationChannelAvailable, useAuthCapabilities, verificationChannelState } from "@/lib/authCapabilities";
 import { useAuth } from "@/context/AuthContext";
@@ -159,7 +160,10 @@ export default function VerifyEmail() {
           <div className="flex h-10 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
             <Smartphone className="h-4 w-4" /> Mobile OTP verification
           </div>
-          <Input data-testid="verify-identifier-input" disabled={capabilitiesLoading || !selectedChannelAvailable} type="tel" placeholder="+91 98765 43210" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+          <div className="space-y-1.5">
+            <Label htmlFor="verify-identifier">Mobile number (enter with +country code)</Label>
+            <Input id="verify-identifier" data-testid="verify-identifier-input" disabled={capabilitiesLoading || !selectedChannelAvailable} type="tel" inputMode="tel" autoComplete="tel" placeholder="Enter with +country code" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+          </div>
         </div>
       )}
       <form onSubmit={submit} className="space-y-5">

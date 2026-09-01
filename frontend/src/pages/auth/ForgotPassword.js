@@ -51,7 +51,7 @@ export default function ForgotPassword() {
         <form onSubmit={requestCode} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="fp-identifier">Email or mobile number</Label>
-            <Input id="fp-identifier" data-testid="forgot-email-input" required autoComplete="username" placeholder="you@example.com or +91…" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+            <Input id="fp-identifier" data-testid="forgot-email-input" required autoComplete="username" placeholder="you@example.com or +country code mobile" value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
           </div>
           <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy} className="w-full h-12 rounded-xl text-base font-bold">{busy ? "Sending…" : "Send reset code"}</Button>
           <p className="text-[11px] text-white/45 leading-relaxed">For privacy, the response is the same whether or not an account matches.</p>
