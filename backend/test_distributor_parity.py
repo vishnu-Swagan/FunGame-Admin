@@ -84,6 +84,35 @@ async def main():
       and admin.get('mfa_verified_at') is not None
       and admin.get('reauthenticated_at') is not None
       and admin.get('admin_step_up_session_id') == admin.get('active_session_id'))
+
+    fallback_admin = {
+        'id': 'admin-fallback', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'phone': '+919999999999', 'phone_normalized': '+919999999999',
+        'phone_verified': True,
+        'email': 'admin-fallback@example.com',
+        'email_normalized': 'admin-fallback@example.com',
+        'email_verified': True, 'active_session_id': 'fallback-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(fallback_admin))
+    delivery_channels = []
+
+    async def issue_with_sms_failure(user, identity, purpose):
+        delivery_channels.append(identity.channel)
+        if identity.channel == 'SMS':
+            raise otp_service.OtpConfigurationError('SMS provider rejected delivery')
+        return {'challenge_id': 'fallback-challenge', 'channel': 'EMAIL'}
+
+    with patch.object(routes_admin, 'issue_challenge', side_effect=issue_with_sms_failure):
+        fallback = await routes_admin.start_admin_step_up(
+            AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), fallback_admin,
+        )
+    T('admin step-up falls back to a verified email when SMS delivery fails',
+      fallback['channel'] == 'EMAIL' and delivery_channels == ['SMS', 'EMAIL'])
+    T('admin step-up verification resolves the channel used by its challenge',
+      routes_admin._admin_step_up_identity(
+          fallback_admin, channel='EMAIL',
+      ).value == 'admin-fallback@example.com')
     wrong_session_admin = {**admin, 'active_session_id': 'replacement-session'}
     T('administrator step-up cannot be inherited by a replacement session',
       await raises(asyncio.to_thread(
