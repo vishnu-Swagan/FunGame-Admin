@@ -37,7 +37,6 @@ const RUMMY_ART = {
   "--rummy-felt-art": "url('/game-art/rummy-felt.jpg')",
   "--rummy-avatar-art": "url('/game-art/rummy-avatar-atlas.jpg')",
   "--rummy-card-back-art": "url('/game-art/rummy-card-back.jpg')",
-  "--rummy-palace-art": `url('${RUMMY_PALACE_ART}')`,
 };
 const RUMMY_JOIN_TRANSPORT_MESSAGE = "We could not reach the secure Rummy server. Check your connection, then retry this table.";
 const readableRuleLabel = (value, fallback = "UNVALIDATED") => String(value || fallback).replaceAll("_", " ");
