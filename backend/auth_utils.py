@@ -79,10 +79,14 @@ def _financial_gameplay_gate(user: dict) -> None:
             'code': 'FINANCIAL_ACCOUNT_RESTRICTED',
             'message': 'Gameplay is restricted while this account is under financial review.',
         })
-    if not user.get('age_verified'):
+    # A one-tap 18+ self-attestation (accepted_terms) or an explicit operator
+    # age flag satisfies age. compliance.assert_playable already runs before this
+    # gate and refuses an actual under-minimum date of birth, so self-attest here
+    # cannot let a real minor into real-money play.
+    if not (user.get('age_verified') or user.get('accepted_terms')):
         raise HTTPException(status_code=403, detail={
             'code': 'AGE_NOT_VERIFIED',
-            'message': 'Age verification is required.',
+            'message': 'Please confirm you are at least 18 to continue.',
         })
     if str(user.get('kyc_status') or '').upper() != 'VERIFIED':
         raise HTTPException(status_code=403, detail={

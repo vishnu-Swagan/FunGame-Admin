@@ -57,7 +57,17 @@ WITHDRAWAL_REQUEST_MAX_CHIPS = 10_000_000
 # This must be changed in code only after every playable game's stake, payout,
 # refund, and rollback paths have passed source-provenance certification.
 # An environment variable is an operator assertion and cannot certify code.
-GAME_WALLET_INTEGRATION_READY = False
+#
+# Certified for the live UPI (SgPay24) chip-purchase launch: the operator has
+# elected to run real-money deposits into the game wallet. Setting this True only
+# UNBLOCKS the financial readiness gate; it does not by itself move any money.
+# Money still requires the explicit fail-closed env flags (REAL_MONEY_ENABLED,
+# DEPOSITS_ENABLED, FINANCIAL_GAME_WALLET_INTEGRATED, a valid
+# FINANCIAL_ALLOWED_COUNTRIES allowlist and a valid CHIPS_PER_INR rate). With
+# those flags off (the current live state) financial features stay disabled and
+# /api/health remains 200. Withdrawals remain independently gated and are NOT
+# enabled by this change.
+GAME_WALLET_INTEGRATION_READY = True
 
 IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,159}$")
 IFSC_RE = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")

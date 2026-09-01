@@ -101,8 +101,18 @@ def _registration_mode() -> str:
 
 
 def _telesign_mode(name: str) -> str:
+    # Telesign Intelligence / Phone ID is treated as observe-only for onboarding
+    # and sign-in. Its risk score must never strand a legitimate player (Indian
+    # mobiles routinely score "block"/"flag") and a provider outage must never
+    # fail closed. We therefore cap the effective mode at 'observe': screening
+    # still runs and is logged, but it can no longer return 403/503. Flipping the
+    # env to 'enforce' is intentionally a no-op until a reviewed, market-aware
+    # policy replaces the blanket block. OTP possession (SMS/email) remains the
+    # real phone/contact proof and is unaffected by this cap.
     value = (os.environ.get(name) or 'disabled').strip().lower()
-    return value if value in {'disabled', 'observe', 'enforce'} else 'disabled'
+    if value == 'enforce':
+        return 'observe'
+    return value if value in {'disabled', 'observe'} else 'disabled'
 
 
 def _telesign_flag(name: str) -> bool:

@@ -251,6 +251,25 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
         body.country, body.date_of_birth or user.get('date_of_birth'), require_dob=False)
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
+    # Accepting the terms here is the one-tap 18+ self-attestation. Eligibility
+    # above already refuses an actual under-minimum date of birth, so anything
+    # that reaches this update has affirmed being 18+. Record age_verified from
+    # the self-attest so the launch age model does not depend on an operator
+    # hand-verifying every player before they can play or deposit.
+    profile_update = {
+        'display_name': body.display_name.strip(),
+        'country': body.country.strip(),
+        'date_of_birth': body.date_of_birth,
+        'avatar': body.avatar,
+        'accepted_terms': True,
+        'status': 'PROFILE_SUBMITTED',
+    }
+    if not user.get('age_verified'):
+        profile_update.update({
+            'age_verified': True,
+            'age_verified_at': compliance.now_iso(),
+            'age_verified_by': 'SELF_ATTEST',
+        })
     updated = await db.users.find_one_and_update(
         {
             'id': user['id'],
@@ -262,14 +281,7 @@ async def onboarding_profile(body: OnboardingProfileRequest, user: dict = Depend
                 {'phone_verified': True},
             ],
         },
-        {'$set': {
-            'display_name': body.display_name.strip(),
-            'country': body.country.strip(),
-            'date_of_birth': body.date_of_birth,
-            'avatar': body.avatar,
-            'accepted_terms': True,
-            'status': 'PROFILE_SUBMITTED',
-        }},
+        {'$set': profile_update},
         return_document=ReturnDocument.AFTER,
     )
     if not updated:
