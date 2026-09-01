@@ -555,8 +555,16 @@ async def dashboard(admin: dict = Depends(require_admin)):
     # Cash movement — real stored deposit/withdrawal amounts only.
     credited_deposits = await _sum_amount_paise(db.deposit_orders, {'status': 'CREDITED'})
     paid_withdrawals = await _sum_amount_paise(db.withdrawal_requests, {'status': 'PAID'})
-    pending_deposits = await db.deposit_orders.count_documents({'status': {'$in': ['CREATED', 'PENDING', 'RECONCILIATION_REQUIRED']}})
-    pending_withdrawals = await db.withdrawal_requests.count_documents({'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}})
+    pending_operator_deposits = await db.operator_payment_requests.count_documents({'kind': 'DEPOSIT', 'status': 'PENDING'})
+    pending_operator_withdrawals = await db.operator_payment_requests.count_documents({'kind': 'WITHDRAWAL', 'status': {'$in': ['PENDING', 'PROCESSING']}})
+    pending_deposits = (
+        await db.deposit_orders.count_documents({'status': {'$in': ['CREATED', 'PENDING', 'RECONCILIATION_REQUIRED']}})
+        + pending_operator_deposits
+    )
+    pending_withdrawals = (
+        await db.withdrawal_requests.count_documents({'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}})
+        + pending_operator_withdrawals
+    )
     reconciliation_required = await db.deposit_orders.count_documents({'status': 'RECONCILIATION_REQUIRED'})
     attention_events = await db.provider_webhook_events.count_documents({'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}})
 
@@ -573,7 +581,9 @@ async def dashboard(admin: dict = Depends(require_admin)):
     queue_specs = [
         ('player_approvals', 'Player approvals', db.users, {'role': 'PLAYER', 'status': 'PENDING'}, pending_users, 'critical', '/Admin/users?status=PENDING'),
         ('signup_requests', 'Signup requests', db.signup_requests, {'status': 'PENDING'}, pending_signups, 'critical', '/Admin/users?status=PENDING'),
-        ('withdrawals', 'Withdrawal queue', db.withdrawal_requests, {'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}}, pending_withdrawals, 'warning', '/Admin/withdrawals'),
+        ('withdrawals', 'Withdrawal queue', db.withdrawal_requests, {'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}}, pending_withdrawals - pending_operator_withdrawals, 'warning', '/Admin/withdrawals'),
+        ('operator_deposits', 'Buy-chip requests', db.operator_payment_requests, {'kind': 'DEPOSIT', 'status': 'PENDING'}, pending_operator_deposits, 'warning', '/Admin/deposits'),
+        ('operator_withdrawals', 'Player withdrawal requests', db.operator_payment_requests, {'kind': 'WITHDRAWAL', 'status': {'$in': ['PENDING', 'PROCESSING']}}, pending_operator_withdrawals, 'warning', '/Admin/withdrawals'),
         ('deposit_reconciliation', 'Deposit reconciliation', db.deposit_orders, {'status': 'RECONCILIATION_REQUIRED'}, reconciliation_required, 'warning', '/Admin/deposits'),
         ('payment_events', 'Payment events needing review', db.provider_webhook_events, {'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}}, attention_events, 'warning', '/Admin/payment-events?attention=1'),
     ]

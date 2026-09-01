@@ -58,17 +58,55 @@ function DataCard({ children }) { return <div className="overflow-hidden rounded
 function Empty({ icon, loading, noun }) { return loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : <EmptyState icon={icon} title={`No ${noun}`} subtitle={`Matching ${noun} will appear here.`} />; }
 
 export function AdminDeposits() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const loader = useCallback(() => adminPayments.deposits(), []);
   const { rows, loading, load } = useAdminRows(loader);
-  const [query, setQuery] = useState(""); const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
+  const [drafts, setDrafts] = useState({});
+  const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status), [rows, query, status]);
-  return <PageTransition className="space-y-4"><PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Provider-created deposits. Credit status is driven only by verified server webhooks." onRefresh={load} loading={loading} /><FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["CREATED", "PENDING", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />{shown.length ? <DataCard>{shown.map((item) => <div key={item.id} className="grid gap-3 p-4 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div><div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">{formatChips(item.chips)} chips</p></div><div><p className="truncate font-mono text-[10px] text-white/55">{valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div><PaymentStatus status={item.status} /></div>)}</DataCard> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}</PageTransition>;
+  const canReview = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
+  const act = async (item, action) => {
+    const note = (drafts[item.id] || "").trim();
+    if (action === "reject" && !note) return toast.error("Enter a rejection reason first");
+    const key = `${item.id}:${action}`;
+    setActing(key);
+    try {
+      await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
+      toast.success(`Buy request ${action === "approve" ? "approved" : "rejected"}`);
+      setDrafts((current) => ({ ...current, [item.id]: "" }));
+      await load();
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setActing("");
+    }
+  };
+  return <PageTransition className="space-y-4">
+    <PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Admin-reviewed buy requests and provider-created deposits. Operator requests credit chips only after approval." onRefresh={load} loading={loading} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "APPROVED", "REJECTED", "CREATED", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />
+    {shown.length ? <div className="space-y-3">{shown.map((item) => {
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
+      const pending = operator && String(item.status || "").toUpperCase() === "PENDING";
+      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-deposit-${item.id}` : `deposit-${item.id}`}>
+        <div className="grid gap-3 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center">
+          <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
+          <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">{formatChips(item.chips)} chips</p></div>
+          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div>
+          <PaymentStatus status={item.status} />
+        </div>
+        {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
+      </article>;
+    })}</div> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}
+  </PageTransition>;
 }
 
 const WITHDRAWAL_ACTIONS = {
   REQUESTED: [["approve", "Approve"], ["reject", "Reject"]],
   PENDING_ADMIN: [["approve", "Approve"], ["reject", "Reject"]],
+  PENDING: [["approve", "Approve"], ["reject", "Reject"]],
   APPROVED: [["mark-submitted", "Mark submitted"]],
   SUBMITTED_TO_PROVIDER: [["mark-paid", "Mark paid"]],
   PROCESSING: [["mark-paid", "Mark paid"]],
@@ -85,6 +123,7 @@ export function AdminWithdrawals() {
   const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status, "internal_status"), [rows, query, status]);
   const canApprove = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_APPROVE);
+  const canReviewOperator = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
   const canMarkPaid = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_MARK_PAID);
   const act = async (item, action) => {
     const key = `${item.id}:${action}`;
@@ -93,8 +132,13 @@ export function AdminWithdrawals() {
     if (["mark-submitted", "mark-paid"].includes(action) && !note) return toast.error("Enter the provider or payment reference first");
     setActing(key);
     try {
-      const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
-      await adminPayments.withdrawalAction(item.id, action, body);
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
+      if (operator) {
+        await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
+      } else {
+        const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
+        await adminPayments.withdrawalAction(item.id, action, body);
+      }
       toast.success(`Withdrawal ${action.replaceAll("-", " ")}`);
       setDrafts((current) => ({ ...current, [item.id]: "" }));
       await load();
@@ -106,15 +150,17 @@ export function AdminWithdrawals() {
   };
   return <PageTransition className="space-y-4">
     <PageHead icon={ArrowUpFromLine} title="Withdrawal queue" subtitle="Approve, reject and record provider settlement without exposing full bank data." onRefresh={load} loading={loading} />
-    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["REQUESTED", "PENDING_ADMIN", "APPROVED", "SUBMITTED_TO_PROVIDER", "PROCESSING", "PAID", "REJECTED", "FAILED", "CANCELLED"]} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "REQUESTED", "PENDING_ADMIN", "APPROVED", "SUBMITTED_TO_PROVIDER", "PROCESSING", "PAID", "REJECTED", "FAILED", "CANCELLED"]} />
     {shown.length ? <div className="space-y-3">{shown.map((item) => {
       const internalStatus = String(item.internal_status || item.status).toUpperCase();
       const automatic = String(item.withdrawal_mode || "").toUpperCase() === "AUTOMATIC";
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
       const permittedActions = (WITHDRAWAL_ACTIONS[internalStatus] || []).filter(([action]) => {
+        if (operator) return ["approve", "reject"].includes(action) && canReviewOperator;
         if (automatic && ["mark-submitted", "mark-paid"].includes(action)) return false;
         return ["approve", "reject"].includes(action) ? canApprove : canMarkPaid;
       });
-      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4">
+      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-withdrawal-${item.id}` : `withdrawal-${item.id}`}>
         <div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
           <div><p className="tabular-nums font-bold text-primary">{formatChips(item.amount_chips)} chips</p><p className="text-[10px] text-white/35">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p></div>

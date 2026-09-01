@@ -15,6 +15,7 @@ import compliance
 from auth_utils import get_current_user, require_recent_admin_step_up
 from db import db
 import financial_wallet as finance
+import operator_rail
 from payment_providers import (
     MAX_WEBHOOK_BODY_BYTES,
     ProviderConfigurationError,
@@ -68,6 +69,22 @@ class WithdrawalModeUpdate(BaseModel):
 class KycReview(BaseModel):
     status: str
     reason: str = Field(min_length=5, max_length=500)
+
+
+class OperatorDepositCreate(BaseModel):
+    amount_paise: int = Field(ge=1, le=operator_rail.OPERATOR_LIMITS["max_deposit_paise"])
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class OperatorWithdrawalCreate(BaseModel):
+    amount_chips: int = Field(ge=1, le=operator_rail.OPERATOR_LIMITS["max_withdrawal_chips"])
+    bank_detail_id: str = Field(min_length=8, max_length=80)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class OperatorResolve(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=500)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 def _financial_http(exc: finance.FinancialError):
@@ -148,6 +165,15 @@ async def require_payment_reader(user: dict = Depends(get_current_user)):
         raise HTTPException(
             status_code=403,
             detail={"code": "PLAYER_REQUIRED", "message": "Player account required."},
+        )
+    return user
+
+
+async def require_operator_player(user: dict = Depends(get_current_user)):
+    if user.get("role") != "PLAYER" or user.get("status") != "ACTIVE":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "PLAYER_REQUIRED", "message": "An active player account is required."},
         )
     return user
 
@@ -276,6 +302,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         # invalid value or internal configuration diagnostics to the player.
         money_config = None
     config_ready = money_config is not None
+    operator = operator_rail.operator_status()
     return {
         "wallet": await finance.wallet_public(user["id"]),
         "money_config": money_config,
@@ -289,6 +316,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
                 "AVAILABLE" if internal["ready"] and config_ready
                 else "PAYMENTS_UNAVAILABLE"
             ),
+            "operator": operator,
         },
     }
 
@@ -312,7 +340,11 @@ async def create_deposit(
 @router.get("/payments/deposits")
 async def list_deposits(user: dict = Depends(require_payment_reader)):
     rows = await db.deposit_orders.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return {"deposits": [finance.deposit_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_user(user["id"], "DEPOSIT")
+    deposits = [finance.deposit_dto(row) for row in rows] + [
+        operator_rail.as_player_deposit(row) for row in operator_rows
+    ]
+    return {"deposits": operator_rail.sort_newest(deposits)}
 
 
 @router.get("/payments/deposits/{deposit_id}")
@@ -324,24 +356,40 @@ async def deposit_detail(deposit_id: str, user: dict = Depends(require_payment_r
 
 
 @router.get("/payments/bank-details")
-async def bank_details(user: dict = Depends(require_withdrawal_player)):
+async def bank_details(user: dict = Depends(require_operator_player)):
     return {"bank_details": await finance.list_payout_methods(user["id"])}
 
 
 @router.post("/payments/bank-details", status_code=201)
-async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require_withdrawal_player)):
+async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require_operator_player)):
     try:
         await _financial_rate_limit(user["id"], "bank-details-create", 5, 3600)
         method = await finance.create_payout_method(user["id"], **body.model_dump())
         return {"bank_detail": finance.payout_method_dto(method)}
+    except ProviderConfigurationError:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "PAYOUT_ENCRYPTION_NOT_READY",
+                "message": "Bank details cannot be saved until payout encryption is configured.",
+            },
+        )
     except finance.FinancialError as exc:
         _financial_http(exc)
 
 
 @router.delete("/payments/bank-details/{method_id}")
 async def remove_bank_details(
-    method_id: str, user: dict = Depends(require_withdrawal_player),
+    method_id: str, user: dict = Depends(require_operator_player),
 ):
+    if await operator_rail.has_open_withdrawal(user["id"], method_id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "BANK_DETAILS_IN_USE",
+                "message": "This bank account is used by a pending withdrawal request.",
+            },
+        )
     try:
         await _financial_rate_limit(user["id"], "bank-details-remove", 5, 3600)
         method = await finance.deactivate_payout_method(user["id"], method_id)
@@ -358,7 +406,11 @@ async def list_withdrawals(user: dict = Depends(require_payment_reader)):
     rows = await db.withdrawal_requests.find(
         {"user_id": user["id"]}, {"_id": 0},
     ).sort("created_at", -1).to_list(200)
-    return {"withdrawals": [finance.withdrawal_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_user(user["id"], "WITHDRAWAL")
+    withdrawals = [finance.withdrawal_dto(row) for row in rows] + [
+        operator_rail.as_player_withdrawal(row) for row in operator_rows
+    ]
+    return {"withdrawals": operator_rail.sort_newest(withdrawals)}
 
 
 @router.post("/payments/withdrawals", status_code=201)
@@ -376,6 +428,36 @@ async def create_withdrawal(
         return {"withdrawal": finance.withdrawal_dto(row)}
     except finance.FinancialError as exc:
         _financial_http(exc)
+
+
+@router.post("/payments/operator/deposits", status_code=201)
+async def create_operator_deposit(
+    body: OperatorDepositCreate,
+    user: dict = Depends(require_operator_player),
+):
+    await _financial_rate_limit(user["id"], "operator-deposit-create", 10, 900)
+    row = await operator_rail.create_request(
+        user, kind="DEPOSIT", amount_paise=body.amount_paise, note=body.note or "",
+    )
+    return {"deposit": operator_rail.as_player_deposit(row), "source": "ADMIN_REVIEW"}
+
+
+@router.post("/payments/operator/withdrawals", status_code=201)
+async def create_operator_withdrawal(
+    body: OperatorWithdrawalCreate,
+    user: dict = Depends(require_operator_player),
+):
+    await _financial_rate_limit(user["id"], "operator-withdrawal-create", 5, 3600)
+    paise = (int(body.amount_chips) * 100) // operator_rail.OPERATOR_LIMITS["chips_per_inr"]
+    row = await operator_rail.create_request(
+        user,
+        kind="WITHDRAWAL",
+        amount_paise=paise,
+        chips=body.amount_chips,
+        bank_detail_id=body.bank_detail_id,
+        note=body.note or "",
+    )
+    return {"withdrawal": operator_rail.as_player_withdrawal(row), "source": "ADMIN_REVIEW"}
 
 
 @router.post("/payments/webhooks/{provider_name}")
@@ -429,7 +511,11 @@ async def admin_deposits(
 ):
     query = {"status": status.upper()} if status else {}
     rows = await db.deposit_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"deposits": [_admin_deposit_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_admin("DEPOSIT", status)
+    deposits = [_admin_deposit_dto(row) for row in rows] + [
+        operator_rail.as_admin_deposit(row) for row in operator_rows
+    ]
+    return {"deposits": operator_rail.sort_newest(deposits)}
 
 
 @admin_router.get("/payments/withdrawals")
@@ -439,7 +525,14 @@ async def admin_withdrawals(
 ):
     query = {"status": status.upper()} if status else {}
     rows = await db.withdrawal_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"withdrawals": [finance.withdrawal_dto(row, admin=True) for row in rows]}
+    operator_status = None if not status else (
+        "PENDING" if status.upper() in {"PENDING", "REQUESTED", "PENDING_ADMIN"} else status
+    )
+    operator_rows = await operator_rail.list_for_admin("WITHDRAWAL", operator_status)
+    withdrawals = [finance.withdrawal_dto(row, admin=True) for row in rows] + [
+        operator_rail.as_admin_withdrawal(row) for row in operator_rows
+    ]
+    return {"withdrawals": operator_rail.sort_newest(withdrawals)}
 
 
 @admin_router.get("/payments/events")
@@ -466,6 +559,12 @@ async def admin_payment_summary(admin: dict = Depends(payments_view)):
     })
     pending_withdrawals = await db.withdrawal_requests.count_documents({
         "status": {"$nin": list(finance.WITHDRAWAL_TERMINAL)},
+    })
+    pending_deposits += await db[operator_rail.COLLECTION].count_documents({
+        "kind": "DEPOSIT", "status": "PENDING",
+    })
+    pending_withdrawals += await db[operator_rail.COLLECTION].count_documents({
+        "kind": "WITHDRAWAL", "status": {"$in": ["PENDING", "PROCESSING"]},
     })
     failed_payment_events = await db.provider_webhook_events.count_documents({
         "status": {"$in": ["RETRY", "REVIEW_REQUIRED"]},
@@ -605,6 +704,40 @@ async def update_withdrawal_mode(
         return {"message": "Withdrawal mode updated.", **(await _settings_response())}
     except finance.FinancialError as exc:
         _financial_http(exc)
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/approve")
+async def admin_approve_operator_request(
+    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+):
+    row = await operator_rail.resolve_request(
+        request_id, admin, approve=True, note=body.note or body.reason or "",
+    )
+    return {
+        "message": "Request approved.",
+        "request": row,
+        "deposit": operator_rail.as_admin_deposit(row) if row.get("kind") == "DEPOSIT" else None,
+        "withdrawal": operator_rail.as_admin_withdrawal(row) if row.get("kind") == "WITHDRAWAL" else None,
+    }
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/reject")
+async def admin_reject_operator_request(
+    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+):
+    reason = str(body.reason or body.note or "").strip()
+    if len(reason) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "OPERATOR_REASON_REQUIRED", "message": "Enter a rejection reason."},
+        )
+    row = await operator_rail.resolve_request(request_id, admin, approve=False, note=reason)
+    return {
+        "message": "Request rejected.",
+        "request": row,
+        "deposit": operator_rail.as_admin_deposit(row) if row.get("kind") == "DEPOSIT" else None,
+        "withdrawal": operator_rail.as_admin_withdrawal(row) if row.get("kind") == "WITHDRAWAL" else None,
+    }
 
 
 @admin_router.post("/withdrawals/{withdrawal_id}/approve")

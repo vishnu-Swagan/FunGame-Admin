@@ -35,6 +35,18 @@ export function isFinancialFeatureAvailable(financial, feature) {
   return Boolean(financial?.ready && financial?.features?.real_money && financial?.features?.[feature]);
 }
 
+export function isOperatorRailAvailable(financial, feature) {
+  const operator = financial?.operator;
+  if (!operator?.enabled) return false;
+  if (feature === "deposits") return Boolean(operator.deposits_enabled);
+  if (feature === "withdrawals") return Boolean(operator.withdrawals_enabled);
+  return false;
+}
+
+export function isPlayerPaymentAvailable(financial, feature) {
+  return isFinancialFeatureAvailable(financial, feature) || isOperatorRailAvailable(financial, feature);
+}
+
 export function statusTone(status) {
   const value = String(status || "PENDING").toUpperCase();
   if (["PAID", "CREDITED", "APPROVED", "VERIFIED"].includes(value)) return "success";

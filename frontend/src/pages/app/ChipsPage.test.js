@@ -10,6 +10,8 @@ const mockWithdrawals = jest.fn();
 const mockBankDetails = jest.fn();
 const mockCreateDeposit = jest.fn();
 const mockCreateWithdrawal = jest.fn();
+const mockCreateOperatorDeposit = jest.fn();
+const mockCreateOperatorWithdrawal = jest.fn();
 const mockFinancialIntentKey = jest.fn();
 const mockClearFinancialIntent = jest.fn();
 let mockPathname = "/chips";
@@ -30,6 +32,8 @@ jest.mock("@/lib/paymentApi", () => ({ payments: {
   bankDetails: (...args) => mockBankDetails(...args),
   createDeposit: (...args) => mockCreateDeposit(...args),
   createWithdrawal: (...args) => mockCreateWithdrawal(...args),
+  createOperatorDeposit: (...args) => mockCreateOperatorDeposit(...args),
+  createOperatorWithdrawal: (...args) => mockCreateOperatorWithdrawal(...args),
 } }));
 
 jest.mock("@/lib/financialIntent", () => ({
@@ -145,6 +149,8 @@ beforeEach(() => {
   mockBankDetails.mockReset().mockResolvedValue([{ id: "bank-1", bank_name: "Secure Bank", account_number_masked: "••••1234" }]);
   mockCreateDeposit.mockReset().mockResolvedValue({ checkout_url: "https://pay.example/checkout/order-1" });
   mockCreateWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "withdrawal-2", status: "PENDING" } });
+  mockCreateOperatorDeposit.mockReset().mockResolvedValue({ deposit: { id: "op-deposit-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
+  mockCreateOperatorWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "op-withdrawal-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
   mockFinancialIntentKey.mockReset().mockImplementation((kind) => `${kind}-key`);
   mockClearFinancialIntent.mockReset();
 });
@@ -271,6 +277,74 @@ test("withdrawal uses the selected masked bank account and the server ₹1,000 m
   expect(mockFinancialIntentKey).toHaveBeenCalledWith("withdrawal", "player-1", "amount_chips=1000&bank=bank-1");
   expect(mockCreateWithdrawal).toHaveBeenCalledWith(1000, "bank-1", "withdrawal-key");
   expect(mockClearFinancialIntent).toHaveBeenCalledWith("withdrawal", "player-1", "withdrawal-key");
+  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+const OPERATOR_WALLET = {
+  wallet: {
+    available_chips: 937292,
+    cash_chips: 0,
+    bonus_chips: 937292,
+    held_chips: 0,
+    withdrawable_chips: 0,
+  },
+  money_config: null,
+  financial: {
+    ready: false,
+    features: { real_money: false, deposits: false, withdrawals: false },
+    operator: {
+      enabled: true,
+      rail: "ADMIN_REVIEW",
+      deposits_enabled: true,
+      withdrawals_enabled: true,
+      limits: {
+        chips_per_inr: 1,
+        min_deposit_paise: 50000,
+        max_deposit_paise: 10000000,
+        min_withdrawal_paise: 100000,
+        min_withdrawal_chips: 1000,
+        max_withdrawal_chips: 1000000,
+      },
+    },
+  },
+};
+
+test("operator rail unlocks buy and withdraw without hosted checkout", async () => {
+  mockWallet.mockResolvedValue(OPERATOR_WALLET);
+  mockPathname = "/chips";
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+
+  expect(publicFinancialConfig(OPERATOR_WALLET)).toMatchObject({
+    chipsPerInr: 1,
+    minDepositPaise: 50000,
+    minWithdrawalPaise: 100000,
+  });
+  expect(container.textContent).toContain("submitted for Admin review");
+  expect(container.textContent).not.toContain("Payment services are not active yet");
+  expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
+  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit buy request");
+
+  change(container.querySelector('[data-testid="deposit-amount"]'), "1000");
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+  expect(mockCreateDeposit).not.toHaveBeenCalled();
+  expect(checkoutNavigator).not.toHaveBeenCalled();
+  expect(mockCreateOperatorDeposit).toHaveBeenCalledWith(100000);
+  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+test("operator rail submits withdrawals against available play chips", async () => {
+  mockWallet.mockResolvedValue(OPERATOR_WALLET);
+  mockPathname = "/chips/withdraw";
+  const { container, root } = await renderPage();
+
+  expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(false);
+  change(container.querySelector('[data-testid="withdrawal-amount"]'), "1000");
+  await submit(container.querySelector('[data-testid="withdrawal-form"]'));
+  expect(mockCreateWithdrawal).not.toHaveBeenCalled();
+  expect(mockCreateOperatorWithdrawal).toHaveBeenCalledWith(1000, "bank-1");
   expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
   await act(async () => root.unmount());
 });
