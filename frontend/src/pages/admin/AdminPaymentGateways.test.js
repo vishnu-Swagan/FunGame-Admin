@@ -111,9 +111,9 @@ test("renders a configured automated provider with copyable webhook and origin U
   expect(card.textContent).toContain("Automated");
   expect(card.textContent).toContain("Configured");
   expect(container.querySelector('[data-testid="category-tab-CARD"]').textContent).toContain("1");
-  expect(container.querySelector('[data-testid="gateway-webhook-url-AUTO_CARD"]').textContent)
+  expect(container.querySelector('[data-testid="gateway-webhook-url-AUTO_CARD"] input').value)
     .toContain("https://api.chakri.casino/api/webhooks/payments/AUTO_CARD");
-  expect(container.querySelector('[data-testid="gateway-origin-url-AUTO_CARD"]').textContent)
+  expect(container.querySelector('[data-testid="gateway-origin-url-AUTO_CARD"] input').value)
     .toContain("/api/webhooks/payments/AUTO_CARD/origin");
   expect(container.querySelector('[data-testid="auto-deposits-AUTO_CARD"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="auto-withdrawals-AUTO_CARD"]').disabled).toBe(true);
