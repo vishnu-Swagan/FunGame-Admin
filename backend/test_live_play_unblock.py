@@ -43,7 +43,9 @@ os.environ['OTP_PEPPER'] = 'test-only-otp-pepper-with-at-least-32-characters'
 import auth_utils  # noqa: E402
 import compliance  # noqa: E402
 import financial_wallet as finance  # noqa: E402
+import operator_rail  # noqa: E402
 import routes_auth  # noqa: E402
+import routes_payments  # noqa: E402
 import routes_player  # noqa: E402
 import telesign_service  # noqa: E402
 from models import OnboardingProfileRequest  # noqa: E402
@@ -175,6 +177,37 @@ async def check_real_money_play_allows_self_attested_player():
     print('  PASS  Real-money play admits a self-attested player without an operator age flag')
 
 
+async def check_self_serve_player_can_buy_upi_chips():
+    await reset_db()
+    os.environ['FINANCIAL_ALLOWED_COUNTRIES'] = 'IN'
+    os.environ['UPI_CHIP_PURCHASES_ENABLED'] = 'true'
+    original = operator_rail.hosted_upi_requested
+    operator_rail.hosted_upi_requested = lambda environ=None: True
+    try:
+        # A self-serve Indian player: phone/email verified (OTP), 18+ self-attest,
+        # in an allowed market, not KYC-verified and not restricted/excluded.
+        player = {
+            'id': 'upi-buyer', 'role': 'PLAYER', 'status': 'ACTIVE',
+            'country': 'India', 'date_of_birth': ADULT_DOB,
+            'accepted_terms': True, 'phone_verified': True, 'email_verified': True,
+            'kyc_status': 'UNVERIFIED',
+        }
+        eligible = await routes_payments.require_operator_deposit_player(player)
+        assert eligible is player
+
+        # A player who is actually restricted still cannot deposit.
+        restricted = {**player, 'financial_status': 'REVIEW_REQUIRED'}
+        await expect_http_error(
+            routes_payments.require_operator_deposit_player(restricted),
+            403, 'FINANCIAL_ACCOUNT_RESTRICTED',
+        )
+    finally:
+        operator_rail.hosted_upi_requested = original
+        os.environ.pop('FINANCIAL_ALLOWED_COUNTRIES', None)
+        os.environ.pop('UPI_CHIP_PURCHASES_ENABLED', None)
+    print('  PASS  Self-serve player buys SgPay24 UPI chips without KYC; restricted account still blocked')
+
+
 async def check_onboarding_records_age_verified():
     await reset_db()
     player = {
@@ -233,6 +266,7 @@ async def main():
     await check_telesign_is_observe_only()
     await check_self_attest_satisfies_age()
     await check_real_money_play_allows_self_attested_player()
+    await check_self_serve_player_can_buy_upi_chips()
     await check_onboarding_records_age_verified()
     await check_game_wallet_certified_and_health_gate()
     print('Live-play unblock: all focused checks passed')

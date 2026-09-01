@@ -167,9 +167,11 @@ async def _require_player(feature: str, user: dict) -> dict:
             status_code=403,
             detail={"code": "AGE_NOT_VERIFIED", "message": "Age verification is required."},
         )
-    # Contact OTP verification is not KYC.  Until an audited identity workflow
-    # writes this explicit status, money mutations remain fail-closed.
-    if not verification["kyc_verified"]:
+    # KYC is a cash-OUT control, not a chip-purchase control. Deposits only add
+    # value to the game wallet, so a self-serve player can buy chips without an
+    # operator hand-verifying identity first; identity/KYC stays fail-closed on
+    # the withdrawal path where money leaves the platform.
+    if feature != "deposits" and not verification["kyc_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "KYC_REQUIRED", "message": "Identity verification is required."},
