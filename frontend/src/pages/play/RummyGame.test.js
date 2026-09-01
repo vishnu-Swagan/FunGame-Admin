@@ -1009,16 +1009,16 @@ test("the exact-ratio table fills landscape while controls respect the safe view
   expect(css).toMatch(/\.rummy-hand-zone\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) auto/s);
   expect(css).toMatch(/\.rummy-group-rail\s*\{[^}]*align-items:\s*flex-start/s);
   expect(css).toMatch(/\.rummy-group\s*\{[^}]*grid-template-rows:\s*auto 22px/s);
-  expect(css).toContain("@media (orientation: landscape) and (max-height: 430px)");
+  expect(css).toContain("@media (orientation: landscape) and (max-height: 620px) and (max-width: 1180px)");
   expect(css).toContain("@media (max-width: 880px) and (min-height: 431px), (min-height: 431px) and (max-height: 620px)");
   expect(css).not.toContain("@media (max-width: 880px), (max-height: 620px)");
-  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 430px\)[\s\S]*?\.rummy-actions button\s*\{[^}]*min-height:\s*44px/s);
+  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 620px\) and \(max-width: 1180px\)[\s\S]*?\.rummy-actions button\s*\{[^}]*min-height:\s*44px/s);
   expect(css).toContain("@media (orientation: portrait) and (max-width: 430px)");
   expect(css).toMatch(/@media \(orientation: portrait\) and \(max-width: 430px\)[\s\S]*?\.rummy-table-hud\s*\{\s*display:\s*none/s);
   expect(css).toMatch(/\.rummy-seat\s*\{\s*width:\s*clamp\(48px, 17cqw, 68px\)/s);
-  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 430px\)[\s\S]*?\.rummy-seat\s*\{\s*width:\s*clamp\(48px, 17cqw, 60px\)/s);
+  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 620px\) and \(max-width: 1180px\)[\s\S]*?\.rummy-seat\s*\{\s*width:\s*clamp\(48px, 17cqw, 60px\)/s);
   expect(css).toMatch(/\.rummy-only-timer\s*\{[^}]*top:\s*0;[^}]*right:\s*-4px;[^}]*transform:\s*translateX\(100%\)/s);
-  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 430px\)[\s\S]*?\.rummy-only-timer\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px/s);
+  expect(css).toMatch(/@media \(orientation: landscape\) and \(max-height: 620px\) and \(max-width: 1180px\)[\s\S]*?\.rummy-only-timer\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px/s);
   expect(css).toMatch(/@media \(orientation: portrait\) and \(max-width: 430px\)[\s\S]*?\.rummy-only-timer\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px/s);
   expect(css).toContain("container-type: inline-size");
   expect(css).toMatch(/\.rummy-table-slot\s*\{[^}]*container-type:\s*size/s);
@@ -1141,9 +1141,9 @@ test("portrait guard keeps the active Rummy subtree mounted and makes it inert u
   Object.defineProperty(window.navigator, "maxTouchPoints", { configurable: true, value: originalMaxTouchPoints });
 });
 
-test("short mobile landscape expands the palace table edge to edge above a compact 44px action dock", () => {
+test("short mobile landscape uses one palace table above a playable hand and compact 44px action dock", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  const landscape = cssBlock(css, "@media (orientation: landscape) and (max-height: 430px)");
+  const landscape = cssBlock(css, "@media (orientation: landscape) and (max-height: 620px) and (max-width: 1180px)");
   const landscapeGame = cssRuleWithin(landscape, ".rummy-game");
   const landscapeHeader = cssRuleWithin(landscape, ".rummy-game-head");
   const landscapeStage = cssRuleWithin(landscape, ".rummy-stage");
@@ -1161,6 +1161,8 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   const landscapeValidation = cssRuleWithin(landscape, ".rummy-validation");
   const landscapeHud = cssRuleWithin(landscape, ".rummy-table-hud");
   const landscapeSeatBack = cssRuleWithin(landscape, ".rummy-seat > small,\n  .rummy-seat .rummy-card-back");
+  const landscapeBottomSeats = cssRuleWithin(landscape, ".rummy-seat-0,\n  .rummy-seat-4");
+  const landscapeTopSeat = cssRuleWithin(landscape, ".rummy-seat-2");
 
   expect(landscapeGame).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\)/);
   expect(landscapeHeader).toMatch(/position:\s*absolute/);
@@ -1173,10 +1175,11 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeSlot).toMatch(/grid-column:\s*1/);
   expect(landscapeSlot).toMatch(/grid-row:\s*1/);
   expect(landscapeSlotAtmosphere).toMatch(/filter:\s*none/);
+  expect(landscapeSlotAtmosphere).not.toMatch(/url\(|rummy-palace-art/);
   expect(landscapeTable).toMatch(/position:\s*absolute/);
   expect(landscapeTable).toMatch(/left:\s*50%/);
   expect(landscapeTable).toMatch(/top:\s*49%/);
-  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, calc\(290cqh - 150px\)\)/);
+  expect(landscapeTable).toMatch(/width:\s*min\(100cqw, 250cqh\)/);
   expect(landscapeTable).toMatch(/transform:\s*translate\(-50%, -50%\) translateZ\(0\)/);
   expect(landscapeHand).toMatch(/grid-column:\s*1/);
   expect(landscapeHand).toMatch(/grid-row:\s*2/);
@@ -1184,9 +1187,9 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeHand).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\) 44px/);
   expect(landscapeHand).toMatch(/align-content:\s*start/);
   expect(landscapeHand).toMatch(/overflow:\s*hidden/);
-  expect(landscapeHand).toMatch(/min-height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
-  expect(landscapeHand).toMatch(/height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
-  expect(landscapeHand).toMatch(/max-height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/min-height:\s*calc\(clamp\(152px, 27svh, 174px\) \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/height:\s*calc\(clamp\(152px, 27svh, 174px\) \+ var\(--fg-safe-bottom\)\)/);
+  expect(landscapeHand).toMatch(/max-height:\s*calc\(clamp\(152px, 27svh, 174px\) \+ var\(--fg-safe-bottom\)\)/);
   expect(landscapeHand).toMatch(/border-top:\s*1px solid/);
   expect(landscapeHand).toMatch(/border-left:\s*0/);
   expect(landscapeHand).toMatch(/padding-right:\s*max\(5px, var\(--fg-safe-right, 0px\)\)/);
@@ -1196,10 +1199,11 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeRail).toMatch(/height:\s*100%/);
   expect(landscapeRail).toMatch(/gap:\s*7px/);
   expect(landscapeRail).toMatch(/scroll-snap-type:\s*x proximity/);
-  expect(landscapeGroup).toMatch(/grid-template-rows:\s*auto 14px/);
-  expect(landscapeGroupCards).toMatch(/min-height:\s*50px/);
-  expect(landscapeCard).toMatch(/width:\s*clamp\(39px, 5\.2vw, 46px\)/);
-  expect(landscapeCard).toMatch(/height:\s*clamp\(48px, 13svh, 54px\)/);
+  expect(landscapeRail).toMatch(/padding:\s*19px 2px 2px/);
+  expect(landscapeGroup).toMatch(/grid-template-rows:\s*auto 16px/);
+  expect(landscapeGroupCards).toMatch(/min-height:\s*56px/);
+  expect(landscapeCard).toMatch(/width:\s*clamp\(41px, 5\.5vw, 54px\)/);
+  expect(landscapeCard).toMatch(/height:\s*clamp\(52px, 11svh, 66px\)/);
   expect(landscapeOverlap).toMatch(/margin-left:\s*-14px/);
   expect(landscapeActions).toMatch(/position:\s*static/);
   expect(landscapeActions).toMatch(/grid-row:\s*2/);
@@ -1215,24 +1219,30 @@ test("short mobile landscape expands the palace table edge to edge above a compa
   expect(landscapeValidation).toMatch(/max-width:\s*calc\(100% - 16px\)/);
   expect(landscapeHud).toMatch(/display:\s*none/);
   expect(landscapeSeatBack).toMatch(/display:\s*none/);
-  expect(landscape).not.toMatch(/\.rummy-seat-[0-4]\s*\{/);
-  expect(css.match(/\.rummy-seat-[0-4]\s*\{/g)).toHaveLength(5);
+  expect(landscapeBottomSeats).toMatch(/transform:\s*translate\(-50%, calc\(-50% - 14px\)\) translateZ\(44px\)/);
+  expect(landscapeTopSeat).toMatch(/transform:\s*translate\(-50%, calc\(-50% \+ 10px\)\) translateZ\(44px\)/);
+  expect(landscapeBottomSeats).not.toMatch(/(?:left|top):/);
+  expect(landscapeTopSeat).not.toMatch(/(?:left|top):/);
+  expect(css.match(/\.rummy-seat-[0-4]\s*\{\s*left:/g)).toHaveLength(5);
 });
 
 test("extra-short landscape phones keep the hand and controls inside the visible viewport", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  const extraShort = cssBlock(css, "@media (orientation: landscape) and (max-height: 340px)");
+  const extraShort = cssBlock(css, "@media (orientation: landscape) and (max-height: 340px) and (max-width: 1180px)");
   const hand = cssRuleWithin(extraShort, ".rummy-hand-zone");
   const card = cssRuleWithin(extraShort, ".rummy-card");
-  expect(hand).toMatch(/height:\s*calc\(112px \+ var\(--fg-safe-bottom\)\)/);
+  expect(hand).toMatch(/height:\s*calc\(146px \+ var\(--fg-safe-bottom\)\)/);
   expect(card).toMatch(/height:\s*clamp\(48px, 15svh, 52px\)/);
 });
 
-test("taller mobile landscape viewports keep the palace presentation fitted to the full safe rectangle", () => {
+test("one continuous mobile landscape layout covers phone and tablet heights", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  const mobileLandscape = cssBlock(css, "@media (orientation: landscape) and (min-height: 431px) and (max-height: 620px) and (max-width: 1180px)");
-  expect(cssRuleWithin(mobileLandscape, ".rummy-stage,\n  .rummy-table-slot")).toMatch(/width:\s*100%;\s*height:\s*100%/);
-  expect(cssRuleWithin(mobileLandscape, ".rummy-table")).toMatch(/top:\s*49%;\s*width:\s*min\(100cqw, calc\(290cqh - 232px\)\)/);
+  const mobileLandscape = cssBlock(css, "@media (orientation: landscape) and (max-height: 620px) and (max-width: 1180px)");
+  expect(cssRuleWithin(mobileLandscape, ".rummy-stage")).toMatch(/width:\s*100%;[^}]*height:\s*100%/);
+  expect(cssRuleWithin(mobileLandscape, ".rummy-table-slot")).toMatch(/width:\s*100%;[^}]*height:\s*100%/);
+  expect(cssRuleWithin(mobileLandscape, ".rummy-table")).toMatch(/top:\s*49%;[\s\S]*?width:\s*min\(100cqw, 250cqh\)/);
+  expect(cssRuleWithin(mobileLandscape, ".rummy-hand-zone")).toMatch(/height:\s*calc\(clamp\(152px, 27svh, 174px\) \+ var\(--fg-safe-bottom\)\)/);
+  expect(css).not.toContain("@media (orientation: landscape) and (min-height: 431px) and (max-height: 620px)");
 });
 
 test("mobile Joker styling keeps rank suits visible and printed Jokers self-contained", () => {
@@ -1262,6 +1272,7 @@ test("the approved five-seat palace table asset is reserved for gameplay", () =>
   expect(source).not.toContain("table-cinematic");
   expect(source).not.toContain("backgroundImage");
   expect(source).not.toContain("rummy-table-inlay");
+  expect(source).not.toContain("--rummy-palace-art");
   expect(source).toContain('className="rummy-table-art"');
   expect(css).toMatch(/\.rummy-table::before,\s*\.rummy-table::after\s*\{[^}]*content:\s*none;[^}]*display:\s*none;/s);
   expect(css).toMatch(/\.rummy-table-art\s*\{[^}]*object-fit:\s*contain;[^}]*pointer-events:\s*none/s);
@@ -1278,9 +1289,11 @@ test("the approved five-seat palace table asset is reserved for gameplay", () =>
   );
 });
 
-test("landscape gameplay extends the palace atmosphere edge to edge without altering the contained table", () => {
+test("landscape gameplay uses a single contained palace image with neutral edge ambience", () => {
   const css = fs.readFileSync(path.join(__dirname, "rummy.css"), "utf8");
-  expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*inset:\s*0;[^}]*var\(--rummy-palace-art\)[^}]*center 47% \/ cover no-repeat/s);
+  expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*inset:\s*0;[^}]*radial-gradient[^}]*linear-gradient/s);
+  expect(cssRuleWithin(css, ".rummy-table-slot::after")).not.toMatch(/url\(|rummy-palace-art/);
+  expect(css).not.toContain("var(--rummy-palace-art)");
   expect(css).toMatch(/\.rummy-table-slot::after\s*\{[^}]*filter:\s*none/s);
   expect(css).toMatch(/\.rummy-table-slot\.is-art-ready::after\s*\{\s*opacity:\s*1/);
   expect(css).toMatch(/\.rummy-table\s*\{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*top:\s*47%;[^}]*width:\s*min\(100cqw, 255cqh\)[^}]*transform:\s*translate\(-50%, -50%\) translateZ\(0\)/s);
