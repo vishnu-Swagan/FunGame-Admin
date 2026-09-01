@@ -30,9 +30,11 @@ os.environ.update({
 os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "crm_parity_test")
 
+from auth_utils import hash_password  # noqa: E402
 from payment_hub import service  # noqa: E402
 from payment_hub.domain import GatewayError, HealthStatus  # noqa: E402
 import routes_admin  # noqa: E402
+import routes_payment_hub  # noqa: E402
 
 client = AsyncMongoMockClient()
 db = client["crm_parity_test"]
@@ -92,6 +94,44 @@ class GatewayCrmFieldTests(unittest.IsolatedAsyncioTestCase):
             dto["origin_verification_url"],
             "https://api.chakri.casino/api/webhooks/payments/MANUAL_BANK/origin",
         )
+        self.assertEqual(dto["integrationMode"], "MANUAL")
+        self.assertFalse(dto["depositEnabled"])
+        self.assertTrue(dto["sandboxMode"])
+        self.assertEqual(dto["webhookUrl"], dto["webhook_url"])
+
+    async def test_other_category_and_camelcase_payload(self):
+        row = await service.create_gateway({
+            "code": "OTHER_CASH", "display_name": "Cash Desk",
+            "adapter_type": "GENERIC_REST", "environment": "SANDBOX",
+            "category": "OTHER", "provider_type": "MANUAL",
+        }, ADMIN)
+        dto = service.gateway_dto(row)
+        self.assertEqual(dto["category"], "OTHER")
+        normalized = service.normalize_crm_gateway_payload({
+            "input": {
+                "depositEnabled": True,
+                "withdrawalEnabled": False,
+                "sandboxMode": False,
+                "countries": ["in", "us"],
+                "description": "Walk-in cash",
+                "secrets": {"apiSecret": "super-secret", "webhookSecret": "hook"},
+            },
+            "currentPassword": "ignored-here",
+        })
+        self.assertTrue(normalized["deposits_enabled"])
+        self.assertEqual(normalized["environment"], "LIVE")
+        self.assertEqual(normalized["countries"], ["IN", "US"])
+        self.assertEqual(normalized["description"], "Walk-in cash")
+        self.assertEqual(normalized["_secrets"], {
+            "api_secret": "super-secret", "webhook_secret": "hook",
+        })
+        updated = await service.update_gateway_crm(row["id"], {
+            "deposits_enabled": True, "countries": ["IN"], "description": "Walk-in cash",
+        }, ADMIN)
+        updated_dto = service.gateway_dto(updated)
+        self.assertEqual(updated_dto["countries"], ["IN"])
+        self.assertEqual(updated_dto["description"], "Walk-in cash")
+        self.assertTrue(updated_dto["depositEnabled"])
 
     async def test_automated_needs_setup_until_configured(self):
         row = await service.create_gateway({
@@ -167,23 +207,33 @@ class PlatformSettingsTests(unittest.IsolatedAsyncioTestCase):
         defaults = await service.get_platform_settings()
         self.assertFalse(defaults["deposits_enabled"])
         self.assertFalse(defaults["wallet_to_wallet_enabled"])
-        self.assertEqual(defaults["return_pages"]["success_path"], "/deposit/success")
+        self.assertEqual(defaults["return_pages"]["success_path"], "/play/wallet")
+        self.assertEqual(defaults["returnPages"]["successPath"], "/play/wallet")
+        self.assertFalse(defaults["localSettings"]["depositsEnabled"])
 
         updated = await service.update_platform_settings({
-            "return_pages": {"success_path": "/wallet/ok", "failure_path": "/wallet/no"},
-            "deposits_enabled": True, "wallet_to_wallet_enabled": True,
+            "returnPages": {"successPath": "/wallet/ok", "failurePath": "/wallet/no"},
+            "localSettings": {"depositsEnabled": True},
+            "walletToWalletEnabled": True,
         }, ADMIN)
         self.assertEqual(updated["return_pages"]["success_path"], "/wallet/ok")
         self.assertTrue(updated["deposits_enabled"])
         self.assertTrue(updated["wallet_to_wallet_enabled"])
+        self.assertTrue(updated["localSettings"]["depositsEnabled"])
+        self.assertTrue(updated["walletToWalletEnabled"])
+
+        https_ok = await service.update_platform_settings({
+            "returnPages": {"successPath": "https://chakri.casino/play/wallet"},
+        }, ADMIN)
+        self.assertEqual(https_ok["returnPages"]["successPath"], "https://chakri.casino/play/wallet")
 
         reloaded = await service.get_platform_settings()
         self.assertEqual(reloaded["return_pages"]["failure_path"], "/wallet/no")
 
-    async def test_rejects_absolute_return_url(self):
+    async def test_rejects_insecure_return_url(self):
         with self.assertRaises(GatewayError) as ctx:
             await service.update_platform_settings({
-                "return_pages": {"success_path": "https://evil.example/steal"},
+                "return_pages": {"success_path": "http://evil.example/steal"},
             }, ADMIN)
         self.assertEqual(ctx.exception.code, "PAYMENT_SETTINGS_INVALID")
 
@@ -210,6 +260,20 @@ class LocalAgentTests(unittest.IsolatedAsyncioTestCase):
 
         rows = await service.list_local_agents()
         self.assertEqual(len(rows), 2)
+
+    async def test_cash_agent_camelcase_create(self):
+        agent = await service.create_local_agent({
+            "agentType": "CASH", "agentName": "Goa Collection",
+            "countryCode": "IN", "depositEnabled": True,
+            "withdrawalEnabled": False, "showDetails": False,
+            "details": "Shop 12, Mapusa",
+        }, ADMIN)
+        self.assertEqual(agent["agent_type"], "CASH")
+        self.assertEqual(agent["agentType"], "CASH")
+        self.assertEqual(agent["agentName"], "Goa Collection")
+        self.assertIsNone(agent["details"])
+        self.assertTrue(agent["details_hidden"])
+        self.assertFalse(agent["detailsConfigured"])
 
     async def test_delete_and_validation(self):
         agent = await service.create_local_agent({
@@ -277,6 +341,18 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["distributors"]["top"][0]["commission_chips"], 250)
         self.assertEqual(len(result["audit_activity"]), 1)
         self.assertEqual(result["audit_activity"][0]["event_type"], "WITHDRAWAL_MODE_CHANGED")
+
+
+class AdminPasswordGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_password_required_when_secrets_are_present(self):
+        admin = {"id": ADMIN, "password_hash": hash_password("Admin-Pass-9")}
+        with self.assertRaises(Exception) as missing:
+            await routes_payment_hub._require_current_admin_password(admin, None)
+        self.assertEqual(missing.exception.status_code, 403)
+        with self.assertRaises(Exception) as wrong:
+            await routes_payment_hub._require_current_admin_password(admin, "wrong-pass")
+        self.assertEqual(wrong.exception.status_code, 401)
+        await routes_payment_hub._require_current_admin_password(admin, "Admin-Pass-9")
 
 
 class _unittest_env:

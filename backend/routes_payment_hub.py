@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from auth_utils import get_current_user, require_recent_admin_step_up
+from auth_utils import get_current_user, require_recent_admin_step_up, verify_password
 from db import db, serialize_doc
 from payment_hub import service
 from payment_hub.domain import GatewayError, redact, utcnow
@@ -100,6 +101,7 @@ class GatewayCreate(BaseModel):
 
 
 class GatewayUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
     display_name: str | None = Field(default=None, min_length=2, max_length=100)
     merchant_reference_masked: str | None = Field(default=None, max_length=80)
     base_url: str | None = Field(default=None, max_length=500)
@@ -112,29 +114,52 @@ class GatewayUpdate(BaseModel):
     auto_approve_deposits: bool | None = None
     auto_approve_withdrawals: bool | None = None
     version: int | None = Field(default=None, ge=1)
+    current_password: str | None = Field(default=None, max_length=128)
+    currentPassword: str | None = Field(default=None, max_length=128)
 
 
 class ReturnPages(BaseModel):
-    success_path: str | None = Field(default=None, max_length=256)
-    failure_path: str | None = Field(default=None, max_length=256)
+    model_config = ConfigDict(extra="allow")
+    success_path: str | None = Field(default=None, max_length=500)
+    failure_path: str | None = Field(default=None, max_length=500)
+    successPath: str | None = Field(default=None, max_length=500)
+    failurePath: str | None = Field(default=None, max_length=500)
+
+
+class LocalSettings(BaseModel):
+    depositsEnabled: bool | None = None
+    withdrawalsEnabled: bool | None = None
+    depositAutoApprove: bool | None = None
+    withdrawalAutoApprove: bool | None = None
 
 
 class PaymentPlatformSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
     return_pages: ReturnPages | None = None
+    returnPages: ReturnPages | None = None
+    localSettings: LocalSettings | None = None
     deposits_enabled: bool | None = None
     withdrawals_enabled: bool | None = None
     deposit_auto_approve: bool | None = None
     withdrawal_auto_approve: bool | None = None
     wallet_to_wallet_enabled: bool | None = None
+    walletToWalletEnabled: bool | None = None
 
 
 class LocalAgentCreate(BaseModel):
-    agent_type: str
-    agent_name: str = Field(min_length=2, max_length=120)
-    country_code: str = Field(min_length=2, max_length=2)
+    model_config = ConfigDict(extra="allow")
+    agent_type: str | None = None
+    agentType: str | None = None
+    agent_name: str | None = Field(default=None, min_length=2, max_length=120)
+    agentName: str | None = Field(default=None, min_length=2, max_length=120)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    countryCode: str | None = Field(default=None, min_length=2, max_length=2)
     deposit_enabled: bool = False
+    depositEnabled: bool | None = None
     withdrawal_enabled: bool = False
+    withdrawalEnabled: bool | None = None
     show_details: bool = False
+    showDetails: bool | None = None
     details: str = Field(default="", max_length=2000)
 
 
@@ -205,11 +230,32 @@ async def gateway_detail(gateway_id: str, admin=Depends(require_permission("gate
     return envelope({"gateway": service.gateway_dto(row)})
 
 
+async def _require_current_admin_password(admin: Mapping[str, Any], password: str | None) -> None:
+    if not password:
+        raise HTTPException(status_code=403, detail={
+            "code": "ADMIN_PASSWORD_REQUIRED",
+            "message": "Enter your current Admin password before saving gateway credentials.",
+        })
+    hashed = str(admin.get("password_hash") or "")
+    matched = bool(hashed) and await asyncio.to_thread(verify_password, password, hashed)
+    if not matched:
+        raise HTTPException(status_code=401, detail={
+            "code": "ADMIN_REAUTH_FAILED",
+            "message": "Administrator password is incorrect.",
+        })
+
+
 @admin_router.patch("/payment-gateways/{gateway_id}")
+@admin_router.put("/payment-gateways/{gateway_id}")
 async def gateway_update(gateway_id: str, body: GatewayUpdate, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True, super_admin=True))):
     try:
-        values = body.model_dump(exclude_none=True)
-        version = values.pop("version", None)
+        raw = body.model_dump(exclude_none=True)
+        password = raw.pop("current_password", None) or raw.pop("currentPassword", None)
+        values = service.normalize_crm_gateway_payload(raw)
+        secrets = values.pop("_secrets", None)
+        if secrets or password is not None:
+            await _require_current_admin_password(admin, password)
+        version = values.pop("version", raw.get("version"))
         strict_keys = {"display_name", "merchant_reference_masked", "base_url", "capabilities", "non_secret_config"}
         # Preserve the optimistic-concurrency update path when a caller supplies a
         # version and edits provider-behaviour fields only. All CRM operator edits
@@ -220,7 +266,12 @@ async def gateway_update(gateway_id: str, body: GatewayUpdate, admin=Depends(req
             row = await service.update_gateway(gateway_id, values, admin["id"], version)
         else:
             row = await service.update_gateway_crm(gateway_id, values, admin["id"])
+        if secrets:
+            await service.store_credentials(gateway_id, secrets, admin["id"])
+            row = await db.payment_gateways.find_one({"id": gateway_id}) or row
         return envelope({"gateway": service.gateway_dto(row)})
+    except HTTPException:
+        raise
     except (GatewayError, ValueError) as exc:
         raise_gateway(exc if isinstance(exc, GatewayError) else GatewayError("GATEWAY_CONFIG_INVALID", "Gateway configuration is invalid."))
 
