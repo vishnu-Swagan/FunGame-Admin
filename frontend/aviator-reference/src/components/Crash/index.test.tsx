@@ -1,6 +1,4 @@
 import React from "react";
-import fs from "fs";
-import path from "path";
 import { act, render } from "@testing-library/react";
 import Context from "../../context";
 import CrashStage from ".";
@@ -21,19 +19,6 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 afterEach(() => jest.useRealTimers());
-
-test("the native renderer uses Chakri's side-profile propeller aircraft", () => {
-  const craft = fs.readFileSync(
-    path.resolve(__dirname, "../../assets/images/aviator-craft.svg"),
-    "utf8",
-  );
-
-  expect(craft).toContain('data-flight-profile="side-view"');
-  expect(craft).toContain('data-tail-anchor="18 62"');
-  expect(craft).toContain('viewBox="0 0 300 112"');
-  expect(craft).toContain('id="propeller"');
-  expect(craft).toContain("propeller-spin");
-});
 
 test("cold startup keeps a neutral synchronization gate until server state arrives", () => {
   const { container } = render(
@@ -82,6 +67,11 @@ test("a live flight advances smoothly from the compensated server time", () => {
   expect(trail).not.toBeNull();
   expect(container.querySelector(".plane.visible")).not.toBeNull();
   expect(container.querySelectorAll(".plane")).toHaveLength(1);
+  expect(container.querySelector(".plane")?.getAttribute("data-flight-style")).toBe("attachment-line-art");
+  expect(container.querySelector(".plane")?.getAttribute("data-aircraft-asset")).toBe("transparent-png");
+  expect(container.querySelector(".aircraft-sprite.visible")).not.toBeNull();
+  expect(container.querySelector(".aircraft-propeller.visible")?.getAttribute("data-propeller")).toBe("spinning");
+  expect(container.querySelectorAll(".aircraft-propeller")).toHaveLength(1);
   expect(trail?.getAttribute("data-tail-x")).toBe(flightPlane?.getAttribute("data-tail-x"));
   expect(trail?.getAttribute("data-tail-y")).toBe(flightPlane?.getAttribute("data-tail-y"));
   expect(container.querySelector(".multiplier")?.textContent).toMatch(/x$/);
