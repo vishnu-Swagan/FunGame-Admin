@@ -179,7 +179,9 @@ export default function AdminPaymentGateways() {
         adminPayments.localAgents(),
       ]);
       if (gatewayResult.status === "fulfilled") {
-        setGateways((gatewayResult.value || []).map(coerceGateway));
+        const rows = (gatewayResult.value || []).map(coerceGateway);
+        setGateways(rows);
+        if (!rows.length && hub?.hosted_provider?.configured) setCategory("EWALLET");
       } else if (!isCatalogPermissionError(gatewayResult.reason)) {
         toast.error(errMsg(gatewayResult.reason, "Payment methods could not be loaded."));
       }
@@ -203,7 +205,10 @@ export default function AdminPaymentGateways() {
   useEffect(() => { load(); }, [load]);
 
   const adminEnabled = true;
-  const liveCount = gateways.filter((item) => !item.sandboxMode).length;
+  const hostedProvider = status?.hosted_provider?.configured ? status.hosted_provider : null;
+  const hostedVisible = Boolean(hostedProvider && category === "EWALLET");
+  const methodCount = gateways.length + (hostedProvider ? 1 : 0);
+  const liveCount = gateways.filter((item) => !item.sandboxMode).length + (hostedProvider?.live ? 1 : 0);
   const shown = useMemo(() => gateways.filter((item) => item.category === category), [gateways, category]);
 
   return (
@@ -215,7 +220,7 @@ export default function AdminPaymentGateways() {
           <p>Choose which payment methods clients can use to deposit and withdraw. Automated providers process callbacks; manual methods create reviewable instructions.</p>
         </div>
         <div className="gateway-header-actions">
-          <span className="gateway-stat">{gateways.length} Methods</span>
+          <span className="gateway-stat">{methodCount} {methodCount === 1 ? "Method" : "Methods"}</span>
           <span className="gateway-stat">{liveCount} Live</span>
           {canCreate && (
             <button type="button" className="crm-text-link" data-testid="add-provider" onClick={() => setCreating(true)}>
@@ -245,7 +250,7 @@ export default function AdminPaymentGateways() {
           >
             <Icon size={18} />
             <span>{label}</span>
-            <b>{gateways.filter((item) => item.category === key).length}</b>
+            <b>{gateways.filter((item) => item.category === key).length + (hostedProvider && key === "EWALLET" ? 1 : 0)}</b>
           </button>
         ))}
       </nav>
@@ -258,6 +263,7 @@ export default function AdminPaymentGateways() {
             onSaved={() => { setCreating(false); load(); }}
           />
         )}
+        {hostedVisible && <HostedProviderCard provider={hostedProvider} />}
         {shown.map((gateway) => (
           <GatewayCard
             key={gateway.id}
@@ -267,7 +273,7 @@ export default function AdminPaymentGateways() {
             onRefresh={load}
           />
         ))}
-        {!shown.length && !loading && !creating && (
+        {!shown.length && !hostedVisible && !loading && !creating && (
           <div className="crm-panel" data-testid="gateways-empty">
             <div className="crm-panel-body empty-state-compact">
               <h3>No methods in this category</h3>
@@ -280,7 +286,7 @@ export default function AdminPaymentGateways() {
         )}
       </div>
 
-      {canCreate && shown.length > 0 && !creating && (
+      {canCreate && (shown.length > 0 || hostedVisible) && !creating && (
         <button type="button" className="gateway-link" data-testid="add-provider-list" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
       )}
 
@@ -295,6 +301,42 @@ export default function AdminPaymentGateways() {
 
       <AgentsPanel agents={agents} canManage={canManage} adminEnabled={adminEnabled} onRefresh={load} />
     </PageTransition>
+  );
+}
+
+function HostedProviderCard({ provider }) {
+  const live = Boolean(provider.live);
+  return (
+    <article className="gateway-card gateway-hosted-card" data-testid={`hosted-provider-${provider.code}`}>
+      <header className="gateway-card-header">
+        <div className="gateway-card-title">
+          <span className="gateway-icon"><Wallet size={18} /></span>
+          <div>
+            <h3>{provider.display_name}</h3>
+            <span className="gateway-mode">Hosted UPI · Production configuration</span>
+            <span className={`status-tag ${live ? "is-ok" : "is-warn"}`}>{live ? "Live" : "Needs attention"}</span>
+          </div>
+        </div>
+        <div className="gateway-hosted-flags" aria-label="Hosted provider availability">
+          <span className={provider.deposits_enabled ? "is-enabled" : "is-disabled"}>Deposits {provider.deposits_enabled ? "enabled" : "disabled"}</span>
+          <span className="is-disabled">Withdrawals not provided</span>
+        </div>
+      </header>
+      <div className="gateway-card-body">
+        <div className="gateway-auto-note">
+          <ShieldCheck size={14} /> This is the active hosted-UPI rail. Its production configuration is read-only here and is separate from draft CRM gateway records.
+        </div>
+        <div className="gateway-webhook">
+          <strong><ShieldCheck size={15} /> SgPay24 callback</strong>
+          <p>Register this exact URL in SgPay24. No provider credentials are exposed to the browser.</p>
+          <CopyField label="Webhook URL" value={provider.webhook_url} testId={`hosted-provider-webhook-${provider.code}`} />
+        </div>
+        <div className="gateway-card-actions">
+          <span className="gateway-muted">Status: {provider.availability_code === "AVAILABLE" ? "Available" : provider.availability_code}</span>
+          <span className="status-tag is-ok">Read only</span>
+        </div>
+      </div>
+    </article>
   );
 }
 

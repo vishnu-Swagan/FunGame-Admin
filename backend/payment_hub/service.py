@@ -100,6 +100,29 @@ def feature_status() -> dict[str, Any]:
         if base_url and v1_provider_code
         else None
     )
+    hosted_provider = None
+    if v1_provider_code and enabled("UPI_CHIP_PURCHASES_ENABLED"):
+        # The production hosted-UPI rail predates the V2 gateway registry. Keep
+        # it visible in the same admin status response without synthesizing a
+        # mutable V2 gateway or exposing provider credentials.
+        from operator_rail import operator_status
+
+        operator = operator_status()
+        hosted_provider = {
+            "code": v1_provider_code,
+            "display_name": "SgPay24" if v1_provider_code == "sgpay24" else v1_provider_code,
+            "category": "EWALLET",
+            "provider_type": "HOSTED_UPI",
+            "configured": True,
+            "live": bool(operator.get("hosted_checkout") and operator.get("deposits_enabled")),
+            "deposits_enabled": bool(operator.get("deposits_enabled")),
+            # Withdrawals on the operator rail are admin-reviewed and are not
+            # handled by the SgPay24 hosted checkout provider.
+            "withdrawals_enabled": False,
+            "availability_code": operator.get("availability_code") or "UPI_PROVIDER_NOT_READY",
+            "webhook_url": v1_webhook_url,
+            "read_only": True,
+        }
     return {
         "payments_v2": payments_v2,
         "admin": admin_feature_enabled(),
@@ -108,6 +131,7 @@ def feature_status() -> dict[str, Any]:
         "webhook_base_url": base_url,
         "v1_provider_code": v1_provider_code,
         "v1_webhook_url": v1_webhook_url,
+        "hosted_provider": hosted_provider,
     }
 
 

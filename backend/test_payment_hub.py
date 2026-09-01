@@ -478,6 +478,24 @@ class PaymentHubTests(unittest.IsolatedAsyncioTestCase):
                     service.feature_status()["v1_webhook_url"],
                     "https://api.chakri.casino/api/payments/webhooks/provider_one",
                 )
+            with patch.dict(os.environ, {
+                "PAYMENT_PROVIDER": "sgpay24",
+                "UPI_CHIP_PURCHASES_ENABLED": "true",
+            }), patch("operator_rail.operator_status", return_value={
+                "hosted_checkout": True,
+                "deposits_enabled": True,
+                "availability_code": "AVAILABLE",
+            }):
+                hosted = service.feature_status()["hosted_provider"]
+                self.assertEqual(hosted["display_name"], "SgPay24")
+                self.assertTrue(hosted["live"])
+                self.assertTrue(hosted["deposits_enabled"])
+                self.assertFalse(hosted["withdrawals_enabled"])
+                self.assertTrue(hosted["read_only"])
+                self.assertEqual(
+                    hosted["webhook_url"],
+                    "https://api.chakri.casino/api/payments/webhooks/sgpay24",
+                )
             os.environ["PAYMENT_WEBHOOK_PUBLIC_BASE_URL"] = "http://127.0.0.1:8000/path"
             self.assertIsNone(service.feature_status()["webhook_base_url"])
             self.assertIsNone(service.gateway_dto(first)["webhook_url"])
