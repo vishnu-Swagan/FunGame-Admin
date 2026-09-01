@@ -881,6 +881,17 @@ async def main():
         ),
         403, 'ADMIN_PERMISSION_REQUIRED',
     )
+    bootstrap_admin = {
+        'id': 'bootstrap-admin', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'admin_permissions': [],
+    }
+    await expect_http_error(
+        routes_compliance.verify_age(
+            'adult-age-review', AgeVerify(verified=True, note='Evidence checked'),
+            bootstrap_admin,
+        ),
+        403, 'ADMIN_MFA_REQUIRED',
+    )
     kyc_admin = {
         'id': 'kyc-admin', 'role': 'ADMIN', 'status': 'ACTIVE',
         'admin_permissions': ['KYC_REVIEW'],

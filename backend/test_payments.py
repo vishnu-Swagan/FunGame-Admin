@@ -1319,6 +1319,17 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             await routes.withdrawals_approve(user=pre_rbac)
         self.assertEqual(mutation_denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
 
+        bootstrap = {
+            "id": "admin-bootstrap", "role": "ADMIN", "status": "ACTIVE",
+            "admin_permissions": [],
+        }
+        self.assertEqual((await routes.kyc_view(user=bootstrap))["id"], "admin-bootstrap")
+        with self.assertRaises(HTTPException) as bootstrap_needs_step_up:
+            await routes.kyc_review(user=bootstrap)
+        self.assertEqual(
+            bootstrap_needs_step_up.exception.detail["code"], "ADMIN_MFA_REQUIRED",
+        )
+
         money_admin = {
             "id": "money-admin", "role": "ADMIN", "status": "ACTIVE",
             "admin_permissions": ["WITHDRAWALS_MARK_PAID", "PAYMENTS_RECONCILE"],

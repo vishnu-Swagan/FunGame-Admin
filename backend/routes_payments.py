@@ -224,6 +224,19 @@ async def require_withdrawal_player(user: dict = Depends(get_current_user)):
 
 
 def _permissions(user: dict) -> set[str]:
+    pre_rbac = (
+        not str(user.get("admin_role") or "").strip()
+        and "permissions" not in user
+        and (
+            "admin_permissions" not in user
+            or not bool(user.get("admin_permissions") or [])
+        )
+    )
+    if pre_rbac:
+        # The original production operator predates granular RBAC. Keep its
+        # verification workspace usable until the account is migrated; manual
+        # trust decisions still require the normal recent MFA/password step-up.
+        return {"PAYMENTS_VIEW", "AUDIT_VIEW", "KYC_VIEW", "KYC_REVIEW"}
     if "admin_permissions" not in user and "permissions" not in user:
         # Pre-RBAC production administrators retain read-only access to the
         # provider-readiness and audit surfaces during migration. No payment
