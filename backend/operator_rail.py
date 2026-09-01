@@ -42,7 +42,7 @@ _TEST_HOSTED_LOCKS: dict[str, asyncio.Lock] = {}
 
 OPERATOR_LIMITS = {
     "chips_per_inr": 1,
-    "min_deposit_paise": 50_000,
+    "min_deposit_paise": 10_000,
     "max_deposit_paise": 10_000_000,
     "min_withdrawal_paise": 100_000,
     "min_withdrawal_chips": 1_000,

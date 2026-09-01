@@ -89,7 +89,7 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
             ("UPI_CHIPS_PER_INR", "0"),
             ("UPI_CHIPS_PER_INR", "1.5"),
             ("UPI_MAX_DAILY_DEPOSIT_PAISE", None),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "49999"),
+            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "9999"),
             ("UPI_MAX_DAILY_DEPOSIT_PAISE", "not-an-int"),
         )
         for field, value in invalid_cases:
@@ -426,6 +426,22 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflict.exception.status_code, 409)
         self.assertEqual(conflict.exception.detail["code"], "IDEMPOTENCY_CONFLICT")
         self.assertEqual(len(self.gateway.create_calls), 1)
+
+    async def test_minimum_buy_is_one_hundred_rupees(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 10_000, "minimum-buy-one-hundred", self.gateway,
+        )
+        self.assertEqual(purchase["amount_paise"], 10_000)
+        self.assertEqual(purchase["chips"], 100)
+        with self.assertRaises(HTTPException) as below_minimum:
+            await operator_rail.create_hosted_deposit(
+                self.user, 9_999, "below-minimum-buy-value", self.gateway,
+            )
+        self.assertEqual(below_minimum.exception.status_code, 400)
+        self.assertEqual(below_minimum.exception.detail["code"], "OPERATOR_AMOUNT_INVALID")
+        self.assertEqual(
+            await self.db[operator_rail.COLLECTION].count_documents({}), 1,
+        )
 
     async def test_concurrent_hosted_purchases_reserve_daily_cap_atomically(self):
         with patch.dict(
