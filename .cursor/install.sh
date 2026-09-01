@@ -84,9 +84,17 @@ WDS_SOCKET_PORT=0
 EOF
 fi
 yarn install --frozen-lockfile
+# The embedded Aviator app is a separate build that bakes its API origin from
+# REACT_APP_BACKEND_URL at build time (see aviator-reference/src/config.ts).
+# It reads env from its own directory, so give it an .env.local pointing at the
+# local API; otherwise the in-iframe game falls back to window.location.origin
+# (:3000, no /api) and never receives live round updates.
+DEV_BACKEND_URL="$(grep -E '^REACT_APP_BACKEND_URL=' "$REPO_ROOT/frontend/.env" | head -1 | cut -d= -f2-)"
+DEV_BACKEND_URL="${DEV_BACKEND_URL:-http://localhost:8000}"
+printf 'REACT_APP_BACKEND_URL=%s\n' "$DEV_BACKEND_URL" > "$REPO_ROOT/frontend/aviator-reference/.env.local"
 # Build the embedded Aviator reference app once here so per-boot startup does
 # not need to reinstall/rebuild it (output: frontend/public/aviator-live).
-log "Building Aviator reference sub-app"
-yarn build:aviator
+log "Building Aviator reference sub-app (API origin: $DEV_BACKEND_URL)"
+REACT_APP_BACKEND_URL="$DEV_BACKEND_URL" yarn build:aviator
 
 log "Install complete."
