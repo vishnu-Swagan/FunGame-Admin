@@ -121,6 +121,7 @@ export default function CrashStage() {
 		? multiplierProgress
 		: 0;
 	const flightGeometry = flightGeometryFor(flightProgress);
+	const showFlightTrail = GameState === "PLAYING" || GameState === "GAMEEND";
 	const bettingProgress = Math.max(0, Math.min(100, 100 - ((waiting / BETTING_WINDOW_MS) * 100)));
 
 	return (
@@ -141,16 +142,20 @@ export default function CrashStage() {
 									<stop offset="1" stopColor="#e11942" stopOpacity="0.24" />
 								</linearGradient>
 							</defs>
-							<path className="curve-fill" d={flightGeometry.fillPath} />
-							<path className="curve-shadow" d={flightGeometry.path} />
-							<path
-								className="curve-line"
-								data-flight-trail="tail-locked"
-								data-tail-x={flightGeometry.tailX.toFixed(2)}
-								data-tail-y={flightGeometry.tailY.toFixed(2)}
-								d={flightGeometry.path}
-							/>
-							<circle className="curve-tip" cx={flightGeometry.tailX} cy={flightGeometry.tailY} r="4" />
+							{showFlightTrail && (
+								<g className="flight-trail" data-flight-trail-state="active">
+									<path className="curve-fill" d={flightGeometry.fillPath} />
+									<path className="curve-shadow" d={flightGeometry.path} />
+									<path
+										className="curve-line"
+										data-flight-trail="tail-locked"
+										data-tail-x={flightGeometry.tailX.toFixed(2)}
+										data-tail-y={flightGeometry.tailY.toFixed(2)}
+										d={flightGeometry.path}
+									/>
+									<circle className="curve-tip" cx={flightGeometry.tailX} cy={flightGeometry.tailY} r="4" />
+								</g>
+							)}
 							<g
 								className={`plane-flight ${GameState === "GAMEEND" ? "crashed" : ""}`}
 								data-tail-x={flightGeometry.tailX.toFixed(2)}

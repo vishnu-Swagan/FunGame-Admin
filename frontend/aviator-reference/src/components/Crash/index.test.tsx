@@ -52,6 +52,21 @@ test("an authoritative round renders immediately without a WebGL startup delay",
   expect(container.querySelector(".round-state")?.textContent).toContain("#90");
 });
 
+test("a new round starts with no leftover curved flight trail", () => {
+  const { container } = render(
+    <Context.Provider value={value({ GameState: "BET", time: 1200, latestRoundNumber: 91 })}>
+      <CrashStage />
+    </Context.Provider>,
+  );
+
+  expect(container.querySelector(".native-flight-visual")).not.toBeNull();
+  expect(container.querySelector(".flight-trail")).toBeNull();
+  expect(container.querySelector('[data-flight-trail="tail-locked"]')).toBeNull();
+  expect(container.querySelector(".curve-fill")).toBeNull();
+  expect(container.querySelector(".curve-tip")).toBeNull();
+  expect(container.querySelector(".plane.visible")).toBeNull();
+});
+
 test("a live flight advances smoothly from the compensated server time", () => {
   const setCurrentTarget = jest.fn();
   const { container } = render(
