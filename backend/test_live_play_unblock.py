@@ -127,7 +127,6 @@ async def check_self_attest_satisfies_age():
     await reset_db()
     await compliance.set_config({'require_age_verification': True}, 'admin')
 
-    excluded = None
     attested = {
         'id': 'u-attest', 'role': 'PLAYER', 'status': 'ACTIVE',
         'country': 'India', 'date_of_birth': ADULT_DOB, 'accepted_terms': True,
@@ -148,7 +147,6 @@ async def check_self_attest_satisfies_age():
     await expect_http_error(compliance.assert_playable(minor), 403, 'UNDERAGE')
 
     await compliance.set_config({'require_age_verification': False}, 'admin')
-    assert excluded is None
     print('  PASS  18+ self-attest satisfies age; a real under-age DOB is still refused')
 
 
