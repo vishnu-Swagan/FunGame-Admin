@@ -33,8 +33,17 @@ TERMINAL_PAYIN = {item.value for item in (PayinStatus.SUCCEEDED, PayinStatus.FAI
 WEBHOOK_PROCESSING_LEASE_SECONDS = 120
 
 
-def enabled(name: str) -> bool:
-    return str(os.environ.get(name, "false")).strip().lower() in {"1", "true", "yes", "on"}
+def enabled(name: str, default: str = "false") -> bool:
+    return str(os.environ.get(name, default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def admin_feature_enabled() -> bool:
+    """Operator configuration surface. On unless Render sets the flag to false.
+
+    This does not authorize wallet credit/debit. PAYMENTS_V2_ENABLED,
+    REAL_MONEY_ENABLED, and the financial readiness flags stay fail-closed.
+    """
+    return enabled("PAYMENT_GATEWAY_ADMIN_ENABLED", default="true")
 
 
 def _public_webhook_base_url() -> str | None:
@@ -91,7 +100,7 @@ def feature_status() -> dict[str, Any]:
     )
     return {
         "payments_v2": payments_v2,
-        "admin": enabled("PAYMENT_GATEWAY_ADMIN_ENABLED"),
+        "admin": admin_feature_enabled(),
         "live_allowed": enabled("PAYMENT_LIVE_MODE_ALLOWED"),
         "installed_adapters": registry.codes(),
         "webhook_base_url": base_url,
@@ -101,7 +110,7 @@ def feature_status() -> dict[str, Any]:
 
 
 def require_admin_feature() -> None:
-    if not enabled("PAYMENT_GATEWAY_ADMIN_ENABLED"):
+    if not admin_feature_enabled():
         raise GatewayError("PAYMENT_GATEWAY_ADMIN_DISABLED", "Payment gateway administration is disabled.", status_code=404)
 
 

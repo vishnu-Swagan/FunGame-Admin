@@ -94,7 +94,7 @@ services:
       - key: PAYMENTS_V2_ENABLED
         value: "false"
       - key: PAYMENT_GATEWAY_ADMIN_ENABLED
-        value: "true"
+        value: "true"                       # operator config surface; code also defaults on. Does not move money.
       - key: PAYMENT_LIVE_MODE_ALLOWED
         value: "false"
       - key: PAYMENT_CREDENTIALS_MASTER_KEY

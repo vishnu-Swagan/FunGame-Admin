@@ -343,6 +343,23 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["audit_activity"][0]["event_type"], "WITHDRAWAL_MODE_CHANGED")
 
 
+class AdminFeatureDefaultTests(unittest.IsolatedAsyncioTestCase):
+    def test_admin_surface_defaults_on_without_enabling_live_money(self):
+        with unittest_env(PAYMENT_GATEWAY_ADMIN_ENABLED=None, PAYMENTS_V2_ENABLED=None):
+            self.assertTrue(service.admin_feature_enabled())
+            self.assertTrue(service.feature_status()["admin"])
+            self.assertFalse(service.feature_status()["payments_v2"])
+            service.require_admin_feature()
+
+    def test_explicit_false_still_disables_admin_surface(self):
+        with unittest_env(PAYMENT_GATEWAY_ADMIN_ENABLED="false"):
+            self.assertFalse(service.admin_feature_enabled())
+            self.assertFalse(service.feature_status()["admin"])
+            with self.assertRaises(GatewayError) as ctx:
+                service.require_admin_feature()
+            self.assertEqual(ctx.exception.code, "PAYMENT_GATEWAY_ADMIN_DISABLED")
+
+
 class AdminPasswordGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_password_required_when_secrets_are_present(self):
         admin = {"id": ADMIN, "password_hash": hash_password("Admin-Pass-9")}
@@ -363,7 +380,10 @@ class _unittest_env:
     def __enter__(self):
         for key, value in self.overrides.items():
             self.previous[key] = os.environ.get(key)
-            os.environ[key] = value
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         return self
 
     def __exit__(self, *exc):
