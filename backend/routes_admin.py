@@ -351,17 +351,20 @@ async def start_admin_step_up(body: AdminStepUpStart,
         await require_otp_indexes()
     except OtpConfigurationError as exc:
         _raise_otp_http(exc)
-    try:
-        await consume_persistent_limit(
-            'admin_step_up_password', admin['id'], limit=5,
-            window_seconds=15 * 60,
-        )
-    except OtpError as exc:
-        _raise_otp_http(exc)
     original_hash = admin.get('password_hash') or ''
     if not await asyncio.to_thread(
         verify_password, body.current_password, original_hash,
     ):
+        # Count failed passwords, not legitimate retries caused by a delivery
+        # outage. A correct password must not remain trapped behind failures
+        # from the SMS or email provider.
+        try:
+            await consume_persistent_limit(
+                'admin_step_up_password', admin['id'], limit=5,
+                window_seconds=15 * 60,
+            )
+        except OtpError as exc:
+            _raise_otp_http(exc)
         raise HTTPException(status_code=401, detail={
             'code': 'ADMIN_REAUTH_FAILED',
             'message': 'Administrator password is incorrect.',
@@ -380,6 +383,11 @@ async def start_admin_step_up(body: AdminStepUpStart,
             # the administrator's other stored contact without weakening MFA.
             delivery_error = exc
         except OtpError as exc:
+            if exc.code == 'RATE_LIMITED' and identity != identities[-1]:
+                # OTP limits are destination-scoped. A saturated broken SMS
+                # route must not suppress the separately limited email route.
+                delivery_error = exc
+                continue
             _raise_otp_http(exc)
     if challenge is None:
         _raise_otp_http(delivery_error or OtpConfigurationError())
