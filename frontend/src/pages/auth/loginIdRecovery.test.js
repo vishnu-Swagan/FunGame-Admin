@@ -119,6 +119,7 @@ test("phone then email verification sends the same editable Login ID on both ste
   mockLocationState = {
     channel: "PHONE",
     identifier: "+447700900123",
+    challengeId: "phone-challenge-1",
     secondaryIdentifier: "player@example.com",
     loginId: "Royal.Player",
   };
@@ -127,6 +128,7 @@ test("phone then email verification sends the same editable Login ID on both ste
       next_verification: {
         channel: "EMAIL",
         identifier: "player@example.com",
+        verification_id: "email-challenge-2",
         destination_masked: "p***@example.com",
       },
     } })
@@ -145,6 +147,8 @@ test("phone then email verification sends the same editable Login ID on both ste
   expect(mockPost).toHaveBeenNthCalledWith(1, "/auth/verify-otp", expect.objectContaining({
     channel: "PHONE",
     identifier: "+447700900123",
+    challenge_id: "phone-challenge-1",
+    verification_id: "phone-challenge-1",
     username: "Royal.Player.2",
   }));
 
@@ -155,6 +159,8 @@ test("phone then email verification sends the same editable Login ID on both ste
     channel: "EMAIL",
     identifier: "player@example.com",
     email: "player@example.com",
+    challenge_id: "email-challenge-2",
+    verification_id: "email-challenge-2",
     username: "Royal.Player.2",
   }));
   expect(mockLogin).toHaveBeenCalledWith("token", expect.objectContaining({ id: "player-1" }));
@@ -171,6 +177,7 @@ test("login recovery carries the pending Login ID into email verification", asyn
       message: "Verify your contact method before logging in.",
     } } } })
     .mockResolvedValueOnce({ data: {
+      challenge_id: "recovery-challenge-1",
       destination_masked: "p***@example.com",
       resend_after_seconds: 30,
     } });
@@ -198,7 +205,27 @@ test("login recovery carries the pending Login ID into email verification", asyn
   expect(mockNavigate).toHaveBeenCalledWith("/verify", { state: expect.objectContaining({
     channel: "EMAIL",
     identifier: "player@example.com",
+    challengeId: "recovery-challenge-1",
     loginId: "Royal.Player.2",
   }) });
+  await act(async () => root.unmount());
+});
+
+test("verification rejects a six-character nonnumeric code before calling the API", async () => {
+  mockLocationState = {
+    channel: "PHONE",
+    identifier: "+447700900123",
+    challengeId: "phone-challenge-3",
+    loginId: "Royal.Player",
+  };
+  const { container, root } = await render(VerifyEmail);
+
+  change(container.querySelector('[data-testid="verification-code-input"]'), "12AB56");
+  change(container.querySelector('[data-testid="verify-password-input"]'), "Strong-Password-9");
+  change(container.querySelector('[data-testid="verify-password-confirm-input"]'), "Strong-Password-9");
+  await submit(container.querySelector("form"));
+
+  expect(mockPost).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="verify-email-submit-button"]').disabled).toBe(true);
   await act(async () => root.unmount());
 });
