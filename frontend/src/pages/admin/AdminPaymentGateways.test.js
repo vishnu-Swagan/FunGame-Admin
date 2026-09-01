@@ -87,6 +87,34 @@ test("renders CRM category tabs and empty states while admin API is enabled", as
   await act(async () => root.unmount());
 });
 
+test("a pre-RBAC platform admin can add a provider configuration", async () => {
+  mockUser = { role: "ADMIN", status: "ACTIVE" };
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="add-provider-empty"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="platform-settings-form"]')).not.toBeNull();
+  await act(async () => root.unmount());
+});
+
+test("a leftover permissions key next to an empty grant list cannot add a provider", async () => {
+  mockUser = {
+    role: "ADMIN", status: "ACTIVE",
+    admin_permissions: [], permissions: ["PAYMENTS_VIEW"],
+  };
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="add-provider-empty"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
+test("an operations admin without gateway grants cannot add a provider", async () => {
+  mockUser = { role: "ADMIN", status: "ACTIVE", admin_role: "OPERATIONS", admin_permissions: [] };
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="add-provider-empty"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
 test("loads methods even when a stale hub.admin flag is false", async () => {
   adminPayments.hubStatus.mockResolvedValue({ admin: false, payments_v2: false });
   const { container, root } = await renderPage();

@@ -159,9 +159,8 @@ export default function AdminPaymentGateways() {
   const [category, setCategory] = useState("CARD");
   const [creating, setCreating] = useState(false);
 
-  const isSuperAdmin = String(user?.admin_role || "").toUpperCase() === "SUPER_ADMIN";
-  const canManage = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG);
-  const canCreate = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_CREATE);
+  const canManage = hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG);
+  const canCreate = hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_CREATE);
   const canTest = hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_TEST);
 
   const load = useCallback(async () => {

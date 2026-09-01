@@ -31,12 +31,19 @@ export const ADMIN_PERMISSIONS = Object.freeze({
 });
 
 // The first production administrator records predate granular RBAC claims.
-// Keep only the read-oriented CRM surfaces (plus the distributor grants that
-// the server already treats as legacy-compatible) available while those rows
-// are migrated. An explicitly present empty canonical list still means revoked.
+// Missing grant keys keep CRM payment configuration plus the distributor
+// grants the server already treats as legacy-compatible. An empty
+// admin_permissions list with no leftover permissions key is the same
+// bootstrap shape for payment configuration only. A leftover permissions
+// key next to that empty list stays revoked. Activation, live money, and
+// PAYMENT_SETTINGS_WRITE stay Super Admin only.
 const LEGACY_ADMIN_COMPATIBILITY = new Set([
   ADMIN_PERMISSIONS.PAYMENTS_VIEW,
   ADMIN_PERMISSIONS.AUDIT_VIEW,
+  ADMIN_PERMISSIONS.GATEWAY_VIEW,
+  ADMIN_PERMISSIONS.GATEWAY_CREATE,
+  ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG,
+  ADMIN_PERMISSIONS.GATEWAY_TEST,
   ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW,
   ADMIN_PERMISSIONS.DISTRIBUTORS_MANAGE,
   ADMIN_PERMISSIONS.DISTRIBUTORS_CREDENTIALS,
@@ -46,17 +53,39 @@ export function isActiveAdmin(user) {
   return Boolean(user && user.role === "ADMIN" && user.status === "ACTIVE");
 }
 
+export function isUnmigratedAdmin(user) {
+  if (!isActiveAdmin(user)) return false;
+  if (String(user.admin_role || "").trim()) return false;
+  const hasCanonical = Object.prototype.hasOwnProperty.call(user, "admin_permissions");
+  const hasLegacy = Object.prototype.hasOwnProperty.call(user, "permissions");
+  if (hasCanonical) {
+    const empty = !Array.isArray(user.admin_permissions) || user.admin_permissions.length === 0;
+    return empty && !hasLegacy;
+  }
+  return !hasLegacy;
+}
+
 export function hasPermission(user, permission) {
   if (!isActiveAdmin(user)) return false;
   const superAdmin = String(user.admin_role || "").toUpperCase() === "SUPER_ADMIN";
   if (permission === ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE) return superAdmin;
   if (superAdmin) return true;
+  if (isUnmigratedAdmin(user)) {
+    const hasCanonical = Object.prototype.hasOwnProperty.call(user, "admin_permissions");
+    if (hasCanonical) {
+      return [
+        ADMIN_PERMISSIONS.PAYMENTS_VIEW,
+        ADMIN_PERMISSIONS.AUDIT_VIEW,
+        ADMIN_PERMISSIONS.GATEWAY_VIEW,
+        ADMIN_PERMISSIONS.GATEWAY_CREATE,
+        ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG,
+        ADMIN_PERMISSIONS.GATEWAY_TEST,
+      ].includes(permission);
+    }
+    return LEGACY_ADMIN_COMPATIBILITY.has(permission);
+  }
   const hasCanonical = Object.prototype.hasOwnProperty.call(user, "admin_permissions");
-  const hasLegacy = Object.prototype.hasOwnProperty.call(user, "permissions");
-  if (!hasCanonical && !hasLegacy) return LEGACY_ADMIN_COMPATIBILITY.has(permission);
-  const permissions = Object.prototype.hasOwnProperty.call(user, "admin_permissions")
-    ? user.admin_permissions
-    : user.permissions;
+  const permissions = hasCanonical ? user.admin_permissions : user.permissions;
   if (!Array.isArray(permissions)) return false;
   const normalized = permissions.map((value) => String(value).toUpperCase());
   return normalized.includes(permission);
