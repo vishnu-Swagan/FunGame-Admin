@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
-test("the aircraft artwork is the approved red side-profile propeller plane", () => {
+test("the aircraft artwork is the red vintage single-prop warbird identity", () => {
 	const craft = fs.readFileSync(
 		path.resolve(__dirname, "../../assets/images/aviator-craft.svg"),
 		"utf8",
@@ -32,9 +32,12 @@ test("the aircraft artwork is the approved red side-profile propeller plane", ()
 	expect(craft).toContain('viewBox="0 0 300 112"');
 	expect(craft).toContain('id="propeller"');
 	expect(craft).toContain("propeller-spin");
-	// A recognisable aircraft, not a bare blob: fuselage, wing and cockpit.
+	// The product-identity warbird (see lobby tile): fuselage, low wing,
+	// radial engine cowl and a bubble canopy — never a bare blob.
 	expect(craft).toContain("craft-body");
 	expect(craft).toContain("craft-wing");
+	expect(craft).toContain("craft-cowl");
+	expect(craft).toContain("craft-canopy");
 	// Never a rocket / animated sprite.
 	expect(craft).not.toContain("rocket");
 	expect(craft).not.toContain(".gif");

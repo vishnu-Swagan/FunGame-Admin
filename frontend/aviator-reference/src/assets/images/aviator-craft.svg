@@ -2,46 +2,58 @@
   <title id="title">Red vintage Aviator aircraft</title>
   <defs>
     <linearGradient id="craft-body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff4864"/>
-      <stop offset="0.5" stop-color="#e11942"/>
-      <stop offset="1" stop-color="#af1330"/>
+      <stop offset="0" stop-color="#ff6076"/>
+      <stop offset="0.42" stop-color="#e11942"/>
+      <stop offset="1" stop-color="#8f0f26"/>
     </linearGradient>
     <linearGradient id="craft-wing" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#d3163a"/>
-      <stop offset="1" stop-color="#9c112b"/>
+      <stop offset="0" stop-color="#cf1638"/>
+      <stop offset="1" stop-color="#830d22"/>
+    </linearGradient>
+    <radialGradient id="craft-cowl" cx="0.68" cy="0.42" r="0.72">
+      <stop offset="0" stop-color="#ff5069"/>
+      <stop offset="0.6" stop-color="#c1132f"/>
+      <stop offset="1" stop-color="#7c0c20"/>
+    </radialGradient>
+    <linearGradient id="craft-canopy" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bff3df"/>
+      <stop offset="1" stop-color="#123b34"/>
     </linearGradient>
   </defs>
 
   <!-- Vertical tail fin -->
-  <path fill="#c1132f" d="M18 40 44 58 44 62 30 62 12 47Z"/>
+  <path fill="#b3122f" d="M52 55 30 31 45 31 60 55Z"/>
   <!-- Horizontal stabiliser -->
-  <path fill="#e11942" d="M20 60 58 60 50 71 30 71Z"/>
-
-  <!-- Landing gear -->
-  <path stroke="#0e1116" stroke-width="4" stroke-linecap="round" d="M168 72 178 92M150 74 140 92"/>
-  <circle cx="180" cy="93" r="8" fill="#0e1116"/>
-  <circle cx="180" cy="93" r="3.4" fill="#42474f"/>
-  <circle cx="138" cy="93" r="8" fill="#0e1116"/>
-  <circle cx="138" cy="93" r="3.4" fill="#42474f"/>
-
-  <!-- Main wing -->
-  <path fill="url(#craft-wing)" d="M112 63 196 63 224 82 150 82Z"/>
+  <path fill="#c9163a" d="M34 58 66 58 57 67 41 67Z"/>
 
   <!-- Fuselage -->
-  <path fill="url(#craft-body)" d="M40 59C68 47 120 43 172 45 214 46 244 49 260 56 263 57 263 61 260 62 244 69 214 72 172 73 120 74 68 71 40 60Z"/>
+  <path fill="url(#craft-body)" d="M40 57C58 47 108 43 172 45 202 46 226 49 244 55 250 57 250 58 244 60 226 66 202 69 172 70 108 72 58 68 40 58Z"/>
+  <!-- Glossy spine highlight -->
+  <path fill="#ff8ea1" opacity=".5" d="M74 50C120 46 182 46 234 51 182 53 120 53 74 51Z"/>
 
-  <!-- Cockpit canopy -->
-  <path fill="#0d1015" d="M150 49C170 47 190 48 202 53 190 57 170 57 152 56Z"/>
-  <path fill="#79d0ff" d="M158 51C172 50 185 51 194 53 184 55 170 55 160 54Z" opacity="0.72"/>
+  <!-- Low wing sweeping down, rounded tip -->
+  <path fill="url(#craft-wing)" d="M96 65C120 63 152 63 180 65L150 88C124 90 102 84 88 75 83 71 88 65 96 65Z"/>
+  <path fill="#ff7085" opacity=".35" d="M104 67C128 66 152 67 176 68 152 70 126 71 104 71Z"/>
 
-  <!-- Nose spinner -->
-  <path fill="#8d0f25" d="M256 54 273 60 256 66Z"/>
+  <!-- Bubble greenhouse canopy -->
+  <path fill="#0f322c" d="M150 47C160 35 190 35 202 47 188 51 164 51 150 47Z"/>
+  <path fill="url(#craft-canopy)" d="M156 45C165 37 187 37 195 45 184 48 167 48 156 45Z" opacity=".9"/>
 
-  <!-- Propeller (cheap CSS spin) -->
-  <g id="propeller" transform-origin="273px 60px">
-    <path fill="#111418" d="M270 28h6l-2 30h-2zM270 92h6l-2-30h-2z"/>
-    <circle cx="273" cy="60" r="5" fill="#e11942"/>
-    <circle cx="273" cy="60" r="2" fill="#111418"/>
+  <!-- Radial engine cowl -->
+  <ellipse cx="246" cy="57" rx="18" ry="15" fill="url(#craft-cowl)"/>
+  <ellipse cx="252" cy="57" rx="9" ry="12" fill="#6f0c1d"/>
+  <!-- Spinner cone -->
+  <path fill="#7c0c20" d="M258 49 272 57 258 65Z"/>
+
+  <!-- Three-blade propeller (cheap CSS spin) -->
+  <g id="propeller" transform-origin="272px 57px">
+    <g fill="#181b20">
+      <path d="M272 57 267 29Q272 24 277 29Z"/>
+      <path d="M272 57 295 70Q297 76 290 76Z"/>
+      <path d="M272 57 249 70Q247 76 254 76Z"/>
+    </g>
+    <circle cx="272" cy="57" r="5.5" fill="#e11942"/>
+    <circle cx="272" cy="57" r="2.2" fill="#181b20"/>
   </g>
 
   <style>
