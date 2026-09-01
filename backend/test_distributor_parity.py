@@ -11,6 +11,7 @@ os.environ.setdefault('APP_ENV', 'test')
 os.environ.setdefault('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS', 'true')
 os.environ.setdefault('OTP_PEPPER', 'test-only-otp-pepper-with-at-least-32-characters')
 os.environ.setdefault('OTP_SMS_ADAPTER', 'mock')
+os.environ.setdefault('OTP_EMAIL_ADAPTER', 'mock')
 os.environ.setdefault('OTP_EXPOSE_DEV_CODE', 'true')
 
 from fastapi import HTTPException, Response
@@ -113,6 +114,28 @@ async def main():
       routes_admin._admin_step_up_identity(
           fallback_admin, channel='EMAIL',
       ).value == 'admin-fallback@example.com')
+
+    enrollment_admin = {
+        'id': 'admin-email-enrollment', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'email': 'admin-enrollment@example.com',
+        'email_normalized': 'admin-enrollment@example.com',
+        'email_verified': False, 'active_session_id': 'enrollment-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(enrollment_admin))
+    enrollment = await routes_admin.start_admin_step_up(
+        AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), enrollment_admin,
+    )
+    await routes_admin.verify_admin_step_up(
+        AdminStepUpVerify(
+            challenge_id=enrollment['challenge_id'], code=enrollment['dev_code'],
+        ), enrollment_admin,
+    )
+    enrolled = await database.users.find_one({'id': enrollment_admin['id']})
+    T('password-confirmed admin can enroll its stored email through the OTP',
+      enrollment['channel'] == 'EMAIL'
+      and enrolled.get('email_verified') is True
+      and enrolled.get('mfa_enabled') is True)
     wrong_session_admin = {**admin, 'active_session_id': 'replacement-session'}
     T('administrator step-up cannot be inherited by a replacement session',
       await raises(asyncio.to_thread(
