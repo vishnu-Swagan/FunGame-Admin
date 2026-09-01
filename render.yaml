@@ -1,14 +1,13 @@
 # Render Blueprint for the existing production services.
 #
-# Keep Blueprint Auto Sync disabled. Review a Blueprint diff before a manual
-# sync, then deploy an already-tested commit explicitly. The service names below
-# intentionally remain the historical Render names: changing them would create
-# replacement services instead of updating the production services in place.
+# Auto-deploy is on for the linked main branch (On Commit). Keep Blueprint Auto
+# Sync reviewed: a sync with autoDeployTrigger off would disable the dashboard
+# setting. Service names stay historical so a sync updates production in place.
 services:
   - type: web
     name: fungame-api
     runtime: docker
-    autoDeployTrigger: "off"
+    autoDeployTrigger: commit
     branch: main
     # Preserve the live production capacity. A Blueprint sync treats this as an
     # instruction, so declaring free here would attempt an unsafe downgrade.
@@ -148,7 +147,7 @@ services:
   - type: web
     name: Chakri.Casino-web
     runtime: static
-    autoDeployTrigger: "off"
+    autoDeployTrigger: commit
     branch: main
     rootDir: frontend
     buildCommand: yarn install --frozen-lockfile --network-timeout 600000 && yarn build
