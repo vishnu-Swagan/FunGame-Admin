@@ -167,18 +167,30 @@ export default function AdminPaymentGateways() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const hub = await adminPayments.hubStatus();
-      setStatus(hub);
-      const [gatewayRows, settingsRow, agentRows] = await Promise.all([
+      const hub = await adminPayments.hubStatus().catch(() => ({}));
+      setStatus(hub || {});
+      const [gatewayResult, settingsResult, agentResult] = await Promise.allSettled([
         adminPayments.gateways(),
         adminPayments.paymentGatewaySettings(),
         adminPayments.localAgents(),
       ]);
-      setGateways(gatewayRows.map(coerceGateway));
-      setSettings(coerceSettings(settingsRow || {}));
-      setAgents(agentRows);
+      if (gatewayResult.status === "fulfilled") {
+        setGateways((gatewayResult.value || []).map(coerceGateway));
+      } else {
+        toast.error(errMsg(gatewayResult.reason, "Payment methods could not be loaded."));
+      }
+      setSettings(coerceSettings(settingsResult.status === "fulfilled" ? settingsResult.value || {} : {}));
+      if (settingsResult.status === "rejected") {
+        toast.error(errMsg(settingsResult.reason, "Payment settings could not be loaded."));
+      }
+      if (agentResult.status === "fulfilled") {
+        setAgents(agentResult.value || []);
+      } else {
+        toast.error(errMsg(agentResult.reason, "Local deposit methods could not be loaded."));
+      }
     } catch (error) {
       toast.error(errMsg(error));
+      setSettings((current) => current || coerceSettings({}));
     } finally {
       setLoading(false);
     }
@@ -186,7 +198,7 @@ export default function AdminPaymentGateways() {
 
   useEffect(() => { load(); }, [load]);
 
-  const adminEnabled = Boolean(status);
+  const adminEnabled = true;
   const liveCount = gateways.filter((item) => !item.sandboxMode).length;
   const shown = useMemo(() => gateways.filter((item) => item.category === category), [gateways, category]);
 
@@ -243,16 +255,16 @@ export default function AdminPaymentGateways() {
           <div className="crm-panel" data-testid="gateways-empty">
             <div className="crm-panel-body empty-state-compact">
               <h3>No methods in this category</h3>
-              <p>Add a provider configuration or choose another category.</p>
-              {canCreate && adminEnabled && (
-                <button type="button" className="crm-text-link" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
+              <p>This admin database has no stored providers yet. CRM methods are not copied automatically — add the same provider here, then save credentials.</p>
+              {canCreate && (
+                <button type="button" className="crm-text-link" data-testid="add-provider-empty" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
               )}
             </div>
           </div>
         )}
       </div>
 
-      {canCreate && adminEnabled && shown.length > 0 && (
+      {canCreate && shown.length > 0 && (
         <button type="button" className="gateway-link" onClick={() => setCreating(true)}><Plus size={14} /> Add a provider configuration</button>
       )}
 

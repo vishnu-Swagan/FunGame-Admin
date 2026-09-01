@@ -81,6 +81,9 @@ test("renders CRM category tabs and empty states while admin API is enabled", as
   expect(container.textContent).toContain("Allow player-to-player transfers");
   expect(container.querySelector('[data-testid="platform-settings-form"]')).not.toBeNull();
   expect(container.querySelector('option[value="CASH"]')?.textContent).toContain("Cash / Address");
+  expect(container.querySelector('[data-testid="add-provider-empty"]')?.textContent)
+    .toContain("Add a provider configuration");
+  expect(container.textContent).toContain("CRM methods are not copied automatically");
   await act(async () => root.unmount());
 });
 
