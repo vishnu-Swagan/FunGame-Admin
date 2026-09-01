@@ -5,22 +5,1213 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Chakri Live Andar Bahar Design System</title>
   <style>
-    :root{--navy:#11162F;--navy-raised:#1B2242;--navy-deep:#080C1D;--table-gold:#C7A55D;--metal-gold:#E4C06B;--metal-gold-deep:#79551D;--andar:#E3153B;--bahar:#2857A5;--ivory:#F8F1DF;--muted:#A8B0CC;--success:#42C477;--warning:#F2C65D;--error:#F0545F;--r-xs:2px;--r-sm:6px;--r-md:10px;--r-pill:999px;--s1:2px;--s2:4px;--s3:8px;--s4:12px;--s5:16px;--s6:24px}
-    *{box-sizing:border-box}body{margin:0;background:#f4f1ea;color:#202435;font-family:Inter,"Avenir Next","Segoe UI",sans-serif}header{padding:38px max(24px,calc((100vw - 1120px)/2));background:var(--navy);color:var(--ivory)}header h1{margin:0 0 8px;font-size:28px;letter-spacing:-.02em}header p{margin:0;color:var(--muted)}main{max-width:1120px;margin:auto;padding:32px 24px 64px}section{margin:0 0 38px}h2{font-size:18px;margin:0 0 16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.card{background:#fff;border:1px solid #ddd6c8;border-radius:10px;padding:16px}.swatch{height:84px;border-radius:6px;margin-bottom:10px;border:1px solid rgba(0,0,0,.12)}code,small{color:#62697e}.spec{padding:14px 0;border-bottom:1px solid #ddd6c8}.display{font-size:28px;font-weight:800;line-height:1.05;letter-spacing:-.02em}.heading{font-size:18px;font-weight:800}.body{font-size:14px;font-weight:600}.label{font-size:12px;font-weight:800;letter-spacing:.03em}.caption{font-size:10px;font-weight:700}.numeric{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}.bar{height:18px;background:var(--metal-gold);border-radius:2px}.radius{height:72px;background:var(--navy-raised);border:2px solid var(--metal-gold)}.depth{background:var(--navy);color:var(--ivory);border:1px solid var(--metal-gold-deep);box-shadow:inset 0 1px rgba(255,255,255,.1),0 10px 24px rgba(8,12,29,.28)}.components{background:var(--navy-deep);border-radius:10px;padding:18px;color:var(--ivory)}.phase{height:34px;display:grid;place-items:center;background:var(--navy-raised);border-radius:2px;font-size:12px;font-weight:800;letter-spacing:.03em}.split{display:grid;grid-template-columns:1fr 82px 1fr;margin-top:12px}.side{height:102px;padding:12px;display:flex;align-items:center;font-size:18px;font-weight:800;border:1px solid var(--metal-gold)}.side.a{background:var(--andar);border-radius:6px 0 0 6px}.side.b{justify-content:flex-end;background:var(--bahar);border-radius:0 6px 6px 0}.joker{display:grid;place-items:center;border-radius:999px;background:radial-gradient(circle,#202746,var(--navy-deep) 70%);border:3px solid var(--metal-gold);z-index:2}.counts{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:12px}.count{height:45px;display:grid;place-items:center;background:var(--navy-deep);color:var(--metal-gold);border:1px solid var(--metal-gold-deep);border-radius:6px;font-size:12px;font-weight:800}.chips{display:flex;gap:10px;align-items:center;margin-top:16px}.chip{width:52px;height:52px;border-radius:999px;border:3px dashed var(--ivory);background:var(--navy-raised);color:var(--ivory);font-weight:800}.chip.on{width:58px;height:58px;background:var(--table-gold);color:var(--navy-deep);box-shadow:0 0 0 3px var(--metal-gold)}.dos{display:grid;grid-template-columns:1fr 1fr;gap:16px}.do{border-left:4px solid var(--success)}.dont{border-left:4px solid var(--error)}ul{padding-left:20px;line-height:1.6}@media(max-width:640px){.counts{grid-template-columns:repeat(2,1fr)}.dos{grid-template-columns:1fr}.split{grid-template-columns:1fr 64px 1fr}}
+    :root {
+      /* colors */
+      --color-navy: #11162F;
+      --color-navy-raised: #1B2242;
+      --color-navy-deep: #080C1D;
+      --color-table-gold: #C7A55D;
+      --color-metal-gold: #E4C06B;
+      --color-metal-gold-deep: #79551D;
+      --color-andar: #E3153B;
+      --color-bahar: #2857A5;
+      --color-ivory: #F8F1DF;
+      --color-muted: #A8B0CC;
+      --color-success: #42C477;
+      --color-warning: #F2C65D;
+      --color-error: #F0545F;
+
+      /* typography */
+      --type-display-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-display-size: 28px;
+      --type-display-weight: 800;
+      --type-display-line-height: 1.05;
+      --type-display-letter-spacing: -0.02em;
+      --type-heading-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-heading-size: 18px;
+      --type-heading-weight: 800;
+      --type-heading-line-height: 1.15;
+      --type-body-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-body-size: 14px;
+      --type-body-weight: 600;
+      --type-body-line-height: 1.3;
+      --type-label-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-label-size: 12px;
+      --type-label-weight: 800;
+      --type-label-line-height: 1;
+      --type-label-letter-spacing: 0.03em;
+      --type-caption-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-caption-size: 10px;
+      --type-caption-weight: 700;
+      --type-caption-line-height: 1.1;
+      --type-numeric-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
+      --type-numeric-size: 16px;
+      --type-numeric-weight: 800;
+      --type-numeric-line-height: 1;
+      --type-numeric-feature: tabular-nums;
+
+      /* rounded */
+      --rounded-xs: 2px;
+      --rounded-sm: 6px;
+      --rounded-md: 10px;
+      --rounded-lg: 24px;
+      --rounded-stage: 34px;
+      --rounded-pill: 999px;
+
+      /* spacing */
+      --space-1: 2px;
+      --space-2: 4px;
+      --space-3: 8px;
+      --space-4: 12px;
+      --space-5: 16px;
+      --space-6: 24px;
+
+      /* royal-reveal-stage */
+      --component-stage-background: var(--color-navy-deep);
+      --component-stage-rounded: var(--rounded-stage);
+      --component-stage-padding: var(--space-5);
+      --component-stage-width: 1072px;
+      --component-stage-height: 410px;
+
+      /* andar-lane */
+      --component-andar-lane-background: var(--color-andar);
+      --component-andar-lane-text: var(--color-ivory);
+      --component-andar-lane-typography: var(--type-label-size);
+      --component-andar-lane-rounded: var(--rounded-lg);
+      --component-andar-lane-width: 790px;
+      --component-andar-lane-height: 132px;
+
+      /* bahar-lane */
+      --component-bahar-lane-background: var(--color-bahar);
+      --component-bahar-lane-text: var(--color-ivory);
+      --component-bahar-lane-typography: var(--type-label-size);
+      --component-bahar-lane-rounded: var(--rounded-lg);
+      --component-bahar-lane-width: 790px;
+      --component-bahar-lane-height: 132px;
+
+      /* dealt-card and dealt-card-winning */
+      --component-dealt-card-background: var(--color-ivory);
+      --component-dealt-card-text: var(--color-navy-deep);
+      --component-dealt-card-typography: var(--type-heading-size);
+      --component-dealt-card-rounded: var(--rounded-sm);
+      --component-dealt-card-width: 68px;
+      --component-dealt-card-height: 96px;
+      --component-winning-card-background: var(--color-ivory);
+      --component-winning-card-text: var(--color-navy-deep);
+      --component-winning-card-typography: var(--type-heading-size);
+      --component-winning-card-rounded: var(--rounded-sm);
+      --component-winning-card-width: 68px;
+      --component-winning-card-height: 96px;
+
+      /* joker-card and joker-pedestal */
+      --component-joker-card-background: var(--color-ivory);
+      --component-joker-card-text: var(--color-navy-deep);
+      --component-joker-card-typography: var(--type-heading-size);
+      --component-joker-card-rounded: var(--rounded-sm);
+      --component-joker-card-width: 78px;
+      --component-joker-card-height: 110px;
+      --component-joker-pedestal-background: var(--color-navy-deep);
+      --component-joker-pedestal-text: var(--color-metal-gold);
+      --component-joker-pedestal-typography: var(--type-caption-size);
+      --component-joker-pedestal-rounded: var(--rounded-lg);
+      --component-joker-pedestal-width: 140px;
+      --component-joker-pedestal-height: 252px;
+
+      /* phase-ribbon and result-banner variants */
+      --component-phase-background: var(--color-navy-raised);
+      --component-phase-text: var(--color-ivory);
+      --component-phase-typography: var(--type-label-size);
+      --component-phase-rounded: var(--rounded-sm);
+      --component-phase-padding: var(--space-3);
+      --component-phase-height: 34px;
+      --component-result-andar-background: var(--color-andar);
+      --component-result-andar-text: var(--color-ivory);
+      --component-result-andar-typography: var(--type-heading-size);
+      --component-result-andar-rounded: var(--rounded-md);
+      --component-result-andar-padding: var(--space-3);
+      --component-result-andar-height: 58px;
+      --component-result-bahar-background: var(--color-bahar);
+      --component-result-bahar-text: var(--color-ivory);
+      --component-result-bahar-typography: var(--type-heading-size);
+      --component-result-bahar-rounded: var(--rounded-md);
+      --component-result-bahar-padding: var(--space-3);
+      --component-result-bahar-height: 58px;
+
+      /* side-bet variants */
+      --component-side-andar-background: var(--color-andar);
+      --component-side-andar-text: var(--color-ivory);
+      --component-side-andar-typography: var(--type-heading-size);
+      --component-side-andar-rounded: var(--rounded-sm);
+      --component-side-andar-padding: var(--space-4);
+      --component-side-andar-height: 140px;
+      --component-side-bahar-background: var(--color-bahar);
+      --component-side-bahar-text: var(--color-ivory);
+      --component-side-bahar-typography: var(--type-heading-size);
+      --component-side-bahar-rounded: var(--rounded-sm);
+      --component-side-bahar-padding: var(--space-4);
+      --component-side-bahar-height: 140px;
+      --component-side-selected-background: var(--color-metal-gold);
+      --component-side-selected-text: var(--color-navy-deep);
+      --component-side-selected-typography: var(--type-numeric-size);
+      --component-side-selected-rounded: var(--rounded-pill);
+      --component-side-selected-padding: var(--space-2);
+      --component-side-selected-size: 42px;
+
+      /* count-bet variants */
+      --component-count-background: var(--color-navy-deep);
+      --component-count-text: var(--color-metal-gold);
+      --component-count-typography: var(--type-label-size);
+      --component-count-rounded: var(--rounded-sm);
+      --component-count-padding: var(--space-3);
+      --component-count-height: 65px;
+      --component-count-winning-background: var(--color-table-gold);
+      --component-count-winning-text: var(--color-ivory);
+      --component-count-winning-typography: var(--type-label-size);
+      --component-count-winning-rounded: var(--rounded-sm);
+      --component-count-winning-padding: var(--space-3);
+      --component-count-winning-height: 65px;
+
+      /* chip variants */
+      --component-chip-background: var(--color-navy-raised);
+      --component-chip-text: var(--color-ivory);
+      --component-chip-typography: var(--type-numeric-size);
+      --component-chip-rounded: var(--rounded-pill);
+      --component-chip-size: 52px;
+      --component-chip-selected-background: var(--color-table-gold);
+      --component-chip-selected-text: var(--color-navy-deep);
+      --component-chip-selected-typography: var(--type-numeric-size);
+      --component-chip-selected-rounded: var(--rounded-pill);
+      --component-chip-selected-size: 58px;
+
+      /* roadmap variants */
+      --component-roadmap-andar-background: var(--color-andar);
+      --component-roadmap-andar-text: var(--color-ivory);
+      --component-roadmap-andar-typography: var(--type-caption-size);
+      --component-roadmap-andar-rounded: var(--rounded-pill);
+      --component-roadmap-andar-size: 19px;
+      --component-roadmap-bahar-background: var(--color-bahar);
+      --component-roadmap-bahar-text: var(--color-ivory);
+      --component-roadmap-bahar-typography: var(--type-caption-size);
+      --component-roadmap-bahar-rounded: var(--rounded-pill);
+      --component-roadmap-bahar-size: 19px;
+
+      /* account-bar */
+      --component-account-background: var(--color-navy);
+      --component-account-text: var(--color-muted);
+      --component-account-typography: var(--type-body-size);
+      --component-account-rounded: var(--rounded-xs);
+      --component-account-padding: var(--space-4);
+      --component-account-height: 34px;
+
+      /* documented behavior */
+      --motion-flight-duration: 280ms;
+      --motion-settle-duration: 180ms;
+      --motion-reduced-fade-duration: 160ms;
+      --motion-lane-ease: cubic-bezier(.76, 0, .24, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; }
+    body {
+      margin: 0;
+      background: #f4f1ea;
+      color: #202435;
+      font-family: var(--type-body-family);
+      font-size: var(--type-body-size);
+      line-height: 1.55;
+    }
+    header {
+      padding: 38px max(24px, calc((100vw - 1180px) / 2));
+      background: var(--color-navy);
+      color: var(--color-ivory);
+    }
+    header h1 {
+      margin: 0 0 var(--space-3);
+      font-family: var(--type-display-family);
+      font-size: var(--type-display-size);
+      font-weight: var(--type-display-weight);
+      line-height: var(--type-display-line-height);
+      letter-spacing: var(--type-display-letter-spacing);
+    }
+    header p { max-width: 760px; margin: 0; color: var(--color-muted); }
+    header code { color: var(--color-metal-gold); }
+    main { max-width: 1180px; margin: auto; padding: 34px 24px 72px; }
+    section { margin: 0 0 44px; scroll-margin-top: 24px; }
+    h2 {
+      margin: 0 0 var(--space-5);
+      font-family: var(--type-heading-family);
+      font-size: var(--type-heading-size);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+    h3 {
+      margin: 0 0 var(--space-4);
+      font-size: var(--type-label-size);
+      font-weight: var(--type-label-weight);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    p { margin: 0 0 var(--space-4); }
+    code {
+      color: #62697e;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: 11px;
+    }
+    .panel {
+      padding: var(--space-5);
+      border: 1px solid #ddd6c8;
+      border-radius: var(--rounded-md);
+      background: #fff;
+    }
+    .prose { max-width: 960px; }
+    .token-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+      gap: var(--space-4);
+      margin-top: var(--space-5);
+    }
+    .token-card {
+      min-width: 0;
+      padding: var(--space-4);
+      border: 1px solid #ddd6c8;
+      border-radius: var(--rounded-md);
+      background: #fff;
+    }
+    .token-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-3);
+      margin-top: var(--space-3);
+    }
+    .token-meta strong { overflow-wrap: anywhere; }
+    .swatch {
+      height: 92px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(0, 0, 0, .14);
+      border-radius: var(--rounded-sm);
+      background: var(--swatch);
+      color: var(--on);
+      font-size: var(--type-heading-size);
+      font-weight: var(--type-heading-weight);
+    }
+    .semantic-group { grid-column: 1 / -1; margin-top: var(--space-3); }
+
+    .type-list { margin-top: var(--space-5); }
+    .type-specimen {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, .45fr);
+      gap: var(--space-5);
+      align-items: center;
+      padding: var(--space-5) 0;
+      border-top: 1px solid #ddd6c8;
+    }
+    .type-specimen:first-child { border-top: 0; }
+    .type-display {
+      font-family: var(--type-display-family);
+      font-size: var(--type-display-size);
+      font-weight: var(--type-display-weight);
+      line-height: var(--type-display-line-height);
+      letter-spacing: var(--type-display-letter-spacing);
+    }
+    .type-heading {
+      font-family: var(--type-heading-family);
+      font-size: var(--type-heading-size);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+    .type-body {
+      font-family: var(--type-body-family);
+      font-size: var(--type-body-size);
+      font-weight: var(--type-body-weight);
+      line-height: var(--type-body-line-height);
+    }
+    .type-label {
+      font-family: var(--type-label-family);
+      font-size: var(--type-label-size);
+      font-weight: var(--type-label-weight);
+      line-height: var(--type-label-line-height);
+      letter-spacing: var(--type-label-letter-spacing);
+      text-transform: uppercase;
+    }
+    .type-caption {
+      font-family: var(--type-caption-family);
+      font-size: var(--type-caption-size);
+      font-weight: var(--type-caption-weight);
+      line-height: var(--type-caption-line-height);
+    }
+    .type-numeric {
+      font-family: var(--type-numeric-family);
+      font-size: var(--type-numeric-size);
+      font-weight: var(--type-numeric-weight);
+      line-height: var(--type-numeric-line-height);
+      font-variant-numeric: var(--type-numeric-feature);
+    }
+
+    .spacing-card { min-height: 96px; }
+    .spacing-track {
+      height: 24px;
+      display: flex;
+      align-items: center;
+      margin-bottom: var(--space-3);
+      border-bottom: 1px solid #e7e0d2;
+    }
+    .spacing-bar {
+      width: calc(var(--sample-space) * 4);
+      height: 16px;
+      min-width: 2px;
+      border-radius: var(--rounded-xs);
+      background: var(--color-metal-gold);
+    }
+
+    .depth-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-5);
+      margin-top: var(--space-5);
+    }
+    .depth-card {
+      min-height: 126px;
+      padding: var(--space-5);
+      border-radius: var(--rounded-md);
+      background: var(--color-navy);
+      color: var(--color-ivory);
+    }
+    .depth-inset {
+      border: 1px solid var(--color-metal-gold-deep);
+      box-shadow: inset 0 1px rgba(255,255,255,.1), inset 0 -18px 30px rgba(8,12,29,.5);
+    }
+    .depth-card-lift {
+      border: 1px solid rgba(8,12,29,.25);
+      box-shadow: 0 7px 14px rgba(8,12,29,.28);
+    }
+    .depth-focus {
+      border: 2px solid var(--color-metal-gold);
+      box-shadow: 0 0 0 3px rgba(228,192,107,.22), 0 10px 24px rgba(8,12,29,.28);
+    }
+    .depth-card code { color: var(--color-muted); }
+    .radius-sample {
+      height: 82px;
+      margin-bottom: var(--space-3);
+      border: 2px solid var(--color-metal-gold);
+      border-radius: var(--sample-radius);
+      background: var(--color-navy-raised);
+    }
+
+    .component-board {
+      margin-top: var(--space-5);
+      padding: var(--space-5);
+      border-radius: var(--rounded-md);
+      background: var(--color-navy-deep);
+      color: var(--color-ivory);
+    }
+    .component-group + .component-group { margin-top: var(--space-6); }
+    .component-group > h3 { color: var(--color-metal-gold); }
+    .component-key {
+      display: inline-block;
+      margin-bottom: var(--space-2);
+      color: var(--color-muted);
+    }
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: var(--space-3);
+    }
+    .phase-sample {
+      height: var(--component-phase-height);
+      display: grid;
+      place-items: center;
+      padding: 0 var(--component-phase-padding);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--component-phase-rounded);
+      background: var(--component-phase-background);
+      color: var(--component-phase-text);
+      font-family: var(--type-label-family);
+      font-size: var(--component-phase-typography);
+      font-weight: var(--type-label-weight);
+      line-height: var(--type-label-line-height);
+      letter-spacing: var(--type-label-letter-spacing);
+      text-align: center;
+    }
+    .phase-sample.is-andar {
+      height: var(--component-result-andar-height);
+      padding: 0 var(--component-result-andar-padding);
+      border-radius: var(--component-result-andar-rounded);
+      background: var(--component-result-andar-background);
+      color: var(--component-result-andar-text);
+      font-family: var(--type-heading-family);
+      font-size: var(--component-result-andar-typography);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+    .phase-sample.is-bahar {
+      height: var(--component-result-bahar-height);
+      padding: 0 var(--component-result-bahar-padding);
+      border-radius: var(--component-result-bahar-rounded);
+      background: var(--component-result-bahar-background);
+      color: var(--component-result-bahar-text);
+      font-family: var(--type-heading-family);
+      font-size: var(--component-result-bahar-typography);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+
+    .stage-scroll { overflow-x: auto; padding: 20px 0 var(--space-4); }
+    .reveal-stage {
+      position: relative;
+      width: var(--component-stage-width);
+      height: var(--component-stage-height);
+      padding: var(--component-stage-padding);
+      border: 2px solid var(--color-metal-gold);
+      border-radius: var(--component-stage-rounded);
+      background:
+        radial-gradient(circle at 50% 49%, rgba(20,119,85,.36), rgba(2,56,42,.28) 55%, rgba(1,22,19,.72)),
+        var(--component-stage-background);
+      box-shadow: 0 10px 18px rgba(0,0,0,.48), inset 0 0 0 10px rgba(255,241,181,.035);
+      overflow: visible;
+    }
+    .stage-title {
+      position: absolute;
+      left: 401px;
+      top: -13px;
+      width: 270px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(239,207,115,.76);
+      border-radius: var(--rounded-pill);
+      background: linear-gradient(90deg, #40280f, var(--color-navy-deep), #40280f);
+      color: #f1d57f;
+      font: 900 var(--type-label-size)/1 var(--type-label-family);
+      letter-spacing: .05em;
+      z-index: 8;
+    }
+    .stage-token {
+      position: absolute;
+      left: var(--space-5);
+      bottom: var(--space-3);
+      z-index: 9;
+      color: rgba(248,241,223,.55);
+    }
+    .watermark {
+      position: absolute;
+      top: 156px;
+      color: rgba(255,255,255,.026);
+      font-size: 78px;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .watermark.is-red { color: rgba(227,21,59,.035); font-size: 72px; }
+    .watermark.w1 { left: 286px; }
+    .watermark.w2 { left: 420px; }
+    .watermark.w3 { left: 548px; }
+    .watermark.w4 { left: 681px; }
+
+    .deal-lane {
+      position: absolute;
+      left: 60px;
+      width: var(--component-andar-lane-width);
+      height: var(--component-andar-lane-height);
+      border: 1px solid rgba(228,192,107,.28);
+      border-radius: var(--component-andar-lane-rounded);
+      background:
+        linear-gradient(90deg, color-mix(in srgb, var(--lane-accent) 38%, transparent), rgba(3,43,33,.36) 48%, rgba(3,25,22,.18)),
+        rgba(8,12,29,.12);
+      z-index: 2;
+    }
+    .deal-lane.is-andar {
+      top: 42px;
+      --lane-accent: var(--component-andar-lane-background);
+      color: var(--component-andar-lane-text);
+      font-size: var(--component-andar-lane-typography);
+    }
+    .deal-lane.is-bahar {
+      top: 220px;
+      --lane-accent: var(--component-bahar-lane-background);
+      color: var(--component-bahar-lane-text);
+      font-size: var(--component-bahar-lane-typography);
+      border-radius: var(--component-bahar-lane-rounded);
+      width: var(--component-bahar-lane-width);
+      height: var(--component-bahar-lane-height);
+    }
+    .lane-plaque {
+      position: absolute;
+      left: 20px;
+      top: 34px;
+      width: 166px;
+      height: 64px;
+      display: grid;
+      place-content: center;
+      gap: var(--space-2);
+      border: 1px solid rgba(255,232,153,.7);
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--lane-accent), color-mix(in srgb, var(--lane-accent) 48%, #050815));
+      color: var(--color-ivory);
+      font-family: var(--type-label-family);
+      font-size: 20px;
+      font-weight: 900;
+      line-height: 1;
+      text-align: center;
+    }
+    .lane-plaque small {
+      color: rgba(255,246,216,.72);
+      font-size: var(--type-caption-size);
+      letter-spacing: .06em;
+    }
+    .lane-card-stack {
+      position: absolute;
+      left: 476px;
+      top: 28px;
+      display: flex;
+      transform: translateX(-50%);
+      transition: left var(--motion-flight-duration) var(--motion-lane-ease);
+      z-index: 4;
+    }
+    .playing-card {
+      position: relative;
+      width: var(--component-dealt-card-width);
+      height: var(--component-dealt-card-height);
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(20,22,30,.32);
+      border-radius: var(--component-dealt-card-rounded);
+      background: linear-gradient(
+        color-mix(in srgb, var(--component-dealt-card-background) 35%, #fff),
+        color-mix(in srgb, var(--component-dealt-card-background) 45%, #e8e7e3)
+      );
+      color: var(--component-dealt-card-text);
+      box-shadow: 0 7px 14px rgba(8,12,29,.28);
+      font-family: var(--type-heading-family);
+      font-size: var(--component-dealt-card-typography);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+    .playing-card + .playing-card { margin-left: -10px; }
+    .playing-card.is-red { color: #ca1734; }
+    .playing-card.is-dealt {
+      animation: deal-flight var(--motion-flight-duration) var(--deal-delay, 0ms) linear both;
+    }
+    .playing-card.is-winning {
+      width: var(--component-winning-card-width);
+      height: var(--component-winning-card-height);
+      border-radius: var(--component-winning-card-rounded);
+      background: linear-gradient(
+        color-mix(in srgb, var(--component-winning-card-background) 35%, #fff),
+        color-mix(in srgb, var(--component-winning-card-background) 45%, #e8e7e3)
+      );
+      color: var(--component-winning-card-text);
+      font-size: var(--component-winning-card-typography);
+      outline: 3px solid rgba(255,232,145,.92);
+      outline-offset: 7px;
+    }
+    .settle-halo {
+      position: absolute;
+      inset: -7px;
+      border: 3px solid var(--lane-accent);
+      border-radius: 14px;
+      opacity: 0;
+      animation: settle-halo var(--motion-settle-duration) 280ms ease-out both;
+      pointer-events: none;
+    }
+
+    .joker-pedestal {
+      position: absolute;
+      left: 870px;
+      top: 72px;
+      width: var(--component-joker-pedestal-width);
+      height: var(--component-joker-pedestal-height);
+      border: 1.5px solid rgba(228,192,107,.56);
+      border-radius: var(--component-joker-pedestal-rounded);
+      background:
+        linear-gradient(155deg, rgba(74,48,17,.82), rgba(8,15,28,.92) 35%, rgba(34,18,12,.9)),
+        var(--component-joker-pedestal-background);
+      color: var(--component-joker-pedestal-text);
+      font-family: var(--type-caption-family);
+      font-size: var(--component-joker-pedestal-typography);
+      font-weight: 900;
+      line-height: var(--type-caption-line-height);
+      text-align: center;
+      z-index: 6;
+    }
+    .pedestal-title { display: block; margin-top: 25px; letter-spacing: .08em; }
+    .pedestal-ring,
+    .pedestal-ring::after {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 128px;
+      height: 128px;
+      border: 2px solid rgba(255,234,164,.18);
+      border-radius: var(--rounded-pill);
+      transform: translate(-50%, -50%);
+      content: "";
+    }
+    .pedestal-ring::after { width: 112px; height: 112px; border-color: rgba(255,234,164,.1); }
+    .joker-card {
+      position: absolute;
+      left: 26px;
+      top: 78px;
+      width: var(--component-joker-card-width);
+      height: var(--component-joker-card-height);
+      border: 1px solid rgba(20,22,30,.32);
+      border-radius: var(--component-joker-card-rounded);
+      background: linear-gradient(
+        color-mix(in srgb, var(--component-joker-card-background) 35%, #fff),
+        color-mix(in srgb, var(--component-joker-card-background) 45%, #e8e7e3)
+      );
+      color: var(--component-joker-card-text);
+      box-shadow: 0 7px 14px rgba(8,12,29,.28);
+      font-family: var(--type-heading-family);
+      font-size: var(--component-joker-card-typography);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+      display: grid;
+      place-items: center;
+      z-index: 3;
+      animation: deal-flight var(--motion-flight-duration) 0ms linear both;
+      --flight-x: 108px;
+      --flight-y: 190px;
+      --flight-turn: 2deg;
+    }
+    .pedestal-foot {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 17px;
+      color: rgba(248,241,223,.58);
+      letter-spacing: .06em;
+    }
+    .card-shoe {
+      position: absolute;
+      left: 966px;
+      top: 336px;
+      width: 98px;
+      height: 62px;
+      border: 2px solid rgba(255,221,129,.75);
+      border-radius: 12px;
+      background: linear-gradient(135deg, #4b2c18, #190f0b 46%, #7e4a20);
+      box-shadow: 0 7px 12px rgba(0,0,0,.55);
+      z-index: 7;
+    }
+    .shoe-slot {
+      position: absolute;
+      left: 15px;
+      top: 11px;
+      width: 65px;
+      height: 34px;
+      border: 1px solid rgba(228,192,107,.52);
+      border-radius: 7px;
+      background: #07090d;
+    }
+    .shoe-card {
+      position: absolute;
+      left: 24px;
+      top: 6px;
+      width: 55px;
+      height: 31px;
+      border: 1px solid rgba(255,230,158,.62);
+      border-radius: 4px;
+      background: #8b1730;
+    }
+    .shoe-card.c2 { left: 27px; top: 4px; }
+    .shoe-card.c3 { left: 30px; top: 2px; }
+    .shoe-card.c4 { left: 33px; top: 0; background: #f6f1e4; }
+    .shoe-label {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 3px;
+      color: #d7bb74;
+      font-size: 9px;
+      font-weight: 900;
+      line-height: 1;
+      text-align: center;
+    }
+    @keyframes deal-flight {
+      0% {
+        opacity: 0;
+        transform: translate(var(--flight-x, 520px), var(--flight-y, 190px)) rotate(var(--flight-turn, 2deg));
+      }
+      25% {
+        opacity: .6836;
+        transform: translate(calc(var(--flight-x, 520px) * .3164), calc(var(--flight-y, 190px) * .3164 - 24px)) rotate(.8deg);
+      }
+      50% {
+        opacity: .9375;
+        transform: translate(calc(var(--flight-x, 520px) * .0625), calc(var(--flight-y, 190px) * .0625 - 34px)) rotate(.25deg);
+      }
+      75% {
+        opacity: .9961;
+        transform: translate(calc(var(--flight-x, 520px) * .0039), calc(var(--flight-y, 190px) * .0039 - 24px)) rotate(.05deg);
+      }
+      100% { opacity: 1; transform: none; }
+    }
+    @keyframes settle-halo {
+      0% { inset: -6px; border-width: 3px; opacity: .58; }
+      100% { inset: -13px; border-width: 2px; opacity: 0; }
+    }
+    @keyframes reduced-release {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+
+    .betting-surface {
+      min-width: 920px;
+      overflow: hidden;
+      border-radius: var(--rounded-md);
+      background: var(--color-navy);
+    }
+    .side-split { position: relative; display: grid; grid-template-columns: 1fr 1fr; }
+    .side-bet {
+      position: relative;
+      height: var(--component-side-andar-height);
+      display: flex;
+      align-items: flex-start;
+      padding: var(--component-side-andar-padding);
+      border: 1px solid var(--color-metal-gold);
+      background: var(--component-side-andar-background);
+      color: var(--component-side-andar-text);
+      font-family: var(--type-heading-family);
+      font-size: var(--component-side-andar-typography);
+      font-weight: var(--type-heading-weight);
+      line-height: var(--type-heading-line-height);
+    }
+    .side-bet.is-andar { border-radius: var(--component-side-andar-rounded) 0 0 var(--component-side-andar-rounded); }
+    .side-bet.is-bahar {
+      height: var(--component-side-bahar-height);
+      justify-content: flex-end;
+      padding: var(--component-side-bahar-padding);
+      border-radius: 0 var(--component-side-bahar-rounded) var(--component-side-bahar-rounded) 0;
+      background: var(--component-side-bahar-background);
+      color: var(--component-side-bahar-text);
+      font-size: var(--component-side-bahar-typography);
+      text-align: right;
+    }
+    .side-bet small { display: block; margin-top: var(--space-2); color: var(--color-metal-gold); }
+    .side-selected {
+      position: absolute;
+      top: 53px;
+      width: var(--component-side-selected-size);
+      height: var(--component-side-selected-size);
+      display: grid;
+      place-items: center;
+      padding: var(--component-side-selected-padding);
+      border: 2px solid var(--color-ivory);
+      border-radius: var(--component-side-selected-rounded);
+      background: var(--component-side-selected-background);
+      color: var(--component-side-selected-text);
+      font-family: var(--type-numeric-family);
+      font-size: var(--component-side-selected-typography);
+      font-weight: var(--type-numeric-weight);
+      line-height: var(--type-numeric-line-height);
+      font-variant-numeric: var(--type-numeric-feature);
+      box-shadow: 0 0 12px rgba(228,192,107,.62);
+    }
+    .is-andar .side-selected { right: 64px; }
+    .is-bahar .side-selected { left: 64px; }
+    .side-joker-well {
+      position: absolute;
+      left: 50%;
+      top: 9px;
+      width: 122px;
+      height: 122px;
+      display: grid;
+      place-items: center;
+      border: 3px solid var(--color-metal-gold);
+      border-radius: var(--rounded-pill);
+      background: radial-gradient(circle at 38% 30%, #31343a, #07080d 62%, #000);
+      color: var(--color-metal-gold);
+      font-weight: 900;
+      transform: translateX(-50%);
+      z-index: 3;
+    }
+    .count-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-2);
+      padding: var(--space-4);
+      background: var(--color-navy);
+    }
+    .count-bet {
+      height: var(--component-count-height);
+      display: grid;
+      place-content: center;
+      gap: var(--space-2);
+      padding: var(--component-count-padding);
+      border: 2px solid var(--color-metal-gold-deep);
+      border-radius: var(--component-count-rounded);
+      background: linear-gradient(#3b3627, var(--component-count-background) 56%);
+      color: var(--component-count-text);
+      font-family: var(--type-label-family);
+      font-size: var(--component-count-typography);
+      font-weight: var(--type-label-weight);
+      line-height: var(--type-label-line-height);
+      text-align: center;
+    }
+    .count-bet strong { color: var(--color-ivory); font-size: var(--type-heading-size); }
+    .count-bet.is-winning {
+      height: var(--component-count-winning-height);
+      padding: var(--component-count-winning-padding);
+      border-color: #fff0a7;
+      border-radius: var(--component-count-winning-rounded);
+      background: linear-gradient(#dfc373, var(--component-count-winning-background) 52%, #3a2b0e);
+      color: var(--component-count-winning-text);
+      font-size: var(--component-count-winning-typography);
+      box-shadow: 0 0 16px rgba(228,192,107,.3);
+    }
+    .chip-rail {
+      min-height: 78px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: var(--space-4);
+      background: var(--color-navy-deep);
+    }
+    .chip {
+      width: var(--component-chip-size);
+      height: var(--component-chip-size);
+      display: grid;
+      place-items: center;
+      border: 3px dashed var(--color-ivory);
+      border-radius: var(--component-chip-rounded);
+      background: radial-gradient(circle at 36% 28%, #2f6d54, var(--component-chip-background) 72%);
+      color: var(--component-chip-text);
+      font-family: var(--type-numeric-family);
+      font-size: var(--component-chip-typography);
+      font-weight: var(--type-numeric-weight);
+      line-height: var(--type-numeric-line-height);
+      font-variant-numeric: var(--type-numeric-feature);
+    }
+    .chip.is-selected {
+      width: var(--component-chip-selected-size);
+      height: var(--component-chip-selected-size);
+      border-radius: var(--component-chip-selected-rounded);
+      background: var(--component-chip-selected-background);
+      color: var(--component-chip-selected-text);
+      font-size: var(--component-chip-selected-typography);
+      box-shadow: 0 0 0 3px var(--color-metal-gold);
+    }
+    .stats-and-account {
+      min-width: 920px;
+      padding-top: var(--space-4);
+      background: var(--color-navy-deep);
+    }
+    .roadmap {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+      padding: 0 var(--space-4) var(--space-4);
+    }
+    .roadmap-dot {
+      width: var(--component-roadmap-andar-size);
+      height: var(--component-roadmap-andar-size);
+      display: grid;
+      place-items: center;
+      border-radius: var(--component-roadmap-andar-rounded);
+      background: var(--component-roadmap-andar-background);
+      color: var(--component-roadmap-andar-text);
+      font-family: var(--type-caption-family);
+      font-size: var(--component-roadmap-andar-typography);
+      font-weight: var(--type-caption-weight);
+      line-height: var(--type-caption-line-height);
+    }
+    .roadmap-dot.is-bahar {
+      width: var(--component-roadmap-bahar-size);
+      height: var(--component-roadmap-bahar-size);
+      border-radius: var(--component-roadmap-bahar-rounded);
+      background: var(--component-roadmap-bahar-background);
+      color: var(--component-roadmap-bahar-text);
+      font-size: var(--component-roadmap-bahar-typography);
+    }
+    .account-bar {
+      height: var(--component-account-height);
+      display: grid;
+      grid-template-columns: 1.35fr 1fr 1fr 1fr 1.35fr;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 0 var(--component-account-padding);
+      border-radius: var(--component-account-rounded);
+      background: var(--component-account-background);
+      color: var(--component-account-text);
+      font-family: var(--type-body-family);
+      font-size: var(--component-account-typography);
+      font-weight: var(--type-body-weight);
+      line-height: var(--type-body-line-height);
+      white-space: nowrap;
+    }
+    .account-bar span:nth-child(4) { color: var(--color-metal-gold); font-weight: 900; }
+    .account-bar span:last-child { text-align: right; }
+    .component-inventory {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-top: var(--space-5);
+    }
+    .component-inventory code {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--rounded-pill);
+      background: rgba(255,255,255,.05);
+      color: var(--color-muted);
+    }
+    .dos {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-5);
+    }
+    .do-card, .dont-card { border-left: 4px solid var(--color-success); }
+    .dont-card { border-left-color: var(--color-error); }
+    .dos ul { margin: var(--space-4) 0 0; padding-left: 20px; }
+    .dos li + li { margin-top: var(--space-3); }
+
+    @media (max-width: 760px) {
+      .type-specimen { grid-template-columns: 1fr; }
+      .depth-grid, .dos { grid-template-columns: 1fr; }
+      .count-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .playing-card.is-dealt,
+      .joker-card {
+        animation-name: reduced-release;
+        animation-duration: var(--motion-reduced-fade-duration);
+        animation-timing-function: ease-out;
+        transform: none !important;
+      }
+      .lane-card-stack { transition: none; }
+      .settle-halo {
+        display: none;
+      }
+    }
   </style>
 </head>
 <body>
-  <header><h1>Chakri Live Andar Bahar</h1><p>Cinematic live-table tokens and components. Human-readable mirror of <code>docs/design.md</code>.</p></header>
+  <header>
+    <h1>Chakri Live Andar Bahar</h1>
+    <p>A cinematic table-native Andar Bahar design system centered on a royal card reveal while remaining precise on every screen. This file is the human-readable mirror of <code>docs/design.md</code>.</p>
+  </header>
+
   <main>
-    <section><h2>Colors</h2><div class="grid">
-      <div class="card"><div class="swatch" style="background:var(--navy)"></div><b>navy</b><br><code>#11162F</code></div><div class="card"><div class="swatch" style="background:var(--navy-raised)"></div><b>navy-raised</b><br><code>#1B2242</code></div><div class="card"><div class="swatch" style="background:var(--navy-deep)"></div><b>navy-deep</b><br><code>#080C1D</code></div><div class="card"><div class="swatch" style="background:var(--table-gold)"></div><b>table-gold</b><br><code>#C7A55D</code></div><div class="card"><div class="swatch" style="background:var(--metal-gold)"></div><b>metal-gold</b><br><code>#E4C06B</code></div><div class="card"><div class="swatch" style="background:var(--andar)"></div><b>andar</b><br><code>#E3153B</code></div><div class="card"><div class="swatch" style="background:var(--bahar)"></div><b>bahar</b><br><code>#2857A5</code></div><div class="card"><div class="swatch" style="background:linear-gradient(90deg,var(--success),var(--warning),var(--error))"></div><b>semantic states</b><br><code>success / warning / error</code></div>
-    </div></section>
-    <section><h2>Typography</h2><div class="card"><div class="spec display">Live Andar Bahar <small>display · 28/800</small></div><div class="spec heading">ANDAR WINS <small>heading · 18/800</small></div><div class="spec body">Bet how many cards will be dealt <small>body · 14/600</small></div><div class="spec label">NO MORE BETS <small>label · 12/800</small></div><div class="spec caption">ROUND #14809059629 <small>caption · 10/700</small></div><div class="spec numeric">₹10,033.00 <small>numeric · 16/800</small></div></div></section>
-    <section><h2>Spacing</h2><div class="grid"><div class="card"><div class="bar" style="width:8px"></div><code>spacing 1 · 2px</code></div><div class="card"><div class="bar" style="width:16px"></div><code>spacing 2 · 4px</code></div><div class="card"><div class="bar" style="width:32px"></div><code>spacing 3 · 8px</code></div><div class="card"><div class="bar" style="width:48px"></div><code>spacing 4 · 12px</code></div><div class="card"><div class="bar" style="width:64px"></div><code>spacing 5 · 16px</code></div><div class="card"><div class="bar" style="width:96px"></div><code>spacing 6 · 24px</code></div></div></section>
-    <section><h2>Radius</h2><div class="grid"><div class="card"><div class="radius" style="border-radius:var(--r-xs)"></div><code>xs · 2px</code></div><div class="card"><div class="radius" style="border-radius:var(--r-sm)"></div><code>sm · 6px</code></div><div class="card"><div class="radius" style="border-radius:var(--r-md)"></div><code>md · 10px</code></div><div class="card"><div class="radius" style="border-radius:var(--r-pill)"></div><code>pill · 999px</code></div></div></section>
-    <section><h2>Elevation &amp; Depth</h2><div class="card depth">Inset wells, a restrained gold rim, glass highlight, and one focused interaction shadow establish the table plane.</div></section>
-    <section><h2>Components</h2><div class="components"><div class="phase">BETTING OPEN · 08</div><div class="split"><div class="side a">ANDAR · 1:1</div><div class="joker">JOKER</div><div class="side b">BAHAR · 0.9:1</div></div><div class="counts"><div class="count">1–5 · 2.5:1</div><div class="count">6–10 · 3.5:1</div><div class="count">11–15 · 4.5:1</div><div class="count">16–25 · 3.5:1</div></div><div class="chips"><button class="chip on">20</button><button class="chip">50</button><button class="chip">100</button><button class="chip">200</button><button class="chip">500</button><button class="chip">1K</button></div></div></section>
-    <section><h2>Do's and Don'ts</h2><div class="dos"><div class="card do"><b>Do</b><ul><li>Use natural blinks, small head movement, and restrained two-hand betting gestures.</li><li>Keep recent counts and A/B percentages inside the statistics footer.</li><li>Synchronize the right-hand front-slot pull and Canvas card release.</li><li>Use the front-facing smile at result and the hair gesture only every 20 minutes.</li></ul></div><div class="card dont"><b>Don't</b><ul><li>Play a spoken result announcement.</li><li>Invent unsettled side bets.</li><li>Use flickering or moving hit regions.</li><li>Let the UI obscure the dealer or table.</li></ul></div></div></section>
+    <section id="overview">
+      <h2>Overview</h2>
+      <div class="panel prose">
+        <p>This system presents a cinematic, table-native Andar Bahar experience for adult Chakri.Casino play-chip users on desktop, tablet, and mobile. The north star is a tactile royal card reveal built into the existing table, with the felt and cards carrying the spectacle. It must never drift into a generic neon casino mockup or a cartoon card game. This is a presentation-only refinement: game rules, odds, wagering states, settlement behavior, APIs, and server behavior remain unchanged.</p>
+      </div>
+    </section>
+
+    <section id="colors">
+      <h2>Colors</h2>
+      <p class="prose">Midnight navy is the structural surface because it lets the warm felt and central reveal stage remain dominant. Crimson is reserved for Andar and royal blue for Bahar, giving each centered dealing lane an unmistakable edge, label, and landing cue without flooding the felt. Champagne and metallic gold connect the table, odds, selected chips, stage frame, and focus states; ivory is the essential text color. All actionable text maintains AA-level contrast at its rendered size.</p>
+      <div class="token-grid">
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-navy);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>navy</strong><code>#11162F</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-navy-raised);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>navy-raised</strong><code>#1B2242</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-navy-deep);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>navy-deep</strong><code>#080C1D</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-table-gold);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>table-gold</strong><code>#C7A55D</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-metal-gold);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>metal-gold</strong><code>#E4C06B</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-metal-gold-deep);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>metal-gold-deep</strong><code>#79551D</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-andar);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>andar</strong><code>#E3153B</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-bahar);--on:var(--color-ivory)">Aa</div><div class="token-meta"><strong>bahar</strong><code>#2857A5</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-ivory);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>ivory</strong><code>#F8F1DF</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-muted);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>muted</strong><code>#A8B0CC</code></div></article>
+        <h3 class="semantic-group">Semantic states</h3>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-success);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>success</strong><code>#42C477</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-warning);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>warning</strong><code>#F2C65D</code></div></article>
+        <article class="token-card"><div class="swatch" style="--swatch:var(--color-error);--on:var(--color-navy-deep)">Aa</div><div class="token-meta"><strong>error</strong><code>#F0545F</code></div></article>
+      </div>
+    </section>
+
+    <section id="typography">
+      <h2>Typography</h2>
+      <p class="prose">Inter or the closest installed humanist-geometric sans is used throughout to match the compact broadcast interface. Display and heading styles are used sparingly for the two main sides and winner reveal. Labels stay uppercase and dense, while balances, bets, countdowns, and payouts use tabular numerals so values do not jump as they update.</p>
+      <div class="panel type-list">
+        <div class="type-specimen"><div class="type-display">Live Andar Bahar</div><code>display · Inter / Avenir Next / Segoe UI · 28px · 800 · 1.05 · -0.02em</code></div>
+        <div class="type-specimen"><div class="type-heading">ANDAR WON · 14 CARDS</div><code>heading · Inter / Avenir Next / Segoe UI · 18px · 800 · 1.15</code></div>
+        <div class="type-specimen"><div class="type-body">Bet how many cards will be dealt.</div><code>body · Inter / Avenir Next / Segoe UI · 14px · 600 · 1.3</code></div>
+        <div class="type-specimen"><div class="type-label">No more bets</div><code>label · Inter / Avenir Next / Segoe UI · 12px · 800 · 1 · 0.03em</code></div>
+        <div class="type-specimen"><div class="type-caption">ROUND #14809059629</div><code>caption · Inter / Avenir Next / Segoe UI · 10px · 700 · 1.1</code></div>
+        <div class="type-specimen"><div class="type-numeric">₹10,033.00</div><code>numeric · Inter / Avenir Next / Segoe UI · 16px · 800 · 1 · tabular-nums</code></div>
+      </div>
+    </section>
+
+    <section id="layout">
+      <h2>Layout</h2>
+      <p class="prose">The composition uses the existing 1600 × 900 landscape frame. The table stage occupies roughly the upper three quarters and the betting deck occupies the lower quarter; within that deck the compact roadmap takes the left column, main side bet the wider center, and eight card-count bets take the right column. The 1072 × 410 <code>royal-reveal-stage</code> is centered within the existing felt rather than placed above or in front of it. Its 790 × 132 Andar and Bahar lane plaques are stacked vertically, both card groups recenter on the table's exact horizontal center at x=800, and the 140 × 252 <code>joker-pedestal</code> stands to their right. At 1× reference scale, <code>dealt-card</code> is 68 × 96 and <code>joker-card</code> is 78 × 110; responsive layouts scale the complete stage uniformly instead of resizing individual cards. The seven recent counts and A/B percentages form one contained statistics footer below the roadmap. The visible chip rail is exactly ₹20, ₹50, ₹100, ₹200, ₹500, and ₹1,000. Canvas coordinates remain the source of truth and are scaled with one uniform transform so visuals and hit targets always agree.</p>
+      <h3>Spacing tokens</h3>
+      <div class="token-grid">
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-1)"></div></div><div class="token-meta"><strong>spacing.1</strong><code>2px</code></div></article>
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-2)"></div></div><div class="token-meta"><strong>spacing.2</strong><code>4px</code></div></article>
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-3)"></div></div><div class="token-meta"><strong>spacing.3</strong><code>8px</code></div></article>
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-4)"></div></div><div class="token-meta"><strong>spacing.4</strong><code>12px</code></div></article>
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-5)"></div></div><div class="token-meta"><strong>spacing.5</strong><code>16px</code></div></article>
+        <article class="token-card spacing-card"><div class="spacing-track"><div class="spacing-bar" style="--sample-space:var(--space-6)"></div></div><div class="token-meta"><strong>spacing.6</strong><code>24px</code></div></article>
+      </div>
+    </section>
+
+    <section id="elevation">
+      <h2>Elevation &amp; Depth</h2>
+      <p class="prose">Depth comes from a dark inset reveal well, a restrained hairline gold frame, subtle glass highlights, and controlled card shadows rather than heavy floating panels. Four low-opacity suit watermarks sit across the center field, while a compact dimensional card shoe uses layered card faces, a walnut-to-copper gradient, gold edges, and a controlled drop shadow to identify the deal origin. The joker itself keeps the same ivory face and ordinary dark keyline as every dealt card; its larger size and the concentric gold rings of <code>joker-pedestal</code> establish hierarchy. Selected chips and winning bets receive a focused gold or green halo. These details are quiet table furniture, never ornate decoration, and the existing felt remains visible around and between the lanes.</p>
+      <div class="depth-grid">
+        <article class="depth-card depth-inset"><h3>Inset stage</h3><code>hairline frame + internal contrast</code></article>
+        <article class="depth-card depth-card-lift"><h3>Card lift</h3><code>controlled 7px / 14px shadow</code></article>
+        <article class="depth-card depth-focus"><h3>Focus / win</h3><code>single restrained gold halo</code></article>
+      </div>
+    </section>
+
+    <section id="shapes">
+      <h2>Shapes</h2>
+      <p class="prose">Betting tiles use small radii because casino layouts need exact edges and dense alignment. Chips and roadmap markers are circular; the joker and all dealt cards retain familiar portrait card proportions with small rounded corners. Medium rounding is reserved for grouped controls, the reveal-stage frame, and phase ribbons; fully rounded shapes should never be used for cards or the main Andar/Bahar split.</p>
+      <h3>Radius tokens</h3>
+      <div class="token-grid">
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-xs)"></div><div class="token-meta"><strong>rounded.xs</strong><code>2px</code></div></article>
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-sm)"></div><div class="token-meta"><strong>rounded.sm</strong><code>6px</code></div></article>
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-md)"></div><div class="token-meta"><strong>rounded.md</strong><code>10px</code></div></article>
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-lg)"></div><div class="token-meta"><strong>rounded.lg</strong><code>24px</code></div></article>
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-stage)"></div><div class="token-meta"><strong>rounded.stage</strong><code>34px</code></div></article>
+        <article class="token-card"><div class="radius-sample" style="--sample-radius:var(--rounded-pill)"></div><div class="token-meta"><strong>rounded.pill</strong><code>999px</code></div></article>
+      </div>
+    </section>
+
+    <section id="components">
+      <h2>Components</h2>
+      <p class="prose">The neutral <code>phase-ribbon</code> states PLACE YOUR BETS with its countdown, LAST BETS, BETS LOCKED, or NO MORE BETS; DEALING remains in the separate round-status rail, and <code>result-banner-andar</code> or <code>result-banner-bahar</code> carries the winning-side summary. <code>royal-reveal-stage</code> anchors the stacked <code>andar-lane</code> and <code>bahar-lane</code>, the centered card groups, <code>joker-card</code>, and <code>joker-pedestal</code>; crimson and royal-blue labels plus small landing halos remain legible when cards overlap. <code>dealt-card</code> and <code>dealt-card-winning</code> share the 68 × 96 footprint, with a restrained external gold outline reserved for the winning card, while <code>joker-card</code> uses the 78 × 110 footprint and the ordinary card keyline. <code>side-bet-andar</code> and <code>side-bet-bahar</code> remain one split betting control with a 42px <code>side-bet-selected</code> wager chip; the eight <code>count-bet</code> tiles show range and payout, and <code>count-bet-winning</code> supplies the settled state. <code>chip</code> and <code>chip-selected</code> expose the six-value rail, both roadmap-dot variants update after settlement, and <code>account-bar</code> always displays balance, total bet, last win, live-mode status, and round number.</p>
+      <p class="prose">Each released card follows one purposeful flight from the dimensional shoe to the correct lane, with a short directional arc, slight rotation, and a duration capped at about 280ms. Standard-motion opacity follows the eased flight progress and reaches normal full opacity at landing, while lane recentering uses controlled easing instead of snapping. A lane-colored settle halo lasts about 180ms and supplies the only landing emphasis; there is no compression or bounce. With <code>prefers-reduced-motion: reduce</code>, release timing and order stay intact, each released card moves immediately to its final coordinates, and a roughly 160ms opacity-only fade replaces all translation, rotation, and scale. Cards never wander, loop, bounce repeatedly, or move their final hit regions.</p>
+
+      <div class="component-board">
+        <div class="component-group">
+          <h3>Phase and result states</h3>
+          <div class="phase-grid">
+            <div><code class="component-key">phase-ribbon</code><div class="phase-sample">PLACE YOUR BETS · 08</div></div>
+            <div><code class="component-key">phase-ribbon</code><div class="phase-sample">4 LAST BETS</div></div>
+            <div><code class="component-key">phase-ribbon</code><div class="phase-sample">BETS LOCKED</div></div>
+            <div><code class="component-key">phase-ribbon</code><div class="phase-sample">NO MORE BETS</div></div>
+            <div><code class="component-key">result-banner-andar</code><div class="phase-sample is-andar">ANDAR WON · 14 CARDS</div></div>
+            <div><code class="component-key">result-banner-bahar</code><div class="phase-sample is-bahar">BAHAR WON · 14 CARDS</div></div>
+          </div>
+        </div>
+
+        <div class="component-group">
+          <h3>Royal reveal stage</h3>
+          <div class="stage-scroll">
+            <div class="reveal-stage">
+              <div class="stage-title">♛ &nbsp; ROYAL CARD REVEAL &nbsp; ♛</div>
+              <code class="stage-token">royal-reveal-stage · 1072 × 410</code>
+              <span class="watermark w1">♠</span><span class="watermark is-red w2">♦</span><span class="watermark w3">♣</span><span class="watermark is-red w4">♥</span>
+
+              <div class="deal-lane is-andar">
+                <div class="lane-plaque">ANDAR<small>3 CARDS</small></div>
+                <div class="lane-card-stack">
+                  <div class="playing-card is-red is-dealt" style="--flight-x:560px;--flight-y:270px;--deal-delay:0ms">A♥</div>
+                  <div class="playing-card is-dealt" style="--flight-x:502px;--flight-y:270px;--deal-delay:60ms">7♠</div>
+                  <div class="playing-card is-winning is-dealt" style="--flight-x:444px;--flight-y:270px;--deal-delay:120ms">J♣<span class="settle-halo"></span></div>
+                </div>
+              </div>
+              <div class="deal-lane is-bahar">
+                <div class="lane-plaque">BAHAR<small>3 CARDS</small></div>
+                <div class="lane-card-stack">
+                  <div class="playing-card is-dealt" style="--flight-x:560px;--flight-y:92px;--deal-delay:30ms">4♣</div>
+                  <div class="playing-card is-red is-dealt" style="--flight-x:502px;--flight-y:92px;--deal-delay:90ms">Q♥</div>
+                  <div class="playing-card is-red is-dealt" style="--flight-x:444px;--flight-y:92px;--deal-delay:150ms">6♦</div>
+                </div>
+              </div>
+              <div class="joker-pedestal">
+                <span class="pedestal-title">MATCH CARD</span>
+                <span class="pedestal-ring"></span>
+                <div class="joker-card">K♠</div>
+                <span class="pedestal-foot">FIRST MATCH WINS</span>
+              </div>
+              <div class="card-shoe" aria-label="Dimensional card shoe">
+                <span class="shoe-slot"></span><span class="shoe-card"></span><span class="shoe-card c2"></span><span class="shoe-card c3"></span><span class="shoe-card c4"></span><span class="shoe-label">DECK</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="component-group">
+          <h3>Betting controls</h3>
+          <code class="component-key">side-bet-andar · side-bet-bahar · side-bet-selected</code>
+          <div style="overflow-x:auto">
+            <div class="betting-surface">
+              <div class="side-split">
+                <div class="side-bet is-andar"><div>ANDAR<small>1:1</small></div><span class="side-selected">20</span></div>
+                <div class="side-bet is-bahar"><div>BAHAR<small>0.9:1</small></div><span class="side-selected">20</span></div>
+                <div class="side-joker-well">JOKER</div>
+              </div>
+              <div class="count-grid">
+                <div class="count-bet is-winning"><strong>1–5</strong><span>2.5:1</span></div>
+                <div class="count-bet"><strong>6–10</strong><span>3.5:1</span></div>
+                <div class="count-bet"><strong>11–15</strong><span>4.5:1</span></div>
+                <div class="count-bet"><strong>16–25</strong><span>3.5:1</span></div>
+                <div class="count-bet"><strong>26–30</strong><span>14.0:1</span></div>
+                <div class="count-bet"><strong>31–35</strong><span>24.0:1</span></div>
+                <div class="count-bet"><strong>36–40</strong><span>49.0:1</span></div>
+                <div class="count-bet"><strong>41–49</strong><span>119.0:1</span></div>
+              </div>
+              <div class="chip-rail">
+                <button class="chip is-selected" type="button">20</button>
+                <button class="chip" type="button">50</button>
+                <button class="chip" type="button">100</button>
+                <button class="chip" type="button">200</button>
+                <button class="chip" type="button">500</button>
+                <button class="chip" type="button">1K</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="component-group">
+          <h3>Roadmap and account bar</h3>
+          <div style="overflow-x:auto">
+            <div class="stats-and-account">
+              <div class="roadmap">
+                <code class="component-key">roadmap-dot-andar</code>
+                <span class="roadmap-dot">A</span><span class="roadmap-dot">A</span>
+                <code class="component-key">roadmap-dot-bahar</code>
+                <span class="roadmap-dot is-bahar">B</span><span class="roadmap-dot is-bahar">B</span><span class="roadmap-dot">A</span>
+              </div>
+              <code class="component-key" style="margin-left:12px">account-bar</code>
+              <div class="account-bar">
+                <span>Andar Bahar 20.00 – 1,000.00 chips</span>
+                <span>Balance 10,033.00</span>
+                <span>Bet 20.00</span>
+                <span>LAST WIN 40.00</span>
+                <span>LIVE MODE · #14809059629</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="component-inventory" aria-label="Rendered component inventory">
+          <code>royal-reveal-stage</code><code>andar-lane</code><code>bahar-lane</code><code>dealt-card</code><code>dealt-card-winning</code><code>joker-card</code><code>joker-pedestal</code><code>phase-ribbon</code><code>result-banner-andar</code><code>result-banner-bahar</code><code>side-bet-andar</code><code>side-bet-bahar</code><code>side-bet-selected</code><code>count-bet</code><code>count-bet-winning</code><code>chip</code><code>chip-selected</code><code>roadmap-dot-andar</code><code>roadmap-dot-bahar</code><code>account-bar</code>
+        </div>
+      </div>
+    </section>
+
+    <section id="dos-and-donts">
+      <h2>Do's and Don'ts</h2>
+      <div class="dos">
+        <div class="panel do-card">
+          <h3>✓ Do</h3>
+          <ul>
+            <li>Preserve the existing table proportions and scale the Canvas, visuals, and input map with one uniform transform.</li>
+            <li>Keep both dealt-card groups centered at x=800, stack the Andar and Bahar lanes, and keep the joker on its dedicated right-side pedestal.</li>
+            <li>Show odds and live phase continuously, with crimson Andar and royal-blue Bahar accents clear at a glance.</li>
+            <li>Use restrained gold framing, faint suit watermarks, and the compact dimensional card shoe as quiet table furniture.</li>
+            <li>Keep touch targets at least 44px after scaling where space allows.</li>
+            <li>Use one capped deal flight, eased lane recentering, and a brief settle halo; in reduced motion, use final coordinates with opacity-only feedback.</li>
+          </ul>
+        </div>
+        <div class="panel dont-card">
+          <h3>✗ Don't</h3>
+          <ul>
+            <li>Add dealer imagery, portraits, silhouettes, hands, or video.</li>
+            <li>Change gameplay, game rules, odds, settlement, API contracts, or server behavior.</li>
+            <li>Invent side bets the server cannot settle.</li>
+            <li>Use flickering glows, soft unreadable text, compression, repeated card bounce, or moving hit regions.</li>
+            <li>Independently resize the Canvas and its input map, or introduce reduced-motion translation, rotation, or scale.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
   </main>
 </body>
 </html>
