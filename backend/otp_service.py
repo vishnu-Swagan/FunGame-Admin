@@ -569,10 +569,14 @@ class TelesignSmsAdapter:
                 'sent': True,
                 'provider': 'telesign',
                 'reference_id': result['reference_id'],
+                'status_code': result['status_code'],
             }
         except telesign_service.TelesignServiceError as exc:
             # Metadata only: the code, key and recipient never enter logs.
-            logger.error('Telesign OTP delivery failed: %s', exc.reason)
+            logger.error(
+                'Telesign OTP delivery failed: reason=%s metadata=%s',
+                exc.reason, exc.metadata,
+            )
             return {'sent': False, 'provider': 'telesign', 'error': exc.reason}
 
 
@@ -591,9 +595,13 @@ class TelesignVerifyAdapter:
                 'sent': True,
                 'provider': 'telesign_verify',
                 'reference_id': result['reference_id'],
+                'status_code': result['status_code'],
             }
         except telesign_service.TelesignServiceError as exc:
-            logger.error('Telesign Verify delivery failed: %s', exc.reason)
+            logger.error(
+                'Telesign Verify delivery failed: reason=%s metadata=%s',
+                exc.reason, exc.metadata,
+            )
             return {
                 'sent': False,
                 'provider': 'telesign_verify',
@@ -811,13 +819,20 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         await _restore_previous_challenge(database, active, now)
         raise OtpConfigurationError('Verification delivery is temporarily unavailable')
 
+    delivery_recorded_at = _now()
+    delivery_provider = delivery.get('provider', 'unknown')
     delivery_fields = {
-        'delivery_provider': delivery.get('provider', 'unknown'),
-        'delivered_at': _now(),
-        'updated_at': _now(),
+        'delivery_provider': delivery_provider,
+        'accepted_at': delivery_recorded_at,
+        'updated_at': delivery_recorded_at,
     }
+    initial_status_code = delivery.get('status_code')
+    if type(initial_status_code) is int:
+        delivery_fields['provider_initial_status_code'] = initial_status_code
     if delivery.get('reference_id'):
         delivery_fields['delivery_reference_id'] = delivery['reference_id']
+    if delivery_provider != 'telesign' or initial_status_code == 200:
+        delivery_fields['delivered_at'] = delivery_recorded_at
     await database.otp_challenges.update_one(
         {'id': challenge_id, 'active': True},
         {'$set': delivery_fields},

@@ -155,6 +155,10 @@ test("an already delivered code stays verifiable while resend is unavailable", (
   const screen = render(VerifyEmail);
   expect(screen.querySelector('[data-testid="verification-resend-unavailable"]')).not.toBeNull();
   expect(screen.querySelector('[data-testid="verify-email-resend-button"]').disabled).toBe(true);
+  expect(screen.querySelector('[data-input-otp]').pattern).toBe("^\\d+$");
   expect(screen.querySelector('[data-testid="verify-login-id-input"]').value).toBe("Royal.Player");
   expect(screen.querySelector('[data-testid="verify-login-id-input"]').required).toBe(true);
+  expect(screen.querySelector('[data-testid="verification-recovery-guidance"]')?.textContent).toMatch(/registered before.*login or account recovery/i);
+  expect(screen.querySelector('a[href="/login"]')).not.toBeNull();
+  expect(screen.querySelector('a[href="/forgot-password"]')).not.toBeNull();
 });

@@ -227,6 +227,7 @@ test("an interrupted dual-verification registration resumes on email with the ch
   };
   mockPost.mockResolvedValue({ data: {
     channel: "EMAIL",
+    challenge_id: "email-challenge-1",
     destination_masked: "r***@example.com",
     resend_after_seconds: 24,
   } });
@@ -247,6 +248,7 @@ test("an interrupted dual-verification registration resumes on email with the ch
     state: expect.objectContaining({
       channel: "EMAIL",
       identifier: "recovery@example.com",
+      challengeId: "email-challenge-1",
       loginId: "Recovery.Player",
     }),
   }));

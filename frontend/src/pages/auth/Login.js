@@ -75,6 +75,7 @@ export default function Login() {
           navigate("/verify", { state: {
             channel: recovery.channel,
             identifier: recovery.contact,
+            challengeId: data?.challenge_id || data?.verification_id || "",
             destinationMasked: data?.destination_masked,
             resendAfter: data?.resend_after_seconds,
             loginId: detail?.login_id || "",

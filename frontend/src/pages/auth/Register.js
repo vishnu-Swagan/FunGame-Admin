@@ -110,6 +110,7 @@ export default function Register() {
         state: {
           channel: verificationChannel,
           identifier: verificationIdentifier,
+          challengeId: data?.challenge_id || data?.verification_id || "",
           destinationMasked: data?.destination_masked,
           resendAfter: data?.resend_after_seconds,
           secondaryIdentifier: email.trim().toLowerCase(),
@@ -244,7 +245,7 @@ export default function Register() {
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
             : emailVerificationRequired
-              ? "First verify the SMS code, then verify the code sent to your email. Your account activates only after both steps succeed."
+              ? "Use a mobile number and email not already linked to an account. First verify the SMS code, then the email code; your account activates only after both steps succeed."
               : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
         </p>
         <p className="text-[11px] text-white/45 leading-relaxed">Virtual chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.</p>
