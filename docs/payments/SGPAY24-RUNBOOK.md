@@ -4,6 +4,17 @@ This is a deposit-only hosted checkout for buying chips. It does not enable the
 financial-wallet or payout system. Keep all of these source-controlled flags
 `false`:
 
+> **Two deposit rails, one provider.** SgPay24 UPI credits chips through the
+> **hosted-UPI rail** (`operator_rail`), gated only by `UPI_CHIP_PURCHASES_ENABLED`
+> + `PAYMENT_PROVIDER=sgpay24`. It does **not** require `REAL_MONEY_ENABLED`,
+> `DEPOSITS_ENABLED`, `PAYMENTS_V2_ENABLED` or `PAYMENT_LIVE_MODE_ALLOWED`; the
+> webhook `POST /api/payments/webhooks/sgpay24` and the reconciliation worker
+> stay live independently of those flags. The separate **financial-wallet rail**
+> (`REAL_MONEY_ENABLED` etc.) is a different system; `GAME_WALLET_INTEGRATION_READY`
+> is now certified `True` so enabling that rail no longer 503s `/api/health`, but
+> it is **not** needed to take SgPay24 UPI deposits. Prefer the hosted-UPI rail.
+
+
 - `REAL_MONEY_ENABLED`
 - `DEPOSITS_ENABLED`
 - `WITHDRAWALS_ENABLED`
