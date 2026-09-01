@@ -205,9 +205,10 @@ export default function WebGLStarter() {
 				{stateReady && <div className="flight-stage" aria-hidden="true">
 					{inFlight && <svg className="flight-curve" viewBox={`0 0 ${stage.width} ${stage.height}`} preserveAspectRatio="none">
 						<defs>
-							<linearGradient id="flight-area" x1="0" y1="1" x2="0.4" y2="0">
-								<stop offset="0" stopColor="#e11942" stopOpacity="0.06" />
-								<stop offset="1" stopColor="#e11942" stopOpacity="0.32" />
+							<linearGradient id="flight-area" x1="0" y1="1" x2="0.15" y2="0">
+								<stop offset="0" stopColor="#c8102e" stopOpacity="0.78" />
+								<stop offset="0.55" stopColor="#e11942" stopOpacity="0.9" />
+								<stop offset="1" stopColor="#ff2d55" stopOpacity="0.96" />
 							</linearGradient>
 						</defs>
 						<path className="curve-fill" d={geometry.fillPath} />
@@ -226,23 +227,11 @@ export default function WebGLStarter() {
 					</div>}
 					<div className={`center-logo ${GameState !== "BET" ? "hide" : ""}`}>
 						<img src={aviatorLogo} alt="" />
-						<span>Preparing live round</span>
 					</div>
 				</div>}
 				<div className="aviator-renderer-gate" aria-live="polite">
 					<img src={aviatorLogo} alt="Aviator" />
 					<span>Synchronising live round</span>
-				</div>
-				{stateReady && <div className={`round-state state-${GameState.toLowerCase()}`}>
-					<span className="state-dot"></span>
-					{GameState === "BET" ? "Next round" : GameState === "PLAYING" ? "Live round" : "Round ended"}
-				</div>}
-				<div
-					className={`flight-timer ${stateReady && (GameState === "PLAYING" || GameState === "GAMEEND") ? "show" : ""} ${GameState === "GAMEEND" ? "stopped" : ""}`}
-					aria-live="off"
-				>
-					<span>Flight time</span>
-					<strong>{flightSeconds.toFixed(1)}s</strong>
 				</div>
 				<div className={`flew-away ${stateReady && GameState === "GAMEEND" ? 'show' : ''}`}>FLEW AWAY!</div>
 				<div className={`multiplier ${stateReady && GameState !== "BET" ? 'show' : ''} ${GameState === "GAMEEND" ? 'crashed' : ''}`} aria-live="polite">
@@ -259,7 +248,7 @@ export default function WebGLStarter() {
 							}}
 						></div>
 					</div>
-					<div className="loading-text">Preparing next round</div>
+					<div className="loading-text">WAITING FOR NEXT ROUND</div>
 				</div>
 			</div>
 		</div>

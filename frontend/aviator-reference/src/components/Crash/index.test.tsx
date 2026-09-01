@@ -86,6 +86,10 @@ test("the waiting phase shows the logo and loading bar with no aircraft", () => 
 	expect(logo).not.toBeNull();
 	expect(logo?.classList.contains("hide")).toBe(false);
 	expect(container.querySelector(".loading-container")?.classList.contains("show-loading")).toBe(true);
+	expect(container.querySelector(".loading-text")?.textContent).toBe("WAITING FOR NEXT ROUND");
+	// Spribe-style stage: no extra HUD chrome during wait.
+	expect(container.querySelector(".round-state")).toBeNull();
+	expect(container.querySelector(".flight-timer")).toBeNull();
 	// The multiplier is not shown during betting.
 	expect(container.querySelector(".multiplier")?.textContent).toBe("");
 });
