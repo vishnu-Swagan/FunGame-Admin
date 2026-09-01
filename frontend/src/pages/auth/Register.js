@@ -84,10 +84,12 @@ export default function Register() {
           ? "Verify your mobile number and email address with secure one-time codes before entering the lounge."
           : "Register with your mobile number. We will send a one-time SMS code before you create your password."}
     >
-      <div className="mb-5 flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
-        {manualReview ? <UserCheck className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
-        {manualReview ? "Administrator account review" : emailVerificationRequired ? "Mobile + email verification" : "Mobile OTP verification"}
-      </div>
+      {!emailVerificationRequired && (
+        <div className="mb-5 flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
+          {manualReview ? <UserCheck className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
+          {manualReview ? "Administrator account review" : "Mobile OTP verification"}
+        </div>
+      )}
 
       <form onSubmit={submit} className="space-y-4">
         <Field label="Full name" htmlFor="reg-name">

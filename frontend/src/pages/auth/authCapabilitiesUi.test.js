@@ -96,6 +96,25 @@ test("registration stays fail-closed without rendering the removed unavailable b
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
 });
 
+test("dual verification keeps its workflow without showing the app-view banner", () => {
+  mockLocationState = null;
+  mockCapabilitiesState = {
+    loading: false,
+    capabilities: {
+      registration_enabled: true,
+      email_registration: true,
+      phone_registration: true,
+      verification_required: true,
+      email_verification_required: true,
+      registration_mode: "PHONE_OTP",
+    },
+  };
+  const screen = render(Register);
+  expect(screen.textContent).not.toMatch(/Mobile \+ email verification/);
+  expect(screen.querySelector('#reg-contact')).not.toBeNull();
+  expect(screen.querySelector('#reg-email').required).toBe(true);
+});
+
 test("direct verification fails closed when neither delivery channel is ready", () => {
   mockLocationState = null;
   mockCapabilitiesState = {
