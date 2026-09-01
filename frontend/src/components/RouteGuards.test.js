@@ -54,6 +54,7 @@ test("a bootstrap admin with an empty grant list still reaches CRM payment confi
   expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.PAYMENTS_VIEW)).toBe(true);
   expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.GATEWAY_CREATE)).toBe(true);
   expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE)).toBe(false);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.DISTRIBUTORS_MANAGE)).toBe(false);
   expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE)).toBe(false);
 });
 

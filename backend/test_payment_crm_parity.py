@@ -378,12 +378,10 @@ class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
         viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
         self.assertEqual(viewed["id"], "legacy-admin")
         self._step_up(admin)
-        created = await routes_payment_hub.require_permission(
-            "gateway.create", step_up=True, super_admin=True,
-        )(user=admin)
+        created = await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
         self.assertEqual(created["id"], "legacy-admin")
         updated = await routes_payment_hub.require_permission(
-            "gateway.update_non_secret_config", step_up=True, super_admin=True,
+            "gateway.update_non_secret_config", step_up=True,
         )(user=admin)
         self.assertEqual(updated["id"], "legacy-admin")
 
@@ -391,6 +389,42 @@ class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
         admin = {"id": "bootstrap", "role": "ADMIN", "status": "ACTIVE", "admin_permissions": []}
         viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
         self.assertEqual(viewed["id"], "bootstrap")
+        self._step_up(admin)
+        created = await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
+        self.assertEqual(created["id"], "bootstrap")
+
+    async def test_pre_rbac_admin_cannot_activate_rotate_or_manage_routes(self):
+        admin = self._step_up({"id": "legacy-admin", "role": "ADMIN", "status": "ACTIVE"})
+        for permission in (
+            "gateway.rotate_credentials",
+            "gateway.activate",
+            "gateway.disable",
+            "gateway.manage_routes",
+        ):
+            with self.subTest(permission=permission):
+                with self.assertRaises(HTTPException) as denied:
+                    await routes_payment_hub.require_permission(
+                        permission, step_up=True, super_admin=True,
+                    )(user=admin)
+                self.assertEqual(denied.exception.detail["code"], "SUPER_ADMIN_REQUIRED")
+
+    async def test_leftover_permissions_next_to_empty_canonical_list_stay_revoked(self):
+        admin = {
+            "id": "migrated", "role": "ADMIN", "status": "ACTIVE",
+            "admin_permissions": [], "permissions": ["PAYMENTS_VIEW", "GATEWAY_VIEW"],
+        }
+        with self.assertRaises(HTTPException) as denied:
+            await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
+
+    async def test_named_role_without_grant_keys_is_view_only(self):
+        admin = {"id": "ops-legacy", "role": "ADMIN", "status": "ACTIVE", "admin_role": "OPERATIONS"}
+        viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
+        self.assertEqual(viewed["id"], "ops-legacy")
+        self._step_up(admin)
+        with self.assertRaises(HTTPException) as denied:
+            await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
+        self.assertEqual(denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
 
     async def test_operations_admin_with_empty_grants_is_still_denied(self):
         admin = {
@@ -411,10 +445,8 @@ class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
         viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
         self.assertEqual(viewed["id"], "ops-view")
         with self.assertRaises(HTTPException) as denied:
-            await routes_payment_hub.require_permission(
-                "gateway.create", step_up=True, super_admin=True,
-            )(user=admin)
-        self.assertEqual(denied.exception.detail["code"], "SUPER_ADMIN_REQUIRED")
+            await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
+        self.assertEqual(denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
 
     async def test_super_admin_with_empty_grants_can_view(self):
         admin = {

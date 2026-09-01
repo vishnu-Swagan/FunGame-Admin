@@ -96,6 +96,17 @@ test("a pre-RBAC platform admin can add a provider configuration", async () => {
   await act(async () => root.unmount());
 });
 
+test("a leftover permissions key next to an empty grant list cannot add a provider", async () => {
+  mockUser = {
+    role: "ADMIN", status: "ACTIVE",
+    admin_permissions: [], permissions: ["PAYMENTS_VIEW"],
+  };
+  adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="add-provider-empty"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
 test("an operations admin without gateway grants cannot add a provider", async () => {
   mockUser = { role: "ADMIN", status: "ACTIVE", admin_role: "OPERATIONS", admin_permissions: [] };
   adminPayments.hubStatus.mockResolvedValue({ admin: true, payments_v2: false });

@@ -31,10 +31,12 @@ export const ADMIN_PERMISSIONS = Object.freeze({
 });
 
 // The first production administrator records predate granular RBAC claims.
-// Keep CRM payment configuration (view/create/update/test) and the distributor
-// grants the server already treats as legacy-compatible. Activation, live
-// money, and PAYMENT_SETTINGS_WRITE stay Super Admin only. An explicitly
-// present empty canonical list still means revoked.
+// Missing grant keys keep CRM payment configuration plus the distributor
+// grants the server already treats as legacy-compatible. An empty
+// admin_permissions list with no leftover permissions key is the same
+// bootstrap shape for payment configuration only. A leftover permissions
+// key next to that empty list stays revoked. Activation, live money, and
+// PAYMENT_SETTINGS_WRITE stay Super Admin only.
 const LEGACY_ADMIN_COMPATIBILITY = new Set([
   ADMIN_PERMISSIONS.PAYMENTS_VIEW,
   ADMIN_PERMISSIONS.AUDIT_VIEW,
@@ -68,7 +70,20 @@ export function hasPermission(user, permission) {
   const superAdmin = String(user.admin_role || "").toUpperCase() === "SUPER_ADMIN";
   if (permission === ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE) return superAdmin;
   if (superAdmin) return true;
-  if (isUnmigratedAdmin(user)) return LEGACY_ADMIN_COMPATIBILITY.has(permission);
+  if (isUnmigratedAdmin(user)) {
+    const hasCanonical = Object.prototype.hasOwnProperty.call(user, "admin_permissions");
+    if (hasCanonical) {
+      return [
+        ADMIN_PERMISSIONS.PAYMENTS_VIEW,
+        ADMIN_PERMISSIONS.AUDIT_VIEW,
+        ADMIN_PERMISSIONS.GATEWAY_VIEW,
+        ADMIN_PERMISSIONS.GATEWAY_CREATE,
+        ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG,
+        ADMIN_PERMISSIONS.GATEWAY_TEST,
+      ].includes(permission);
+    }
+    return LEGACY_ADMIN_COMPATIBILITY.has(permission);
+  }
   const hasCanonical = Object.prototype.hasOwnProperty.call(user, "admin_permissions");
   const permissions = hasCanonical ? user.admin_permissions : user.permissions;
   if (!Array.isArray(permissions)) return false;
