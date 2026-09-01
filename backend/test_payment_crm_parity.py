@@ -351,13 +351,12 @@ class AdminFeatureDefaultTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(service.feature_status()["payments_v2"])
             service.require_admin_feature()
 
-    def test_explicit_false_still_disables_admin_surface(self):
-        with unittest_env(PAYMENT_GATEWAY_ADMIN_ENABLED="false"):
-            self.assertFalse(service.admin_feature_enabled())
-            self.assertFalse(service.feature_status()["admin"])
-            with self.assertRaises(GatewayError) as ctx:
-                service.require_admin_feature()
-            self.assertEqual(ctx.exception.code, "PAYMENT_GATEWAY_ADMIN_DISABLED")
+    def test_stale_false_env_does_not_disable_admin_surface(self):
+        with unittest_env(PAYMENT_GATEWAY_ADMIN_ENABLED="false", PAYMENTS_V2_ENABLED="false"):
+            self.assertTrue(service.admin_feature_enabled())
+            self.assertTrue(service.feature_status()["admin"])
+            service.require_admin_feature()
+            self.assertFalse(service.feature_status()["payments_v2"])
 
 
 class AdminPasswordGuardTests(unittest.IsolatedAsyncioTestCase):
