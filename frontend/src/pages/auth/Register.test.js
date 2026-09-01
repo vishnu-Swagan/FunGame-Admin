@@ -75,6 +75,13 @@ async function submit(form) {
   });
 }
 
+async function clickPrimarySubmit(container) {
+  await act(async () => {
+    container.querySelector('[data-testid="auth-primary-submit-button"]').click();
+    await settle();
+  });
+}
+
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
 });
@@ -177,5 +184,103 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
     state: expect.objectContaining({ channel: "PHONE", identifier: "+919999888877" }),
   }));
+  await act(async () => root.unmount());
+});
+
+test("a real submit-button click posts the live dual-verification payload", async () => {
+  mockCapabilities = {
+    registration_enabled: true,
+    email_registration: false,
+    phone_registration: true,
+    verification_required: true,
+    email_verification_required: true,
+    registration_mode: "PHONE_OTP",
+  };
+  mockPost.mockResolvedValue({ data: { destination_masked: "+91******10", resend_after_seconds: 30 } });
+  const { container, root } = await renderRegister();
+
+  change(container.querySelector("#reg-name"), "Live Player");
+  change(container.querySelector("#reg-contact"), "+91 (98765).43210");
+  change(container.querySelector("#reg-email"), "Live.Player@Example.com");
+  change(container.querySelector("#reg-dob"), "1990-05-20");
+  change(container.querySelector("#reg-country"), "India");
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    await settle();
+  });
+  await clickPrimarySubmit(container);
+
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(mockPost).toHaveBeenCalledWith("/auth/register", {
+    channel: "PHONE",
+    identifier: "+919876543210",
+    phone: "+919876543210",
+    email: "live.player@example.com",
+    full_name: "Live Player",
+    date_of_birth: "1990-05-20",
+    country: "India",
+    accepted_terms: true,
+  });
+  expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
+    state: expect.objectContaining({
+      channel: "PHONE",
+      identifier: "+919876543210",
+      secondaryIdentifier: "live.player@example.com",
+    }),
+  }));
+  await act(async () => root.unmount());
+});
+
+test("an invalid required email is explained inline and focused without posting", async () => {
+  mockCapabilities = {
+    registration_enabled: true,
+    email_registration: false,
+    phone_registration: true,
+    verification_required: true,
+    email_verification_required: true,
+    registration_mode: "PHONE_OTP",
+  };
+  const { container, root } = await renderRegister();
+
+  change(container.querySelector("#reg-name"), "Live Player");
+  change(container.querySelector("#reg-contact"), "+919876543210");
+  change(container.querySelector("#reg-email"), "not-an-email");
+  change(container.querySelector("#reg-dob"), "1990-05-20");
+  change(container.querySelector("#reg-country"), "India");
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    await settle();
+  });
+  await clickPrimarySubmit(container);
+
+  expect(mockPost).not.toHaveBeenCalled();
+  expect(container.querySelector("#reg-email-error")?.textContent).toBe("Enter a valid email address");
+  expect(container.querySelector("#reg-email").getAttribute("aria-invalid")).toBe("true");
+  expect(document.activeElement).toBe(container.querySelector("#reg-email"));
+  await act(async () => root.unmount());
+});
+
+test("unchecked terms remain actionable and receive accessible feedback", async () => {
+  mockCapabilities = {
+    registration_enabled: true,
+    email_registration: false,
+    phone_registration: true,
+    verification_required: true,
+    registration_mode: "PHONE_OTP",
+  };
+  const { container, root } = await renderRegister();
+
+  change(container.querySelector("#reg-name"), "Terms Player");
+  change(container.querySelector("#reg-contact"), "+919876543210");
+  change(container.querySelector("#reg-dob"), "1990-05-20");
+  change(container.querySelector("#reg-country"), "India");
+  expect(container.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
+  await clickPrimarySubmit(container);
+
+  const terms = container.querySelector('[data-testid="register-terms-checkbox"]');
+  expect(mockPost).not.toHaveBeenCalled();
+  expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the account and play terms");
+  expect(terms.getAttribute("aria-invalid")).toBe("true");
+  expect(document.activeElement).toBe(terms);
   await act(async () => root.unmount());
 });

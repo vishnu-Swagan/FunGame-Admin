@@ -118,8 +118,10 @@ test("dual registration preserves the server email-verification requirement", ()
 test("contact normalization matches backend email and E.164 phone rules", () => {
   expect(normalizeContactIdentifier("EMAIL", " Player@Example.COM ")).toBe("player@example.com");
   expect(normalizeContactIdentifier("PHONE", "+91 98765-43210")).toBe("+919876543210");
+  expect(normalizeContactIdentifier("PHONE", "+91 (98765).43210")).toBe("+919876543210");
   expect(isValidE164Phone("+1234567")).toBe(false);
   expect(isValidE164Phone("+12345678")).toBe(true);
+  expect(isValidE164Phone("+91 (98765).43210")).toBe(true);
   expect(isValidE164Phone("+919876543210")).toBe(true);
 });
 

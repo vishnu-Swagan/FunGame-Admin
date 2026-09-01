@@ -87,7 +87,7 @@ export function normalizeContactChannel(channel, identifier = "") {
 export function normalizeContactIdentifier(channel, identifier) {
   const value = String(identifier || "");
   return normalizeContactChannel(channel, value) === "PHONE"
-    ? value.replace(/[\s-]/g, "")
+    ? value.replace(/[\s().-]+/g, "")
     : value.trim().toLowerCase();
 }
 
