@@ -13,7 +13,7 @@ import { payments } from "@/lib/paymentApi";
 import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 
-const QUICK_BUY_AMOUNTS = [500, 1000, 2500, 5000];
+const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
 
 function positiveInteger(...values) {

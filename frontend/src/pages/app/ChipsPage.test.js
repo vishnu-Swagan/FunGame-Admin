@@ -300,7 +300,7 @@ const OPERATOR_WALLET = {
       withdrawals_enabled: true,
       limits: {
         chips_per_inr: 1,
-        min_deposit_paise: 50000,
+        min_deposit_paise: 10000,
         max_deposit_paise: 10000000,
         min_withdrawal_paise: 100000,
         min_withdrawal_chips: 1000,
@@ -375,7 +375,7 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
 
   expect(publicFinancialConfig(OPERATOR_WALLET)).toMatchObject({
     chipsPerInr: 1,
-    minDepositPaise: 50000,
+    minDepositPaise: 10000,
     minWithdrawalPaise: 100000,
   });
   expect(container.textContent).toContain("submitted for Admin review");
