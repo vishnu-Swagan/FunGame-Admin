@@ -39,7 +39,7 @@ const Bet = ({ index, add, setAdd }: BetProps) => {
 	const single = index === 'f' ? state.fsingle : state.ssingle
 	const singleAmount = index === 'f' ? state.fsingleAmount : state.ssingleAmount
 
-	const [gameType, setGameType] = React.useState<GameType>("auto");
+	const [gameType, setGameType] = React.useState<GameType>("manual");
 	const [betOpt, setBetOpt] = React.useState<BetOptType>("20");
 	const [showModal, setShowModal] = React.useState(false);
 	const [myBetAmount, setMyBetAmount] = React.useState(20);
@@ -196,12 +196,12 @@ const Bet = ({ index, add, setAdd }: BetProps) => {
 	},[betAmount])
 
 	return (
-		<div className={`bet-control bet-control-${index}`} data-panel={index === 'f' ? 'Bet panel 1' : 'Bet panel 2'}>
+		<div className={`bet-control bet-control-${index} mode-${gameType}`} data-panel={index === 'f' ? 'Bet panel 1' : 'Bet panel 2'}>
 			<div className="controls">
 				{index === 'f' ? !add && (
-					<div className="sec-hand-btn add" onClick={() => setAdd(true)}></div>
+					<button type="button" aria-label="Add second bet panel" className="sec-hand-btn add" onClick={() => setAdd(true)} />
 				) : add &&
-				<div className="sec-hand-btn minus" onClick={() => setAdd(false)}></div>
+				<button type="button" aria-label="Remove second bet panel" className="sec-hand-btn minus" onClick={() => setAdd(false)} />
 				}
 				<div className="navigation">
 					<div className="navigation-switcher">

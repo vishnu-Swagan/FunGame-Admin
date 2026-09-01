@@ -190,6 +190,10 @@ export interface SeedDetailsType {
     crashPoint?: number;
     target?: number;
     verificationFactor?: number;
+    verificationFactorText?: string;
+    fairnessVersion?: number;
+    commitmentPayload?: string;
+    algorithm?: string;
 }
 
 export const init_state = {

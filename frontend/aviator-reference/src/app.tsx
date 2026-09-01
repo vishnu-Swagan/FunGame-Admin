@@ -11,18 +11,9 @@ function App() {
   return (
     <div className="main-container">
       {errorBackend && (
-        <div style={{
-          position: 'fixed',
-          top: '10px',
-          right: '10px',
-          background: '#ff4444',
-          color: 'white',
-          padding: '8px 16px',
-          borderRadius: '4px',
-          zIndex: 9999,
-          fontSize: '12px'
-        }}>
-          ⚠️ Connection to server lost
+        <div className="connection-notice" role="status" aria-live="polite">
+          <span aria-hidden="true" />
+          Reconnecting to the live round
         </div>
       )}
      
