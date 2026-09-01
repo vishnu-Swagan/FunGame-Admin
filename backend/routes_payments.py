@@ -821,7 +821,11 @@ async def admin_kyc_queue(
             "id": row.get("id"), "email_masked": _mask_email(row.get("email")),
             "phone_masked": _mask_phone(row.get("phone")), "country": row.get("country"),
             "phone_available": bool(row.get("phone_normalized") or row.get("phone")),
-            "age_verified": bool(row.get("age_verified")),
+            # Preserve compatibility for older admin clients: the account-backed
+            # 18+ confirmation is the canonical launch age signal, so it must
+            # never be presented as unverified merely because no manual review
+            # flag was written.
+            "age_verified": bool(row.get("age_verified") or row.get("accepted_terms")),
             "age_verification_status": row.get("age_verification_status") or "NOT_REQUESTED",
             "mobile_verification_status": row.get("mobile_verification_status") or "NOT_REQUESTED",
             "mobile_manually_verified": row.get("mobile_review_status") == "ADMIN_APPROVED",
