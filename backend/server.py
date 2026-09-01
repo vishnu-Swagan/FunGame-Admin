@@ -38,8 +38,9 @@ import routes_game_settlement
 import routes_payments
 import routes_payment_hub
 import financial_wallet
+import operator_rail
 from payment_hub import service as payment_hub_service
-from payment_providers import load_payment_provider
+from payment_providers import ProviderConfigurationError, load_payment_provider
 from transactions import run_game_transaction
 
 logging.basicConfig(
@@ -86,23 +87,34 @@ async def _aviator_keepalive():
 
 
 async def _financial_worker():
-    """Dormant-by-default outbox runner and bounded reconciliation loop."""
+    """Leader-only financial and hosted-UPI reconciliation loops."""
     last_reconciliation = 0.0
+    last_upi_reconciliation = 0.0
     while True:
         try:
             status = financial_wallet.financial_status()
-            if status['ready'] and status['features']['real_money']:
+            financial_live = bool(status['ready'] and status['features']['real_money'])
+            # Turning off checkout intake must not strand already-paid orders.
+            upi_live = await operator_rail.hosted_upi_reconciliation_needed()
+            if financial_live or upi_live:
                 leader = await financial_wallet.acquire_financial_worker_lease(
                     f'financial-{_WORKER_ID}', ttl_seconds=45,
                 )
                 if leader:
+                    current = time.monotonic()
                     provider = load_payment_provider()
-                    if status['features']['automatic_withdrawals']:
+                    if upi_live and current - last_upi_reconciliation >= 8:
+                        upi_result = await operator_rail.reconcile_hosted_batch(
+                            provider, limit=25,
+                        )
+                        last_upi_reconciliation = current
+                        if upi_result.get('updated') or upi_result.get('errors'):
+                            logger.info('hosted UPI reconciliation result: %s', upi_result)
+                    if financial_live and status['features']['automatic_withdrawals']:
                         outbox = await financial_wallet.process_outbox_batch(provider, limit=10)
                         if any(outbox.values()):
                             logger.info('financial outbox result: %s', outbox)
-                    current = time.monotonic()
-                    if current - last_reconciliation >= 60:
+                    if financial_live and current - last_reconciliation >= 60:
                         result = await financial_wallet.reconcile_financial_records(
                             provider, limit=50,
                         )
@@ -126,6 +138,7 @@ async def _retire_nocash_wording_migration():
 
 
 async def _core_indexes():
+    await operator_rail.ensure_hosted_indexes()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
@@ -364,6 +377,18 @@ async def health():
             status_code=503,
             detail={'code': 'FINANCIAL_NOT_READY', 'message': 'Financial services are not ready.'},
         )
+    if await operator_rail.hosted_upi_reconciliation_needed():
+        try:
+            if operator_rail.hosted_upi_requested():
+                operator_rail.hosted_upi_provider()
+            else:
+                operator_rail.hosted_upi_reconciliation_provider()
+        except ProviderConfigurationError as exc:
+            logger.error('hosted UPI readiness failed: %s', type(exc).__name__)
+            raise HTTPException(
+                status_code=503,
+                detail={'code': 'UPI_NOT_READY', 'message': 'UPI payment services are not ready.'},
+            ) from exc
     return {
         'status': 'ok',
         'gameplay_ready': True,

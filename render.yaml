@@ -96,6 +96,15 @@ services:
         value: "true"                       # operator config surface; code also defaults on. Does not move money.
       - key: PAYMENT_LIVE_MODE_ALLOWED
         value: "false"
+      # Deposit-only hosted UPI has its own narrow gate. Keep it false in Git;
+      # enabling it is a separate, explicitly approved Render dashboard change
+      # after the mocked checks and one live canary in docs/payments/SGPAY24-RUNBOOK.md.
+      - key: UPI_CHIP_PURCHASES_ENABLED
+        value: "false"
+      - key: UPI_CHIPS_PER_INR
+        sync: false          # required reviewed integer rate; each hosted order snapshots it
+      - key: UPI_MAX_DAILY_DEPOSIT_PAISE
+        sync: false          # per-player cap; use 50000 (INR 500) for the one-payment canary
       - key: PAYMENT_CREDENTIALS_MASTER_KEY
         sync: false          # AES-GCM key; configure in Render secrets only
       - key: PAYMENT_WEBHOOK_PUBLIC_BASE_URL
@@ -105,11 +114,21 @@ services:
       - key: PAYMENT_PROVIDER_CHECKOUT_ALLOWED_DOMAINS
         sync: false          # exact reviewed HTTPS hosts permitted for player checkout redirects
       - key: PAYMENT_PROVIDER
-        sync: false          # primary provider code; no runtime fallback exists
+        sync: false          # set to sgpay24 in Render only; no runtime fallback exists
       - key: PAYMENT_PROVIDER_CONFIG_JSON
         sync: false          # approved endpoint and field mappings; never embed credential values
       - key: PAYMENT_RETURN_URL
         value: https://chakri.casino/chips/deposit/return
+      # SgPay24 credentials are intentionally placeholders, never source values.
+      # Render retains sync:false values entered in its secret dashboard.
+      - key: SGPAY24_MERCHANT_ID
+        sync: false          # Merchant ID from the authenticated SgPay24 profile
+      - key: SGPAY24_API_TOKEN
+        sync: false          # rotate if exposed; never send to the browser or commit it
+      - key: SGPAY24_CUSTOMER_EMAIL_FALLBACK
+        value: payments@chakri.casino
+      - key: SGPAY24_TIMEOUT_SECONDS
+        value: "15"
       - key: CHIPS_PER_INR
         sync: false          # operator-reviewed integer conversion rate
       - key: MIN_DEPOSIT_PAISE

@@ -576,6 +576,16 @@ async def _deposit_limit_violations(
             {"$match": held_query},
             {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
         ], session=session)
+        hosted_reserved = await _sum_chips(db.operator_payment_requests, [
+            {"$match": {
+                "user_id": user_id,
+                "source": "SGPAY24_UPI",
+                "status": {"$in": ["CREATED", "PENDING", "RECONCILIATION_REQUIRED"]},
+                "reservation_gaming_day": {"$gte": since},
+            }},
+            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
+        ], session=session)
+        reserved += hosted_reserved
         proposed = credited + reserved + int(additional_chips)
         if proposed > cap:
             violations.append({

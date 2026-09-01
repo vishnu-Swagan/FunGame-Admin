@@ -310,6 +310,63 @@ const OPERATOR_WALLET = {
   },
 };
 
+const UPI_OPERATOR_WALLET = {
+  ...OPERATOR_WALLET,
+  financial: {
+    ...OPERATOR_WALLET.financial,
+    operator: {
+      ...OPERATOR_WALLET.financial.operator,
+      rail: "UPI_HOSTED",
+      hosted_checkout: true,
+      checkout_hosts: ["root.sgpay24.com"],
+    },
+  },
+};
+
+test("hosted UPI operator rail creates an idempotent deposit and opens only SgPay checkout", async () => {
+  mockWallet.mockResolvedValue(UPI_OPERATOR_WALLET);
+  mockCreateOperatorDeposit.mockResolvedValue({
+    checkout_url: "https://root.sgpay24.com/pay/order-1",
+    deposit: { id: "upi-deposit-1", status: "PENDING" },
+    source: "SGPAY24_UPI",
+  });
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+
+  expect(publicFinancialConfig(UPI_OPERATOR_WALLET)).toMatchObject({
+    operatorCheckoutHosts: ["root.sgpay24.com"],
+    checkoutHosts: ["root.sgpay24.com"],
+  });
+  expect(container.textContent).toContain("Buy chips with UPI");
+  expect(container.textContent).toContain("SgPay secure UPI checkout");
+  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Pay securely with UPI");
+
+  change(container.querySelector('[data-testid="deposit-amount"]'), "1000");
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+
+  expect(mockFinancialIntentKey).toHaveBeenCalledWith("deposit", "player-1", "amount_paise=100000");
+  expect(mockCreateOperatorDeposit).toHaveBeenCalledWith(100000, "deposit-key");
+  expect(mockCreateDeposit).not.toHaveBeenCalled();
+  expect(checkoutNavigator).toHaveBeenCalledWith("https://root.sgpay24.com/pay/order-1");
+  expect(mockClearFinancialIntent).toHaveBeenCalledWith("deposit", "player-1", "deposit-key");
+  expect(mockNavigate).not.toHaveBeenCalledWith("/chips/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+test("hosted UPI operator rail rejects checkout URLs outside the server allowlist", async () => {
+  mockWallet.mockResolvedValue(UPI_OPERATOR_WALLET);
+  mockCreateOperatorDeposit.mockResolvedValue({ checkout_url: "https://attacker.example/pay/order-1" });
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+
+  expect(mockCreateOperatorDeposit).toHaveBeenCalledWith(100000, "deposit-key");
+  expect(checkoutNavigator).not.toHaveBeenCalled();
+  expect(mockClearFinancialIntent).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
 test("operator rail unlocks buy and withdraw without hosted checkout", async () => {
   mockWallet.mockResolvedValue(OPERATOR_WALLET);
   mockPathname = "/chips";

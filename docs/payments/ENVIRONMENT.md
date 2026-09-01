@@ -42,3 +42,8 @@ not enabled merely by adding CRM gateway drafts.
 
 Never place values in source control. Render entries marked `sync:false` belong
 in the service secret manager.
+
+The separate deposit-only SgPay24 hosted UPI rail, including its explicit
+feature gate, rate, daily cap, merchant secrets, callback and canary procedure,
+is documented in [SGPAY24-RUNBOOK.md](SGPAY24-RUNBOOK.md). Enabling that rail
+does not authorize any V2, withdrawal or financial-wallet flag.

@@ -7,19 +7,38 @@ Wallet credit or debit happens only when an administrator approves.
 """
 from __future__ import annotations
 
+import asyncio
+import os
+import re
+import urllib.parse
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from fastapi import HTTPException
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 import ledger
+import financial_wallet as finance
 from ledger import InsufficientChips
-from db import db
+from db import client, db
+from payment_providers import (
+    DepositStatus,
+    PaymentProvider,
+    ProviderConfigurationError,
+    ProviderRequestError,
+    load_payment_provider,
+)
 
 
 COLLECTION = "operator_payment_requests"
+DAILY_GUARD_COLLECTION = "upi_daily_purchase_guards"
+UPI_SOURCE = "SGPAY24_UPI"
+ADMIN_SOURCE = "ADMIN_REVIEW"
+HOSTED_TERMINAL = frozenset({"CREDITED", "FAILED", "EXPIRED", "RECONCILIATION_REQUIRED"})
+IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,159}$")
+_TEST_HOSTED_LOCKS: dict[str, asyncio.Lock] = {}
 
 OPERATOR_LIMITS = {
     "chips_per_inr": 1,
@@ -35,13 +54,110 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _env_true(name: str, environ: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    return str(env.get(name, "false")).strip().lower() == "true"
+
+
+def hosted_upi_requested(environ: Mapping[str, str] | None = None) -> bool:
+    return _env_true("UPI_CHIP_PURCHASES_ENABLED", environ)
+
+
+def hosted_upi_chips_per_inr(environ: Mapping[str, str] | None = None) -> int:
+    env = os.environ if environ is None else environ
+    raw = env.get("UPI_CHIPS_PER_INR")
+    if raw is None or str(raw).strip() == "":
+        raise ProviderConfigurationError("UPI_CHIPS_PER_INR must be explicitly configured")
+    try:
+        rate = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ProviderConfigurationError("UPI_CHIPS_PER_INR must be an integer") from exc
+    if not 1 <= rate <= 1_000_000:
+        raise ProviderConfigurationError("UPI_CHIPS_PER_INR is outside the allowed range")
+    return rate
+
+
+def hosted_upi_daily_limit_paise(environ: Mapping[str, str] | None = None) -> int:
+    env = os.environ if environ is None else environ
+    raw = env.get("UPI_MAX_DAILY_DEPOSIT_PAISE")
+    if raw is None or str(raw).strip() == "":
+        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be explicitly configured")
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be an integer") from exc
+    if not OPERATOR_LIMITS["min_deposit_paise"] <= limit <= 100_000_000:
+        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE is outside the allowed range")
+    return limit
+
+
+def hosted_upi_provider(
+    environ: Mapping[str, str] | None = None,
+) -> PaymentProvider:
+    if not hosted_upi_requested(environ):
+        raise ProviderConfigurationError("UPI chip purchases are disabled")
+    provider = load_payment_provider(environ)
+    if provider.name != "sgpay24":
+        raise ProviderConfigurationError("UPI chip purchases require the SgPay24 provider")
+    hosted_upi_chips_per_inr(environ)
+    hosted_upi_daily_limit_paise(environ)
+    return provider
+
+
+def hosted_upi_reconciliation_provider(
+    environ: Mapping[str, str] | None = None,
+) -> PaymentProvider:
+    provider = load_payment_provider(environ)
+    if provider.name != "sgpay24":
+        raise ProviderConfigurationError("UPI reconciliation requires the SgPay24 provider")
+    return provider
+
+
+async def hosted_upi_reconciliation_needed() -> bool:
+    if hosted_upi_requested():
+        return True
+    # With no SgPay24 provider configured there cannot be a valid hosted-UPI
+    # obligation. During an intake rollback PAYMENT_PROVIDER and credentials
+    # stay configured, so existing open orders continue through the query below.
+    if str(os.environ.get("PAYMENT_PROVIDER", "")).strip().lower() != "sgpay24":
+        return False
+    open_order = await db[COLLECTION].find_one({
+        "source": UPI_SOURCE,
+        "kind": "DEPOSIT",
+        "status": {"$in": ["CREATED", "PENDING"]},
+    }, {"_id": 0, "id": 1})
+    return bool(open_order)
+
+
 def operator_status() -> dict[str, Any]:
+    hosted_requested = hosted_upi_requested()
+    hosted_ready = False
+    checkout_hosts: list[str] = []
+    if hosted_requested:
+        try:
+            checkout_hosts = list(hosted_upi_provider().checkout_allowed_hosts)
+            hosted_ready = bool(checkout_hosts)
+        except ProviderConfigurationError:
+            hosted_ready = False
     return {
         "enabled": True,
-        "rail": "ADMIN_REVIEW",
-        "deposits_enabled": True,
+        "rail": "UPI_HOSTED" if hosted_requested else ADMIN_SOURCE,
+        "deposits_enabled": hosted_ready if hosted_requested else True,
         "withdrawals_enabled": True,
-        "limits": dict(OPERATOR_LIMITS),
+        "hosted_checkout": hosted_ready,
+        "checkout_hosts": checkout_hosts,
+        "availability_code": (
+            "AVAILABLE" if hosted_ready or not hosted_requested else "UPI_PROVIDER_NOT_READY"
+        ),
+        "limits": {
+            **OPERATOR_LIMITS,
+            "chips_per_inr": (
+                hosted_upi_chips_per_inr() if hosted_ready else OPERATOR_LIMITS["chips_per_inr"]
+            ),
+            "max_daily_deposit_paise": (
+                hosted_upi_daily_limit_paise() if hosted_ready else None
+            ),
+        },
     }
 
 
@@ -61,7 +177,12 @@ def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
         "account_number_masked": row.get("account_number_masked"),
         "note": row.get("note") or "",
         "admin_note": row.get("admin_note") or "",
-        "source": "ADMIN_REVIEW",
+        "source": row.get("source") or ADMIN_SOURCE,
+        "utr_required": bool(row.get("utr_required")) or (
+            row.get("source") == UPI_SOURCE
+            and str(row.get("status") or "").upper() in {"CREATED", "PENDING"}
+        ),
+        "utr_submitted": bool(row.get("utr_claim")) or bool(row.get("utr_submitted")),
         "created_at": row.get("created_at"),
         "resolved_at": row.get("resolved_at"),
         "resolved_by": row.get("resolved_by"),
@@ -93,7 +214,9 @@ def as_player_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         "amount_paise": dto["amount_paise"],
         "currency": "INR",
         "chips": dto["chips"],
-        "source": "ADMIN_REVIEW",
+        "source": dto["source"],
+        "utr_required": dto["utr_required"],
+        "utr_submitted": dto["utr_submitted"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
     }
@@ -113,7 +236,7 @@ def as_player_withdrawal(row: Mapping[str, Any]) -> dict[str, Any]:
             "bank_name": dto["bank_name"],
             "account_number_masked": dto["account_number_masked"],
         },
-        "source": "ADMIN_REVIEW",
+        "source": dto["source"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
     }
@@ -125,8 +248,8 @@ def as_admin_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         **as_player_deposit(row),
         "user_id": dto["user_id"],
         "user_email": dto["user_email"],
-        "provider_order_id": "ADMIN_REVIEW",
-        "provider_reference": None,
+        "provider_order_id": row.get("provider_order_id") or ADMIN_SOURCE,
+        "provider_reference": row.get("provider_reference"),
         "admin_note": dto["admin_note"],
         "note": dto["note"],
     }
@@ -227,12 +350,576 @@ async def create_request(
         "account_number_masked": account_masked,
         "status": "PENDING",
         "note": str(note or "")[:500],
-        "source": "ADMIN_REVIEW",
+        "source": ADMIN_SOURCE,
         "created_at": utcnow(),
     }
     await db[COLLECTION].insert_one(row)
     row.pop("_id", None)
     return request_dto(row)
+
+
+def _deposit_return_url(deposit_id: str) -> str:
+    base = str(
+        os.environ.get(
+            "PAYMENT_RETURN_URL", "https://chakri.casino/chips/deposit/return",
+        ),
+    ).strip()
+    try:
+        parsed = urllib.parse.urlsplit(base)
+    except ValueError as exc:
+        raise ProviderConfigurationError("PAYMENT_RETURN_URL is invalid") from exc
+    query = [
+        (key, value) for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"deposit_id", "order_id"}
+    ]
+    query.append(("deposit_id", deposit_id))
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
+
+
+def _hosted_idempotency(value: str) -> str:
+    key = str(value or "").strip()
+    if not IDEMPOTENCY_RE.fullmatch(key):
+        raise HTTPException(status_code=400, detail={
+            "code": "IDEMPOTENCY_KEY_REQUIRED",
+            "message": "Idempotency-Key must be 8-160 safe characters.",
+        })
+    return key
+
+
+def _hosted_customer(user: Mapping[str, Any]) -> dict[str, Any]:
+    digits = re.sub(r"\D", "", str(user.get("phone") or user.get("phone_normalized") or ""))
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if not user.get("phone_verified") or len(digits) != 10 or digits[0] not in "6789":
+        raise HTTPException(status_code=400, detail={
+            "code": "UPI_PHONE_REQUIRED",
+            "message": "Verify a valid Indian mobile number before using UPI checkout.",
+        })
+    return {
+        "full_name": user.get("full_name") or user.get("display_name"),
+        "email": user.get("email"),
+        "email_verified": bool(user.get("email_verified")),
+        "phone": digits,
+        "phone_verified": True,
+    }
+
+
+async def _ensure_hosted_checkout(
+    row: Mapping[str, Any], provider: PaymentProvider,
+) -> tuple[dict[str, Any], str]:
+    if row.get("source") != UPI_SOURCE or row.get("provider") != provider.name:
+        raise HTTPException(status_code=409, detail={
+            "code": "UPI_PROVIDER_MISMATCH", "message": "This purchase belongs to another payment flow.",
+        })
+    if str(row.get("status") or "").upper() in HOSTED_TERMINAL:
+        return dict(row), ""
+    if row.get("checkout_url") and row.get("provider_order_id"):
+        return dict(row), str(row["checkout_url"])
+    user = await db.users.find_one({"id": row["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail={
+            "code": "PLAYER_NOT_FOUND", "message": "The player account was not found.",
+        })
+    try:
+        checkout = await provider.create_deposit_order(
+            deposit_id=str(row["id"]),
+            amount_paise=int(row["amount_paise"]),
+            currency="INR",
+            idempotency_key=f"upi-chip:{row['id']}",
+            return_url=_deposit_return_url(str(row["id"])),
+            customer=_hosted_customer(user),
+        )
+    except HTTPException:
+        raise
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        await db[COLLECTION].update_one(
+            {"id": row["id"], "source": UPI_SOURCE, "status": "CREATED"},
+            {"$set": {"last_error": type(exc).__name__, "updated_at": utcnow()}},
+        )
+        raise HTTPException(status_code=503, detail={
+            "code": "UPI_CHECKOUT_UNAVAILABLE",
+            "message": "UPI checkout is temporarily unavailable. No chips were credited.",
+        }) from exc
+    stored = await db[COLLECTION].find_one_and_update(
+        {"id": row["id"], "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+        {"$set": {
+            "status": "PENDING",
+            "provider_order_id": checkout.provider_order_id,
+            "checkout_url": checkout.checkout_url,
+            "last_error": None,
+            "next_reconcile_at": utcnow() + timedelta(seconds=8),
+            "updated_at": utcnow(),
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not stored:
+        stored = await db[COLLECTION].find_one({"id": row["id"]})
+    if not stored or stored.get("provider_order_id") != checkout.provider_order_id:
+        raise HTTPException(status_code=409, detail={
+            "code": "UPI_CHECKOUT_CONFLICT",
+            "message": "UPI checkout needs review. No chips were credited.",
+        })
+    stored.pop("_id", None)
+    return stored, str(stored.get("checkout_url") or checkout.checkout_url)
+
+
+async def create_hosted_deposit(
+    user: Mapping[str, Any], amount_paise: int, idempotency_key: str,
+    provider: PaymentProvider | None = None,
+) -> tuple[dict[str, Any], str]:
+    gateway = provider or hosted_upi_provider()
+    key = _hosted_idempotency(idempotency_key)
+    paise, _ = _require_amount("DEPOSIT", amount_paise)
+    rate = hosted_upi_chips_per_inr()
+    if paise * rate % 100:
+        raise HTTPException(status_code=400, detail={
+            "code": "UPI_AMOUNT_INVALID",
+            "message": "Choose an INR amount that converts to a whole chip amount.",
+        })
+    chips = (paise * rate) // 100
+    _hosted_customer(user)
+    existing = await db[COLLECTION].find_one({
+        "user_id": user["id"], "source": UPI_SOURCE, "idempotency_key": key,
+    }, {"_id": 0})
+    if existing:
+        if int(existing.get("amount_paise", -1)) != paise:
+            raise HTTPException(status_code=409, detail={
+                "code": "IDEMPOTENCY_CONFLICT",
+                "message": "This purchase key belongs to another amount.",
+            })
+        return await _ensure_hosted_checkout(existing, gateway)
+    gaming_day = ledger.gaming_day()
+    day_start, day_end = ledger.day_bounds_utc(gaming_day)
+    row = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "kind": "DEPOSIT",
+        "amount_paise": paise,
+        "chips": chips,
+        "rate_snapshot": {"chips_per_inr": rate, "version": "sgpay24-upi-v1"},
+        "reservation_gaming_day": gaming_day,
+        "status": "CREATED",
+        "source": UPI_SOURCE,
+        "provider": gateway.name,
+        "provider_order_id": None,
+        "provider_reference": None,
+        "checkout_url": None,
+        "idempotency_key": key,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+    async def reserve_and_insert(session):
+        kwargs = {"session": session} if session is not None else {}
+        # Force concurrent purchases for the same player/day to contend on one
+        # document. The transaction then re-reads limits and inserts atomically.
+        guard_id = f"{user['id']}:{gaming_day}"
+        await db[DAILY_GUARD_COLLECTION].update_one(
+            {"_id": guard_id},
+            {"$inc": {"version": 1}, "$setOnInsert": {
+                "user_id": user["id"], "gaming_day": str(gaming_day),
+                "created_at": utcnow(),
+            }},
+            upsert=True,
+            **kwargs,
+        )
+        duplicate = await db[COLLECTION].find_one({
+            "user_id": user["id"], "source": UPI_SOURCE, "idempotency_key": key,
+        }, {"_id": 0}, **kwargs)
+        if duplicate:
+            if int(duplicate.get("amount_paise", -1)) != paise:
+                raise HTTPException(status_code=409, detail={
+                    "code": "IDEMPOTENCY_CONFLICT",
+                    "message": "This purchase key belongs to another request.",
+                })
+            return duplicate
+        await finance._touch_deposit_limit_lock(user["id"], session=session)
+        violations = await finance._deposit_limit_violations(
+            user["id"], chips, session=session,
+        )
+        if violations:
+            violation = violations[0]
+            raise HTTPException(status_code=403, detail={
+                "code": "DEPOSIT_LIMIT",
+                "message": (
+                    f"This would take you past your {str(violation.get('period') or 'deposit').lower()} "
+                    f"deposit limit. You have {int(violation.get('remaining', 0)):,} chips left in this period."
+                ),
+            })
+        pending_count = await db[COLLECTION].count_documents({
+            "user_id": user["id"], "source": UPI_SOURCE,
+            "status": {"$in": ["CREATED", "PENDING"]},
+        }, **kwargs)
+        if pending_count >= 5:
+            raise HTTPException(status_code=429, detail={
+                "code": "UPI_PENDING_LIMIT",
+                "message": "Complete or wait for an existing UPI purchase before starting another.",
+            })
+        totals = await db[COLLECTION].aggregate([
+            {"$match": {
+                "user_id": user["id"], "source": UPI_SOURCE,
+                "status": {"$in": ["CREATED", "PENDING", "CREDITED", "RECONCILIATION_REQUIRED"]},
+                "created_at": {"$gte": day_start, "$lt": day_end},
+            }},
+            {"$group": {"_id": None, "amount_paise": {"$sum": "$amount_paise"}}},
+        ], **kwargs).to_list(1)
+        used_paise = int((totals[0] if totals else {}).get("amount_paise", 0))
+        if used_paise + paise > hosted_upi_daily_limit_paise():
+            raise HTTPException(status_code=409, detail={
+                "code": "UPI_DAILY_LIMIT",
+                "message": "This purchase would exceed the daily UPI purchase limit.",
+            })
+        await db[COLLECTION].insert_one(dict(row), **kwargs)
+        return row
+
+    try:
+        if str(os.environ.get("APP_ENV", "")).strip().lower() == "test":
+            lock = _TEST_HOSTED_LOCKS.setdefault(str(user["id"]), asyncio.Lock())
+            async with lock:
+                stored = await _run_hosted_transaction(reserve_and_insert)
+        else:
+            stored = await _run_hosted_transaction(reserve_and_insert)
+    except DuplicateKeyError:
+        duplicate = await db[COLLECTION].find_one({
+            "user_id": user["id"], "source": UPI_SOURCE, "idempotency_key": key,
+        }, {"_id": 0})
+        if not duplicate or int(duplicate.get("amount_paise", -1)) != paise:
+            raise HTTPException(status_code=409, detail={
+                "code": "IDEMPOTENCY_CONFLICT",
+                "message": "This purchase key belongs to another request.",
+            })
+        stored = duplicate
+    return await _ensure_hosted_checkout(stored, gateway)
+
+
+async def _run_hosted_transaction(work):
+    if str(os.environ.get("APP_ENV", "")).strip().lower() == "test":
+        return await work(None)
+    async with await client.start_session() as session:
+        return await session.with_transaction(lambda active: work(active))
+
+
+async def settle_hosted_deposit(
+    request_id: str, authoritative: DepositStatus, *, actor: str,
+) -> dict[str, Any]:
+    status = str(authoritative.status or "").strip().upper()
+    if status in {"CREATED", "PENDING", "PROCESSING", "AUTHORIZED"}:
+        attempts = 1
+        current = await db[COLLECTION].find_one({"id": request_id, "source": UPI_SOURCE})
+        if current:
+            attempts += int(current.get("reconcile_attempts", 0))
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {
+                "status": "PENDING",
+                "next_reconcile_at": utcnow() + timedelta(seconds=min(8 * (2 ** min(attempts, 4)), 60)),
+                "updated_at": utcnow(),
+            }, "$inc": {"reconcile_attempts": 1}},
+        )
+        return {"id": request_id, "status": "PENDING"}
+    if status in {"FAILED", "EXPIRED"}:
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {"status": status, "resolved_at": utcnow(), "updated_at": utcnow()}},
+        )
+        return {"id": request_id, "status": status}
+    if status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+        raise HTTPException(status_code=409, detail={
+            "code": "UPI_STATUS_INVALID", "message": "UPI payment returned an unsupported status.",
+        })
+
+    async def work(session):
+        kwargs = {"session": session} if session is not None else {}
+        current = await db[COLLECTION].find_one(
+            {"id": request_id, "source": UPI_SOURCE}, {"_id": 0}, **kwargs,
+        )
+        if not current:
+            raise HTTPException(status_code=404, detail={
+                "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+            })
+        if current.get("status") == "CREDITED":
+            if str(current.get("provider_reference") or "").upper() != str(authoritative.provider_reference or "").upper():
+                raise HTTPException(status_code=409, detail={
+                    "code": "UPI_TERMINAL_CONFLICT",
+                    "message": "The verified payment reference changed and needs review.",
+                })
+            return {"id": request_id, "status": "CREDITED", "duplicate": True}
+        if current.get("status") in HOSTED_TERMINAL:
+            raise HTTPException(status_code=409, detail={
+                "code": "UPI_TERMINAL_CONFLICT",
+                "message": "This purchase already has a terminal status.",
+            })
+        reference = str(authoritative.provider_reference or "").strip().upper()
+        if (
+            authoritative.amount_paise != int(current["amount_paise"])
+            or authoritative.currency != "INR"
+            or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
+        ):
+            await db[COLLECTION].update_one(
+                {"id": request_id, "source": UPI_SOURCE},
+                {"$set": {"status": "RECONCILIATION_REQUIRED", "updated_at": utcnow()}},
+                **kwargs,
+            )
+            return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+        claim = str(current.get("utr_claim") or "").strip().upper()
+        if not claim:
+            await db[COLLECTION].update_one(
+                {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+                {"$set": {
+                    "status": "PENDING",
+                    "last_error": "WAITING_FOR_UTR",
+                    "next_reconcile_at": utcnow() + timedelta(seconds=60),
+                    "updated_at": utcnow(),
+                }},
+                **kwargs,
+            )
+            return {"id": request_id, "status": "PENDING", "utr_required": True}
+        if claim != reference.upper():
+            await db[COLLECTION].update_one(
+                {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+                {"$set": {
+                    "status": "PENDING",
+                    "last_error": "UTR_MISMATCH",
+                    "next_reconcile_at": utcnow() + timedelta(seconds=60),
+                    "updated_at": utcnow(),
+                }},
+                **kwargs,
+            )
+            return {"id": request_id, "status": "PENDING", "utr_mismatch": True}
+        duplicate_reference = await db[COLLECTION].find_one(
+            {
+                "source": UPI_SOURCE,
+                "provider": current.get("provider"),
+                "provider_reference": reference,
+                "id": {"$ne": request_id},
+            },
+            {"_id": 0, "id": 1},
+            **kwargs,
+        )
+        if duplicate_reference:
+            await db[COLLECTION].update_one(
+                {"id": request_id, "source": UPI_SOURCE},
+                {"$set": {"status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR", "updated_at": utcnow()}},
+                **kwargs,
+            )
+            return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+        user = await db.users.find_one({"id": current["user_id"]}, {"_id": 0, "id": 1}, **kwargs)
+        if not user:
+            raise HTTPException(status_code=409, detail={
+                "code": "UPI_PLAYER_MISSING", "message": "The purchase needs operator review.",
+            })
+        await ledger.credit_chips(
+            current["user_id"], int(current["chips"]),
+            "Verified UPI chip purchase",
+            ref=f"upi-chip:{request_id}", kind=ledger.DEPOSIT, session=session,
+        )
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {
+                "status": "CREDITED",
+                "provider_reference": reference,
+                "resolved_at": utcnow(),
+                "resolved_by": actor,
+                "updated_at": utcnow(),
+            }},
+            **kwargs,
+        )
+        return {"id": request_id, "status": "CREDITED", "duplicate": False}
+
+    try:
+        return await _run_hosted_transaction(work)
+    except DuplicateKeyError:
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE, "status": {"$ne": "CREDITED"}},
+            {"$set": {"status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR", "updated_at": utcnow()}},
+        )
+        return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+
+
+async def reconcile_hosted_deposit(
+    request_id: str, provider: PaymentProvider | None = None, *, actor: str = "upi-status-worker",
+) -> dict[str, Any]:
+    gateway = provider or hosted_upi_reconciliation_provider()
+    row = await db[COLLECTION].find_one({
+        "id": request_id, "source": UPI_SOURCE, "kind": "DEPOSIT",
+    }, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail={
+            "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+        })
+    if row.get("status") in HOSTED_TERMINAL:
+        return {"id": request_id, "status": row["status"], "terminal": True}
+    if not row.get("provider_order_id"):
+        stored, _ = await _ensure_hosted_checkout(row, gateway)
+        return {"id": request_id, "status": stored.get("status", "PENDING")}
+    try:
+        authoritative = await gateway.get_payment_status(
+            str(row["provider_order_id"]), expected_amount_paise=int(row["amount_paise"]),
+        )
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE},
+            {"$set": {
+                "last_error": type(exc).__name__,
+                "next_reconcile_at": utcnow() + timedelta(seconds=15),
+                "updated_at": utcnow(),
+            }, "$inc": {"reconcile_attempts": 1}},
+        )
+        raise HTTPException(status_code=503, detail={
+            "code": "UPI_STATUS_UNAVAILABLE",
+            "message": "UPI payment status is temporarily unavailable.",
+        }) from exc
+    return await settle_hosted_deposit(request_id, authoritative, actor=actor)
+
+
+async def refresh_hosted_deposit(
+    request_id: str, user_id: str, provider: PaymentProvider | None = None,
+) -> dict[str, Any]:
+    current = await db[COLLECTION].find_one({
+        "id": request_id, "user_id": user_id, "source": UPI_SOURCE,
+    }, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail={
+            "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+        })
+    if current.get("status") in HOSTED_TERMINAL:
+        return request_dto(current)
+    claimed = await db[COLLECTION].find_one_and_update(
+        {
+            "id": request_id, "user_id": user_id, "source": UPI_SOURCE,
+            "status": {"$in": ["CREATED", "PENDING"]},
+            "$or": [
+                {"next_client_check_at": {"$exists": False}},
+                {"next_client_check_at": {"$lte": utcnow()}},
+            ],
+        },
+        {"$set": {"next_client_check_at": utcnow() + timedelta(seconds=7)}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if claimed:
+        try:
+            await reconcile_hosted_deposit(request_id, provider, actor=f"player-return:{user_id}")
+        except HTTPException as exc:
+            if exc.status_code < 500:
+                raise
+    stored = await db[COLLECTION].find_one({"id": request_id, "user_id": user_id}, {"_id": 0})
+    return request_dto(stored)
+
+
+def _normalize_utr(value: str) -> str:
+    utr = str(value or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9_-]{4,80}", utr):
+        raise HTTPException(status_code=400, detail={
+            "code": "UPI_UTR_INVALID",
+            "message": "Enter the UTR shown by your UPI app.",
+        })
+    return utr
+
+
+async def submit_hosted_utr(
+    request_id: str, user_id: str, utr: str, provider: PaymentProvider | None = None,
+) -> dict[str, Any]:
+    claim = _normalize_utr(utr)
+    current = await db[COLLECTION].find_one({
+        "id": request_id,
+        "user_id": user_id,
+        "source": UPI_SOURCE,
+        "kind": "DEPOSIT",
+    }, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail={
+            "code": "UPI_PURCHASE_NOT_FOUND",
+            "message": "The UPI purchase was not found.",
+        })
+    if current.get("status") == "CREDITED":
+        return current
+    if current.get("status") in HOSTED_TERMINAL:
+        raise HTTPException(status_code=409, detail={
+            "code": "UPI_PURCHASE_TERMINAL",
+            "message": "This UPI purchase can no longer be confirmed.",
+        })
+    await db[COLLECTION].update_one(
+        {"id": request_id, "user_id": user_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+        {"$set": {
+            "utr_claim": claim,
+            "utr_claimed_at": utcnow(),
+            "last_error": None,
+            "next_reconcile_at": utcnow(),
+            "updated_at": utcnow(),
+        }, "$inc": {"utr_submit_attempts": 1}},
+    )
+    result = await reconcile_hosted_deposit(
+        request_id, provider, actor=f"player-utr:{user_id}",
+    )
+    if result.get("utr_mismatch"):
+        raise HTTPException(status_code=409, detail={
+            "code": "UPI_UTR_NOT_CONFIRMED",
+            "message": "SgPay24 has not confirmed this UTR for the purchase.",
+        })
+    stored = await db[COLLECTION].find_one(
+        {"id": request_id, "user_id": user_id, "source": UPI_SOURCE}, {"_id": 0},
+    )
+    return stored
+
+
+async def reconcile_hosted_batch(
+    provider: PaymentProvider | None = None, limit: int = 25,
+) -> dict[str, int]:
+    if not await hosted_upi_reconciliation_needed():
+        return {"checked": 0, "updated": 0, "errors": 0}
+    gateway = provider or hosted_upi_reconciliation_provider()
+    cap = max(1, min(int(limit), 100))
+    rows = await db[COLLECTION].find({
+        "source": UPI_SOURCE,
+        "kind": "DEPOSIT",
+        "status": {"$in": ["CREATED", "PENDING"]},
+        "$or": [
+            {"next_reconcile_at": {"$exists": False}},
+            {"next_reconcile_at": {"$lte": utcnow()}},
+        ],
+    }, {"_id": 0, "id": 1}).sort("created_at", 1).limit(cap).to_list(cap)
+    updated = errors = 0
+    for row in rows:
+        try:
+            result = await reconcile_hosted_deposit(row["id"], gateway)
+            if result.get("status") in HOSTED_TERMINAL:
+                updated += 1
+        except HTTPException:
+            errors += 1
+    return {"checked": len(rows), "updated": updated, "errors": errors}
+
+
+async def ensure_hosted_indexes() -> None:
+    await db[COLLECTION].create_index("id", unique=True, name="operator_request_id_unique")
+    await db[COLLECTION].create_index(
+        [("user_id", 1), ("source", 1), ("idempotency_key", 1)],
+        unique=True,
+        partialFilterExpression={"source": UPI_SOURCE, "idempotency_key": {"$type": "string"}},
+        name="operator_upi_user_idempotency_unique",
+    )
+    await db[COLLECTION].create_index(
+        [("provider", 1), ("provider_order_id", 1)],
+        unique=True,
+        partialFilterExpression={"source": UPI_SOURCE, "provider_order_id": {"$type": "string"}},
+        name="operator_upi_provider_order_unique",
+    )
+    await db[COLLECTION].create_index(
+        [("provider", 1), ("provider_reference", 1)],
+        unique=True,
+        partialFilterExpression={"source": UPI_SOURCE, "provider_reference": {"$type": "string"}},
+        name="operator_upi_provider_reference_unique",
+    )
+    await db[COLLECTION].create_index(
+        [("source", 1), ("status", 1), ("next_reconcile_at", 1)],
+        name="operator_upi_reconciliation_due",
+    )
+    await db[COLLECTION].create_index(
+        [("user_id", 1), ("source", 1), ("created_at", -1)],
+        name="operator_upi_user_daily_limit",
+    )
+    await db[DAILY_GUARD_COLLECTION].create_index(
+        "gaming_day", name="upi_daily_guard_gaming_day",
+    )
 
 
 async def list_for_user(user_id: str, kind: str | None = None) -> list[dict[str, Any]]:
@@ -253,7 +940,14 @@ async def list_for_admin(kind: str, status: str | None = None) -> list[dict[str,
 
 async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve: bool, note: str = "") -> dict[str, Any]:
     claimed = await db[COLLECTION].find_one_and_update(
-        {"id": request_id, "status": "PENDING"},
+        {
+            "id": request_id,
+            "status": "PENDING",
+            "$or": [
+                {"source": ADMIN_SOURCE},
+                {"source": {"$exists": False}},
+            ],
+        },
         {"$set": {"status": "PROCESSING", "updated_at": utcnow()}},
         return_document=ReturnDocument.AFTER,
     )
@@ -261,6 +955,11 @@ async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve:
         existing = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
+        if existing.get("source") == UPI_SOURCE:
+            raise HTTPException(status_code=409, detail={
+                "code": "UPI_PROVIDER_VERIFICATION_REQUIRED",
+                "message": "Hosted UPI purchases settle only after authenticated provider status verification.",
+            })
         raise HTTPException(status_code=409, detail={"code": "OPERATOR_REQUEST_RESOLVED", "message": "This request was already resolved."})
     claimed.pop("_id", None)
     status = "APPROVED" if approve else "REJECTED"
