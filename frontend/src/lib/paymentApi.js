@@ -55,6 +55,21 @@ export const payments = {
     }, { idempotencyKey });
     return data;
   },
+  async createOperatorDeposit(amountPaise, note) {
+    const { data } = await financialApi.post(`${PLAYER_ROOT}/operator/deposits`, {
+      amount_paise: amountPaise,
+      note: note || null,
+    }, { __noFailover: true });
+    return data;
+  },
+  async createOperatorWithdrawal(amountChips, bankDetailId, note) {
+    const { data } = await financialApi.post(`${PLAYER_ROOT}/operator/withdrawals`, {
+      amount_chips: amountChips,
+      bank_detail_id: bankDetailId,
+      note: note || null,
+    }, { __noFailover: true });
+    return data;
+  },
 };
 
 export const adminPayments = {
@@ -187,6 +202,14 @@ export const adminPayments = {
   },
   async withdrawalAction(id, action, body = {}) {
     const { data } = await financialApi.post(`/admin/withdrawals/${encodeURIComponent(id)}/${action}`, body, { __noFailover: true });
+    return data;
+  },
+  async resolveOperatorRequest(id, action, body = {}) {
+    const { data } = await financialApi.post(
+      `${ADMIN_ROOT}/operator-requests/${encodeURIComponent(id)}/${action}`,
+      body,
+      { __noFailover: true },
+    );
     return data;
   },
   async reconcileEvent(id) {

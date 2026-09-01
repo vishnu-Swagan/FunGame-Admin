@@ -1,4 +1,4 @@
-import { formatInrPaise, isFinancialFeatureAvailable, normalizeWallet, rupeesToPaise, userWithdrawalStatus } from "./walletUtils";
+import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, isPlayerPaymentAvailable, normalizeWallet, rupeesToPaise, userWithdrawalStatus } from "./walletUtils";
 
 test("parses rupees to integer paise without float arithmetic", () => {
   expect(rupeesToPaise("500")).toBe(50000);
@@ -34,4 +34,17 @@ test("financial actions fail closed until both readiness and feature flags are t
   expect(isFinancialFeatureAvailable({ ready: true, features: { real_money: false, deposits: true } }, "deposits")).toBe(false);
   expect(isFinancialFeatureAvailable({ ready: false, features: { real_money: true, deposits: true } }, "deposits")).toBe(false);
   expect(isFinancialFeatureAvailable({ ready: true, features: { real_money: true, deposits: true } }, "deposits")).toBe(true);
+});
+
+test("operator rail unlocks player money actions without flipping certified financial flags", () => {
+  const dormant = {
+    ready: false,
+    features: { real_money: false, deposits: false, withdrawals: false },
+    operator: { enabled: true, deposits_enabled: true, withdrawals_enabled: true },
+  };
+  expect(isFinancialFeatureAvailable(dormant, "deposits")).toBe(false);
+  expect(isOperatorRailAvailable(dormant, "deposits")).toBe(true);
+  expect(isPlayerPaymentAvailable(dormant, "deposits")).toBe(true);
+  expect(isPlayerPaymentAvailable(dormant, "withdrawals")).toBe(true);
+  expect(isOperatorRailAvailable({ operator: { enabled: false, deposits_enabled: true } }, "deposits")).toBe(false);
 });

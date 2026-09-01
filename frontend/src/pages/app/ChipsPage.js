@@ -10,7 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
-import { formatInrPaise, isFinancialFeatureAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
+import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 
 const QUICK_BUY_AMOUNTS = [500, 1000, 2500, 5000];
@@ -33,18 +33,19 @@ function inputRupees(paise) {
  */
 export function publicFinancialConfig(payload) {
   const financial = payload?.financial || {};
+  const operatorLimits = financial.operator?.limits || {};
   const published = payload?.money_config || financial.public_config || financial.config || payload?.public_config || {};
   const limits = published.limits || financial.limits || published;
   const conversion = published.conversion || published.rate || financial.conversion || financial.rate || payload?.rate || {};
   const depositLimits = published.deposits || limits.deposits || {};
   const withdrawalLimits = published.withdrawals || limits.withdrawals || {};
-  const chipsPerInr = positiveInteger(conversion.chips_per_inr, published.chips_per_inr, financial.chips_per_inr);
-  const minDepositPaise = positiveInteger(depositLimits.minimum_paise, limits.min_deposit_paise, published.min_deposit_paise, financial.min_deposit_paise);
-  const maxDepositPaise = positiveInteger(depositLimits.maximum_paise, limits.max_deposit_paise, published.max_deposit_paise, financial.max_deposit_paise);
-  let minWithdrawalChips = positiveInteger(withdrawalLimits.minimum_chips, limits.min_withdrawal_chips, published.min_withdrawal_chips, financial.min_withdrawal_chips);
-  const maxWithdrawalChips = positiveInteger(withdrawalLimits.maximum_chips, limits.max_withdrawal_chips, published.max_withdrawal_chips, financial.max_withdrawal_chips);
-  let minWithdrawalPaise = positiveInteger(withdrawalLimits.minimum_paise, limits.min_withdrawal_paise, published.min_withdrawal_paise, financial.min_withdrawal_paise);
-  let maxWithdrawalPaise = positiveInteger(withdrawalLimits.maximum_paise, limits.max_withdrawal_paise, published.max_withdrawal_paise, financial.max_withdrawal_paise);
+  const chipsPerInr = positiveInteger(conversion.chips_per_inr, published.chips_per_inr, financial.chips_per_inr, operatorLimits.chips_per_inr);
+  const minDepositPaise = positiveInteger(depositLimits.minimum_paise, limits.min_deposit_paise, published.min_deposit_paise, financial.min_deposit_paise, operatorLimits.min_deposit_paise);
+  const maxDepositPaise = positiveInteger(depositLimits.maximum_paise, limits.max_deposit_paise, published.max_deposit_paise, financial.max_deposit_paise, operatorLimits.max_deposit_paise);
+  let minWithdrawalChips = positiveInteger(withdrawalLimits.minimum_chips, limits.min_withdrawal_chips, published.min_withdrawal_chips, financial.min_withdrawal_chips, operatorLimits.min_withdrawal_chips);
+  const maxWithdrawalChips = positiveInteger(withdrawalLimits.maximum_chips, limits.max_withdrawal_chips, published.max_withdrawal_chips, financial.max_withdrawal_chips, operatorLimits.max_withdrawal_chips);
+  let minWithdrawalPaise = positiveInteger(withdrawalLimits.minimum_paise, limits.min_withdrawal_paise, published.min_withdrawal_paise, financial.min_withdrawal_paise, operatorLimits.min_withdrawal_paise);
+  let maxWithdrawalPaise = positiveInteger(withdrawalLimits.maximum_paise, limits.max_withdrawal_paise, published.max_withdrawal_paise, financial.max_withdrawal_paise, operatorLimits.max_withdrawal_paise);
 
   if (!minWithdrawalChips && minWithdrawalPaise && chipsPerInr && (minWithdrawalPaise * chipsPerInr) % 100 === 0) {
     minWithdrawalChips = (minWithdrawalPaise * chipsPerInr) / 100;
@@ -152,20 +153,26 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (bankAccountId && !bankAccounts.some((account) => account.id === bankAccountId)) setBankAccountId(bankAccounts[0]?.id || "");
   }, [bankAccounts, bankAccountId]);
 
-  const buyFeatureAvailable = isFinancialFeatureAvailable(financial, "deposits");
-  const withdrawalFeatureAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
-  const providerReadinessCopy = buyFeatureAvailable && withdrawalFeatureAvailable
+  const hostedBuyAvailable = isFinancialFeatureAvailable(financial, "deposits");
+  const hostedWithdrawAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
+  const operatorBuyAvailable = isOperatorRailAvailable(financial, "deposits");
+  const operatorWithdrawAvailable = isOperatorRailAvailable(financial, "withdrawals");
+  const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
+  const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
+  const providerReadinessCopy = hostedBuyAvailable && hostedWithdrawAvailable
     ? "Chip purchases and withdrawals are completed by the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-    : buyFeatureAvailable
+    : hostedBuyAvailable
       ? "Chip purchases are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-      : withdrawalFeatureAvailable
+      : hostedWithdrawAvailable
         ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
-        : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
+        : operatorBuyAvailable || operatorWithdrawAvailable
+          ? "Buy Chips and withdrawals are submitted for Admin review. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
+          : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
     && config.maxDepositPaise
-    && config.checkoutHosts.length,
+    && (hostedBuyAvailable ? config.checkoutHosts.length : operatorBuyAvailable),
   );
   const withdrawalConfigured = Boolean(config.chipsPerInr && config.minWithdrawalPaise && config.minWithdrawalChips && config.maxWithdrawalChips);
   const buyPaise = rupeesToPaise(buyAmount);
@@ -190,14 +197,21 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (!buyPaise || buyPaise < config.minDepositPaise || buyPaise > config.maxDepositPaise) {
       return toast.error(`Enter an amount between ${formatInrPaise(config.minDepositPaise)} and ${formatInrPaise(config.maxDepositPaise)}.`);
     }
-    const key = financialIntentKey("deposit", user?.id, `amount_paise=${buyPaise}`);
     setBusy("buy");
     try {
-      const result = await payments.createDeposit(buyPaise, key);
-      const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.checkoutHosts);
-      if (!checkoutUrl) throw new Error("The payment provider returned an invalid checkout address. No chips were credited.");
-      checkoutNavigator(checkoutUrl);
-      clearFinancialIntent("deposit", user?.id, key);
+      if (hostedBuyAvailable && config.checkoutHosts.length) {
+        const key = financialIntentKey("deposit", user?.id, `amount_paise=${buyPaise}`);
+        const result = await payments.createDeposit(buyPaise, key);
+        const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.checkoutHosts);
+        if (!checkoutUrl) throw new Error("The payment provider returned an invalid checkout address. No chips were credited.");
+        checkoutNavigator(checkoutUrl);
+        clearFinancialIntent("deposit", user?.id, key);
+        return;
+      }
+      await payments.createOperatorDeposit(buyPaise);
+      toast.success("Buy request submitted. Track its status in Activity.");
+      await Promise.allSettled([load(), refreshUser?.()]);
+      changeTab("activity");
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
@@ -216,14 +230,19 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (!withdrawChips || withdrawChips < config.minWithdrawalChips || withdrawChips > config.maxWithdrawalChips) {
       return toast.error("Choose an INR amount that converts to a whole, eligible chip amount.");
     }
-    if (withdrawChips > wallet.withdrawable_chips) return toast.error("This amount is higher than your withdrawable chip balance.");
+    const availableForWithdraw = hostedWithdrawAvailable ? wallet.withdrawable_chips : wallet.available_chips;
+    if (withdrawChips > availableForWithdraw) return toast.error(hostedWithdrawAvailable ? "This amount is higher than your withdrawable chip balance." : "This amount is higher than your available play chips.");
     if (!bankAccountId) return toast.error("Add and select a bank account before withdrawing.");
 
-    const key = financialIntentKey("withdrawal", user?.id, `amount_chips=${withdrawChips}&bank=${bankAccountId}`);
     setBusy("withdraw");
     try {
-      await payments.createWithdrawal(withdrawChips, bankAccountId, key);
-      clearFinancialIntent("withdrawal", user?.id, key);
+      if (hostedWithdrawAvailable) {
+        const key = financialIntentKey("withdrawal", user?.id, `amount_chips=${withdrawChips}&bank=${bankAccountId}`);
+        await payments.createWithdrawal(withdrawChips, bankAccountId, key);
+        clearFinancialIntent("withdrawal", user?.id, key);
+      } else {
+        await payments.createOperatorWithdrawal(withdrawChips, bankAccountId);
+      }
       toast.success("Withdrawal submitted. Track its status in Activity.");
       await Promise.allSettled([load(), refreshUser?.()]);
       changeTab("activity");
@@ -255,12 +274,12 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Buy chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Buy chips</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."}</p></div></div>
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Buy Chips is temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
             <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">You receive</span><strong className="tabular-nums text-primary">{formatChips(buyChips)} chips</strong></div>
-            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? "Opening secure checkout…" : "Continue to payment"}</Button>
+            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? (hostedBuyAvailable ? "Opening secure checkout…" : "Submitting request…") : hostedBuyAvailable ? "Continue to payment" : "Submit buy request"}</Button>
           </form>
         </TabsContent>
 
