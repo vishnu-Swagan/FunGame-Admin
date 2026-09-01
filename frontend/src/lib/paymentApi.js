@@ -70,6 +70,30 @@ export const adminPayments = {
     const { data } = await financialApi.post("/admin/payment-gateways", body, { __noFailover: true });
     return data?.data?.gateway || data?.gateway || data;
   },
+  async updateGateway(id, body) {
+    const { data } = await financialApi.patch(`/admin/payment-gateways/${encodeURIComponent(id)}`, body, { __noFailover: true });
+    return data?.data?.gateway || data?.gateway || data;
+  },
+  async paymentGatewaySettings() {
+    const { data } = await financialApi.get("/admin/payment-gateway-settings");
+    return data?.data?.settings || data?.settings || data;
+  },
+  async savePaymentGatewaySettings(body) {
+    const { data } = await financialApi.patch("/admin/payment-gateway-settings", body, { __noFailover: true });
+    return data?.data?.settings || data?.settings || data;
+  },
+  async localAgents() {
+    const { data } = await financialApi.get("/admin/payment-local-agents");
+    return data?.data?.items || [];
+  },
+  async createLocalAgent(body) {
+    const { data } = await financialApi.post("/admin/payment-local-agents", body, { __noFailover: true });
+    return data?.data?.agent || data?.agent || data;
+  },
+  async deleteLocalAgent(id) {
+    const { data } = await financialApi.delete(`/admin/payment-local-agents/${encodeURIComponent(id)}`, { __noFailover: true });
+    return data?.data || data;
+  },
   async writeGatewayCredentials(id, credentials) {
     const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/credentials`, { credentials }, { __noFailover: true });
     return data?.data || data;
