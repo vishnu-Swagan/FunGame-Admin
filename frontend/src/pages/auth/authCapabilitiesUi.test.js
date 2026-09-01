@@ -61,6 +61,7 @@ test("manual-review registration requires both contacts and password confirmatio
     capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
   };
   const screen = render(Register);
+  expect(screen.querySelector('#reg-login-id').required).toBe(true);
   expect(screen.querySelector('#reg-contact').type).toBe("tel");
   expect(screen.querySelector('#reg-email').required).toBe(true);
   expect(screen.querySelector('#reg-password').required).toBe(true);
@@ -81,6 +82,9 @@ test("registration clearly labels manual approval without claiming an OTP", () =
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').textContent).toMatch(/Create account for review/);
 
   const login = render(Login);
+  const loginIdentifier = login.querySelector('#identifier');
+  expect(loginIdentifier.placeholder).toBe("Email, mobile with +country code, or your Login ID");
+  expect(loginIdentifier.placeholder).not.toMatch(/\+91|GK Login ID/i);
   expect(login.querySelector('[data-testid="login-forgot-link"]')).toBeNull();
   expect(login.querySelector('[data-testid="login-manual-recovery-note"]')).not.toBeNull();
 });
@@ -143,7 +147,7 @@ test("verification exposes the ready mobile delivery channel", () => {
 });
 
 test("an already delivered code stays verifiable while resend is unavailable", () => {
-  mockLocationState = { channel: "PHONE", identifier: "+919876543210" };
+  mockLocationState = { channel: "PHONE", identifier: "+919876543210", loginId: "Royal.Player" };
   mockCapabilitiesState = {
     loading: false,
     capabilities: { registration_enabled: false, email_registration: false, phone_registration: false },
@@ -151,4 +155,6 @@ test("an already delivered code stays verifiable while resend is unavailable", (
   const screen = render(VerifyEmail);
   expect(screen.querySelector('[data-testid="verification-resend-unavailable"]')).not.toBeNull();
   expect(screen.querySelector('[data-testid="verify-email-resend-button"]').disabled).toBe(true);
+  expect(screen.querySelector('[data-testid="verify-login-id-input"]').value).toBe("Royal.Player");
+  expect(screen.querySelector('[data-testid="verify-login-id-input"]').required).toBe(true);
 });

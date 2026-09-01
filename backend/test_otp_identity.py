@@ -158,7 +158,7 @@ async def main():
     # soon as the phone challenge is consumed.
     registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Player One',
+        email='player@example.com', username='Player.One', full_name='Player One',
         date_of_birth='1990-01-01', country='India',
         accepted_terms=True,
     ))
@@ -173,7 +173,7 @@ async def main():
     # never fabricates or sends a second delivery.
     duplicate_unverified = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Someone Else',
+        email='player@example.com', username='Player.One', full_name='Someone Else',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     assert duplicate_unverified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
@@ -226,7 +226,7 @@ async def main():
         await expect_http_error(
             routes_auth.register(RegisterRequest(
                 channel='PHONE', identifier='+919100000002', phone='+919100000002',
-                email='crm-failure@example.com',
+                email='crm-failure@example.com', username='CRM.Failure.Player',
                 full_name='CRM Failure', date_of_birth='1990-01-01', country='India',
                 accepted_terms=True,
             )),
@@ -286,15 +286,18 @@ async def main():
     )
     assert verified_error.detail == unknown_error.detail
 
-    duplicate_verified = await routes_auth.register(RegisterRequest(
+    duplicate_verified = await expect_http_error(routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Another Name',
+        email='player@example.com', username='Player.One', full_name='Another Name',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
-    ))
-    assert duplicate_verified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
-    assert duplicate_verified['verification_required'] is True
-    assert duplicate_verified['channel'] == 'PHONE'
-    assert 'dev_code' not in duplicate_verified
+    )), 409, 'LOGIN_ID_UNAVAILABLE')
+    duplicate_unknown = await expect_http_error(routes_auth.register(RegisterRequest(
+        channel='PHONE', identifier='+919100000099', phone='+919100000099',
+        email='unknown-contact@example.com', username='Player.One',
+        full_name='Unknown Contact', date_of_birth='1990-01-01', country='India',
+        accepted_terms=True,
+    )), 409, 'LOGIN_ID_UNAVAILABLE')
+    assert duplicate_verified.detail == duplicate_unknown.detail
 
     planted_password = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='player@example.com', email='player@example.com',
@@ -401,7 +404,7 @@ async def main():
 
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
-        full_name='Phone Player', date_of_birth='1990-01-01', country='India',
+        username='Phone.Player', full_name='Phone Player', date_of_birth='1990-01-01', country='India',
         accepted_terms=True,
     ))
     assert phone_registration['channel'] == 'PHONE'
@@ -431,7 +434,7 @@ async def main():
 
     race_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000003', phone='+919100000003',
-        email='race@example.com', full_name='Race Player',
+        email='race@example.com', username='Race.Player', full_name='Race Player',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     race_request = VerifyEmailRequest(

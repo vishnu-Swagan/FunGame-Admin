@@ -831,6 +831,27 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
             'approved_at': approved_at,
             'approved_by': admin['id'],
         }
+        requested_username = user.get('requested_username')
+        if requested_username:
+            try:
+                await crm.require_portal_identity_readiness()
+                username, username_key = await crm.reserve_player_login_id(
+                    requested_username, user_id, session=session,
+                )
+            except crm.CrmConfigurationError as exc:
+                raise HTTPException(status_code=503, detail={
+                    'code': 'LOGIN_ID_STORAGE_UNAVAILABLE',
+                    'message': 'Login ID storage is temporarily unavailable. No account was approved.',
+                }) from exc
+            except (ValueError, DuplicateKeyError) as exc:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'LOGIN_ID_UNAVAILABLE',
+                    'message': 'The requested Login ID is unavailable. Reject this application so the player can choose another.',
+                }) from exc
+            approval_updates.update({
+                'username': username,
+                'username_key': username_key,
+            })
         if manual_review_registration:
             approval_updates.update({
                 'email': manual_email,
@@ -858,6 +879,8 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 'submitted_at': user.get('submitted_at'),
             })
         unset_fields = {'rejection_reason': ''}
+        if requested_username:
+            unset_fields['requested_username'] = ''
         if manual_review_registration:
             unset_fields.update({'pending_email': '', 'pending_phone': ''})
         try:
@@ -1022,8 +1045,8 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     async def commit(session):
         kwargs = {'session': session} if session is not None else {}
         try:
-            await crm.reserve_login_id(
-                username, 'USER', user['id'], session=session,
+            await crm.reserve_player_login_id(
+                username, user['id'], session=session,
             )
             await db.users.insert_one(user, **kwargs)
             # Attribution is bound at creation and never again — see crm.py. An
@@ -1119,8 +1142,8 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         if current.get('status') != 'PENDING':
             raise HTTPException(status_code=400, detail='Request already resolved')
         try:
-            await crm.reserve_login_id(
-                username, 'USER', user['id'], session=session,
+            await crm.reserve_player_login_id(
+                username, user['id'], session=session,
             )
             # Resolve the request, create the user, bind attribution, opening
             # chips and notification in the same transaction.
