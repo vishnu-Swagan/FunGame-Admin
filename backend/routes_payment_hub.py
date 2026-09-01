@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from auth_utils import get_current_user, require_recent_admin_step_up, verify_password
+from auth_utils import get_current_user, require_admin, require_recent_admin_step_up, verify_password
 from db import db, serialize_doc
 from payment_hub import service
 from payment_hub.domain import GatewayError, redact, utcnow
@@ -229,12 +229,12 @@ class RouteSimulation(BaseModel):
 
 
 @admin_router.get("/payment-hub/status")
-async def hub_status(admin=Depends(require_permission("gateway.view", feature=False))):
+async def hub_status(admin=Depends(require_admin)):
     return envelope(service.feature_status())
 
 
 @admin_router.get("/payment-gateways")
-async def gateways(admin=Depends(require_permission("gateway.view"))):
+async def gateways(admin=Depends(require_admin)):
     try:
         service.require_admin_feature()
         rows = await db.payment_gateways.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -244,7 +244,7 @@ async def gateways(admin=Depends(require_permission("gateway.view"))):
 
 
 @admin_router.post("/payment-gateways", status_code=201)
-async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create", step_up=True))):
+async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create"))):
     try:
         return envelope({"gateway": service.gateway_dto(await service.create_gateway(body.model_dump(exclude_none=True), admin["id"]))})
     except (GatewayError, ValueError) as exc:
@@ -252,7 +252,7 @@ async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("
 
 
 @admin_router.get("/payment-gateways/{gateway_id}")
-async def gateway_detail(gateway_id: str, admin=Depends(require_permission("gateway.view"))):
+async def gateway_detail(gateway_id: str, admin=Depends(require_admin)):
     row = await db.payment_gateways.find_one({"id": gateway_id})
     if not row:
         raise_gateway(GatewayError("GATEWAY_NOT_FOUND", "Gateway was not found.", status_code=404))
@@ -306,7 +306,7 @@ async def gateway_update(gateway_id: str, body: GatewayUpdate, admin=Depends(req
 
 
 @admin_router.get("/payment-gateway-settings")
-async def payment_gateway_settings(admin=Depends(require_permission("gateway.view"))):
+async def payment_gateway_settings(admin=Depends(require_admin)):
     try:
         return envelope({"settings": await service.get_platform_settings()})
     except GatewayError as exc:
@@ -323,7 +323,7 @@ async def payment_gateway_settings_update(body: PaymentPlatformSettingsUpdate, a
 
 
 @admin_router.get("/payment-local-agents")
-async def payment_local_agents(admin=Depends(require_permission("gateway.view"))):
+async def payment_local_agents(admin=Depends(require_admin)):
     try:
         rows = await service.list_local_agents()
         return envelope({"items": rows, "count": len(rows)})

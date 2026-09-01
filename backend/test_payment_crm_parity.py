@@ -362,6 +362,19 @@ class AdminFeatureDefaultTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
+    def test_crm_catalog_reads_are_open_to_any_active_admin(self):
+        from auth_utils import require_admin
+        for endpoint in (
+            routes_payment_hub.hub_status,
+            routes_payment_hub.gateways,
+            routes_payment_hub.gateway_detail,
+            routes_payment_hub.payment_gateway_settings,
+            routes_payment_hub.payment_local_agents,
+        ):
+            with self.subTest(endpoint=endpoint.__name__):
+                depends = endpoint.__defaults__[0]
+                self.assertEqual(depends.dependency, require_admin)
+
     def _step_up(self, admin):
         now = datetime.now(timezone.utc)
         admin.update({
@@ -377,20 +390,29 @@ class PaymentHubPermissionTests(unittest.IsolatedAsyncioTestCase):
         admin = {"id": "legacy-admin", "role": "ADMIN", "status": "ACTIVE"}
         viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
         self.assertEqual(viewed["id"], "legacy-admin")
-        self._step_up(admin)
-        created = await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
+        created = await routes_payment_hub.require_permission("gateway.create")(user=admin)
         self.assertEqual(created["id"], "legacy-admin")
+        self._step_up(admin)
         updated = await routes_payment_hub.require_permission(
             "gateway.update_non_secret_config", step_up=True,
         )(user=admin)
         self.assertEqual(updated["id"], "legacy-admin")
 
+    async def test_create_does_not_require_mfa_step_up(self):
+        admin = {"id": "legacy-admin", "role": "ADMIN", "status": "ACTIVE"}
+        created = await routes_payment_hub.require_permission("gateway.create")(user=admin)
+        self.assertEqual(created["id"], "legacy-admin")
+        with self.assertRaises(HTTPException) as denied:
+            await routes_payment_hub.require_permission(
+                "gateway.update_non_secret_config", step_up=True,
+            )(user=admin)
+        self.assertEqual(denied.exception.detail["code"], "ADMIN_MFA_REQUIRED")
+
     async def test_empty_grant_list_without_role_is_treated_as_bootstrap_admin(self):
         admin = {"id": "bootstrap", "role": "ADMIN", "status": "ACTIVE", "admin_permissions": []}
         viewed = await routes_payment_hub.require_permission("gateway.view")(user=admin)
         self.assertEqual(viewed["id"], "bootstrap")
-        self._step_up(admin)
-        created = await routes_payment_hub.require_permission("gateway.create", step_up=True)(user=admin)
+        created = await routes_payment_hub.require_permission("gateway.create")(user=admin)
         self.assertEqual(created["id"], "bootstrap")
 
     async def test_pre_rbac_admin_cannot_activate_rotate_or_manage_routes(self):

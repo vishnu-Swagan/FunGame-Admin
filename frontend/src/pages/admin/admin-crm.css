@@ -365,7 +365,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .crm-panel-header p { margin: 3px 0 0; color: var(--ink-faint); font-size: 10px; }
 .crm-panel-meta { color: var(--ink-faint); font-size: 10px; white-space: nowrap; }
 .crm-panel-body { min-width: 0; }
-.crm-text-link { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--crm-accent-ink); font-size: 10.5px; font-weight: 680; }
+.crm-text-link { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--crm-accent-ink); cursor: pointer; font-size: 10.5px; font-weight: 680; }
 .crm-text-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .crm-filter-bar { display: flex; min-height: 59px; flex-wrap: wrap; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); }
 .crm-search-control { display: flex; width: min(340px, 45vw); height: 36px; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--ink-faint); }
@@ -541,6 +541,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .gateway-tabs button.is-active { border-color: var(--crm-accent, var(--accent)); background: var(--surface); color: var(--ink); box-shadow: 0 4px 12px #16233014; }
 .gateway-tabs button b { display: inline-grid; min-width: 21px; min-height: 21px; place-items: center; border-radius: 999px; background: var(--crm-accent, var(--accent)); color: #fff; font-size: 9px; }
 .gateway-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.gateway-create-panel { grid-column: 1 / -1; }
 .gateway-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-panel); }
 .gateway-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, var(--surface), var(--surface-muted)); }
 .gateway-card-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -563,8 +564,8 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .gateway-field { min-width: 0; display: grid; gap: 5px; }
 .gateway-field span { font-size: 9.5px; color: var(--ink-soft); font-weight: 650; }
 .gateway-field em { color: var(--danger); font-style: normal; }
-.gateway-field input, .gateway-settings-grid input, .local-agent-form input, .local-agent-form select { min-height: 38px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 10.5px; outline: none; }
-.gateway-field input:focus, .gateway-settings-grid input:focus, .local-agent-form input:focus, .local-agent-form select:focus { border-color: var(--crm-accent, var(--accent)); box-shadow: 0 0 0 3px var(--crm-accent-soft, var(--accent-soft)); }
+.gateway-field input, .gateway-field select, .gateway-settings-grid input, .local-agent-form input, .local-agent-form select { min-height: 38px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 10.5px; outline: none; }
+.gateway-field input:focus, .gateway-field select:focus, .gateway-settings-grid input:focus, .local-agent-form input:focus, .local-agent-form select:focus { border-color: var(--crm-accent, var(--accent)); box-shadow: 0 0 0 3px var(--crm-accent-soft, var(--accent-soft)); }
 .gateway-webhook { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); }
 .gateway-webhook strong { display: flex; align-items: center; gap: 6px; font-size: 10.5px; }
 .gateway-webhook p { margin: 4px 0 0; color: var(--ink-faint); font-size: 9.5px; line-height: 1.45; }
