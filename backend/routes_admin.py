@@ -766,6 +766,178 @@ WIN_NOTE_RE = 'win \\(round|cashout'
 BET_NOTE_RE = 'bet \\(round|Live bet'
 REFUND_NOTE_RE = 'refund|cancelled'
 
+# Account removal is intentionally narrower than a database purge. Historical
+# game, wallet and audit rows are retained so reports do not silently change.
+# The short-lived records below are authentication/UI adjuncts and can safely
+# disappear with the login itself.
+ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS: tuple[tuple[str, str], ...] = (
+    ('otp_challenges', 'user_id'),
+    ('notifications', 'user_id'),
+    ('verification_requests', 'user_id'),
+    ('chip_request_pending_counters', 'user_id'),
+)
+
+
+async def _account_delete_blockers(user_id: str, *, session=None) -> list[str]:
+    """Return live or financial relationships that make deletion unsafe."""
+    kwargs = {'session': session} if session is not None else {}
+    checks = (
+        ('an open Aviator bet', 'aviator_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an open live-game bet', 'live_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an open game bet', 'game_rounds', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an unfinished Blackjack hand', 'blackjack_games', {
+            'user_id': user_id, 'status': {'$nin': ['done', 'idle']},
+        }),
+        ('an active Rummy seat', 'rummy_seats', {
+            'user_id': user_id, 'status': {'$in': ['ACTIVE', 'RECONNECTING']},
+        }),
+        ('a pending chip request', 'chip_requests', {
+            'user_id': user_id, 'status': 'PENDING',
+        }),
+        # Payment history is retained under the financial/audit retention
+        # model. Deleting its identity owner through this general CRM action
+        # would create an ambiguous financial record, so suspension is the
+        # correct operator action for these accounts.
+        ('deposit payment history', 'deposit_orders', {'user_id': user_id}),
+        ('withdrawal payment history', 'withdrawal_requests', {'user_id': user_id}),
+        ('operator payment history', 'operator_payment_requests', {'user_id': user_id}),
+        ('saved bank details', 'payout_methods', {'user_id': user_id}),
+    )
+    blockers = []
+    for label, collection, query in checks:
+        if await db[collection].find_one(query, {'_id': 1}, **kwargs):
+            blockers.append(label)
+    return blockers
+
+
+async def _delete_player_account(user_id: str, admin: dict) -> dict:
+    """Permanently remove one player login with transaction and role guards."""
+    user = await db.users.find_one({'id': user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    _require_player_credential_target(user)
+    blockers = await _account_delete_blockers(user_id)
+    if blockers:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_DELETE_BLOCKED',
+            'message': (
+                'This player cannot be deleted while the account has '
+                f"{', '.join(blockers)}. Resolve active items or suspend the account instead."
+            ),
+            'blockers': blockers,
+        })
+
+    original_status = user.get('status')
+
+    async def commit_deletion(session):
+        kwargs = {'session': session} if session is not None else {}
+        current = await db.users.find_one(
+            {'id': user_id, 'role': 'PLAYER', 'status': original_status}, **kwargs,
+        )
+        if not current:
+            existing = await db.users.find_one({'id': user_id}, **kwargs)
+            if not existing:
+                raise HTTPException(status_code=404, detail='User not found')
+            _require_player_credential_target(existing)
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed. Reload the list and confirm deletion again.',
+            })
+
+        locked = await db.users.update_one(
+            {'id': user_id, 'role': 'PLAYER', 'status': original_status},
+            {'$set': {
+                'status': 'DELETING',
+                'active_session_id': f'revoked-{uuid.uuid4()}',
+                'deletion_started_at': _now(),
+                'deletion_started_by': admin['id'],
+            }},
+            **kwargs,
+        )
+        if locked.matched_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed. Reload the list and confirm deletion again.',
+            })
+
+        # Re-check after acquiring the player-row write lock. On production
+        # MongoDB, a concurrent bet/payment write now conflicts with this
+        # transaction rather than racing account removal.
+        blockers_now = await _account_delete_blockers(user_id, session=session)
+        if blockers_now:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_DELETE_BLOCKED',
+                'message': 'New account activity appeared before deletion. Reload and try again.',
+                'blockers': blockers_now,
+            })
+
+        deleted_ephemeral = 0
+        for collection, field in ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS:
+            result = await db[collection].delete_many({field: user_id}, **kwargs)
+            deleted_ephemeral += int(result.deleted_count)
+        avatar_result = await db.avatar_uploads.delete_many({
+            '$or': [{'_id': user_id}, {'user_id': user_id}],
+        }, **kwargs)
+        deleted_ephemeral += int(avatar_result.deleted_count)
+        reservation_result = await db.login_id_reservations.delete_many({
+            'owner_type': 'USER', 'owner_id': user_id,
+        }, **kwargs)
+        deleted_ephemeral += int(reservation_result.deleted_count)
+
+        # Attribution and immutable history are retained, but the current
+        # assignment is closed so no future report treats a deleted login as an
+        # active distributor player.
+        await db.player_attribution.update_many(
+            {'user_id': user_id, 'active': True},
+            {'$set': {
+                'active': False, 'closed_at': _now(),
+                'closed_by': admin['id'], 'close_reason': 'ACCOUNT_DELETED',
+            }},
+            **kwargs,
+        )
+
+        result = await db.users.delete_one({
+            'id': user_id, 'role': 'PLAYER', 'status': 'DELETING',
+        }, **kwargs)
+        if result.deleted_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed before deletion completed.',
+            })
+
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'PLAYER_ACCOUNT_DELETED',
+            'target_type': 'PLAYER',
+            'target_id': user_id,
+            'before': {
+                'status': original_status,
+                'registration_source': current.get('registration_source'),
+                'login_configured': bool(current.get('username') or current.get('email')),
+                'chip_balance': int(current.get('chip_balance') or 0),
+                'points_balance': int(current.get('points_balance') or 0),
+            },
+            'after': {'deleted': True},
+            'metadata': {
+                'ephemeral_records_deleted': deleted_ephemeral,
+                'history_retained': True,
+            },
+            'created_at': _now(),
+        }, **kwargs)
+        return deleted_ephemeral
+
+    deleted_ephemeral = await _run_account_transaction(commit_deletion)
+    logger.info(
+        'admin %s deleted player account %s; removed %s ephemeral records',
+        admin.get('id'), user_id, deleted_ephemeral,
+    )
+    return {
+        'message': 'Player account deleted permanently.',
+        'deleted_user_id': user_id,
+        'history_retained': True,
+    }
+
 
 async def _user_ledger_stats() -> dict:
     """Aggregate chip_transactions per user into deposits / winning chips / loss chips."""
@@ -814,6 +986,17 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
             u['email'] = u.get('pending_email') or u.get('email')
             u['phone'] = u.get('pending_phone') or u.get('phone')
     return {'users': serialize_doc(users)}
+
+
+@router.delete('/users/{user_id}')
+async def delete_user_account(user_id: str, admin: dict = Depends(require_admin)):
+    """Delete a player login while retaining immutable game/audit history.
+
+    Authentication dependencies guarantee an active administrator. The
+    deletion service separately locks the target to ``role=PLAYER`` so this
+    route can never be used to remove an administrator or distributor login.
+    """
+    return await _delete_player_account(user_id, admin)
 
 
 @router.post('/users/{user_id}/approve')
