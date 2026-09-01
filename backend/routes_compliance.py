@@ -35,6 +35,18 @@ PERMANENT_PHRASE = 'CLOSE MY ACCOUNT PERMANENTLY'
 def _admin_permissions(admin: dict) -> set[str]:
     # An explicitly empty canonical list means revoked. Only genuinely legacy
     # records that lack the canonical field may fall back to `permissions`.
+    pre_rbac = (
+        not str(admin.get('admin_role') or '').strip()
+        and 'permissions' not in admin
+        and (
+            'admin_permissions' not in admin
+            or not bool(admin.get('admin_permissions') or [])
+        )
+    )
+    if pre_rbac:
+        # The bootstrap production operator predates RBAC migration. Manual
+        # approvals remain protected by the same mandatory recent step-up.
+        return {'KYC_VIEW', 'KYC_REVIEW'}
     values = (
         admin.get('admin_permissions')
         if 'admin_permissions' in admin
