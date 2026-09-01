@@ -1,24 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 112" role="img" aria-labelledby="title" data-flight-profile="side-view">
   <title id="title">Red vintage Aviator aircraft</title>
-  <g fill="#ed0b42">
-    <!-- Original, compact side-profile vintage aircraft silhouette. -->
-    <path d="M20 54 43 50 31 29 45 25 68 49l33-1 27-25 28-1-19 25 59-2 25 7c11 3 17 7 17 11s-7 8-19 10l-26 3-58-5 20 19-27-2-30-19-62-2c-19-1-31-5-38-10Z"/>
-    <path d="m14 57 50-3-25 22-19-1 19-15-25 2Z"/>
-    <path d="m85 64 70-2 38 24-33 3-75-25Z"/>
-    <path d="m154 45 17-18 25 1 16 19-58-2Z"/>
-    <ellipse cx="229" cy="62" rx="13" ry="12"/>
-    <circle cx="241" cy="62" r="5"/>
+  <defs>
+    <linearGradient id="craft-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff4864"/>
+      <stop offset="0.5" stop-color="#e11942"/>
+      <stop offset="1" stop-color="#af1330"/>
+    </linearGradient>
+    <linearGradient id="craft-wing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d3163a"/>
+      <stop offset="1" stop-color="#9c112b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Vertical tail fin -->
+  <path fill="#c1132f" d="M18 40 44 58 44 62 30 62 12 47Z"/>
+  <!-- Horizontal stabiliser -->
+  <path fill="#e11942" d="M20 60 58 60 50 71 30 71Z"/>
+
+  <!-- Landing gear -->
+  <path stroke="#0e1116" stroke-width="4" stroke-linecap="round" d="M168 72 178 92M150 74 140 92"/>
+  <circle cx="180" cy="93" r="8" fill="#0e1116"/>
+  <circle cx="180" cy="93" r="3.4" fill="#42474f"/>
+  <circle cx="138" cy="93" r="8" fill="#0e1116"/>
+  <circle cx="138" cy="93" r="3.4" fill="#42474f"/>
+
+  <!-- Main wing -->
+  <path fill="url(#craft-wing)" d="M112 63 196 63 224 82 150 82Z"/>
+
+  <!-- Fuselage -->
+  <path fill="url(#craft-body)" d="M40 59C68 47 120 43 172 45 214 46 244 49 260 56 263 57 263 61 260 62 244 69 214 72 172 73 120 74 68 71 40 60Z"/>
+
+  <!-- Cockpit canopy -->
+  <path fill="#0d1015" d="M150 49C170 47 190 48 202 53 190 57 170 57 152 56Z"/>
+  <path fill="#79d0ff" d="M158 51C172 50 185 51 194 53 184 55 170 55 160 54Z" opacity="0.72"/>
+
+  <!-- Nose spinner -->
+  <path fill="#8d0f25" d="M256 54 273 60 256 66Z"/>
+
+  <!-- Propeller (cheap CSS spin) -->
+  <g id="propeller" transform-origin="273px 60px">
+    <path fill="#111418" d="M270 28h6l-2 30h-2zM270 92h6l-2-30h-2z"/>
+    <circle cx="273" cy="60" r="5" fill="#e11942"/>
+    <circle cx="273" cy="60" r="2" fill="#111418"/>
   </g>
-  <path fill="#101216" d="m172 42 7-10h14l9 13-30-3Z"/>
-  <path fill="#ed0b42" d="M185 28h5v8h-5z"/>
-  <path fill="#101216" d="m47 50 6-12 6 11-12 1Zm79 11 9-4 10 5-10 5-9-6Z" opacity=".72"/>
-  <g>
-    <g id="propeller" transform-origin="244px 61px">
-      <path fill="#ed0b42" d="M240 18c3-8 7-8 9 0l-4 39h-6l1-39Zm-1 48h6l4 38c-2 8-6 8-9 0l-1-38Z"/>
-      <circle cx="244" cy="62" r="5" fill="#ed0b42"/>
-      <circle cx="244" cy="62" r="2" fill="#101216"/>
-    </g>
-  </g>
+
   <style>
     #propeller { animation: propeller-spin .19s linear infinite; }
     @keyframes propeller-spin { to { transform: rotate(360deg); } }

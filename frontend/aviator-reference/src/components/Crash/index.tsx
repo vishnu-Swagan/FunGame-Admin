@@ -1,15 +1,23 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React from "react";
-import Unity from "react-unity-webgl";
 import "./crash.scss";
 import Context from "../../context";
 import aviatorLogo from "../../assets/images/logo.svg";
 import aviatorCraft from "../../assets/images/aviator-craft.svg";
-import { aviatorUnityContext } from "../../unity";
 import { playGameSound } from "../../sound";
 
-const RENDERER_STARTUP_LIMIT_MS = 3500;
-const FLIGHT_HOVER_PROGRESS = 0.82;
+// The plane reaches its hovering zone in the upper-right of the stage around
+// this multiplier; after that it holds position while the number keeps climbing,
+// exactly like the real Aviator flight. This is presentation only — round
+// outcomes stay wholly server-authoritative.
+const HOVER_MULTIPLIER = 2.2;
+// A convex climb: nearly flat off the runway, then rising steeply.
+const CURVE_EXPONENT = 1.72;
+const CURVE_SAMPLES = 30;
+// Deterministic default so the stage renders identically under SSR and tests
+// where layout measurement is unavailable.
+const DEFAULT_STAGE = { width: 900, height: 480 };
+
 const flightCurveValue = (seconds: number) => (
 	1
 	+ (0.06 * seconds)
@@ -18,57 +26,93 @@ const flightCurveValue = (seconds: number) => (
 	+ Math.pow(0.04 * seconds, 4)
 );
 
+type Stage = { width: number; height: number };
+
+type FlightGeometry = {
+	fillPath: string;
+	linePath: string;
+	planeX: number;
+	planeY: number;
+	planeAngle: number;
+};
+
+// Build the filled flight curve and the plane's position/pitch from a single
+// parametric quadratic so the aircraft always rides exactly on the tip of the
+// curve, rotated to its tangent. Everything is computed in the stage's own
+// pixel space, so the plane and curve cannot drift apart at any aspect ratio.
+const buildFlightGeometry = (stage: Stage, progress: number): FlightGeometry => {
+	const width = stage.width || DEFAULT_STAGE.width;
+	const height = stage.height || DEFAULT_STAGE.height;
+	const startX = 0;
+	const startY = height;
+	const hoverX = width * 0.7;
+	const hoverY = height * 0.17;
+	const spanX = hoverX - startX;
+	const spanY = hoverY - startY;
+	const p = Math.max(0, Math.min(1, progress));
+
+	let linePath = `M ${startX.toFixed(2)} ${startY.toFixed(2)}`;
+	let planeX = startX;
+	let planeY = startY;
+	for (let i = 1; i <= CURVE_SAMPLES; i += 1) {
+		const u = (i / CURVE_SAMPLES) * p;
+		const x = startX + (spanX * u);
+		const y = startY + (spanY * Math.pow(u, CURVE_EXPONENT));
+		linePath += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
+		planeX = x;
+		planeY = y;
+	}
+	const fillPath = `${linePath} L ${planeX.toFixed(2)} ${startY.toFixed(2)} Z`;
+
+	// Tangent of the curve at the plane's position (dy/dx). Screen y grows
+	// downward, so a rising curve yields a negative angle (nose up).
+	const derivativeU = spanX;
+	const derivativeV = spanY * CURVE_EXPONENT * Math.pow(Math.max(p, 1e-3), CURVE_EXPONENT - 1);
+	const planeAngle = (Math.atan2(derivativeV, derivativeU) * 180) / Math.PI;
+
+	return { fillPath, linePath, planeX, planeY, planeAngle };
+};
+
 export default function WebGLStarter() {
-	const { GameState, currentNum, time, setCurrentTarget, latestRoundNumber } = React.useContext(Context)
+	const { GameState, currentNum, time, setCurrentTarget } = React.useContext(Context);
 	const [target, setTarget] = React.useState(1);
 	const [waiting, setWaiting] = React.useState(0);
 	const [flightSeconds, setFlightSeconds] = React.useState(0);
-	const [unityLoaded, setUnityLoaded] = React.useState(false);
-	const [unityFailed, setUnityFailed] = React.useState(false);
-	const [fallbackActive, setFallbackActive] = React.useState(false);
-	const lastUnityState = React.useRef(0);
-	const [rendererSyncKey, setRendererSyncKey] = React.useState("");
+	const [showLoading, setShowLoading] = React.useState(false);
+	const [stage, setStage] = React.useState<Stage>(DEFAULT_STAGE);
+	const stageRef = React.useRef<HTMLDivElement | null>(null);
+
 	const stateReady = GameState === "BET" || GameState === "PLAYING" || GameState === "GAMEEND";
-	const phaseSyncKey = `${latestRoundNumber || 0}:${GameState}`;
-	const unityRendererReady = stateReady && unityLoaded && !unityFailed && !fallbackActive && rendererSyncKey === phaseSyncKey;
-	const rendererReady = stateReady && (unityRendererReady || fallbackActive);
+	const inFlight = GameState === "PLAYING" || GameState === "GAMEEND";
 
-	React.useEffect(() => {
-		const handleLoaded = () => setUnityLoaded(true);
-		const handleProgress = (progress: number) => {
-			if (progress >= 1) setUnityLoaded(true);
+	// Keep the flight geometry locked to the stage's real pixel size so the
+	// plane and curve line up on every screen. Falls back to DEFAULT_STAGE when
+	// measurement is unavailable (SSR / jsdom).
+	React.useLayoutEffect(() => {
+		const node = stageRef.current;
+		if (!node) return undefined;
+		const measure = () => {
+			const rect = node.getBoundingClientRect();
+			if (rect.width > 0 && rect.height > 0) {
+				setStage((previous) => (
+					previous.width === rect.width && previous.height === rect.height
+						? previous
+						: { width: rect.width, height: rect.height }
+				));
+			}
 		};
-		const handleError = (error: unknown) => {
-			// Unity 2021 emits this compatibility notice through the library's
-			// error channel even though the bundled game continues normally.
-			if (String(error).includes("Pointer_stringify")) return;
-			console.error("Original Aviator renderer failed to load", error);
-			setUnityFailed(true);
-			setFallbackActive(true);
-		};
-
-		aviatorUnityContext.on("loaded", handleLoaded);
-		aviatorUnityContext.on("progress", handleProgress);
-		aviatorUnityContext.on("error", handleError);
-
+		measure();
+		let observer: ResizeObserver | undefined;
+		if (typeof ResizeObserver !== "undefined") {
+			observer = new ResizeObserver(measure);
+			observer.observe(node);
+		}
+		window.addEventListener("resize", measure);
 		return () => {
-			aviatorUnityContext.removeEventListener("loaded");
-			aviatorUnityContext.removeEventListener("progress");
-			aviatorUnityContext.removeEventListener("error");
+			observer?.disconnect();
+			window.removeEventListener("resize", measure);
 		};
 	}, []);
-
-	// The bundled Unity scene is an enhancement, not a reason to block a live
-	// round. Some browsers download all WebGL files successfully but never emit
-	// Unity's final `loaded` callback. Move to the deterministic, server-driven
-	// renderer after a short bounded wait. If Unity finishes later, it may take
-	// over only after it has synchronised during the next BET phase. Keeping the
-	// fallback for the active flight prevents two aircraft appearing at once.
-	React.useEffect(() => {
-		if (!stateReady || unityLoaded || fallbackActive) return undefined;
-		const timeout = window.setTimeout(() => setFallbackActive(true), RENDERER_STARTUP_LIMIT_MS);
-		return () => window.clearTimeout(timeout);
-	}, [stateReady, unityLoaded, fallbackActive]);
 
 	React.useEffect(() => {
 		let myInterval;
@@ -83,7 +127,7 @@ export default function WebGLStarter() {
 				computedMultiplier = Math.max(1, Math.floor(curve * 100) / 100);
 				setTarget(computedMultiplier);
 				setCurrentTarget(computedMultiplier);
-			}
+			};
 			myInterval = setInterval(() => {
 				getCurrentTime();
 			}, 20);
@@ -102,7 +146,7 @@ export default function WebGLStarter() {
 			}, 20);
 		}
 		return () => clearInterval(myInterval);
-	}, [GameState, time])
+	}, [GameState, time]);
 
 	const previousGameState = React.useRef("");
 	React.useEffect(() => {
@@ -112,9 +156,6 @@ export default function WebGLStarter() {
 		if (GameState === "GAMEEND") playGameSound("flewAway");
 	}, [GameState]);
 
-	const [showLoading, setShowLoading] = React.useState(false);
-
-	// Handle game state changes
 	React.useEffect(() => {
 		if (GameState === "BET") {
 			setShowLoading(true);
@@ -128,85 +169,61 @@ export default function WebGLStarter() {
 	const displayedMultiplier = GameState === "PLAYING"
 		? Math.max(target || 1, 1)
 		: Math.max(Number(currentNum) || 1, 1);
-	// Keep the aircraft motion tied to the already displayed, server-synchronised
-	// multiplier. This changes presentation only; round outcomes remain wholly
-	// server-authoritative. Reusing the same value at GAMEEND also prevents the
-	// aircraft from jumping to a different position when a round settles.
+
+	// Drive the aircraft motion from the same server-synchronised flight time
+	// that produces the on-screen multiplier. Presentation only — outcomes stay
+	// server-authoritative, and reusing this value at GAMEEND keeps the aircraft
+	// from jumping when a round settles.
 	const continuousFlightMultiplier = flightCurveValue(Math.max(0, flightSeconds));
-	const multiplierProgress = Math.min(
-		FLIGHT_HOVER_PROGRESS,
-		Math.max(0.035, Math.sqrt(Math.max(0, continuousFlightMultiplier - 1) / 1.2)),
+	const rawProgress = Math.sqrt(
+		Math.max(0, continuousFlightMultiplier - 1) / (HOVER_MULTIPLIER - 1),
 	);
-	const flightProgress = GameState === "PLAYING" || GameState === "GAMEEND"
-		? multiplierProgress
-		: 0;
-	const verticalProgress = Math.min(
-		0.88,
-		(1.165 * Math.pow(flightProgress, 2)) + (0.35 * Math.pow(flightProgress, 3)),
+	const flightProgress = inFlight ? Math.min(1, rawProgress) : 0;
+	const geometry = React.useMemo(
+		() => buildFlightGeometry(stage, flightProgress),
+		[stage.width, stage.height, flightProgress],
 	);
-	const curveRemaining = 1 - flightProgress;
-	const horizontalProgress = 1 - Math.pow(1 - flightProgress, 1.3);
 	const planeStyle = {
-		left: `${Math.min(78, 4 + (82 * horizontalProgress))}%`,
-		bottom: `${4 + (94 * verticalProgress)}%`,
-		transform: `translate(-2%, 55%) rotate(${-5 - (2.5 * flightProgress)}deg)`,
+		left: `${geometry.planeX.toFixed(2)}px`,
+		top: `${geometry.planeY.toFixed(2)}px`,
+		transform: `translate(-42%, -58%) rotate(${geometry.planeAngle.toFixed(2)}deg)`,
 	};
 
-	React.useLayoutEffect(() => {
-		if (!stateReady || !unityLoaded || unityFailed) return undefined;
-		const phaseState = GameState === "PLAYING" ? 2 : GameState === "GAMEEND" ? 5 : 1;
-		lastUnityState.current = phaseState;
-		aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: phaseState }));
-		let secondFrame = 0;
-		const firstFrame = window.requestAnimationFrame(() => {
-			secondFrame = window.requestAnimationFrame(() => setRendererSyncKey(phaseSyncKey));
-		});
-		return () => {
-			window.cancelAnimationFrame(firstFrame);
-			window.cancelAnimationFrame(secondFrame);
-		};
-	}, [GameState, phaseSyncKey, stateReady, unityLoaded, unityFailed]);
-
-	React.useEffect(() => {
-		if (!fallbackActive || !unityLoaded || unityFailed) return;
-		if (GameState !== "BET" || rendererSyncKey !== phaseSyncKey) return;
-		setFallbackActive(false);
-	}, [fallbackActive, unityLoaded, unityFailed, GameState, rendererSyncKey, phaseSyncKey]);
-
-	React.useEffect(() => {
-		if (!unityRendererReady || GameState !== "PLAYING") return;
-		const nextState = target > 10 ? 4 : target > 2 ? 3 : 2;
-		if (lastUnityState.current === nextState) return;
-		lastUnityState.current = nextState;
-		aviatorUnityContext.send("GameManager", "RequestToken", JSON.stringify({ gameState: nextState }));
-	}, [GameState, unityRendererReady, target]);
+	const rendererMode = stateReady ? "flight" : "pending";
 
 	return (
 		<div className="crash-container">
-			<div className={`space-box ${unityRendererReady ? "github-visual-ready" : fallbackActive && stateReady ? "fallback-visual-ready" : "renderer-pending"}`} id="space" data-server-state-ready={stateReady ? "true" : "false"} data-renderer-ready={rendererReady ? "true" : "false"} data-renderer-mode={unityRendererReady ? "unity" : fallbackActive && stateReady ? "fallback" : "pending"}>
-				<Unity
-					unityContext={aviatorUnityContext}
-					matchWebGLToCanvasSize={true}
-					className="github-unity-stage"
-				/>
-				{fallbackActive && stateReady && <div className="fallback-flight-visual" aria-hidden="true">
-					<svg className="flight-curve" viewBox="0 0 820 420" preserveAspectRatio="none">
+			<div
+				className={`space-box ${stateReady ? "flight-visual-ready" : "renderer-pending"}`}
+				id="space"
+				ref={stageRef}
+				data-server-state-ready={stateReady ? "true" : "false"}
+				data-renderer-ready={stateReady ? "true" : "false"}
+				data-renderer-mode={rendererMode}
+			>
+				<div className="stage-grid" aria-hidden="true"></div>
+				{stateReady && <div className="flight-stage" aria-hidden="true">
+					{inFlight && <svg className="flight-curve" viewBox={`0 0 ${stage.width} ${stage.height}`} preserveAspectRatio="none">
 						<defs>
-							<linearGradient id="flight-area" x1="0" y1="1" x2="1" y2="0">
-								<stop offset="0" stopColor="#e11942" stopOpacity="0.04" />
-								<stop offset="1" stopColor="#e11942" stopOpacity="0.24" />
+							<linearGradient id="flight-area" x1="0" y1="1" x2="0.4" y2="0">
+								<stop offset="0" stopColor="#e11942" stopOpacity="0.06" />
+								<stop offset="1" stopColor="#e11942" stopOpacity="0.32" />
 							</linearGradient>
 						</defs>
-						<path className="curve-fill" style={{ clipPath: `inset(0 ${100 - (horizontalProgress * 100)}% 0 0)` }} d="M0 420 C273 420 546 265 820 -186 L820 420 Z" />
-						<path className="curve-shadow" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
-						<path className="curve-line" pathLength="1" style={{ strokeDashoffset: curveRemaining }} d="M0 420 C273 420 546 265 820 -186" />
-					</svg>
-					<img
-						src={aviatorCraft}
-						alt=""
-						className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""} ${GameState === "GAMEEND" ? "crashed" : ""}`}
+						<path className="curve-fill" d={geometry.fillPath} />
+						<path className="curve-glow" d={geometry.linePath} />
+						<path className="curve-line" d={geometry.linePath} />
+					</svg>}
+					{inFlight && <div
+						className={`plane-anchor ${GameState === "GAMEEND" ? "crashed" : ""}`}
 						style={planeStyle}
-					/>
+					>
+						<img
+							src={aviatorCraft}
+							alt=""
+							className={`plane ${inFlight ? "visible" : ""} ${GameState === "GAMEEND" ? "crashed" : ""}`}
+						/>
+					</div>}
 					<div className={`center-logo ${GameState !== "BET" ? "hide" : ""}`}>
 						<img src={aviatorLogo} alt="" />
 						<span>Preparing live round</span>
@@ -214,9 +231,8 @@ export default function WebGLStarter() {
 				</div>}
 				<div className="aviator-renderer-gate" aria-live="polite">
 					<img src={aviatorLogo} alt="Aviator" />
-					<span>{unityFailed ? "Live renderer unavailable" : "Synchronising live round"}</span>
+					<span>Synchronising live round</span>
 				</div>
-				<div className="stage-grid" aria-hidden="true"></div>
 				{stateReady && <div className={`round-state state-${GameState.toLowerCase()}`}>
 					<span className="state-dot"></span>
 					{GameState === "BET" ? "Next round" : GameState === "PLAYING" ? "Live round" : "Round ended"}
@@ -234,10 +250,10 @@ export default function WebGLStarter() {
 				</div>
 				<div className={`loading-container ${stateReady && showLoading ? 'show-loading' : ''}`}>
 					<div className="loading-bar">
-						<div 
-							className="loading-fill" 
+						<div
+							className="loading-fill"
 							id="fill"
-							style={{ 
+							style={{
 								width: showLoading ? `${Math.max(0, Math.min(100, (5000 - waiting) * 100 / 5000))}%` : '0%',
 								animation: showLoading ? 'loadingRightToLeft 5s linear forwards' : 'none'
 							}}
