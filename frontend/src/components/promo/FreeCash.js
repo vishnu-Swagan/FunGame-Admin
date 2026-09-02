@@ -2,30 +2,29 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { errMsg } from "@/lib/api";
 import { promoApi } from "@/lib/promoApi";
+import "./freeCashArt.css";
 
 function formatInr(paise) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 }).format((Number(paise) || 0) / 100);
 }
 
-function Chest() {
+export function ChestArt({ size = "hero" }) {
+  const hero = size === "hero";
   return (
-    <svg viewBox="0 0 120 120" className="h-24 w-24 drop-shadow-[0_10px_20px_rgba(16,185,129,0.45)]" aria-hidden>
-      <defs>
-        <linearGradient id="chestGold" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#fde68a" />
-          <stop offset="100%" stopColor="#d97706" />
-        </linearGradient>
-        <linearGradient id="chestBody" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="100%" stopColor="#065f46" />
-        </linearGradient>
-      </defs>
-      <ellipse cx="60" cy="104" rx="34" ry="8" fill="rgba(16,185,129,0.25)" />
-      <rect x="22" y="52" width="76" height="46" rx="10" fill="url(#chestBody)" />
-      <path d="M18 58 C18 32 102 32 102 58 L102 66 L18 66 Z" fill="url(#chestGold)" />
-      <circle cx="60" cy="70" r="10" fill="#fbbf24" stroke="#78350f" strokeWidth="3" />
-      <rect x="56" y="70" width="8" height="14" rx="2" fill="#78350f" />
-    </svg>
+    <div className={`relative flex items-center justify-center ${hero ? "h-36 w-40" : "h-12 w-12"}`} aria-hidden>
+      {hero && (
+        <img
+          src="/promo/free-cash-coins.png"
+          alt=""
+          className="chakri-coin-glow pointer-events-none absolute left-1/2 top-16 w-36 max-w-none"
+        />
+      )}
+      <img
+        src={hero ? "/promo/free-cash-chest.png" : "/promo/free-cash-fab.png"}
+        alt=""
+        className={`chakri-chest-bob relative z-10 object-contain drop-shadow-[0_12px_28px_rgba(16,185,129,0.55)] ${hero ? "h-32 w-32" : "h-11 w-11"}`}
+      />
+    </div>
   );
 }
 
@@ -68,7 +67,7 @@ export default function FreeCash({ open, onClose, initial }) {
       <div className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-emerald-300/25 bg-[#07150f] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
         <button type="button" onClick={onClose} className="absolute right-4 top-4 text-white/45">Close</button>
         <div className="flex flex-col items-center">
-          <Chest />
+          <ChestArt />
           <p className="mt-2 text-lg font-black tracking-wide text-amber-200">Free Cash</p>
           <p className="text-3xl font-black tabular-nums text-white">{formatInr(wallet.balance_paise)}</p>
           <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-black/50">
@@ -93,8 +92,8 @@ export default function FreeCash({ open, onClose, initial }) {
 
 export function FreeCashFab({ onClick, remainingPaise }) {
   return (
-    <button type="button" onClick={onClick} data-testid="free-cash-fab" className="fixed bottom-24 right-4 z-40 flex h-16 w-16 items-center justify-center rounded-full border border-amber-300/40 bg-gradient-to-b from-emerald-400 to-emerald-800 shadow-[0_8px_30px_rgba(16,185,129,0.55)]">
-      <span className="text-[10px] font-black uppercase leading-tight text-amber-100">Free<br />Cash</span>
+    <button type="button" onClick={onClick} data-testid="free-cash-fab" className="chakri-fab-pulse fixed bottom-24 right-4 z-40 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-amber-300/40 bg-[#062016]">
+      <img src="/promo/free-cash-fab.png" alt="Free Cash" className="h-14 w-14 object-contain" />
       {remainingPaise > 0 && <span className="sr-only">{formatInr(remainingPaise)} to claim</span>}
     </button>
   );
