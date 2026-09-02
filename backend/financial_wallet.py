@@ -227,12 +227,45 @@ async def _run_transaction(fn):
 
 def _decode_32_byte_key(raw: str, setting: str) -> bytes:
     try:
-        key = base64.urlsafe_b64decode(str(raw).encode("ascii"))
+        padded = str(raw or "") + "=" * (-len(str(raw or "")) % 4)
+        key = base64.urlsafe_b64decode(padded.encode("ascii"))
     except Exception as exc:  # noqa: BLE001 - normalized to a secret-free error
         raise ProviderConfigurationError(f"{setting} must be base64-encoded") from exc
     if len(key) != 32:
         raise ProviderConfigurationError(f"{setting} must decode to exactly 32 bytes")
     return key
+
+
+def _derived_payout_key(purpose: str, environ: Optional[Mapping[str, str]] = None) -> bytes:
+    """Operator-rail fallback: derive AES keys from the existing SgPay master key.
+
+    Live cash-out does not use the financial-wallet WITHDRAWALS_ENABLED rail, so
+    PAYOUT_DATA_KEY_V1 is often unset. PAYMENT_CREDENTIALS_MASTER_KEY is already
+    required for hosted UPI, and HKDF keeps bank details encrypted without a
+    second secret.
+    """
+    env = os.environ if environ is None else environ
+    raw = str(env.get("PAYMENT_CREDENTIALS_MASTER_KEY", "")).strip()
+    if not raw:
+        raise ProviderConfigurationError(
+            "Payout encryption needs PAYOUT_DATA_KEY_V1 or PAYMENT_CREDENTIALS_MASTER_KEY",
+        )
+    master = _decode_32_byte_key(raw, "PAYMENT_CREDENTIALS_MASTER_KEY")
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"chakri-operator-payout-v1",
+        info=purpose.encode("utf-8"),
+    ).derive(master)
+
+
+def _payout_key_or_derived(raw: str, setting: str, purpose: str, environ=None) -> bytes:
+    value = str(raw or "").strip()
+    if value:
+        return _decode_32_byte_key(value, setting)
+    return _derived_payout_key(purpose, environ)
 
 
 def _active_encryption_key(environ: Optional[Mapping[str, str]] = None) -> tuple[str, bytes]:
@@ -241,7 +274,9 @@ def _active_encryption_key(environ: Optional[Mapping[str, str]] = None) -> tuple
     if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", version):
         raise ProviderConfigurationError("PAYOUT_DATA_ACTIVE_KEY_VERSION is invalid")
     setting = f"PAYOUT_DATA_KEY_{version.upper()}"
-    return version, _decode_32_byte_key(str(env.get(setting, "")), setting)
+    return version, _payout_key_or_derived(
+        str(env.get(setting, "")), setting, f"payout-data-{version.lower()}", env,
+    )
 
 
 def _key_for_version(version: str, environ: Optional[Mapping[str, str]] = None) -> bytes:
@@ -249,14 +284,18 @@ def _key_for_version(version: str, environ: Optional[Mapping[str, str]] = None) 
     if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", str(version)):
         raise ProviderConfigurationError("Stored payout encryption key version is invalid")
     setting = f"PAYOUT_DATA_KEY_{str(version).upper()}"
-    return _decode_32_byte_key(str(env.get(setting, "")), setting)
+    return _payout_key_or_derived(
+        str(env.get(setting, "")), setting, f"payout-data-{str(version).lower()}", env,
+    )
 
 
 def _fingerprint_key(environ: Optional[Mapping[str, str]] = None) -> bytes:
     env = os.environ if environ is None else environ
-    return _decode_32_byte_key(
+    return _payout_key_or_derived(
         str(env.get("PAYOUT_DATA_FINGERPRINT_KEY", "")),
         "PAYOUT_DATA_FINGERPRINT_KEY",
+        "payout-fingerprint",
+        env,
     )
 
 
