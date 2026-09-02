@@ -10,6 +10,7 @@
     position: absolute;
     inset: 0;
     isolation: isolate;
+    container-type: size;
     width: 100%;
     height: auto;
     overflow: hidden;
@@ -22,14 +23,8 @@
       position: absolute;
       inset: 0;
       z-index: 2;
-      background-image:
-        radial-gradient(circle at 52% 52%, rgba(12, 96, 145, 0.28), transparent 31%),
-        repeating-conic-gradient(
-          from 0deg at 0% 100%,
-          rgba(255, 255, 255, 0.055) 0deg 7deg,
-          rgba(255, 255, 255, 0) 7deg 15deg
-        );
-      opacity: 0.72;
+      background: radial-gradient(circle at 52% 52%, rgba(12, 96, 145, 0.2), transparent 32%);
+      opacity: 0.56;
       pointer-events: none;
     }
 
@@ -53,6 +48,88 @@
     pointer-events: none;
   }
 
+}
+
+.flight-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  contain: paint;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.flight-rays {
+  position: absolute;
+  inset: -28%;
+  width: 156%;
+  height: 156%;
+  overflow: hidden;
+  opacity: 0.58;
+}
+
+.flight-rays-rotor {
+  fill: rgba(255, 255, 255, 0.045);
+  transform: rotate(0deg);
+  transform-box: view-box;
+  transform-origin: 32px 124px;
+  animation: flightRaysRotate 70s linear infinite;
+  will-change: transform;
+}
+
+.flight-glow {
+  position: absolute;
+  top: 48%;
+  left: 52%;
+  width: 76%;
+  aspect-ratio: 1.35;
+  opacity: 0.46;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  transition:
+    opacity 260ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 260ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.flight-glow-core {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(66, 166, 222, 0.25) 0%,
+    rgba(25, 112, 166, 0.16) 26%,
+    rgba(9, 49, 82, 0.07) 48%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.8;
+  transform: scale(0.98);
+  transform-origin: 50% 50%;
+}
+
+.space-box.phase-playing .flight-glow {
+  opacity: 1;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  will-change: transform, opacity;
+}
+
+.space-box.phase-playing .flight-glow-core,
+.space-box.phase-gameend .flight-glow-core {
+  animation: flightGlowBreath 7.2s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate;
+  will-change: transform, opacity;
+}
+
+.space-box.phase-gameend .flight-glow {
+  opacity: 0;
+  transform: translate3d(-50%, -50%, 0) scale(1.02);
+  will-change: transform, opacity;
+}
+
+.space-box[data-motion-paused="true"] .flight-rays-rotor,
+.space-box[data-motion-paused="true"] .flight-glow,
+.space-box[data-motion-paused="true"] .flight-glow-core,
+.space-box[data-motion-paused="true"] .aircraft-propeller {
+  animation-play-state: paused !important;
 }
 
 .native-flight-visual {
@@ -233,10 +310,6 @@
 .aircraft-sprite {
   transform-box: fill-box;
   transform-origin: 13.5% 94.7%;
-
-  &.visible {
-    animation: planeCruise 1.18s ease-in-out infinite;
-  }
 }
 
 .plane {
@@ -258,7 +331,6 @@
 
   &.visible {
     opacity: 1;
-    animation: propellerSpin 140ms linear infinite;
   }
 
   .propeller-blade {
@@ -278,8 +350,14 @@
   }
 }
 
+.aircraft-propeller.is-flying:not([data-motion-driver="waapi"]),
+.aircraft-propeller.is-ended:not([data-motion-driver="waapi"]) {
+  animation: propellerSpin 110ms linear infinite;
+  will-change: transform;
+}
+
 .plane-flight.crashed .aircraft-sprite {
-  animation: aviatorEscapeVector 460ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
+  animation: aviatorEscapeVector 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 .multiplier,
@@ -436,17 +514,25 @@
   }
 }
 
-@keyframes planeCruise {
-  0% {
-    transform: rotate(-0.65deg);
+@keyframes flightRaysRotate {
+  from {
+    transform: rotate(0deg);
   }
 
-  50% {
-    transform: rotate(0.8deg);
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes flightGlowBreath {
+  from {
+    opacity: 0.72;
+    transform: scale(0.98);
   }
 
-  100% {
-    transform: rotate(-0.65deg);
+  to {
+    opacity: 0.88;
+    transform: scale(1.035);
   }
 }
 
@@ -533,6 +619,32 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .flight-rays-rotor,
+  .flight-glow,
+  .flight-glow-core,
+  .aircraft-propeller {
+    animation: none !important;
+    will-change: auto;
+  }
+
+  .flight-rays-rotor {
+    transform: rotate(0deg);
+  }
+
+  .flight-glow {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+
+  .space-box.phase-gameend .flight-glow {
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+
+  .flight-glow-core {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
   .round-state .state-dot,
   .plane,
   .aircraft-propeller,
@@ -542,7 +654,6 @@
     transition-duration: 1ms !important;
   }
 
-  .aircraft-sprite.visible,
   .plane-flight.crashed .aircraft-sprite,
   .aircraft-propeller.visible {
     animation: none !important;
