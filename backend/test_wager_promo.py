@@ -104,10 +104,18 @@ class WagerPromoTests(unittest.IsolatedAsyncioTestCase):
             account_number="12345678901",
             ifsc_code="HDFC0000001",
             payout_identifier="",
+            phone="+919876543210",
+            email="player@example.com",
         )
         self.assertIsInstance(result, PayoutSubmission)
         self.assertEqual(result.provider_payout_id, "po-1")
-        adapter._request_json.assert_awaited()
+        called = adapter._request_json.await_args
+        self.assertEqual(called.kwargs.get("as_query"), True)
+        sent = called.args[1]
+        self.assertNotIn("upi_id", sent)
+        self.assertEqual(sent["phone"], "9876543210")
+        self.assertEqual(sent["email"], "player@example.com")
+        self.assertEqual(sent["account_number"], "12345678901")
 
 
 if __name__ == "__main__":

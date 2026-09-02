@@ -1027,31 +1027,58 @@ class SgPay24PaymentProvider:
             raise ProviderConfigurationError("Provider host resolved to a non-public address")
         return list(dict.fromkeys(addresses))
 
-    async def _request_json(self, path: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    @staticmethod
+    def _provider_error_message(status: int, raw: bytes) -> str:
+        text = ""
+        try:
+            parsed = json.loads(raw or b"{}")
+            if isinstance(parsed, Mapping):
+                text = str(parsed.get("msg") or parsed.get("message") or parsed.get("error") or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            return f"SgPay payout failed ({status}): {text}"[:300]
+        return f"SgPay payout failed ({status}): Provider rejected withdrawal request."
+
+    async def _request_json(
+        self, path: str, payload: Mapping[str, Any], *, as_query: bool = False,
+    ) -> Mapping[str, Any]:
         allowed = {self._create_path, self._status_path, self._payout_path, self._payout_status_path}
         extra = str(self._env.get("SGPAY24_PAYOUT_PATH") or "").strip()
         if extra.startswith("/api/") and len(extra) < 80 and ".." not in extra:
             allowed.add(extra)
         if path not in allowed:
             raise ProviderConfigurationError("SgPay24 endpoint is not approved")
-        body = json.dumps(dict(payload), separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        cleaned = {
+            str(key): value for key, value in dict(payload).items()
+            if value not in {None, ""}
+        }
         timeout = self._timeout
+        if as_query:
+            query = urllib.parse.urlencode(
+                {key: str(value) for key, value in cleaned.items()},
+                doseq=False,
+            )
+            request_path = f"{path}?{query}"
+            body = None
+            headers = {"Accept": "application/json"}
+        else:
+            request_path = path
+            body = json.dumps(cleaned, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            headers = {"Accept": "application/json", "Content-Type": "application/json"}
 
         def send() -> Mapping[str, Any]:
             connection = _PinnedHTTPSConnection(
                 self._resolve_public_addresses()[0], self._host, self._port, timeout=timeout,
             )
             try:
-                connection.request(
-                    "POST", path, body=body,
-                    headers={"Accept": "application/json", "Content-Type": "application/json"},
-                )
+                connection.request("POST", request_path, body=body, headers=headers)
                 response = connection.getresponse()
+                raw = response.read(1024 * 1024 + 1)
                 if 300 <= response.status < 400:
                     raise ProviderRequestError("Provider redirect was rejected")
                 if response.status >= 400:
-                    raise ProviderRequestError("Provider returned an unsuccessful response")
-                raw = response.read(1024 * 1024 + 1)
+                    raise ProviderRequestError(self._provider_error_message(response.status, raw))
                 if len(raw) > 1024 * 1024:
                     raise ProviderRequestError("Provider response exceeded the configured limit")
                 parsed = json.loads(raw or b"{}")
@@ -1175,20 +1202,37 @@ class SgPay24PaymentProvider:
         upi = str(kwargs.get("payout_identifier") or "").strip()
         if not account_number and not upi:
             raise ProviderRequestError("Payout needs a bank account or UPI id")
+        phone = re.sub(r"\D", "", str(kwargs.get("phone") or ""))
+        if len(phone) == 12 and phone.startswith("91"):
+            phone = phone[2:]
+        if len(phone) != 10 or phone[0] not in "6789":
+            raise ProviderRequestError("A valid Indian mobile number is required for payout")
+        email = str(kwargs.get("email") or "").strip().lower()
+        if not self._valid_email(email):
+            email = self._fallback_email
         payload = {
             "merchant_id": self._merchant_id,
             "order_id": order_id,
             "amount": self._amount_in_rupees(amount_paise),
             "name": str(kwargs.get("account_holder_name") or "Player")[:80],
-            "account_number": account_number,
-            "ifsc": ifsc,
-            "ifsc_code": ifsc,
-            "upi_id": upi,
-            "phone": str(kwargs.get("phone") or "9999999999")[:15],
+            "email": email,
+            "phone": phone,
             "api_token": self._api_token,
             "remark": f"Chakri payout {order_id[:24]}",
         }
-        response = await self._request_json(self._payout_endpoint(), payload)
+        if account_number:
+            payload["account_number"] = account_number
+        if ifsc:
+            payload["ifsc"] = ifsc
+            payload["ifsc_code"] = ifsc
+        if upi:
+            payload["upi_id"] = upi
+        bank_name = str(kwargs.get("bank_name") or "").strip()
+        if bank_name:
+            payload["bank_name"] = bank_name
+        # SgPay24 createPayoutRequest ignores JSON bodies ("All fields are required")
+        # and only reads query-string fields, same host as hosted UPI deposits.
+        response = await self._request_json(self._payout_endpoint(), payload, as_query=True)
         data = response.get("data") if isinstance(response.get("data"), Mapping) else response
         if not isinstance(data, Mapping):
             data = response
