@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -262,6 +263,77 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                     "order_id": "order-12345678",
                     "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
                 })
+
+    async def test_status_parses_naive_ist_date_as_utc_occurred_at(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": 500, "status": 1, "utr": "UTR12345678",
+            "date": "2026-09-02 16:47:00",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertEqual(actual.status, "PAID")
+        self.assertEqual(
+            actual.occurred_at,
+            datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc),
+        )
+
+    async def test_status_prefers_paid_at_over_created_at(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": 500, "status": 1, "utr": "UTR12345678",
+            "created_at": "2026-09-02 12:02:05",
+            "paid_at": "2026-09-02T16:47:00+05:30",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertEqual(
+            actual.occurred_at,
+            datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc),
+        )
+
+    async def test_status_without_date_leaves_occurred_at_none(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": "500.00", "status": 1, "utr": "UTR12345678",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertIsNone(actual.occurred_at)
+
+    def test_webhook_parses_updated_at_when_present(self):
+        gateway = provider()
+        raw = json.dumps({
+            "order_id": "order-12345678",
+            "amount": 500,
+            "status": 1,
+            "transaction_id": 918273,
+            "utr": "CALLBACK-CLAIMED-UTR",
+            "updated_at": "2026-09-02T16:47:00+05:30",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.occurred_at, "2026-09-02T11:17:00.000Z")
+
+    def test_webhook_without_date_leaves_occurred_at_none(self):
+        gateway = provider()
+        raw = json.dumps({
+            "order_id": "order-12345678",
+            "amount": 500,
+            "status": 1,
+            "transaction_id": 918273,
+            "utr": "CALLBACK-CLAIMED-UTR",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertIsNone(event.occurred_at)
 
     async def test_status_rejects_wrong_order_merchant_amount_and_missing_paid_utr(self):
         responses = (
@@ -643,6 +715,48 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 100)
         self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
+
+    async def test_settle_persists_provider_occurred_at_and_does_not_overwrite(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "buy-chips-timestamp-0001", self.gateway,
+        )
+        captured = datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc)
+        later = datetime(2026, 9, 2, 11, 47, tzinfo=timezone.utc)
+        credited = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-CAPTURE-TIME", captured),
+            actor="test-status-check",
+        )
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(operator_rail.isoformat_utc(stored["provider_occurred_at"]), "2026-09-02T11:17:00.000Z")
+        dto = operator_rail.as_player_deposit(stored)
+        self.assertEqual(dto["paid_at"], "2026-09-02T11:17:00.000Z")
+        self.assertNotEqual(dto["paid_at"], dto["created_at"])
+
+        await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-CAPTURE-TIME", later),
+            actor="late-reconcile",
+        )
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(operator_rail.isoformat_utc(stored["provider_occurred_at"]), "2026-09-02T11:17:00.000Z")
+
+    async def test_player_dto_falls_back_to_resolved_at_when_provider_date_missing(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "buy-chips-timestamp-fallback", self.gateway,
+        )
+        credited = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-NO-DATE"),
+            actor="test-status-check",
+        )
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertIsNone(stored.get("provider_occurred_at"))
+        dto = operator_rail.as_player_deposit(stored)
+        self.assertEqual(dto["paid_at"], dto["resolved_at"])
+        self.assertNotEqual(dto["paid_at"], dto["created_at"])
 
     async def test_reconciliation_passes_expected_amount_and_credits_exactly_once(self):
         purchase, _ = await operator_rail.create_hosted_deposit(

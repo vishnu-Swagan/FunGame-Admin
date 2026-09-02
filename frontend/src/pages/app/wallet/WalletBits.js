@@ -1,6 +1,6 @@
 import { Banknote, Gift, Hourglass, WalletCards } from "lucide-react";
 import { formatChips } from "@/components/common";
-import { statusTone, userWithdrawalStatus } from "@/lib/walletUtils";
+import { formatPaymentTime, paymentDisplayAt, statusTone, userWithdrawalStatus } from "@/lib/walletUtils";
 
 const TONE = {
   success: "border-emerald-400/35 bg-emerald-400/10 text-emerald-300",
@@ -58,7 +58,7 @@ export function PaymentRow({ item, kind }) {
   const amountText = isDeposit
     ? new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format((Number(amount) || 0) / 100)
     : `${formatChips(amount)} chips`;
-  const when = item.created_at ? new Date(item.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  const when = formatPaymentTime(paymentDisplayAt(item));
   const bank = !isDeposit ? item.bank_detail || {} : {};
   const bankLabel = bank.account_number_masked || bank.masked_account_number || null;
   const reference = item.reference || item.provider_reference || null;

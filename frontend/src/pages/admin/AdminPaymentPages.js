@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageTransition, EmptyState, formatChips } from "@/components/common";
 import { adminPayments } from "@/lib/paymentApi";
 import { errMsg } from "@/lib/api";
-import { formatInrPaise } from "@/lib/walletUtils";
+import { formatInrPaise, formatPaymentTime, paymentDisplayAt } from "@/lib/walletUtils";
 import { PaymentStatus } from "@/pages/app/wallet/WalletBits";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
@@ -23,9 +23,7 @@ function valueOf(item, ...keys) {
 }
 
 function when(value) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  return formatPaymentTime(value);
 }
 
 function useAdminRows(loader) {
@@ -95,7 +93,7 @@ export function AdminDeposits() {
         <div className="grid gap-3 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
           <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">{formatChips(item.chips)} chips</p></div>
-          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div>
+          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(paymentDisplayAt(item))}</p></div>
           <PaymentStatus status={item.status} />
         </div>
         {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
@@ -167,7 +165,7 @@ export function AdminWithdrawals() {
         <div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
           <div><p className="tabular-nums font-bold text-primary">{formatChips(item.amount_chips)} chips</p><p className="text-[10px] text-white/35">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p></div>
-          <div><p className="text-xs text-white/60">{valueOf(item.bank_detail, "bank_name")}</p><p className="font-mono text-[10px] text-white/40">{valueOf(item.bank_detail, "account_number_masked", "masked_account_number")}</p>{item.bank_detail?.payout_identifier_masked && <p className="font-mono text-[10px] text-white/35">{item.bank_detail.payout_identifier_masked}</p>}</div>
+          <div><p className="text-xs text-white/60">{valueOf(item.bank_detail, "bank_name")}</p><p className="font-mono text-[10px] text-white/40">{valueOf(item.bank_detail, "account_number_masked", "masked_account_number")}</p><p className="text-[10px] text-white/35">{when(paymentDisplayAt(item))}</p>{item.bank_detail?.payout_identifier_masked && <p className="font-mono text-[10px] text-white/35">{item.bank_detail.payout_identifier_masked}</p>}</div>
           <PaymentStatus status={internalStatus} />
         </div>
         {item.provider_reference && <div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Provider reference</p><p className="mt-0.5 break-all font-mono text-xs text-white/70">{item.provider_reference}</p></div>}
