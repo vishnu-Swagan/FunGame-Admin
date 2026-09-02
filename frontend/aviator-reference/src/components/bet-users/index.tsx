@@ -10,7 +10,7 @@ import { BettedUserType, UserType } from "../../utils/interfaces";
 export default function BetsUsers() {
   const { previousHand, bettedUsers, getMyBets, seed } = React.useContext(Context);
 
-  const [headerType, setHeaderType] = React.useState("my");
+  const [headerType, setHeaderType] = React.useState("all");
   const [allData, setAllData] = React.useState<UserType[] | BettedUserType[]>(
     []
   );

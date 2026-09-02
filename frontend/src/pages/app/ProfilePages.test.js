@@ -80,6 +80,8 @@ test("game profile exposes wallet and bank-account entry points", async () => {
   expect(container.querySelector('[data-testid="profile-account-details"]')?.textContent).toMatch(/GK1234567.*new.player@example.com.*India/i);
   expect(container.querySelector('[data-testid="profile-contact-verification"]')?.textContent).toBe("OTP deferred");
   expect(container.querySelector('[data-testid="profile-link-settings"]')?.textContent).toMatch(/Account settings/i);
+  expect(container.querySelector('[data-testid="profile-age-status"]')).toBeNull();
+  expect(container.querySelector('[data-testid="profile-age-request"]')).toBeNull();
 
   await act(async () => container.querySelector('[data-testid="profile-link-buy-chips"]').click());
   expect(mockNavigate).toHaveBeenCalledWith("/wallet");

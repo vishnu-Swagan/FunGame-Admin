@@ -9,13 +9,16 @@ assertion and exit status.
 
 
 collect_ignore = [
+    "test_chicken_road_rounds.py",
     "test_commission.py",
     "test_compliance.py",
     "test_crm.py",
     "test_distributor_parity.py",
     "test_enable_all_games.py",
     "test_game_transactions.py",
+    "test_live_play_unblock.py",
     "test_migration_export.py",
+    "test_otp_delivery_fallback.py",
     "test_otp_identity.py",
     "test_payments.py",
     "test_payouts.py",

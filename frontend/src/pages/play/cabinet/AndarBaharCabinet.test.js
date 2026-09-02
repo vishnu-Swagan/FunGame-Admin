@@ -30,3 +30,18 @@ test("live round timing and server-backed betting remain wired", () => {
   expect(component).toContain("dealerFrameAt");
   expect(component).toContain("placeBet");
 });
+
+test("the central card reveal remains a presentation-only canvas layer", () => {
+  expect(component).toContain("drawRoyalRevealStage");
+  expect(component).toContain("layoutLaneCards(rows, arrivalProgress)");
+  expect(component).toContain("TABLE_CARD_WIDTH, TABLE_CARD_HEIGHT");
+  expect(component).toContain("drawFlightTrail");
+  expect(component).toContain("drawSettleHalo");
+  expect(component).toContain("royalStageLayerFor");
+  expect(component).toContain("ctx.drawImage(staticLayer, 0, 0, DESIGN_W, DESIGN_H)");
+  expect(component).toContain('window.matchMedia?.("(prefers-reduced-motion: reduce)")');
+  expect(component).toContain('document.body.classList.contains("rm")');
+  expect(component).toContain("new MutationObserver(update)");
+  expect(styles).toMatch(/prefers-reduced-motion:[^)]+\)[\s\S]*\.ab-top-actions button:active\s*\{\s*transform:\s*none;/);
+  expect(styles).toMatch(/body\.rm \.ab-top-actions button:active\s*\{\s*transform:\s*none;/);
+});

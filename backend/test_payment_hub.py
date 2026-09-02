@@ -183,6 +183,9 @@ def generic_rest_config():
 
 class PaymentHubTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # Rebind the shared service database so this suite is isolated from any
+        # other module that also points ``service.db`` at its own mock client.
+        service.db = db
         for name in await db.list_collection_names():
             await db[name].delete_many({})
         await service.ensure_indexes()
@@ -474,6 +477,24 @@ class PaymentHubTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     service.feature_status()["v1_webhook_url"],
                     "https://api.chakri.casino/api/payments/webhooks/provider_one",
+                )
+            with patch.dict(os.environ, {
+                "PAYMENT_PROVIDER": "sgpay24",
+                "UPI_CHIP_PURCHASES_ENABLED": "true",
+            }), patch("operator_rail.operator_status", return_value={
+                "hosted_checkout": True,
+                "deposits_enabled": True,
+                "availability_code": "AVAILABLE",
+            }):
+                hosted = service.feature_status()["hosted_provider"]
+                self.assertEqual(hosted["display_name"], "SgPay24")
+                self.assertTrue(hosted["live"])
+                self.assertTrue(hosted["deposits_enabled"])
+                self.assertFalse(hosted["withdrawals_enabled"])
+                self.assertTrue(hosted["read_only"])
+                self.assertEqual(
+                    hosted["webhook_url"],
+                    "https://api.chakri.casino/api/payments/webhooks/sgpay24",
                 )
             os.environ["PAYMENT_WEBHOOK_PUBLIC_BASE_URL"] = "http://127.0.0.1:8000/path"
             self.assertIsNone(service.feature_status()["webhook_base_url"])

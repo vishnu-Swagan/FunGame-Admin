@@ -33,8 +33,19 @@ TERMINAL_PAYIN = {item.value for item in (PayinStatus.SUCCEEDED, PayinStatus.FAI
 WEBHOOK_PROCESSING_LEASE_SECONDS = 120
 
 
-def enabled(name: str) -> bool:
-    return str(os.environ.get(name, "false")).strip().lower() in {"1", "true", "yes", "on"}
+def enabled(name: str, default: str = "false") -> bool:
+    return str(os.environ.get(name, default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def admin_feature_enabled() -> bool:
+    """Operator configuration surface is always on.
+
+    A stale Render ``PAYMENT_GATEWAY_ADMIN_ENABLED=false`` must not hide
+    provider setup. This still does not authorize wallet credit/debit:
+    PAYMENTS_V2_ENABLED, REAL_MONEY_ENABLED, and the financial readiness
+    flags stay fail-closed.
+    """
+    return True
 
 
 def _public_webhook_base_url() -> str | None:
@@ -89,19 +100,43 @@ def feature_status() -> dict[str, Any]:
         if base_url and v1_provider_code
         else None
     )
+    hosted_provider = None
+    if v1_provider_code and enabled("UPI_CHIP_PURCHASES_ENABLED"):
+        # The production hosted-UPI rail predates the V2 gateway registry. Keep
+        # it visible in the same admin status response without synthesizing a
+        # mutable V2 gateway or exposing provider credentials.
+        from operator_rail import operator_status
+
+        operator = operator_status()
+        hosted_provider = {
+            "code": v1_provider_code,
+            "display_name": "SgPay24" if v1_provider_code == "sgpay24" else v1_provider_code,
+            "category": "EWALLET",
+            "provider_type": "HOSTED_UPI",
+            "configured": True,
+            "live": bool(operator.get("hosted_checkout") and operator.get("deposits_enabled")),
+            "deposits_enabled": bool(operator.get("deposits_enabled")),
+            # Withdrawals on the operator rail are admin-reviewed and are not
+            # handled by the SgPay24 hosted checkout provider.
+            "withdrawals_enabled": False,
+            "availability_code": operator.get("availability_code") or "UPI_PROVIDER_NOT_READY",
+            "webhook_url": v1_webhook_url,
+            "read_only": True,
+        }
     return {
         "payments_v2": payments_v2,
-        "admin": enabled("PAYMENT_GATEWAY_ADMIN_ENABLED"),
+        "admin": admin_feature_enabled(),
         "live_allowed": enabled("PAYMENT_LIVE_MODE_ALLOWED"),
         "installed_adapters": registry.codes(),
         "webhook_base_url": base_url,
         "v1_provider_code": v1_provider_code,
         "v1_webhook_url": v1_webhook_url,
+        "hosted_provider": hosted_provider,
     }
 
 
 def require_admin_feature() -> None:
-    if not enabled("PAYMENT_GATEWAY_ADMIN_ENABLED"):
+    if not admin_feature_enabled():
         raise GatewayError("PAYMENT_GATEWAY_ADMIN_DISABLED", "Payment gateway administration is disabled.", status_code=404)
 
 
@@ -148,6 +183,59 @@ def _decrypt(row: Mapping[str, Any]) -> str:
         raise GatewayError("PAYMENT_SECRET_DECRYPTION_FAILED", "Gateway credentials could not be decrypted.", status_code=503) from exc
 
 
+# --- CRM operator parity ---------------------------------------------------
+# The rollback CRM presents each stored provider grouped by a payment category
+# and as either an automated integration or a manual/instructions method. These
+# are presentation and stored-configuration concepts only: they never move money
+# and are deliberately excluded from the gateway config hash so toggling them
+# cannot invalidate a health check or reopen an activation approval.
+PAYMENT_CATEGORIES = ("CARD", "CRYPTO", "EWALLET", "BANK", "OTHER")
+PROVIDER_TYPES = ("AUTOMATED", "MANUAL")
+LOCAL_AGENT_TYPES = ("CASH", "BANK", "UPI", "CARD", "OTHER")
+GATEWAY_TOGGLES = (
+    "deposits_enabled", "withdrawals_enabled",
+    "auto_approve_deposits", "auto_approve_withdrawals",
+)
+MANUAL_CONFIG_KEYS = (
+    "walletAddress", "qrImageUrl", "instructions",
+    "bankName", "accountHolderName", "accountNumber", "swiftIban",
+    "accountIdentifier",
+)
+AUTOMATED_CONFIG_KEYS = (
+    "apiBaseUrl", "gatewayServer", "merchantId", "projectId", "orderCurrency",
+    "allowedPayTokens", "orderValidMinutes",
+)
+
+
+def _derive_category(row: Mapping[str, Any]) -> str:
+    explicit = str(row.get("category", "")).strip().upper()
+    if explicit in PAYMENT_CATEGORIES:
+        return explicit
+    capabilities = {str(item).strip().upper() for item in row.get("capabilities", [])}
+    if "BANK_TRANSFER" in capabilities:
+        return "BANK"
+    if capabilities & {"UPI", "WALLET"}:
+        return "EWALLET"
+    if "CARD" in capabilities:
+        return "CARD"
+    return "CARD"
+
+
+def _derive_provider_type(row: Mapping[str, Any]) -> str:
+    explicit = str(row.get("provider_type", "")).strip().upper()
+    return explicit if explicit in PROVIDER_TYPES else "AUTOMATED"
+
+
+def _gateway_toggles(row: Mapping[str, Any]) -> dict[str, bool]:
+    return {toggle: bool(row.get(toggle, False)) for toggle in GATEWAY_TOGGLES}
+
+
+def _is_configured(provider_type: str, config: Mapping[str, Any], hints: Mapping[str, Any]) -> bool:
+    if provider_type == "MANUAL":
+        return any(str(config.get(key, "")).strip() for key in MANUAL_CONFIG_KEYS)
+    return bool(str(config.get("apiBaseUrl", "")).strip()) and bool(hints)
+
+
 def gateway_dto(row: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {
         "id", "code", "display_name", "adapter_type", "environment", "status",
@@ -160,7 +248,8 @@ def gateway_dto(row: Mapping[str, Any]) -> dict[str, Any]:
         key: value for key, value in row.items()
         if key in allowed and key not in {"non_secret_config", "credential_hints"}
     })
-    result["non_secret_config"] = _public_non_secret_config(row.get("non_secret_config", {}))
+    public_config = _public_non_secret_config(row.get("non_secret_config", {}))
+    result["non_secret_config"] = public_config
     hints = row.get("credential_hints", {}) or {}
     result["credential_hints"] = {
         str(key): str(value)[:20] for key, value in hints.items()
@@ -172,6 +261,51 @@ def gateway_dto(row: Mapping[str, Any]) -> dict[str, Any]:
         f"{base_url}/api/webhooks/payments/{urllib.parse.quote(code, safe='')}"
         if base_url and GATEWAY_CODE.fullmatch(code) else None
     )
+    # Read-only origin verification URL a provider dashboard can echo back to
+    # confirm the callback origin. It carries no credential and, like the
+    # webhook URL, is copyable while PAYMENTS_V2_ENABLED remains false.
+    result["origin_verification_url"] = (
+        f"{base_url}/api/webhooks/payments/{urllib.parse.quote(code, safe='')}/origin"
+        if base_url and GATEWAY_CODE.fullmatch(code) else None
+    )
+    provider_type = _derive_provider_type(row)
+    result["category"] = _derive_category(row)
+    result["provider_type"] = provider_type
+    result["mode"] = "LIVE" if str(row.get("environment", "")).upper() == "LIVE" else "SANDBOX"
+    result["connection_tested"] = str(row.get("health_status", "")).upper() == HealthStatus.HEALTHY.value
+    result["configured"] = _is_configured(provider_type, public_config, result["credential_hints"])
+    result.update(_gateway_toggles(row))
+    countries = row.get("countries") or public_config.get("countries") or []
+    if isinstance(countries, str):
+        countries = [item.strip().upper() for item in countries.split(",") if item.strip()]
+    else:
+        countries = [str(item).strip().upper() for item in countries if str(item).strip()]
+    description = str(row.get("description") or public_config.get("description") or "")
+    last_tested = row.get("last_health_check_at") or row.get("last_success_at")
+    last_status = "PASS" if result["connection_tested"] else (
+        str(row.get("health_status") or "UNKNOWN").upper() if row.get("last_health_check_at") else "NOT_TESTED"
+    )
+    # CRM rollback aliases (camelCase). Snake_case fields above stay canonical.
+    result.update({
+        "name": result.get("display_name"),
+        "integrationMode": provider_type,
+        "depositEnabled": result["deposits_enabled"],
+        "withdrawalEnabled": result["withdrawals_enabled"],
+        "depositAutoApprove": result["auto_approve_deposits"],
+        "withdrawalAutoApprove": result["auto_approve_withdrawals"],
+        "sandboxMode": result["mode"] != "LIVE",
+        "configuration": public_config,
+        "webhookUrl": result.get("webhook_url"),
+        "originVerificationUrl": result.get("origin_verification_url"),
+        "countries": countries,
+        "description": description,
+        "slug": code,
+        "lastTestStatus": last_status,
+        "lastTestedAt": last_tested,
+        "secrets": {
+            key: {"configured": True} for key in result["credential_hints"]
+        },
+    })
     return result
 
 
@@ -333,6 +467,9 @@ async def ensure_indexes() -> None:
     await db.reconciliation_cases.create_index([("status", 1), ("created_at", -1)], name="reconciliation_status_created")
     await db.settlements.create_index([("gateway_id", 1), ("provider_settlement_id", 1)], unique=True, name="settlement_provider_unique")
     await db.settlement_imports.create_index([("gateway_id", 1), ("source_file_checksum", 1)], unique=True, name="settlement_file_checksum_unique")
+    await db.payment_local_agents.create_index("id", unique=True, name="payment_local_agent_id_unique")
+    await db.payment_local_agents.create_index([("country_code", ASCENDING), ("agent_type", ASCENDING)], name="payment_local_agent_lookup")
+    await db.payment_platform_settings.create_index("id", unique=True, name="payment_platform_settings_id_unique")
 
 
 async def create_gateway(payload: Mapping[str, Any], actor_id: str) -> dict[str, Any]:
@@ -343,6 +480,12 @@ async def create_gateway(payload: Mapping[str, Any], actor_id: str) -> dict[str,
     if not GATEWAY_CODE.fullmatch(code) or adapter_type not in registry.codes() or environment not in {"SANDBOX", "LIVE"}:
         raise GatewayError("GATEWAY_CONFIG_INVALID", "Gateway identity or adapter is invalid.")
     capabilities = sorted({Capability(item).value for item in payload.get("capabilities", [])})
+    category = str(payload.get("category", "")).strip().upper()
+    if category and category not in PAYMENT_CATEGORIES:
+        raise GatewayError("GATEWAY_CONFIG_INVALID", "Payment category is invalid.")
+    provider_type = str(payload.get("provider_type", "")).strip().upper()
+    if provider_type and provider_type not in PROVIDER_TYPES:
+        raise GatewayError("GATEWAY_CONFIG_INVALID", "Provider type is invalid.")
     now = utcnow()
     row = {
         "id": str(uuid.uuid4()), "code": code,
@@ -355,6 +498,14 @@ async def create_gateway(payload: Mapping[str, Any], actor_id: str) -> dict[str,
         "is_enabled": False, "created_by_admin_id": actor_id, "updated_by_admin_id": actor_id,
         "created_at": now, "updated_at": now, "version": 1,
         "credential_epoch": 0, "credential_hints": {},
+        # CRM operator-parity presentation fields. Stored configuration only;
+        # they never authorize a wallet credit or debit.
+        "category": category or _derive_category({"capabilities": capabilities}),
+        "provider_type": provider_type or "AUTOMATED",
+        "deposits_enabled": bool(payload.get("deposits_enabled", False)),
+        "withdrawals_enabled": bool(payload.get("withdrawals_enabled", False)),
+        "auto_approve_deposits": False,
+        "auto_approve_withdrawals": False,
     }
     try:
         await db.payment_gateways.insert_one(row)
@@ -406,6 +557,416 @@ async def update_gateway(gateway_id: str, payload: Mapping[str, Any], actor_id: 
     await _expire_activation_approvals(gateway_id, actor_id, "GATEWAY_CONFIGURATION_CHANGED")
     await audit(actor_id, "GATEWAY_UPDATED", "PAYMENT_GATEWAY", gateway_id, before=gateway_dto(current), after=gateway_dto(changed))
     return changed
+
+
+def normalize_crm_gateway_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept the rollback-CRM camelCase body and return hub field names."""
+    if not isinstance(payload, Mapping):
+        return {}
+    inner = payload.get("input") if isinstance(payload.get("input"), Mapping) else payload
+    aliases = {
+        "name": "display_name",
+        "displayName": "display_name",
+        "integrationMode": "provider_type",
+        "depositEnabled": "deposits_enabled",
+        "withdrawalEnabled": "withdrawals_enabled",
+        "depositAutoApprove": "auto_approve_deposits",
+        "withdrawalAutoApprove": "auto_approve_withdrawals",
+        "configuration": "non_secret_config",
+        "baseUrl": "base_url",
+        "merchantReferenceMasked": "merchant_reference_masked",
+    }
+    normalized: dict[str, Any] = {}
+    for key, value in inner.items():
+        target = aliases.get(key, key)
+        if target in {"currentPassword", "current_password", "secrets"}:
+            continue
+        normalized[target] = value
+    if "sandboxMode" in inner:
+        normalized["environment"] = "SANDBOX" if inner["sandboxMode"] else "LIVE"
+    if isinstance(inner.get("countries"), list):
+        normalized["countries"] = [
+            str(item).strip().upper() for item in inner["countries"] if str(item).strip()
+        ]
+    elif isinstance(inner.get("countries"), str):
+        normalized["countries"] = [
+            item.strip().upper() for item in inner["countries"].split(",") if item.strip()
+        ]
+    if "description" in inner:
+        normalized["description"] = str(inner.get("description") or "")[:500]
+    secrets = inner.get("secrets") or payload.get("secrets")
+    if isinstance(secrets, Mapping):
+        secret_aliases = {
+            "apiSecret": "api_secret",
+            "webhookSecret": "webhook_secret",
+            "authKey": "auth_key",
+            "encryptionKey": "encryption_key",
+        }
+        extracted = {}
+        for key, value in secrets.items():
+            name = secret_aliases.get(str(key).strip(), str(key).strip())
+            if isinstance(value, Mapping):
+                raw = value.get("value")
+            else:
+                raw = value
+            if raw:
+                extracted[name] = str(raw)
+        if extracted:
+            normalized["_secrets"] = extracted
+    return normalized
+
+
+async def update_gateway_crm(gateway_id: str, payload: Mapping[str, Any], actor_id: str) -> dict[str, Any]:
+    """Apply CRM operator changes to a stored provider.
+
+    Handles the rollback-CRM controls: payment category, automated vs manual
+    provider type, deposit/withdrawal enable toggles, auto-approve toggles, and
+    the manual/automated non-secret configuration fields.
+
+    Money never moves here. Enabling deposits/withdrawals or auto-approve only
+    records operator intent; a live wallet credit/debit still requires the
+    financial readiness flags enforced in :mod:`financial_wallet`. Auto-approve
+    can only be turned on for an AUTOMATED provider that has a passing connection
+    test and whose matching direction toggle is on. Provider-behaviour fields
+    (base_url, capabilities, non_secret_config, display_name) may change only
+    while the gateway is not ACTIVE, mirroring :func:`update_gateway`, and doing
+    so resets the health check and expires pending activation approvals.
+    """
+    require_admin_feature()
+    current = await db.payment_gateways.find_one({"id": gateway_id})
+    if not current:
+        raise GatewayError("GATEWAY_NOT_FOUND", "Gateway was not found.", status_code=404)
+
+    updates: dict[str, Any] = {}
+    reset_health = False
+
+    if "category" in payload:
+        category = str(payload["category"]).strip().upper()
+        if category not in PAYMENT_CATEGORIES:
+            raise GatewayError("GATEWAY_CONFIG_INVALID", "Payment category is invalid.")
+        updates["category"] = category
+
+    provider_type = _derive_provider_type(current)
+    if "provider_type" in payload:
+        provider_type = str(payload["provider_type"]).strip().upper()
+        if provider_type not in PROVIDER_TYPES:
+            raise GatewayError("GATEWAY_CONFIG_INVALID", "Provider type is invalid.")
+        updates["provider_type"] = provider_type
+
+    behaviour_keys = {
+        "display_name", "base_url", "capabilities",
+        "non_secret_config", "merchant_reference_masked", "environment",
+    }
+    if any(key in payload for key in behaviour_keys):
+        if current.get("status") == "ACTIVE":
+            raise GatewayError(
+                "GATEWAY_ACTIVE_CONFIG_LOCKED",
+                "Disable the gateway before changing configuration.",
+                status_code=409,
+            )
+        reset_health = True
+        if "display_name" in payload:
+            updates["display_name"] = str(payload["display_name"]).strip()[:100]
+        if "merchant_reference_masked" in payload:
+            updates["merchant_reference_masked"] = str(payload["merchant_reference_masked"])[:80]
+        if "base_url" in payload:
+            updates["base_url"] = str(payload["base_url"])[:500]
+        if "capabilities" in payload:
+            updates["capabilities"] = sorted({Capability(item).value for item in payload["capabilities"]})
+        if "non_secret_config" in payload:
+            updates["non_secret_config"] = _non_secret_config(payload["non_secret_config"])
+        if "environment" in payload:
+            environment = str(payload["environment"]).strip().upper()
+            if environment not in {"SANDBOX", "LIVE"}:
+                raise GatewayError("GATEWAY_CONFIG_INVALID", "Gateway environment is invalid.")
+            updates["environment"] = environment
+
+    if "countries" in payload:
+        updates["countries"] = [
+            str(item).strip().upper()[:2] for item in (payload.get("countries") or [])
+            if str(item).strip()
+        ]
+    if "description" in payload:
+        updates["description"] = str(payload.get("description") or "")[:500]
+
+    deposits_enabled = bool(current.get("deposits_enabled", False))
+    withdrawals_enabled = bool(current.get("withdrawals_enabled", False))
+    if "deposits_enabled" in payload:
+        deposits_enabled = bool(payload["deposits_enabled"])
+        updates["deposits_enabled"] = deposits_enabled
+    if "withdrawals_enabled" in payload:
+        withdrawals_enabled = bool(payload["withdrawals_enabled"])
+        updates["withdrawals_enabled"] = withdrawals_enabled
+
+    # A configuration change in this request invalidates the prior test, so
+    # auto-approve cannot be enabled in the same call that alters behaviour.
+    connection_tested = (
+        not reset_health
+        and str(current.get("health_status", "")).upper() == HealthStatus.HEALTHY.value
+    )
+
+    def _require_auto_approve(direction_enabled: bool) -> None:
+        if provider_type != "AUTOMATED" or not connection_tested or not direction_enabled:
+            raise GatewayError(
+                "GATEWAY_AUTO_APPROVE_NOT_ALLOWED",
+                "Auto-approve requires an automated provider with the matching "
+                "direction enabled and a successful connection test.",
+            )
+
+    if "auto_approve_deposits" in payload and bool(payload["auto_approve_deposits"]):
+        _require_auto_approve(deposits_enabled)
+        updates["auto_approve_deposits"] = True
+    elif "auto_approve_deposits" in payload:
+        updates["auto_approve_deposits"] = False
+
+    if "auto_approve_withdrawals" in payload and bool(payload["auto_approve_withdrawals"]):
+        _require_auto_approve(withdrawals_enabled)
+        updates["auto_approve_withdrawals"] = True
+    elif "auto_approve_withdrawals" in payload:
+        updates["auto_approve_withdrawals"] = False
+
+    # Preserve the invariant: switching to manual, disabling a direction, or
+    # changing behaviour clears any auto-approve that would otherwise linger on.
+    final_auto_deposits = updates.get("auto_approve_deposits", bool(current.get("auto_approve_deposits", False)))
+    if final_auto_deposits and (provider_type != "AUTOMATED" or not deposits_enabled or reset_health):
+        updates["auto_approve_deposits"] = False
+    final_auto_withdrawals = updates.get("auto_approve_withdrawals", bool(current.get("auto_approve_withdrawals", False)))
+    if final_auto_withdrawals and (provider_type != "AUTOMATED" or not withdrawals_enabled or reset_health):
+        updates["auto_approve_withdrawals"] = False
+
+    if not updates:
+        return current
+
+    updates["updated_by_admin_id"] = actor_id
+    updates["updated_at"] = utcnow()
+    mongo_update: dict[str, Any] = {"$set": dict(updates), "$inc": {"version": 1}}
+    if reset_health:
+        mongo_update["$set"].update({
+            "health_status": HealthStatus.UNKNOWN.value,
+            "consecutive_failure_count": 0,
+            "last_error_code": None,
+            "last_error_summary": None,
+        })
+        mongo_update["$unset"] = {
+            "health_checked_version": "", "health_checked_credential_epoch": "",
+            "health_checked_config_hash": "", "last_health_check_at": "",
+            "last_success_at": "", "last_failure_at": "",
+        }
+    changed = await db.payment_gateways.find_one_and_update(
+        {"id": gateway_id, "version": int(current.get("version", 1))},
+        mongo_update, return_document=ReturnDocument.AFTER,
+    )
+    if not changed:
+        raise GatewayError("GATEWAY_VERSION_CONFLICT", "Gateway changed; refresh and retry.", status_code=409)
+    if reset_health:
+        await _expire_activation_approvals(gateway_id, actor_id, "GATEWAY_CONFIGURATION_CHANGED")
+    await audit(actor_id, "GATEWAY_CRM_UPDATED", "PAYMENT_GATEWAY", gateway_id, before=gateway_dto(current), after=gateway_dto(changed))
+    return changed
+
+
+# --- Payment platform settings (CRM "Payment platform settings") -----------
+_PLATFORM_SETTINGS_ID = "main"
+_SAFE_RETURN_PATH = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{0,255}$")
+
+
+def _valid_return_page(value: str) -> bool:
+    """Accept a site-relative path or a public https URL (CRM return pages)."""
+    if _SAFE_RETURN_PATH.fullmatch(value):
+        return True
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and bool(parsed.hostname)
+        and not parsed.username
+        and not parsed.password
+        and len(value) <= 500
+    )
+
+
+def platform_settings_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
+    row = row or {}
+    return_pages = row.get("return_pages") or row.get("returnPages") or {}
+    success = str(
+        return_pages.get("success_path")
+        or return_pages.get("successPath")
+        or "/play/wallet"
+    )
+    failure = str(
+        return_pages.get("failure_path")
+        or return_pages.get("failurePath")
+        or "/play/wallet"
+    )
+    deposits = bool(row.get("deposits_enabled", False))
+    withdrawals = bool(row.get("withdrawals_enabled", False))
+    deposit_auto = bool(row.get("deposit_auto_approve", False))
+    withdrawal_auto = bool(row.get("withdrawal_auto_approve", False))
+    wallet = bool(row.get("wallet_to_wallet_enabled", False))
+    return {
+        "return_pages": {"success_path": success, "failure_path": failure},
+        "deposits_enabled": deposits,
+        "withdrawals_enabled": withdrawals,
+        "deposit_auto_approve": deposit_auto,
+        "withdrawal_auto_approve": withdrawal_auto,
+        "wallet_to_wallet_enabled": wallet,
+        "updated_at": row.get("updated_at"),
+        # CRM aliases
+        "returnPages": {"successPath": success, "failurePath": failure},
+        "localSettings": {
+            "depositsEnabled": deposits,
+            "withdrawalsEnabled": withdrawals,
+            "depositAutoApprove": deposit_auto,
+            "withdrawalAutoApprove": withdrawal_auto,
+        },
+        "walletToWalletEnabled": wallet,
+    }
+
+
+async def get_platform_settings() -> dict[str, Any]:
+    require_admin_feature()
+    row = await db.payment_platform_settings.find_one({"id": _PLATFORM_SETTINGS_ID}, {"_id": 0})
+    return platform_settings_dto(row)
+
+
+async def update_platform_settings(payload: Mapping[str, Any], actor_id: str) -> dict[str, Any]:
+    require_admin_feature()
+    current = await db.payment_platform_settings.find_one({"id": _PLATFORM_SETTINGS_ID}, {"_id": 0})
+    merged = platform_settings_dto(current)
+    updates: dict[str, Any] = {}
+    pages_in = payload.get("return_pages") or payload.get("returnPages")
+    if isinstance(pages_in, Mapping):
+        pages = dict(merged["return_pages"])
+        mapping = {
+            "success_path": pages_in.get("success_path", pages_in.get("successPath")),
+            "failure_path": pages_in.get("failure_path", pages_in.get("failurePath")),
+        }
+        for key, value in mapping.items():
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not _valid_return_page(text):
+                raise GatewayError("PAYMENT_SETTINGS_INVALID", "Return pages must be a site-relative path or https URL.")
+            pages[key] = text
+        updates["return_pages"] = pages
+    local = payload.get("localSettings") if isinstance(payload.get("localSettings"), Mapping) else {}
+    flag_aliases = {
+        "deposits_enabled": ("deposits_enabled", "depositsEnabled"),
+        "withdrawals_enabled": ("withdrawals_enabled", "withdrawalsEnabled"),
+        "deposit_auto_approve": ("deposit_auto_approve", "depositAutoApprove"),
+        "withdrawal_auto_approve": ("withdrawal_auto_approve", "withdrawalAutoApprove"),
+        "wallet_to_wallet_enabled": ("wallet_to_wallet_enabled", "walletToWalletEnabled"),
+    }
+    for dest, names in flag_aliases.items():
+        if dest == "wallet_to_wallet_enabled":
+            source = payload
+        else:
+            source = local if any(name in local for name in names) else payload
+        for name in names:
+            if name in source:
+                updates[dest] = bool(source[name])
+                break
+    if not updates:
+        return merged
+    updates["updated_at"] = utcnow()
+    updates["updated_by_admin_id"] = actor_id
+    await db.payment_platform_settings.update_one(
+        {"id": _PLATFORM_SETTINGS_ID},
+        {"$set": updates, "$setOnInsert": {"id": _PLATFORM_SETTINGS_ID, "created_at": utcnow()}},
+        upsert=True,
+    )
+    row = await db.payment_platform_settings.find_one({"id": _PLATFORM_SETTINGS_ID}, {"_id": 0})
+    await audit(
+        actor_id, "PAYMENT_PLATFORM_SETTINGS_UPDATED",
+        "PAYMENT_PLATFORM_SETTINGS", _PLATFORM_SETTINGS_ID, after=platform_settings_dto(row),
+    )
+    return platform_settings_dto(row)
+
+
+# --- Local deposit agents (CRM "Local deposits") ---------------------------
+_COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")
+
+
+def local_agent_dto(row: Mapping[str, Any]) -> dict[str, Any]:
+    show_details = bool(row.get("show_details") or row.get("showDetails") or False)
+    raw_details = str(row.get("details", ""))
+    agent_type = row.get("agent_type") or row.get("agentType")
+    agent_name = row.get("agent_name") or row.get("agentName")
+    country = row.get("country_code") or row.get("countryCode")
+    deposit = bool(row.get("deposit_enabled", row.get("depositEnabled", False)))
+    withdrawal = bool(row.get("withdrawal_enabled", row.get("withdrawalEnabled", False)))
+    return {
+        "id": row.get("id"),
+        "agent_type": agent_type,
+        "agent_name": agent_name,
+        "country_code": country,
+        "deposit_enabled": deposit,
+        "withdrawal_enabled": withdrawal,
+        "show_details": show_details,
+        # Receiving details stay hidden unless the operator explicitly published them.
+        "details": raw_details if show_details else None,
+        "details_hidden": bool(raw_details.strip()) and not show_details,
+        "details_configured": bool(raw_details.strip()),
+        "created_at": row.get("created_at"),
+        "agentType": agent_type,
+        "agentName": agent_name,
+        "countryCode": country,
+        "depositEnabled": deposit,
+        "withdrawalEnabled": withdrawal,
+        "showDetails": show_details,
+        "detailsConfigured": bool(raw_details.strip()) and show_details,
+    }
+
+
+async def list_local_agents() -> list[dict[str, Any]]:
+    require_admin_feature()
+    rows = await db.payment_local_agents.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [local_agent_dto(row) for row in rows]
+
+
+async def create_local_agent(payload: Mapping[str, Any], actor_id: str) -> dict[str, Any]:
+    require_admin_feature()
+    agent_type = str(payload.get("agent_type") or payload.get("agentType") or "").strip().upper()
+    if agent_type not in LOCAL_AGENT_TYPES:
+        raise GatewayError("PAYMENT_LOCAL_AGENT_INVALID", "Agent type is invalid.")
+    agent_name = str(payload.get("agent_name") or payload.get("agentName") or "").strip()
+    if not 2 <= len(agent_name) <= 120:
+        raise GatewayError("PAYMENT_LOCAL_AGENT_INVALID", "Agent name is required.")
+    country_code = str(payload.get("country_code") or payload.get("countryCode") or "").strip().upper()
+    if not _COUNTRY_CODE.fullmatch(country_code):
+        raise GatewayError("PAYMENT_LOCAL_AGENT_INVALID", "Country code must be a 2-letter ISO code.")
+    row = {
+        "id": str(uuid.uuid4()),
+        "agent_type": agent_type,
+        "agent_name": agent_name[:120],
+        "country_code": country_code,
+        "deposit_enabled": bool(payload.get("deposit_enabled", payload.get("depositEnabled", False))),
+        "withdrawal_enabled": bool(payload.get("withdrawal_enabled", payload.get("withdrawalEnabled", False))),
+        "show_details": bool(payload.get("show_details", payload.get("showDetails", False))),
+        "details": str(payload.get("details", ""))[:2000],
+        "created_by_admin_id": actor_id,
+        "created_at": utcnow(),
+    }
+    await db.payment_local_agents.insert_one(row)
+    await audit(
+        actor_id, "PAYMENT_LOCAL_AGENT_CREATED",
+        "PAYMENT_LOCAL_AGENT", row["id"], after=local_agent_dto(row),
+    )
+    return local_agent_dto(row)
+
+
+async def delete_local_agent(agent_id: str, actor_id: str) -> dict[str, Any]:
+    require_admin_feature()
+    row = await db.payment_local_agents.find_one({"id": agent_id})
+    if not row:
+        raise GatewayError("PAYMENT_LOCAL_AGENT_NOT_FOUND", "Local deposit agent was not found.", status_code=404)
+    await db.payment_local_agents.delete_one({"id": agent_id})
+    await audit(
+        actor_id, "PAYMENT_LOCAL_AGENT_DELETED",
+        "PAYMENT_LOCAL_AGENT", agent_id, before=local_agent_dto(row),
+    )
+    return {"id": agent_id, "deleted": True}
 
 
 async def store_credentials(gateway_id: str, values: Mapping[str, str], actor_id: str) -> dict[str, Any]:

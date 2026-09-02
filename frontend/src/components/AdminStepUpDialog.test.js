@@ -93,3 +93,45 @@ test("the dialog verifies password and one-time code before retrying the pending
   await act(async () => root.unmount());
   container.remove();
 });
+
+test("password-only step-up retries the pending KYC action without asking for a code", async () => {
+  api.post.mockResolvedValueOnce({
+    data: {
+      verified: true,
+      password_only: true,
+      message: "Administrator password verified.",
+    },
+  });
+  const onVerified = jest.fn().mockResolvedValue(undefined);
+  const onCancel = jest.fn();
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(
+      <AdminStepUpDialog
+        open
+        actionLabel="completing this KYC decision"
+        onCancel={onCancel}
+        onVerified={onVerified}
+      />,
+    );
+  });
+
+  await act(async () => {
+    setInput(container.querySelector("#admin-step-up-password"), "ADMIN-PASSWORD-12");
+  });
+  await act(async () => {
+    container.querySelector('[data-testid="admin-step-up-password-form"]')
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  expect(api.post).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[data-testid="admin-step-up-code-form"]')).toBeNull();
+  expect(onVerified).toHaveBeenCalledTimes(1);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+
+  await act(async () => root.unmount());
+  container.remove();
+});

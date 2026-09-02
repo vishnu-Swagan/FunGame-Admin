@@ -58,6 +58,21 @@ export const payments = {
     }, { idempotencyKey });
     return data;
   },
+  async createOperatorDeposit(amountPaise, idempotencyKey, note) {
+    const { data } = await financialPost(`${PLAYER_ROOT}/operator/deposits`, {
+      amount_paise: amountPaise,
+      note: note || null,
+    }, { idempotencyKey });
+    return data;
+  },
+  async createOperatorWithdrawal(amountChips, bankDetailId, note) {
+    const { data } = await financialApi.post(`${PLAYER_ROOT}/operator/withdrawals`, {
+      amount_chips: amountChips,
+      bank_detail_id: bankDetailId,
+      note: note || null,
+    }, { __noFailover: true });
+    return data;
+  },
 };
 
 export const adminPayments = {
@@ -72,6 +87,30 @@ export const adminPayments = {
   async createGateway(body) {
     const { data } = await financialApi.post("/admin/payment-gateways", body, { __noFailover: true });
     return data?.data?.gateway || data?.gateway || data;
+  },
+  async updateGateway(id, body) {
+    const { data } = await financialApi.patch(`/admin/payment-gateways/${encodeURIComponent(id)}`, body, { __noFailover: true });
+    return data?.data?.gateway || data?.gateway || data;
+  },
+  async paymentGatewaySettings() {
+    const { data } = await financialApi.get("/admin/payment-gateway-settings");
+    return data?.data?.settings || data?.settings || data;
+  },
+  async savePaymentGatewaySettings(body) {
+    const { data } = await financialApi.patch("/admin/payment-gateway-settings", body, { __noFailover: true });
+    return data?.data?.settings || data?.settings || data;
+  },
+  async localAgents() {
+    const { data } = await financialApi.get("/admin/payment-local-agents");
+    return data?.data?.items || [];
+  },
+  async createLocalAgent(body) {
+    const { data } = await financialApi.post("/admin/payment-local-agents", body, { __noFailover: true });
+    return data?.data?.agent || data?.agent || data;
+  },
+  async deleteLocalAgent(id) {
+    const { data } = await financialApi.delete(`/admin/payment-local-agents/${encodeURIComponent(id)}`, { __noFailover: true });
+    return data?.data || data;
   },
   async writeGatewayCredentials(id, credentials) {
     const { data } = await financialApi.post(`/admin/payment-gateways/${encodeURIComponent(id)}/credentials`, { credentials }, { __noFailover: true });
@@ -133,6 +172,30 @@ export const adminPayments = {
     const { data } = await financialApi.patch(`${ADMIN_ROOT}/kyc/${encodeURIComponent(userId)}`, { status, reason }, { __noFailover: true });
     return data;
   },
+  async requestPlayerVerification(userId, kind, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/verification-request`,
+      { kind, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
+  async reviewPlayerAge(userId, verified, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/age-verify`,
+      { verified, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
+  async reviewPlayerMobile(userId, verified, note) {
+    const { data } = await financialApi.post(
+      `/admin/compliance/players/${encodeURIComponent(userId)}/mobile-verify`,
+      { verified, note },
+      { __noFailover: true },
+    );
+    return data;
+  },
   async deposits(params = {}) {
     const { data } = await financialApi.get(`${ADMIN_ROOT}/deposits`, { params });
     return responseRows(data, "deposits");
@@ -166,6 +229,22 @@ export const adminPayments = {
   },
   async withdrawalAction(id, action, body = {}) {
     const { data } = await financialApi.post(`/admin/withdrawals/${encodeURIComponent(id)}/${action}`, body, { __noFailover: true });
+    return data;
+  },
+  async resolveOperatorRequest(id, action, body = {}) {
+    const { data } = await financialApi.post(
+      `${ADMIN_ROOT}/operator-requests/${encodeURIComponent(id)}/${action}`,
+      body,
+      { __noFailover: true },
+    );
+    return data;
+  },
+  async retryOperatorPayout(id) {
+    const { data } = await financialApi.post(
+      `${ADMIN_ROOT}/operator-requests/${encodeURIComponent(id)}/retry-payout`,
+      {},
+      { __noFailover: true },
+    );
     return data;
   },
   async reconcileEvent(id) {

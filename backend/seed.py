@@ -28,6 +28,9 @@ GAMES = [
     {"slug": "aviator", "name": "Aviator", "category": "Crash", "tagline": "Fly high, ride the multiplier", "featured": True,
      "description": "Watch the plane climb and cash out your stake before it flies away. The longer it flies, the higher the multiplier.",
      "art": {"from": "#0d1b3e", "to": "#e0353f", "accent": "#ff5964", "icon": "plane", "glyph": "2.4x"}},
+    {"slug": "chicken-road", "name": "Chicken Road", "category": "Crash", "tagline": "Cross the highway, cash out before the crash", "featured": True,
+     "description": "Guide the chicken across a busy night highway. The multiplier climbs with every lane - cash out your play chips before a vehicle hits it.",
+     "art": {"from": "#1a1206", "to": "#c98a1e", "accent": "#ffd447", "icon": "bird", "glyph": "4.8x"}},
     {"slug": "seven-up-down", "name": "Seven-Up-Down", "category": "Dice", "tagline": "Above, below or lucky seven", "featured": False,
      "description": "Two dice roll. Will the total land above seven, below seven, or exactly on the lucky number?",
      "art": {"from": "#123227", "to": "#0b8457", "accent": "#28e0a5", "icon": "dices", "glyph": "7"}},
@@ -185,7 +188,7 @@ async def run_seed():
 
     # Games added after the initial seed — ensure they exist and are playable on
     # already-seeded databases (idempotent; won't clobber later edits).
-    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101), ('rummy', 102)):
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101), ('rummy', 102), ('chicken-road', 103)):
         gm = next((g for g in GAMES if g['slug'] == slug), None)
         if gm:
             await db.games.update_one(

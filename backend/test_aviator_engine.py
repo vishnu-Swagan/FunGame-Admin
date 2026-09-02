@@ -1,3 +1,4 @@
+import hashlib
 import os
 import unittest
 from unittest.mock import patch
@@ -45,6 +46,21 @@ class AviatorEngineTests(unittest.TestCase):
             first = game_engines.aviator_crash_point('reference-seed')
             self.assertEqual(first, game_engines.aviator_crash_point('reference-seed'))
             self.assertGreaterEqual(first, 1.0)
+
+    def test_v2_commitment_binds_seed_and_return_factor(self):
+        seed = 'reference-seed'
+        commitment = game_engines.aviator_commitment(seed, 0.8)
+        self.assertEqual(commitment, game_engines.aviator_commitment(seed, 0.8))
+        self.assertNotEqual(commitment, game_engines.aviator_commitment(seed, 0.81))
+        self.assertIn(
+            'aviator-commit-v2:0.800000000000:',
+            game_engines.aviator_commitment_payload(seed, 0.8),
+        )
+
+    def test_legacy_commitment_remains_verifiable(self):
+        seed = 'legacy-seed'
+        expected = hashlib.sha256(seed.encode()).hexdigest()
+        self.assertEqual(game_engines.aviator_commitment(seed, 0.8, version=1), expected)
 
     def test_crash_point_is_last_reached_cent(self):
         # 0.8 / (1-u) = 1.231, so a 1.24x auto target must not be paid.

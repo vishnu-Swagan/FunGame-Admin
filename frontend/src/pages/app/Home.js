@@ -149,6 +149,22 @@ export default function Home() {
 
       {/* Live floor ticker */}
       <LiveActivityBar slug="chakri-lobby" />
+      {promo?.wager?.bonus && (
+        <section className="rounded-2xl border border-emerald-400/25 bg-emerald-950/40 p-4" data-testid="home-cash-guarantee">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-200/80">Total wallet</p>
+            <p className="tabular-nums text-xl font-black text-amber-300">₹{((user?.chip_balance || 0)).toLocaleString("en-IN")}</p>
+          </div>
+          <p className="mt-3 text-xs font-semibold text-emerald-200">Cash guarantee ₹{((promo.wager.bonus.bonus_paise || 0) / 100).toFixed(2)}</p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-amber-300" style={{ width: `${promo.wager.bonus.progress_pct || 0}%` }} />
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-white/70">{promo.wager.bonus.copy}</p>
+        </section>
+      )}
+      {promo?.wager?.deposit_wager && !promo?.wager?.deposit_wager?.cleared && (
+        <p className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">{promo.wager.deposit_wager.copy}</p>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-3">
@@ -243,6 +259,9 @@ export default function Home() {
           {games.length === 0 && <EmptyState title="No games available" subtitle="Check back soon — the lobby is being stocked." />}
         </>
       )}
+      <FreeCashFab onClick={() => setFreeCashOpen(true)} remainingPaise={promo?.free_cash?.remaining_paise} />
+      <FreeCash open={freeCashOpen} onClose={() => setFreeCashOpen(false)} initial={promo?.free_cash} />
+      <WagerBonusOverlay overlay={overlay} onClose={() => setOverlay(null)} />
     </PageTransition>
   );
 }

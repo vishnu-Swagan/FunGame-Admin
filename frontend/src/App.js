@@ -138,7 +138,8 @@ function AdminConsoleApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
+            <Route path="payment-hub" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
             <Route path="bonuses" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />
@@ -237,7 +238,8 @@ function PlayerApp() {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
-            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
+            <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
+            <Route path="payment-hub" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentHub /></RequirePermission>} />
             <Route path="bonuses" element={LEGACY_CHIP_REQUESTS_ENABLED ? <AdminChipRequests /> : <Navigate to="/Admin/dashboard" replace />} />
             <Route path="games/catalog" element={<AdminGames />} />
             <Route path="reports" element={<AdminCompliance />} />

@@ -36,6 +36,7 @@ HOUSE_CODE = 'HOUSE'
 ACTIVE_ATTRIBUTION_INDEX = 'player_attribution_active_user_unique'
 ACTIVE_ATTRIBUTION_PARTIAL = {'active': True}
 LOGIN_ID_RESERVATION_INDEX = 'login_id_reservation_key_unique'
+LOGIN_ID_RESERVATION_COVERAGE_VERSION = 1
 
 # 0/O and 1/I/L are the same character to someone reading a code off a screen or
 # hearing it over a phone, and a mistyped code silently pays the wrong person.
@@ -75,7 +76,10 @@ def normalise_code(raw):
 
 
 def code_is_available(code):
-    return code not in _RESERVED or code == HOUSE_CODE
+    raw = str(code or '').strip().upper().replace(' ', '').replace('-', '')
+    canonical = raw.translate(_CONFUSABLE)
+    reserved_keys = {item.translate(_CONFUSABLE) for item in _RESERVED}
+    return canonical not in reserved_keys
 
 
 def normalise_login_username(raw):
@@ -83,9 +87,19 @@ def normalise_login_username(raw):
     username = str(raw or '').strip()
     if not _LOGIN_USERNAME_OK.fullmatch(username):
         raise ValueError(
-            'Login ID must be 4-32 characters: letters, numbers, dot, underscore or hyphen'
+            'Login ID must start with a letter or number and use 4-32 letters, numbers, dots, underscores or hyphens'
         )
     return username, username.casefold()
+
+
+def login_id_reservation_aliases(username):
+    """Case-insensitive and referral-code-confusable reservation keys."""
+    display = str(username or '').strip()
+    aliases = {display.casefold()}
+    canonical_code = normalise_code(display)
+    if canonical_code:
+        aliases.add(canonical_code.casefold())
+    return aliases
 
 
 async def _assert_login_username_available(username, distributor_id=None, user_id=None,
@@ -93,12 +107,19 @@ async def _assert_login_username_available(username, distributor_id=None, user_i
     """Reserve partner Login IDs across CRM reservations and existing users."""
     kwargs = _session_kwargs(session)
     username, key = normalise_login_username(username)
+    canonical_code = normalise_code(username)
+    reserved_keys = {normalise_code(item) for item in _RESERVED}
+    if username.upper() in _RESERVED or canonical_code in reserved_keys:
+        raise ValueError(f'Login ID {username} is reserved')
     reserved = await db.distributors.find_one({'login_username_key': key}, **kwargs)
     if reserved and reserved.get('id') != distributor_id:
         raise ValueError(f'Login ID {username} is already reserved for another distributor')
-    code_owner = await db.distributors.find_one({
-        'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'},
-    }, **kwargs)
+    code_clauses = [
+        {'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]
+    if canonical_code:
+        code_clauses.append({'code': canonical_code})
+    code_owner = await db.distributors.find_one({'$or': code_clauses}, **kwargs)
     if code_owner and code_owner.get('id') != distributor_id:
         raise ValueError(f'Login ID {username} conflicts with another distributor referral code')
     taken = await db.users.find_one({'$or': [
@@ -107,6 +128,14 @@ async def _assert_login_username_available(username, distributor_id=None, user_i
     ]}, **kwargs)
     if taken and taken.get('id') != user_id:
         raise ValueError(f'Login ID {username} is already in use')
+    reservation = await db.login_id_reservations.find_one({
+        'key': {'$in': sorted(login_id_reservation_aliases(username))},
+    }, **kwargs)
+    if reservation and not (
+        reservation.get('owner_type') == 'DISTRIBUTOR'
+        and reservation.get('owner_id') == str(distributor_id or '')
+    ):
+        raise ValueError(f'Login ID {username} is already reserved')
     return username, key
 
 
@@ -125,13 +154,20 @@ async def distributor_login_id_is_reserved(username, *, session=None) -> bool:
     if not username:
         return False
     key = username.casefold()
-    if normalise_code(username) in _RESERVED:
+    canonical_code = normalise_code(username)
+    reserved_keys = {normalise_code(item) for item in _RESERVED}
+    if username.upper() in _RESERVED or canonical_code in reserved_keys:
         return True
     kwargs = _session_kwargs(session)
+    code_queries = [
+        {'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]
+    if canonical_code:
+        code_queries.append({'code': canonical_code})
     return bool(await db.distributors.find_one({'$or': [
         {'login_username_key': key},
         {'login_username': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
-        {'code': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+        *code_queries,
     ]}, {'_id': 0, 'id': 1}, **kwargs))
 
 
@@ -184,6 +220,138 @@ async def reserve_login_id(username, owner_type, owner_id, *, session=None):
         ):
             return existing
         raise ValueError(f'Login ID {display} is already reserved')
+
+
+async def reserve_login_id_aliases(username, owner_type, owner_id, *, session=None):
+    """Claim every key that is visually equivalent in the referral namespace."""
+    display = str(username or '').strip()
+    aliases = login_id_reservation_aliases(display)
+    await reserve_login_id(display, owner_type, owner_id, session=session)
+    for alias in sorted(aliases - {display.casefold()}):
+        await reserve_login_id(alias, owner_type, owner_id, session=session)
+
+
+async def release_login_id_aliases(username, owner_type, owner_id, *,
+                                   retain_usernames=(), session=None):
+    retained = set()
+    for retained_username in retain_usernames:
+        if retained_username:
+            retained.update(login_id_reservation_aliases(retained_username))
+    for alias in login_id_reservation_aliases(username) - retained:
+        await release_login_id(alias, owner_type, owner_id, session=session)
+
+
+async def assert_player_login_id_available(username, user_id=None, *, session=None):
+    """Validate a player Login ID against every current identity namespace."""
+    username, key = normalise_login_username(username)
+    kwargs = _session_kwargs(session)
+    if await distributor_login_id_is_reserved(username, session=session):
+        raise ValueError('Login ID is unavailable')
+    taken = await db.users.find_one({'$or': [
+        {'username_key': key},
+        {'username': {'$regex': f'^{re.escape(username)}$', '$options': 'i'}},
+    ]}, {'_id': 0, 'id': 1}, **kwargs)
+    if taken and taken.get('id') != str(user_id or ''):
+        raise ValueError('Login ID is unavailable')
+    reservation_keys = login_id_reservation_aliases(username)
+    reserved = await db.login_id_reservations.find_one({
+        'key': {'$in': sorted(reservation_keys)},
+    }, **kwargs)
+    if reserved and not (
+        reserved.get('owner_type') == 'USER'
+        and reserved.get('owner_id') == str(user_id or '')
+    ):
+        raise ValueError('Login ID is unavailable')
+    return username, key
+
+
+async def reserve_player_login_id(username, user_id, *, session=None):
+    """Validate and atomically reserve one user-chosen player Login ID."""
+    username, key = await assert_player_login_id_available(
+        username, user_id, session=session,
+    )
+    await reserve_login_id_aliases(username, 'USER', user_id, session=session)
+    return username, key
+
+
+async def ensure_login_id_reservation_coverage() -> None:
+    """Adopt every legacy Login ID/referral-code alias before new writes.
+
+    The version marker is written only after all identities have been claimed.
+    Existing cross-namespace conflicts therefore keep registration and
+    credential mutation fail-closed until an operator resolves the data.
+    """
+    # Clear a prior marker first. If this pass encounters a conflict, readiness
+    # must not continue trusting stale coverage evidence.
+    await db.system_config.update_one(
+        {'key': 'main'},
+        {'$unset': {
+            'login_id_reservation_coverage_version': '',
+            'login_id_reservation_covered_at': '',
+        }},
+        upsert=True,
+    )
+
+    distributor_user_owners = {}
+    async for distributor in db.distributors.find(
+        {'is_house': {'$ne': True}},
+        {'_id': 0, 'id': 1, 'code': 1, 'login_username': 1, 'user_id': 1},
+    ):
+        owner_id = distributor.get('id')
+        if not owner_id:
+            raise CrmConfigurationError('A distributor is missing its identity owner')
+        for identity in (distributor.get('code'), distributor.get('login_username')):
+            if identity:
+                try:
+                    await reserve_login_id_aliases(identity, 'DISTRIBUTOR', owner_id)
+                except (ValueError, DuplicateKeyError) as exc:
+                    raise CrmConfigurationError(
+                        f'Legacy distributor Login ID coverage conflicts for {owner_id}'
+                    ) from exc
+        linked_user_id = distributor.get('user_id')
+        if linked_user_id:
+            linked_user_id = str(linked_user_id)
+            existing_owner = distributor_user_owners.get(linked_user_id)
+            if existing_owner and existing_owner != owner_id:
+                raise CrmConfigurationError(
+                    f'Legacy distributor user {linked_user_id} has multiple owners'
+                )
+            distributor_user_owners[linked_user_id] = owner_id
+
+    async for user in db.users.find(
+        {'username': {'$type': 'string'}},
+        {'_id': 0, 'id': 1, 'username': 1, 'role': 1},
+    ):
+        if not user.get('id') or not str(user.get('username') or '').strip():
+            continue
+        user_id = str(user['id'])
+        owner_type = 'USER'
+        owner_id = user_id
+        if user.get('role') == 'DISTRIBUTOR':
+            owner_id = distributor_user_owners.get(user_id)
+            if not owner_id:
+                raise CrmConfigurationError(
+                    f'Legacy distributor portal user {user_id} has no CRM owner'
+                )
+            owner_type = 'DISTRIBUTOR'
+        try:
+            # A mismatched legacy portal username is still adopted under its
+            # linked distributor owner, protecting every alias while leaving
+            # profile repair to the audited CRM workflow.
+            await reserve_login_id_aliases(user['username'], owner_type, owner_id)
+        except (ValueError, DuplicateKeyError) as exc:
+            raise CrmConfigurationError(
+                f'Legacy user Login ID coverage conflicts for {user_id}'
+            ) from exc
+
+    await db.system_config.update_one(
+        {'key': 'main'},
+        {'$set': {
+            'login_id_reservation_coverage_version': LOGIN_ID_RESERVATION_COVERAGE_VERSION,
+            'login_id_reservation_covered_at': now_iso(),
+        }},
+        upsert=True,
+    )
 
 
 async def release_login_id(username, owner_type, owner_id, *, session=None):
@@ -261,15 +429,22 @@ async def create_distributor(name, code, rate_bps, created_by, email=None,
     rate_bps = int(rate_bps)
     if not 0 <= rate_bps <= 10000:
         raise ValueError('Commission must be between 0 and 100 percent')
+    distributor_id = str(uuid.uuid4())
+    # Referral codes and Login IDs share one confusable namespace. This check
+    # also prevents a new partner code from consuming an existing player ID.
+    await _assert_login_username_available(
+        code, distributor_id=distributor_id, session=session,
+    )
     login_username = login_username_key = None
     if username:
         login_username, login_username_key = await _assert_login_username_available(
             username, session=session,
         )
-    distributor_id = str(uuid.uuid4())
-    await reserve_login_id(code, 'DISTRIBUTOR', distributor_id, session=session)
+    await reserve_login_id_aliases(
+        code, 'DISTRIBUTOR', distributor_id, session=session,
+    )
     if login_username and login_username_key != code.casefold():
-        await reserve_login_id(
+        await reserve_login_id_aliases(
             login_username, 'DISTRIBUTOR', distributor_id, session=session,
         )
     doc = {
@@ -362,7 +537,7 @@ async def update_distributor(distributor_id, updates, actor, *, expected_version
             raw_username, distributor_id=distributor_id, user_id=dist.get('user_id'),
             session=session,
         )
-        await reserve_login_id(
+        await reserve_login_id_aliases(
             username, 'DISTRIBUTOR', distributor_id, session=session,
         )
         patch.update({'login_username': username, 'login_username_key': key})
@@ -413,8 +588,10 @@ async def update_distributor(distributor_id, updates, actor, *, expected_version
         and old_username.casefold() != str(patch.get('login_username') or '').casefold()
         and old_username.casefold() != str(dist.get('code') or '').casefold()
     ):
-        await release_login_id(
-            old_username, 'DISTRIBUTOR', distributor_id, session=session,
+        await release_login_id_aliases(
+            old_username, 'DISTRIBUTOR', distributor_id,
+            retain_usernames=(patch.get('login_username'), dist.get('code')),
+            session=session,
         )
     return await db.distributors.find_one(
         {'id': distributor_id}, {'_id': 0}, **kwargs,
@@ -693,10 +870,10 @@ async def attach_login(distributor_id, email, password_hash, actor, username=Non
         desired_username, distributor_id=distributor_id, user_id=dist.get('user_id'),
         session=session,
     )
-    await reserve_login_id(
+    await reserve_login_id_aliases(
         dist['code'], 'DISTRIBUTOR', distributor_id, session=session,
     )
-    await reserve_login_id(
+    await reserve_login_id_aliases(
         desired_username, 'DISTRIBUTOR', distributor_id, session=session,
     )
     provisioned_at = now_iso()
@@ -735,8 +912,10 @@ async def attach_login(distributor_id, email, password_hash, actor, username=Non
             and previous_username.casefold() != desired_username.casefold()
             and previous_username.casefold() != str(dist.get('code') or '').casefold()
         ):
-            await release_login_id(
-                previous_username, 'DISTRIBUTOR', distributor_id, session=session,
+            await release_login_id_aliases(
+                previous_username, 'DISTRIBUTOR', distributor_id,
+                retain_usernames=(desired_username, dist.get('code')),
+                session=session,
             )
         return await db.users.find_one(
             {'id': dist['user_id'], 'role': 'DISTRIBUTOR'},
@@ -803,7 +982,8 @@ async def ensure_indexes():
     # New portal-parity indexes stay after the established attribution indexes.
     # Attempt every additive index independently so one legacy conflict never
     # suppresses the others, then surface a single readiness error. No data is
-    # backfilled or deleted automatically.
+    # deleted automatically. Legacy identities are adopted into the additive
+    # reservation collection only after every required index exists.
     failures = []
     specs = (
         (
@@ -842,6 +1022,7 @@ async def ensure_indexes():
         raise CrmConfigurationError(
             f'CRM portal identity indexes are unavailable ({", ".join(failures)})'
         )
+    await ensure_login_id_reservation_coverage()
 
 
 async def require_portal_identity_readiness() -> None:
@@ -869,12 +1050,35 @@ async def require_portal_identity_readiness() -> None:
             spec = (await collection.index_information()).get(name) or {}
             if list(spec.get('key') or []) != keys or spec.get('unique') is not True:
                 raise CrmConfigurationError(f'CRM portal identity index {name} is unavailable')
-            if partial is not None and spec.get('partialFilterExpression') != partial:
+            actual_partial = spec.get('partialFilterExpression')
+            if (
+                (partial is None and actual_partial is not None)
+                or (partial is not None and actual_partial != partial)
+                or spec.get('sparse') is True
+            ):
                 raise CrmConfigurationError(f'CRM portal identity index {name} is invalid')
+        coverage = await db.system_config.find_one(
+            {'key': 'main'},
+            {'_id': 0, 'login_id_reservation_coverage_version': 1},
+        )
+        if (
+            not coverage
+            or coverage.get('login_id_reservation_coverage_version')
+            != LOGIN_ID_RESERVATION_COVERAGE_VERSION
+        ):
+            raise CrmConfigurationError('CRM Login ID reservation coverage is unavailable')
     except CrmConfigurationError:
         raise
     except Exception as exc:
         raise CrmConfigurationError('CRM portal identity storage is unavailable') from exc
+
+
+async def portal_identity_ready() -> bool:
+    try:
+        await require_portal_identity_readiness()
+    except Exception:
+        return False
+    return True
 
 
 async def require_registration_attribution_readiness() -> None:

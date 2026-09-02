@@ -29,7 +29,7 @@ $box-color: rgb(25, 25, 52);
   --brand-lime-ink: #182000;
   --win-green: #5fb926;
   --aviator-red: #e21b3c;
-  --header-height: 54px;
+  --header-height: 46px;
   --z-header: 80;
   --z-dialog: 100;
 }
@@ -178,21 +178,46 @@ code {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 14px;
-    gap: 16px;
+    padding: 0 10px;
+    gap: 12px;
   }
 
   .brand-lockup {
     display: flex;
     align-items: center;
     min-width: 0;
-    gap: 12px;
+    gap: 10px;
   }
 
   .logo-container {
-    width: 94px;
+    width: auto;
+    min-width: 116px;
     display: flex;
     align-items: center;
+    cursor: pointer;
+  }
+
+  .game-logo {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    color: #f6f7f9;
+    line-height: 1;
+
+    &__operator {
+      color: var(--aviator-red);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    strong {
+      font-size: 24px;
+      font-style: italic;
+      font-weight: 900;
+      letter-spacing: -.065em;
+    }
   }
 
   .round-status {
@@ -237,7 +262,7 @@ code {
   .lobby-button,
   .howto,
   .sound-toggle {
-    height: 32px;
+    height: 30px;
     padding: 0 11px;
     border: 1px solid var(--line);
     border-radius: 5px;
@@ -308,7 +333,7 @@ code {
 
   .balance {
     min-width: 142px;
-    height: 38px;
+    height: 34px;
     padding: 4px 11px 4px 13px;
     border-left: 2px solid var(--brand-lime);
     border-radius: 3px 6px 6px 3px;
@@ -348,6 +373,36 @@ code {
       font-weight: 700;
       letter-spacing: .06em;
     }
+  }
+}
+
+.connection-notice {
+  position: fixed;
+  top: calc(var(--header-height) + 8px);
+  right: 10px;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 108, 115, .32);
+  border-radius: 6px;
+  background: rgba(40, 15, 19, .94);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .32);
+  color: #ffc1c5;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .025em;
+  backdrop-filter: blur(12px);
+
+  > span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ff6c73;
+    box-shadow: 0 0 0 3px rgba(255, 108, 115, .12);
+    animation: live-pulse 1.2s ease-in-out infinite;
   }
 }
 
@@ -641,8 +696,8 @@ code {
   }
 
   .bets-block__heading {
-    min-height: 58px;
-    padding: 10px 12px 8px 14px;
+    min-height: 46px;
+    padding: 7px 10px 6px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -651,7 +706,7 @@ code {
 
     h2 {
       margin: 1px 0 0;
-      font-size: 17px;
+      font-size: 15px;
       font-weight: 700;
       letter-spacing: -.025em;
       line-height: 1;
@@ -1136,7 +1191,7 @@ code {
 
 @media (max-width: 680px) {
   :root {
-    --header-height: 50px;
+    --header-height: 48px;
   }
 
   .site-header {
@@ -1146,7 +1201,9 @@ code {
     }
 
     .brand-lockup { gap: 7px; }
-    .logo-container { width: 76px; }
+    .logo-container { min-width: 94px; }
+    .game-logo strong { font-size: 20px; }
+    .game-logo__operator { font-size: 7px; }
     .round-status { display: none; }
     .header-actions { gap: 5px; }
     .lobby-button { display: none; }

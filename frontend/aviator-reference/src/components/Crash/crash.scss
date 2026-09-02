@@ -38,18 +38,6 @@
       pointer-events: none;
     }
 
-    &.github-visual-ready {
-      background: #050505;
-
-      &::before,
-      &::after,
-      .stage-grid,
-      .fallback-flight-visual,
-      .center-logo {
-        opacity: 0;
-        visibility: hidden;
-      }
-    }
   }
 
   .stage-grid {
@@ -152,26 +140,85 @@
   position: absolute !important;
   inset: 0;
   z-index: 4;
-  display: block;
-  opacity: 0;
-  visibility: hidden;
-  width: 100% !important;
-  height: 100% !important;
-  background: #050505;
-
-  canvas {
-    display: block;
-    width: 100% !important;
-    height: 100% !important;
-  }
+  overflow: hidden;
+  contain: paint;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.space-box.github-visual-ready .github-unity-stage {
+.flight-rays {
+  position: absolute;
+  inset: -28%;
+  width: 156%;
+  height: 156%;
+  overflow: hidden;
+  opacity: 0.58;
+}
+
+.flight-rays-rotor {
+  fill: rgba(255, 255, 255, 0.045);
+  transform: rotate(0deg);
+  transform-box: view-box;
+  transform-origin: 32px 124px;
+  animation: flightRaysRotate 70s linear infinite;
+  will-change: transform;
+}
+
+.flight-glow {
+  position: absolute;
+  top: 48%;
+  left: 52%;
+  width: 76%;
+  aspect-ratio: 1.35;
+  opacity: 0.46;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  transition:
+    opacity 260ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 260ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.flight-glow-core {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(66, 166, 222, 0.25) 0%,
+    rgba(25, 112, 166, 0.16) 26%,
+    rgba(9, 49, 82, 0.07) 48%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.8;
+  transform: scale(0.98);
+  transform-origin: 50% 50%;
+}
+
+.space-box.phase-playing .flight-glow {
   opacity: 1;
-  visibility: visible;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  will-change: transform, opacity;
 }
 
-.fallback-flight-visual {
+.space-box.phase-playing .flight-glow-core,
+.space-box.phase-gameend .flight-glow-core {
+  animation: flightGlowBreath 7.2s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate;
+  will-change: transform, opacity;
+}
+
+.space-box.phase-gameend .flight-glow {
+  opacity: 0;
+  transform: translate3d(-50%, -50%, 0) scale(1.02);
+  will-change: transform, opacity;
+}
+
+.space-box[data-motion-paused="true"] .flight-rays-rotor,
+.space-box[data-motion-paused="true"] .flight-glow,
+.space-box[data-motion-paused="true"] .flight-glow-core,
+.space-box[data-motion-paused="true"] .aircraft-propeller {
+  animation-play-state: paused !important;
+}
+
+.native-flight-visual {
   position: absolute;
   inset: 0;
   z-index: 6;
@@ -184,6 +231,7 @@
 .space-box.fallback-visual-ready .fallback-flight-visual {
   opacity: 1;
   visibility: visible;
+  pointer-events: none;
 }
 
 .aviator-renderer-gate {
@@ -201,10 +249,6 @@
   letter-spacing: .14em;
   text-transform: uppercase;
 
-  img {
-    width: clamp(112px, 20vw, 210px);
-    height: auto;
-  }
 }
 
 .space-box.renderer-pending .round-state,
@@ -216,8 +260,7 @@
   visibility: hidden !important;
 }
 
-.space-box.github-visual-ready .aviator-renderer-gate,
-.space-box.fallback-visual-ready .aviator-renderer-gate {
+.space-box.native-visual-ready .aviator-renderer-gate {
   display: none;
 }
 
@@ -245,6 +288,15 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+
+  small {
+    padding-left: 7px;
+    border-left: 1px solid rgba(255, 255, 255, 0.09);
+    color: #666a72;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
 
   .state-dot {
     width: 6px;
@@ -311,11 +363,10 @@
 
 .flight-curve {
   position: absolute;
-  left: 4.5%;
-  bottom: 7.5%;
+  inset: 2% 2.5% 2.5%;
   z-index: 5;
-  width: 82%;
-  height: 70%;
+  width: 95%;
+  height: 95.5%;
   overflow: visible;
   pointer-events: none;
 
@@ -325,7 +376,6 @@
 
   .curve-fill {
     fill: url(#flight-area);
-    transition: clip-path 80ms linear;
   }
 
   .curve-shadow {
@@ -333,20 +383,26 @@
     stroke: rgba(225, 25, 66, 0.12);
     stroke-width: 20;
     stroke-linecap: round;
-    stroke-dasharray: 1;
-    transition: stroke-dashoffset 80ms linear;
     filter: blur(9px);
   }
 
   .curve-line {
     fill: none;
-    stroke: #e11942;
+    stroke: #ff2436;
     stroke-width: 4;
     stroke-linecap: round;
-    stroke-dasharray: 1;
-    transition: stroke-dashoffset 80ms linear;
-    filter: drop-shadow(0 0 5px rgba(225, 25, 66, 0.58));
+    filter: drop-shadow(0 0 5px rgba(255, 36, 54, 0.62));
   }
+
+  .curve-tip {
+    fill: #ff2436;
+    filter: drop-shadow(0 0 8px rgba(255, 36, 54, 0.9));
+  }
+}
+
+.aircraft-sprite {
+  transform-box: fill-box;
+  transform-origin: 13.5% 94.7%;
 }
 
 .plane {
@@ -368,6 +424,23 @@
   &.crashed .plane-exit-motion {
     animation: aviatorEscape 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   }
+
+  .propeller-hub {
+    fill: #ff2436;
+    stroke: #080a0d;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+}
+
+.aircraft-propeller.is-flying:not([data-motion-driver="waapi"]),
+.aircraft-propeller.is-ended:not([data-motion-driver="waapi"]) {
+  animation: propellerSpin 110ms linear infinite;
+  will-change: transform;
+}
+
+.plane-flight.crashed .aircraft-sprite {
+  animation: aviatorEscapeVector 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 .plane-exit-motion {
@@ -461,19 +534,42 @@
     transform: translate(-50%, -47%) scale(0.98);
   }
 
-  img {
-    width: clamp(138px, 17vw, 210px);
-    height: auto;
-    filter: drop-shadow(0 8px 22px rgba(229, 5, 57, 0.16));
-  }
-
-  span {
+  small {
     color: #777a82;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
+}
+
+.stage-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  color: #f6f7f9;
+  filter: drop-shadow(0 8px 22px rgba(229, 5, 57, 0.16));
+  letter-spacing: -0.045em;
+  line-height: 1;
+
+  span {
+    color: #e11942;
+    font-size: clamp(12px, 1.25vw, 17px);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  strong {
+    font-size: clamp(34px, 4.7vw, 64px);
+    font-style: italic;
+    font-weight: 900;
+    letter-spacing: -0.065em;
+  }
+}
+
+.aviator-renderer-gate .stage-brand strong {
+  font-size: clamp(38px, 5.2vw, 68px);
 }
 
 .crash-container .loading-container {
@@ -561,7 +657,31 @@
     transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
   }
 
-  16% {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes flightGlowBreath {
+  from {
+    opacity: 0.72;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 0.88;
+    transform: scale(1.035);
+  }
+}
+
+@keyframes propellerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes aviatorEscapeVector {
+  0% {
     opacity: 1;
     transform: translate3d(58px, -22px, 0) rotate(-0.5deg) scale(0.99);
   }
@@ -581,16 +701,6 @@
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
-  }
-}
-
-@keyframes loadingRightToLeft {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(-100%);
   }
 }
 
@@ -614,9 +724,6 @@
     min-width: 114px;
   }
 
-  .plane {
-    width: clamp(68px, 18.5%, 170px);
-  }
 }
 
 @media (max-width: 520px) {
@@ -677,11 +784,16 @@
   }
 
   .round-state .state-dot,
-  .flight-curve .curve-line,
   .plane,
+  .aircraft-propeller,
   .multiplier,
   .center-logo,
   .flight-timer {
     transition-duration: 1ms !important;
+  }
+
+  .plane-flight.crashed .aircraft-sprite,
+  .aircraft-propeller.visible {
+    animation: none !important;
   }
 }

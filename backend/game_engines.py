@@ -888,11 +888,12 @@ def play_no_hold(bet, payload):
 
 
 # ---------------- Aviator helpers ----------------
-# The flight curve is shared verbatim with the Unity-backed reference client.
-# It deliberately remains separate from the private probability configuration:
+# The flight curve is shared with Chakri's native SVG client renderer. It
+# deliberately remains separate from the private probability configuration:
 # the curve controls animation time, while the secret server setting controls
 # the distribution of immutable crash points.
 AVIATOR_GROWTH = 0.06
+AVIATOR_FAIRNESS_VERSION = 2
 
 
 def aviator_return_factor():
@@ -909,6 +910,28 @@ def aviator_return_factor():
 def aviator_uniform_from_seed(server_seed):
     digest = hashlib.sha256(f'aviator-crash-v1:{server_seed}'.encode()).hexdigest()
     return int(digest[:13], 16) / (2 ** 52)
+
+
+def aviator_factor_text(return_factor):
+    """Canonical factor text used by both the commitment and verifier."""
+    return f'{float(return_factor):.12f}'
+
+
+def aviator_commitment_payload(server_seed, return_factor, version=AVIATOR_FAIRNESS_VERSION):
+    """Bind every private crash input before bets close.
+
+    Version 1 committed only the seed. Version 2 also commits the configured
+    return factor, preventing it from being changed after the seed hash is
+    published while keeping already-settled v1 rounds verifiable.
+    """
+    if int(version) <= 1:
+        return str(server_seed)
+    return f'aviator-commit-v2:{aviator_factor_text(return_factor)}:{server_seed}'
+
+
+def aviator_commitment(server_seed, return_factor, version=AVIATOR_FAIRNESS_VERSION):
+    payload = aviator_commitment_payload(server_seed, return_factor, version)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def aviator_crash_point(server_seed=None, return_factor=None):
@@ -977,6 +1000,70 @@ def aviator_time_for(mult):
     # Step a few nanoseconds onto the reached-cent side of the floating-point
     # boundary so multiplier(time_for(x)) is always exactly x, never x-0.01.
     return high + 1e-7
+
+
+# ---------------- Chicken Road helpers ----------------
+# Chicken Road is a crash table (original IP): a chicken crosses a night highway,
+# the multiplier climbs, and the player cashes out before a vehicle hits it.
+# It reuses the very same server-authoritative crash engine as Aviator - the
+# flight/climb curve (aviator_multiplier) and its inverse (aviator_time_for) are
+# shared verbatim so the on-screen multiplier is locked to elapsed time exactly
+# like Aviator. Only the fairness namespace and the configurable return factor
+# are distinct, so the two tables can never share a seed or commitment.
+CHICKEN_ROAD_GROWTH = AVIATOR_GROWTH
+CHICKEN_ROAD_FAIRNESS_VERSION = 1
+# Unlike Aviator (a private, fail-closed operator setting), Chicken Road ships a
+# safe default so the play-chip table runs locally and in tests without extra
+# configuration. An operator may still pin it via the environment.
+CHICKEN_ROAD_DEFAULT_RETURN_FACTOR = 0.97
+
+
+def chicken_road_return_factor():
+    """Return the Chicken Road probability factor (env override, else default)."""
+    raw_factor = os.environ.get('CHICKEN_ROAD_RETURN_FACTOR', '').strip()
+    if not raw_factor:
+        return CHICKEN_ROAD_DEFAULT_RETURN_FACTOR
+    return_factor = float(raw_factor)
+    if not 0 < return_factor < 1:
+        raise RuntimeError('CHICKEN_ROAD_RETURN_FACTOR must be between 0 and 1')
+    return return_factor
+
+
+def chicken_road_uniform_from_seed(server_seed):
+    digest = hashlib.sha256(f'chicken-road-crash-v1:{server_seed}'.encode()).hexdigest()
+    return int(digest[:13], 16) / (2 ** 52)
+
+
+def chicken_road_commitment_payload(server_seed, return_factor,
+                                    version=CHICKEN_ROAD_FAIRNESS_VERSION):
+    """Bind the seed and the return factor before bets close for a round."""
+    return f'chicken-road-commit-v1:{aviator_factor_text(return_factor)}:{server_seed}'
+
+
+def chicken_road_commitment(server_seed, return_factor,
+                            version=CHICKEN_ROAD_FAIRNESS_VERSION):
+    payload = chicken_road_commitment_payload(server_seed, return_factor, version)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def chicken_road_crash_point(server_seed=None, return_factor=None):
+    """The immutable multiplier a round crashes at (the vehicle hits the chicken)."""
+    return_factor = chicken_road_return_factor() if return_factor is None else return_factor
+    u = chicken_road_uniform_from_seed(server_seed) if server_seed is not None else RNG.random()
+    crash = max(1.0, return_factor / max(1e-9, 1 - u))
+    # The displayed crash is the last fully reached cent, exactly as Aviator does,
+    # so an auto-cashout target the run never reached is never paid.
+    return min(1_000_000.0, math.floor(crash * 100) / 100)
+
+
+def chicken_road_multiplier(elapsed_seconds):
+    """The climbing multiplier - shares Aviator's reference curve verbatim."""
+    return aviator_multiplier(elapsed_seconds)
+
+
+def chicken_road_time_for(mult):
+    """Inverse of the climb curve - shares Aviator's reference inverse verbatim."""
+    return aviator_time_for(mult)
 
 
 # ---------------- Engine registry (instant games) ----------------

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { ShieldCheck, Globe, AlertTriangle, Ban, BadgeCheck, Eye } from "lucide-react";
+import { ShieldCheck, Globe, AlertTriangle, Ban, Eye } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { formatChips } from "@/components/common";
 
@@ -79,24 +79,6 @@ export default function AdminCompliance() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
-  const verifyAge = async (userId) => {
-    const note = window.prompt(
-      "Record why this player's age evidence was accepted (minimum 5 characters)."
-    );
-    if (!note || note.trim().length < 5) {
-      toast.error("An audit reason of at least 5 characters is required");
-      return;
-    }
-    try {
-      const { data } = await api.post(`/admin/compliance/players/${userId}/age-verify`, {
-        verified: true,
-        note: note.trim(),
-      });
-      toast.success(`${data.message} (age ${data.age})`);
-      load();
-    } catch (e) { toast.error(errMsg(e)); }
-  };
-
   if (!cfg) return <p className="text-sm text-white/50">Loading…</p>;
 
   const shown = preview || review;
@@ -108,7 +90,7 @@ export default function AdminCompliance() {
           <ShieldCheck className="h-5 w-5 text-primary" /> Compliance
         </h1>
         <p className="text-xs text-white/55 mt-1">
-          Markets, age, self-exclusion and player limits.
+          Markets, minimum-age safeguards, self-exclusion and player limits.
         </p>
       </div>
 
@@ -186,12 +168,6 @@ export default function AdminCompliance() {
                       className="rounded-full bg-amber-400/15 text-amber-300 px-2 py-0.5 text-[9px] tracking-wider">{r}</span>
                   ))}
                 </span>
-                {f.reasons.includes("UNDERAGE") ? null : (
-                  <button onClick={() => verifyAge(f.user_id)}
-                    className="rounded-lg border border-white/12 bg-white/5 px-2 py-1 text-[11px] font-semibold flex items-center gap-1">
-                    <BadgeCheck className="h-3 w-3" /> Verify age
-                  </button>
-                )}
               </div>
             ))}
           </div>
@@ -214,13 +190,6 @@ export default function AdminCompliance() {
           on={cfg.enforce_market_on_login}
           onChange={(v) => patch({ enforce_market_on_login: v })}
           testId="compliance-enforce-market"
-        />
-        <Toggle
-          label="Require age verification before playing"
-          hint="New and existing players are held until an operator confirms their age"
-          on={cfg.require_age_verification}
-          onChange={(v) => patch({ require_age_verification: v })}
-          testId="compliance-require-age"
         />
         <div className="grid gap-3 sm:grid-cols-3 pt-1">
           <Num label="Minimum age" value={cfg.min_age}

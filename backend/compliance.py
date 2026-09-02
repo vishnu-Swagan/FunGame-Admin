@@ -442,11 +442,18 @@ async def assert_playable(user):
             'Chakri.Casino is not available in your registered country. '
             'Contact support if this is wrong.')
 
-    if cfg.get('require_age_verification') and not user.get('age_verified'):
+    # Age is satisfied by the player's one-tap 18+ self-attestation (recorded as
+    # accepted_terms during onboarding) or by an explicit operator age flag.
+    # Requiring an operator to hand-verify age stranded live players behind
+    # "Age verification failed"; the launch model is self-attest, and an actual
+    # date of birth below the minimum is still refused below so a real minor
+    # cannot slip through.
+    if (cfg.get('require_age_verification')
+            and not user.get('age_verified')
+            and not user.get('accepted_terms')):
         raise ComplianceBlock(
             'AGE_NOT_VERIFIED',
-            'Your age has not been verified yet. An operator will review your '
-            'account shortly.')
+            'Please confirm you are at least 18 to continue.')
 
     # Age is re-derived rather than trusted, so an account that got through
     # before is caught the next time it is used. The BASE minimum applies

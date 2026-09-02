@@ -30,6 +30,7 @@ import routes_distributor
 import routes_compliance
 import routes_games
 import routes_live
+import routes_chicken_road
 import routes_blackjack
 import routes_rummy
 import routes_security
@@ -42,7 +43,7 @@ import financial_wallet
 import game_wallet
 import promotions
 from payment_hub import service as payment_hub_service
-from payment_providers import load_payment_provider
+from payment_providers import ProviderConfigurationError, load_payment_provider
 from transactions import run_game_transaction
 
 logging.basicConfig(
@@ -80,12 +81,18 @@ async def _hold_keepalive_lock():
 
 
 async def _aviator_keepalive():
-    """Keep the universal Aviator round machine ticking 24/7 (leader only)."""
+    """Keep the universal crash-table round machines ticking 24/7 (leader only).
+
+    One leader lock drives both crash tables (Aviator and Chicken Road) so their
+    DB-chained rounds keep advancing between requests without two competing
+    keepalive tasks."""
     from routes_live import advance_aviator
+    from routes_chicken_road import advance_chicken_road
     while True:
         try:
             if await _hold_keepalive_lock():
                 await advance_aviator()
+                await advance_chicken_road()
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -94,16 +101,21 @@ async def _aviator_keepalive():
 
 
 async def _financial_worker():
-    """Dormant-by-default outbox runner and bounded reconciliation loop."""
+    """Leader-only financial and hosted-UPI reconciliation loops."""
     last_reconciliation = 0.0
+    last_upi_reconciliation = 0.0
     while True:
         try:
             status = financial_wallet.financial_status()
-            if status['ready'] and status['features']['real_money']:
+            financial_live = bool(status['ready'] and status['features']['real_money'])
+            # Turning off checkout intake must not strand already-paid orders.
+            upi_live = await operator_rail.hosted_upi_reconciliation_needed()
+            if financial_live or upi_live:
                 leader = await financial_wallet.acquire_financial_worker_lease(
                     f'financial-{_WORKER_ID}', ttl_seconds=45,
                 )
                 if leader:
+                    current = time.monotonic()
                     provider = load_payment_provider()
                     outbox = await financial_wallet.process_outbox_batch(
                         provider, limit=10,
@@ -136,6 +148,7 @@ async def _retire_nocash_wording_migration():
 
 
 async def _core_indexes():
+    await operator_rail.ensure_hosted_indexes()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
@@ -166,6 +179,15 @@ async def _core_indexes():
         unique=True,
         partialFilterExpression={'active': True},
         name='aviator_one_active_bet_per_panel',
+    )
+    await db.chicken_road_rounds.create_index('round_number', unique=True)
+    await db.chicken_road_bets.create_index([('round_number', 1), ('status', 1)])
+    await db.chicken_road_bets.create_index([('user_id', 1), ('round_number', 1)])
+    await db.chicken_road_bets.create_index(
+        [('user_id', 1), ('round_number', 1), ('panel', 1)],
+        unique=True,
+        partialFilterExpression={'active': True},
+        name='chicken_road_one_active_bet_per_panel',
     )
 
 
@@ -406,6 +428,7 @@ async def health():
 
 api_router.include_router(routes_auth.router)
 api_router.include_router(routes_live.router)
+api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_rummy.router)

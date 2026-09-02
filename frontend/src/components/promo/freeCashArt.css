@@ -1,0 +1,36 @@
+@keyframes chakri-chest-bob {
+  0%, 100% { transform: translate3d(0, 0, 0) rotateZ(-1.2deg); }
+  50% { transform: translate3d(0, -10px, 0) rotateZ(1.6deg); }
+}
+@keyframes chakri-coin-glow {
+  0%, 100% { opacity: 0.7; transform: translate3d(-50%, 10px, 0) scale(0.92); }
+  50% { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+}
+@keyframes chakri-fab-pulse {
+  0%, 100% { box-shadow: 0 8px 28px rgba(16, 185, 129, 0.45), 0 0 0 0 rgba(251, 191, 36, 0.35); }
+  50% { box-shadow: 0 10px 34px rgba(16, 185, 129, 0.7), 0 0 0 8px rgba(251, 191, 36, 0); }
+}
+.chakri-chest-bob {
+  animation: chakri-chest-bob 2.8s ease-in-out infinite;
+  transform-origin: 50% 80%;
+  will-change: transform;
+}
+.chakri-coin-glow {
+  animation: chakri-coin-glow 3.2s ease-in-out infinite;
+}
+.chakri-fab-pulse {
+  animation: chakri-fab-pulse 2.4s ease-in-out infinite;
+}
+
+/* AppShell bottom nav is h-[72px] with safe-area padding. Keep the FAB above it. */
+.chakri-free-cash-fab {
+  position: fixed;
+  right: 1rem;
+  bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 55;
+}
+
+.chakri-free-cash-sheet {
+  max-height: min(92dvh, 720px);
+  overflow-y: auto;
+}

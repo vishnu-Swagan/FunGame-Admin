@@ -11,6 +11,7 @@ os.environ.setdefault('APP_ENV', 'test')
 os.environ.setdefault('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS', 'true')
 os.environ.setdefault('OTP_PEPPER', 'test-only-otp-pepper-with-at-least-32-characters')
 os.environ.setdefault('OTP_SMS_ADAPTER', 'mock')
+os.environ.setdefault('OTP_EMAIL_ADAPTER', 'mock')
 os.environ.setdefault('OTP_EXPOSE_DEV_CODE', 'true')
 
 from fastapi import HTTPException, Response
@@ -84,11 +85,87 @@ async def main():
       and admin.get('mfa_verified_at') is not None
       and admin.get('reauthenticated_at') is not None
       and admin.get('admin_step_up_session_id') == admin.get('active_session_id'))
+
+    fallback_admin = {
+        'id': 'admin-fallback', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'phone': '+919999999999', 'phone_normalized': '+919999999999',
+        'phone_verified': True,
+        'email': 'admin-fallback@example.com',
+        'email_normalized': 'admin-fallback@example.com',
+        'email_verified': True, 'active_session_id': 'fallback-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(fallback_admin))
+    for _ in range(5):
+        await otp_service.consume_persistent_limit(
+            'admin_step_up_password', fallback_admin['id'], limit=5,
+            window_seconds=15 * 60,
+        )
+    delivery_channels = []
+
+    async def issue_with_sms_failure(user, identity, purpose):
+        delivery_channels.append(identity.channel)
+        if identity.channel == 'SMS':
+            raise otp_service.OtpConfigurationError('SMS provider rejected delivery')
+        return {'challenge_id': 'fallback-challenge', 'channel': 'EMAIL'}
+
+    with patch.object(routes_admin, 'issue_challenge', side_effect=issue_with_sms_failure):
+        fallback = await routes_admin.start_admin_step_up(
+            AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), fallback_admin,
+        )
+    T('admin step-up falls back to a verified email when SMS delivery fails',
+      fallback['channel'] == 'EMAIL' and delivery_channels == ['SMS', 'EMAIL'])
+    T('correct admin password is not blocked by exhausted failed-password attempts',
+      fallback['challenge_id'] == 'fallback-challenge')
+    T('admin step-up verification resolves the channel used by its challenge',
+      routes_admin._admin_step_up_identity(
+          fallback_admin, channel='EMAIL',
+      ).value == 'admin-fallback@example.com')
+
+    enrollment_admin = {
+        'id': 'admin-email-enrollment', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'email': 'admin-enrollment@example.com',
+        'email_normalized': 'admin-enrollment@example.com',
+        'email_verified': False, 'active_session_id': 'enrollment-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(enrollment_admin))
+    enrollment = await routes_admin.start_admin_step_up(
+        AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), enrollment_admin,
+    )
+    await routes_admin.verify_admin_step_up(
+        AdminStepUpVerify(
+            challenge_id=enrollment['challenge_id'], code=enrollment['dev_code'],
+        ), enrollment_admin,
+    )
+    enrolled = await database.users.find_one({'id': enrollment_admin['id']})
+    T('password-confirmed admin can enroll its stored email through the OTP',
+      enrollment['channel'] == 'EMAIL'
+      and enrolled.get('email_verified') is True
+      and enrolled.get('mfa_enabled') is True)
     wrong_session_admin = {**admin, 'active_session_id': 'replacement-session'}
     T('administrator step-up cannot be inherited by a replacement session',
       await raises(asyncio.to_thread(
           auth_utils.require_recent_admin_step_up, wrong_session_admin,
       ), 'ADMIN_STEP_UP_REQUIRED'))
+
+    otp_down_admin = {
+        'id': 'admin-otp-down', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'phone': '+919111111111', 'phone_normalized': '+919111111111',
+        'phone_verified': True, 'active_session_id': 'otp-down-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(otp_down_admin))
+    with patch.object(routes_admin, 'delivery_adapter_ready', return_value=False):
+        otp_down = await routes_admin.start_admin_step_up(
+            AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), otp_down_admin,
+        )
+    otp_down_row = await database.users.find_one({'id': 'admin-otp-down'})
+    T('CRM KYC step-up completes on password when OTP delivery is unavailable',
+      otp_down.get('password_only') is True and otp_down.get('verified') is True)
+    T('password-only step-up records the MFA window for KYC',
+      otp_down_row.get('mfa_enabled') is True
+      and otp_down_row.get('admin_step_up_session_id') == 'otp-down-session')
 
     created = await routes_admin.create_distributor(DistributorCreate(
         name='Northern Network', code='NRTH1', rate_bps=2500,

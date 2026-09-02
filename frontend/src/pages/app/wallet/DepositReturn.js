@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleCheck, CircleX, Clock3, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageTransition } from "@/components/common";
 import { useAuth } from "@/context/AuthContext";
+import { errMsg } from "@/lib/api";
 import { payments } from "@/lib/paymentApi";
 import { TERMINAL_DEPOSIT_STATUSES } from "@/lib/walletUtils";
 import { PaymentStatus } from "@/pages/app/wallet/WalletBits";
@@ -19,9 +21,17 @@ export default function DepositReturn() {
   const [deposit, setDeposit] = useState(null);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
+  const [utr, setUtr] = useState("");
+  const [utrBusy, setUtrBusy] = useState(false);
+  const [utrError, setUtrError] = useState("");
+  const [utrNotice, setUtrNotice] = useState("");
+  const [overlay, setOverlay] = useState(null);
+  const requestInFlight = useRef(false);
 
   const check = useCallback(async () => {
     if (!depositId) { setError("No deposit reference was supplied. Check wallet activity for the latest status."); setChecking(false); return; }
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setChecking(true);
     try {
       const result = await payments.deposit(depositId);
@@ -37,22 +47,63 @@ export default function DepositReturn() {
       }
       setDeposit(nextDeposit);
       setError("");
-      if (String(result.status).toUpperCase() === "CREDITED") await refreshUser();
+      if (String(result?.status).toUpperCase() === "CREDITED") {
+        try { await refreshUser(); } catch (_error) { /* Status remains authoritative if profile refresh fails. */ }
+        try {
+          const promo = result?.overlay ? { overlay: result.overlay } : await promoApi.state();
+          const next = result?.overlay || promo?.wager?.overlay;
+          if (next) setOverlay(next);
+        } catch (_error) { /* Overlay is optional after credit. */ }
+      }
     } catch (requestError) {
-      setError("We could not verify this deposit yet. Your wallet remains unchanged until the provider webhook is confirmed.");
+      setError("We could not refresh this payment yet. Your wallet changes only after the server verifies it with the payment provider; we will keep checking.");
     } finally {
+      requestInFlight.current = false;
       setChecking(false);
     }
   }, [depositId, refreshUser]);
 
+  const submitUtr = async (event) => {
+    event.preventDefault();
+    const normalizedUtr = utr.trim();
+    if (!/^[A-Z0-9_-]{4,80}$/i.test(normalizedUtr)) {
+      setUtrError("Enter the UTR shown in your UPI app (4–80 letters, numbers, hyphens, or underscores).");
+      return;
+    }
+    setUtrBusy(true);
+    setUtrError("");
+    setUtrNotice("");
+    try {
+      const result = await payments.submitDepositUtr(depositId, normalizedUtr);
+      setDeposit(result);
+      setError("");
+      setUtr("");
+      if (String(result?.status).toUpperCase() === "CREDITED") {
+        setUtrNotice("SgPay verified this UTR and the chips are credited.");
+        try { await refreshUser(); } catch (_error) { /* Deposit status remains authoritative. */ }
+      } else {
+        setUtrNotice("UTR submitted. Our server is matching it with SgPay; this page will keep checking.");
+      }
+    } catch (requestError) {
+      setUtrError(errMsg(requestError, "We could not verify that UTR. Check it in your UPI app and try again."));
+    } finally {
+      setUtrBusy(false);
+    }
+  };
+
   useEffect(() => { check(); }, [check]);
   useEffect(() => {
-    if (!deposit || TERMINAL_DEPOSIT_STATUSES.has(String(deposit.status).toUpperCase())) return undefined;
-    const timer = window.setInterval(check, 3000);
+    if (!depositId || TERMINAL_DEPOSIT_STATUSES.has(String(deposit?.status || "").toUpperCase())) return undefined;
+    const timer = window.setInterval(check, DEPOSIT_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [deposit, check]);
+  }, [depositId, deposit?.status, check]);
 
   const status = String(deposit?.status || "PENDING").toUpperCase();
+  const isHostedUpi = String(deposit?.source || "").toUpperCase() === "SGPAY24_UPI";
+  const copy = (isHostedUpi ? UPI_STATUS_COPY : PAYMENT_STATUS_COPY)[status] || {
+    title: isHostedUpi ? "UPI deposit update" : "Deposit update",
+    detail: "Check Wallet activity for the latest server-verified payment status.",
+  };
   const Icon = status === "CREDITED" ? CircleCheck : ["FAILED", "EXPIRED", "REFUNDED", "RECONCILIATION_REQUIRED"].includes(status) ? CircleX : Clock3;
   if (status === "CREDITED" && deposit?.mission) {
     return (

@@ -40,8 +40,26 @@ test("pre-RBAC administrators retain the CRM read surfaces during migration", ()
   expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW)).toBe(true);
   expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.PAYMENTS_VIEW)).toBe(true);
   expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.AUDIT_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.GATEWAY_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.GATEWAY_CREATE)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.GATEWAY_UPDATE_NON_SECRET_CONFIG)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.GATEWAY_TEST)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.KYC_VIEW)).toBe(true);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.KYC_REVIEW)).toBe(true);
   expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.WITHDRAWALS_APPROVE)).toBe(false);
+  expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE)).toBe(false);
   expect(hasPermission(legacyAdmin, ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE)).toBe(false);
+});
+
+test("a bootstrap admin with an empty grant list still reaches CRM payment configuration", () => {
+  const bootstrap = { role: "ADMIN", status: "ACTIVE", admin_permissions: [] };
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.PAYMENTS_VIEW)).toBe(true);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.GATEWAY_CREATE)).toBe(true);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.KYC_VIEW)).toBe(true);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.KYC_REVIEW)).toBe(true);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE)).toBe(false);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.DISTRIBUTORS_MANAGE)).toBe(false);
+  expect(hasPermission(bootstrap, ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE)).toBe(false);
 });
 
 test("an empty canonical permission list does not revive legacy permissions", () => {

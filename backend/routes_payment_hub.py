@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from auth_utils import get_current_user, require_recent_admin_step_up
+from auth_utils import get_current_user, require_admin, require_recent_admin_step_up, verify_password
 from db import db, serialize_doc
 from payment_hub import service
 from payment_hub.domain import GatewayError, redact, utcnow
@@ -38,16 +39,45 @@ PERMISSION_ALIASES = {
 }
 
 
+# First production admin rows predate admin_permissions. Keep the CRM
+# configuration surfaces available until those documents are migrated.
+# A leftover ``permissions`` key next to an empty canonical list is an
+# explicit migration and stays revoked. A named admin_role with an empty
+# grant list also stays revoked.
+_PRE_RBAC_PAYMENT_GRANTS = {
+    "PAYMENTS_VIEW", "GATEWAY_VIEW", "GATEWAY_CREATE",
+    "GATEWAY_UPDATE_NON_SECRET_CONFIG", "GATEWAY_TEST", "AUDIT_VIEW",
+}
+_PRE_RBAC_VIEW_GRANTS = {"PAYMENTS_VIEW", "GATEWAY_VIEW", "AUDIT_VIEW"}
+
+
+def _is_super_admin(user: Mapping[str, Any]) -> bool:
+    return str(user.get("admin_role") or "").upper() == "SUPER_ADMIN"
+
+
+def _is_pre_rbac_admin(user: Mapping[str, Any]) -> bool:
+    """Bootstrap operator: no designated admin_role and no migrated grant list."""
+    if str(user.get("admin_role") or "").strip():
+        return False
+    if "admin_permissions" in user:
+        return not bool(user.get("admin_permissions") or []) and "permissions" not in user
+    return "permissions" not in user
+
+
 def _permissions(user: Mapping[str, Any]) -> set[str]:
+    if _is_pre_rbac_admin(user):
+        return set(_PRE_RBAC_PAYMENT_GRANTS)
+    if "admin_permissions" not in user and "permissions" not in user:
+        return set(_PRE_RBAC_VIEW_GRANTS)
     values = user.get("admin_permissions") if "admin_permissions" in user else user.get("permissions", [])
-    return {str(value).strip().upper() for value in (values or [])}
+    return {str(value).strip().upper() for value in (values or []) if value}
 
 
 def require_permission(permission: str, *, step_up: bool = False, super_admin: bool = False, feature: bool = True):
     async def dependency(user: dict = Depends(get_current_user)):
         if user.get("role") != "ADMIN" or user.get("status") != "ACTIVE":
             raise HTTPException(status_code=403, detail={"code": "ADMIN_REQUIRED", "message": "Administrator access is required."})
-        is_super = str(user.get("admin_role", "")).upper() == "SUPER_ADMIN"
+        is_super = _is_super_admin(user)
         if super_admin and not is_super:
             raise HTTPException(status_code=403, detail={"code": "SUPER_ADMIN_REQUIRED", "message": "A designated Super Admin is required."})
         if not is_super and not (_permissions(user) & PERMISSION_ALIASES[permission]):
@@ -93,15 +123,73 @@ class GatewayCreate(BaseModel):
     base_url: str = Field(default="", max_length=500)
     capabilities: list[str] = Field(default_factory=list)
     non_secret_config: dict[str, Any] = Field(default_factory=dict)
+    category: str | None = None
+    provider_type: str | None = None
+    deposits_enabled: bool = False
+    withdrawals_enabled: bool = False
 
 
 class GatewayUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
     display_name: str | None = Field(default=None, min_length=2, max_length=100)
     merchant_reference_masked: str | None = Field(default=None, max_length=80)
     base_url: str | None = Field(default=None, max_length=500)
     capabilities: list[str] | None = None
     non_secret_config: dict[str, Any] | None = None
-    version: int = Field(ge=1)
+    category: str | None = None
+    provider_type: str | None = None
+    deposits_enabled: bool | None = None
+    withdrawals_enabled: bool | None = None
+    auto_approve_deposits: bool | None = None
+    auto_approve_withdrawals: bool | None = None
+    version: int | None = Field(default=None, ge=1)
+    current_password: str | None = Field(default=None, max_length=128)
+    currentPassword: str | None = Field(default=None, max_length=128)
+
+
+class ReturnPages(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    success_path: str | None = Field(default=None, max_length=500)
+    failure_path: str | None = Field(default=None, max_length=500)
+    successPath: str | None = Field(default=None, max_length=500)
+    failurePath: str | None = Field(default=None, max_length=500)
+
+
+class LocalSettings(BaseModel):
+    depositsEnabled: bool | None = None
+    withdrawalsEnabled: bool | None = None
+    depositAutoApprove: bool | None = None
+    withdrawalAutoApprove: bool | None = None
+
+
+class PaymentPlatformSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    return_pages: ReturnPages | None = None
+    returnPages: ReturnPages | None = None
+    localSettings: LocalSettings | None = None
+    deposits_enabled: bool | None = None
+    withdrawals_enabled: bool | None = None
+    deposit_auto_approve: bool | None = None
+    withdrawal_auto_approve: bool | None = None
+    wallet_to_wallet_enabled: bool | None = None
+    walletToWalletEnabled: bool | None = None
+
+
+class LocalAgentCreate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    agent_type: str | None = None
+    agentType: str | None = None
+    agent_name: str | None = Field(default=None, min_length=2, max_length=120)
+    agentName: str | None = Field(default=None, min_length=2, max_length=120)
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    countryCode: str | None = Field(default=None, min_length=2, max_length=2)
+    deposit_enabled: bool = False
+    depositEnabled: bool | None = None
+    withdrawal_enabled: bool = False
+    withdrawalEnabled: bool | None = None
+    show_details: bool = False
+    showDetails: bool | None = None
+    details: str = Field(default="", max_length=2000)
 
 
 class CredentialsWrite(BaseModel):
@@ -141,12 +229,12 @@ class RouteSimulation(BaseModel):
 
 
 @admin_router.get("/payment-hub/status")
-async def hub_status(admin=Depends(require_permission("gateway.view", feature=False))):
+async def hub_status(admin=Depends(require_admin)):
     return envelope(service.feature_status())
 
 
 @admin_router.get("/payment-gateways")
-async def gateways(admin=Depends(require_permission("gateway.view"))):
+async def gateways(admin=Depends(require_admin)):
     try:
         service.require_admin_feature()
         rows = await db.payment_gateways.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -156,30 +244,107 @@ async def gateways(admin=Depends(require_permission("gateway.view"))):
 
 
 @admin_router.post("/payment-gateways", status_code=201)
-async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create", step_up=True, super_admin=True))):
+async def gateway_create(body: GatewayCreate, admin=Depends(require_permission("gateway.create"))):
     try:
-        return envelope({"gateway": service.gateway_dto(await service.create_gateway(body.model_dump(), admin["id"]))})
+        return envelope({"gateway": service.gateway_dto(await service.create_gateway(body.model_dump(exclude_none=True), admin["id"]))})
     except (GatewayError, ValueError) as exc:
         raise_gateway(exc if isinstance(exc, GatewayError) else GatewayError("GATEWAY_CONFIG_INVALID", "Gateway capabilities are invalid."))
 
 
 @admin_router.get("/payment-gateways/{gateway_id}")
-async def gateway_detail(gateway_id: str, admin=Depends(require_permission("gateway.view"))):
+async def gateway_detail(gateway_id: str, admin=Depends(require_admin)):
     row = await db.payment_gateways.find_one({"id": gateway_id})
     if not row:
         raise_gateway(GatewayError("GATEWAY_NOT_FOUND", "Gateway was not found.", status_code=404))
     return envelope({"gateway": service.gateway_dto(row)})
 
 
+async def _require_current_admin_password(admin: Mapping[str, Any], password: str | None) -> None:
+    if not password:
+        raise HTTPException(status_code=403, detail={
+            "code": "ADMIN_PASSWORD_REQUIRED",
+            "message": "Enter your current Admin password before saving gateway credentials.",
+        })
+    hashed = str(admin.get("password_hash") or "")
+    matched = bool(hashed) and await asyncio.to_thread(verify_password, password, hashed)
+    if not matched:
+        raise HTTPException(status_code=401, detail={
+            "code": "ADMIN_REAUTH_FAILED",
+            "message": "Administrator password is incorrect.",
+        })
+
+
 @admin_router.patch("/payment-gateways/{gateway_id}")
-async def gateway_update(gateway_id: str, body: GatewayUpdate, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True, super_admin=True))):
+@admin_router.put("/payment-gateways/{gateway_id}")
+async def gateway_update(gateway_id: str, body: GatewayUpdate, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True))):
     try:
-        values = body.model_dump(exclude_none=True)
-        version = values.pop("version")
-        row = await service.update_gateway(gateway_id, values, admin["id"], version)
+        raw = body.model_dump(exclude_none=True)
+        password = raw.pop("current_password", None) or raw.pop("currentPassword", None)
+        values = service.normalize_crm_gateway_payload(raw)
+        secrets = values.pop("_secrets", None)
+        if secrets or password is not None:
+            await _require_current_admin_password(admin, password)
+        version = values.pop("version", raw.get("version"))
+        strict_keys = {"display_name", "merchant_reference_masked", "base_url", "capabilities", "non_secret_config"}
+        # Preserve the optimistic-concurrency update path when a caller supplies a
+        # version and edits provider-behaviour fields only. All CRM operator edits
+        # (category, provider type, deposit/withdrawal and auto-approve toggles)
+        # flow through the version-free CRM update, which still fails closed on a
+        # concurrent modification.
+        if version is not None and values and set(values) <= strict_keys:
+            row = await service.update_gateway(gateway_id, values, admin["id"], version)
+        else:
+            row = await service.update_gateway_crm(gateway_id, values, admin["id"])
+        if secrets:
+            await service.store_credentials(gateway_id, secrets, admin["id"])
+            row = await db.payment_gateways.find_one({"id": gateway_id}) or row
         return envelope({"gateway": service.gateway_dto(row)})
+    except HTTPException:
+        raise
     except (GatewayError, ValueError) as exc:
         raise_gateway(exc if isinstance(exc, GatewayError) else GatewayError("GATEWAY_CONFIG_INVALID", "Gateway configuration is invalid."))
+
+
+@admin_router.get("/payment-gateway-settings")
+async def payment_gateway_settings(admin=Depends(require_admin)):
+    try:
+        return envelope({"settings": await service.get_platform_settings()})
+    except GatewayError as exc:
+        raise_gateway(exc)
+
+
+@admin_router.patch("/payment-gateway-settings")
+async def payment_gateway_settings_update(body: PaymentPlatformSettingsUpdate, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True))):
+    try:
+        payload = body.model_dump(exclude_none=True)
+        return envelope({"settings": await service.update_platform_settings(payload, admin["id"])})
+    except (GatewayError, ValueError) as exc:
+        raise_gateway(exc if isinstance(exc, GatewayError) else GatewayError("PAYMENT_SETTINGS_INVALID", "Payment platform settings are invalid."))
+
+
+@admin_router.get("/payment-local-agents")
+async def payment_local_agents(admin=Depends(require_admin)):
+    try:
+        rows = await service.list_local_agents()
+        return envelope({"items": rows, "count": len(rows)})
+    except GatewayError as exc:
+        raise_gateway(exc)
+
+
+@admin_router.post("/payment-local-agents", status_code=201)
+async def payment_local_agent_create(body: LocalAgentCreate, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True))):
+    try:
+        return envelope({"agent": await service.create_local_agent(body.model_dump(), admin["id"])})
+    except (GatewayError, ValueError) as exc:
+        raise_gateway(exc if isinstance(exc, GatewayError) else GatewayError("PAYMENT_LOCAL_AGENT_INVALID", "Local deposit agent is invalid."))
+
+
+@admin_router.delete("/payment-local-agents/{agent_id}")
+async def payment_local_agent_delete(agent_id: str, admin=Depends(require_permission("gateway.update_non_secret_config", step_up=True))):
+    try:
+        return envelope(await service.delete_local_agent(agent_id, admin["id"]))
+    except GatewayError as exc:
+        raise_gateway(exc)
 
 
 @admin_router.post("/payment-gateways/{gateway_id}/credentials")

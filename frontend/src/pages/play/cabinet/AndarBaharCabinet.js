@@ -16,6 +16,18 @@ import {
   formatRoundClock,
   roundSecondsRemaining,
 } from "./andarBaharTimeline";
+import {
+  ANDAR_BAHAR_CARD_RELEASE,
+  ANDAR_BAHAR_JOKER_SLOT,
+  ANDAR_BAHAR_MOTION,
+  ANDAR_BAHAR_STAGE,
+  ANDAR_BAHAR_TABLE_CARD,
+  cardFlightDuration,
+  cardFlightFrame,
+  cardMotionProgress,
+  formatProfitOdds,
+  layoutLaneCards,
+} from "./andarBaharPresentation";
 import "./andarBahar.css";
 
 const DESIGN_W = 1600;
@@ -26,13 +38,19 @@ const DEMO_REVEAL_SECONDS = 24;
 const DEMO_RESULT_SECONDS = 6;
 const CHIP_RAIL_Y = 600;
 const ACTION_Y = 632;
+const PHASE_RIBBON_Y = 532;
 const MAIN_BET_Y = 710;
 const MAIN_BET_H = 140;
 const COUNT_BET_Y = 710;
 const COUNT_BET_H = 65;
 const COUNT_BET_ROW_GAP = 69;
-const CARD_RELEASE_X = 430;
-const CARD_RELEASE_Y = 520;
+const REVEAL_STAGE = ANDAR_BAHAR_STAGE;
+const TABLE_CARD_WIDTH = ANDAR_BAHAR_TABLE_CARD.width;
+const TABLE_CARD_HEIGHT = ANDAR_BAHAR_TABLE_CARD.height;
+const TABLE_CARD_Y = ANDAR_BAHAR_TABLE_CARD.y;
+const JOKER_SLOT = ANDAR_BAHAR_JOKER_SLOT;
+const CARD_RELEASE_X = ANDAR_BAHAR_CARD_RELEASE.x;
+const CARD_RELEASE_Y = ANDAR_BAHAR_CARD_RELEASE.y;
 const REFERENCE_CHIPS = [20, 50, 100, 200, 500, 1000];
 const CHIP_COLORS = {
   20: ["#2663a8", "#12335e", "#eef7ff"],
@@ -49,7 +67,7 @@ const DEFAULT_OPTIONS = {
   count_6_10: 4.5,
   count_11_15: 5.5,
   count_16_25: 4.5,
-  count_26_30: 5,
+  count_26_30: 15,
   count_31_35: 25,
   count_36_40: 50,
   count_41_49: 120,
@@ -121,6 +139,203 @@ function drawCard(ctx, card, x, y, width, height, alpha = 1, rotation = 0) {
   label(ctx, card.rank, -width * 0.31, -height * 0.32, Math.max(11, width * 0.27), color, "center", 900);
   label(ctx, glyph, -width * 0.31, -height * 0.09, Math.max(10, width * 0.25), color, "center", 700);
   label(ctx, glyph, 0, height * 0.09, Math.max(18, width * 0.42), color, "center", 700);
+  ctx.restore();
+}
+
+function drawLanePlaque(ctx, side, y, active, count) {
+  const isAndar = side === "andar";
+  const accent = isAndar ? "#e3153b" : "#2857a5";
+  const laneGradient = ctx.createLinearGradient(328, y, 1106, y + 132);
+  laneGradient.addColorStop(0, isAndar ? "rgba(97,11,31,.52)" : "rgba(15,42,91,.54)");
+  laneGradient.addColorStop(0.48, "rgba(3,43,33,.36)");
+  laneGradient.addColorStop(1, "rgba(3,25,22,.18)");
+
+  ctx.save();
+  rounded(ctx, 324, y, 790, 132, 24);
+  ctx.fillStyle = laneGradient;
+  ctx.fill();
+  ctx.strokeStyle = active ? "rgba(255,236,163,.9)" : "rgba(228,192,107,.28)";
+  ctx.lineWidth = active ? 2.6 : 1.2;
+  ctx.stroke();
+
+  rounded(ctx, 344, y + 34, 166, 64, 14);
+  const plaque = ctx.createLinearGradient(344, y + 34, 510, y + 98);
+  plaque.addColorStop(0, accent);
+  plaque.addColorStop(1, isAndar ? "#6e0b22" : "#102c66");
+  ctx.fillStyle = plaque;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,232,153,.7)";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  label(ctx, side.toUpperCase(), 427, y + 58, 20, "#fff6d8", "center", 900);
+  label(ctx, `${count} CARD${count === 1 ? "" : "S"}`, 427, y + 82, 10, "rgba(255,246,216,.72)", "center", 800);
+
+  ctx.beginPath();
+  ctx.arc(532, y + 66, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = active ? "#fff0a5" : accent;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawCardShoe(ctx) {
+  ctx.save();
+  ctx.translate(CARD_RELEASE_X + 20, CARD_RELEASE_Y + 20);
+  ctx.shadowColor = "rgba(0,0,0,.55)";
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 7;
+  rounded(ctx, -58, -24, 98, 62, 12);
+  const body = ctx.createLinearGradient(-58, -24, 40, 38);
+  body.addColorStop(0, "#4b2c18");
+  body.addColorStop(0.46, "#190f0b");
+  body.addColorStop(1, "#7e4a20");
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(255,221,129,.75)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  rounded(ctx, -43, -13, 65, 34, 7);
+  ctx.fillStyle = "#07090d";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(228,192,107,.52)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  for (let index = 0; index < 4; index += 1) {
+    rounded(ctx, -34 + index * 3, -18 - index * 2, 55, 31, 4);
+    ctx.fillStyle = index === 3 ? "#f6f1e4" : "#8b1730";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,230,158,.62)";
+    ctx.stroke();
+  }
+  label(ctx, "DECK", -9, 29, 9, "#d7bb74", "center", 900);
+  ctx.restore();
+}
+
+function drawRoyalRevealStageBase(ctx) {
+  const { x, y, width, height } = REVEAL_STAGE;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.48)";
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 10;
+  rounded(ctx, x, y, width, height, 34);
+  const stage = ctx.createRadialGradient(800, 356, 20, 800, 356, 560);
+  stage.addColorStop(0, "rgba(20,119,85,.36)");
+  stage.addColorStop(0.55, "rgba(2,56,42,.28)");
+  stage.addColorStop(1, "rgba(1,22,19,.72)");
+  ctx.fillStyle = stage;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(228,192,107,.68)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  rounded(ctx, x + 10, y + 10, width - 20, height - 20, 26);
+  ctx.strokeStyle = "rgba(255,241,181,.14)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const glow = ctx.createRadialGradient(800, 365, 0, 800, 365, 230);
+  glow.addColorStop(0, "rgba(235,207,124,.085)");
+  glow.addColorStop(1, "rgba(235,207,124,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(800, 365, 230, 0, Math.PI * 2);
+  ctx.fill();
+
+  label(ctx, "♠", 590, 365, 78, "rgba(255,255,255,.026)", "center", 700);
+  label(ctx, "♦", 720, 365, 72, "rgba(227,21,59,.035)", "center", 700);
+  label(ctx, "♣", 850, 365, 78, "rgba(255,255,255,.026)", "center", 700);
+  label(ctx, "♥", 980, 365, 72, "rgba(227,21,59,.035)", "center", 700);
+
+  rounded(ctx, 665, y - 13, 270, 34, 17);
+  const title = ctx.createLinearGradient(665, y - 13, 935, y + 21);
+  title.addColorStop(0, "#40280f");
+  title.addColorStop(0.5, "#0d1326");
+  title.addColorStop(1, "#40280f");
+  ctx.fillStyle = title;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(239,207,115,.76)";
+  ctx.stroke();
+  label(ctx, "♛  ROYAL CARD REVEAL  ♛", 800, y + 4, 12, "#f1d57f", "center", 900);
+
+  rounded(ctx, 1134, 238, 140, 252, 28);
+  const matchWell = ctx.createLinearGradient(1134, 238, 1274, 490);
+  matchWell.addColorStop(0, "rgba(74,48,17,.82)");
+  matchWell.addColorStop(0.35, "rgba(8,15,28,.92)");
+  matchWell.addColorStop(1, "rgba(34,18,12,.9)");
+  ctx.fillStyle = matchWell;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(228,192,107,.56)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  label(ctx, "MATCH CARD", 1204, 270, 11, "#e9cc76", "center", 900);
+  ctx.beginPath();
+  ctx.arc(1200, 371, 64, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,234,164,.18)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(1200, 371, 56, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,234,164,.1)";
+  ctx.stroke();
+  label(ctx, "FIRST MATCH WINS", 1204, 468, 9, "rgba(248,241,223,.58)", "center", 800);
+  drawCardShoe(ctx);
+  ctx.restore();
+}
+
+let royalStageLayerCache = null;
+
+function royalStageLayerFor(ratio) {
+  if (typeof document === "undefined") return null;
+  const scale = Math.max(1, Math.min(2, Number(ratio) || 1));
+  if (royalStageLayerCache?.scale === scale) return royalStageLayerCache.canvas;
+  const canvas = document.createElement("canvas");
+  canvas.width = DESIGN_W * scale;
+  canvas.height = DESIGN_H * scale;
+  const layerContext = canvas.getContext("2d");
+  if (!layerContext) return null;
+  layerContext.setTransform(scale, 0, 0, scale, 0, 0);
+  drawRoyalRevealStageBase(layerContext);
+  royalStageLayerCache = { canvas, scale };
+  return canvas;
+}
+
+function drawRoyalRevealStage(ctx, scene, laneRows, activeSide, ratio) {
+  const staticLayer = royalStageLayerFor(ratio);
+  if (staticLayer) ctx.drawImage(staticLayer, 0, 0, DESIGN_W, DESIGN_H);
+  else drawRoyalRevealStageBase(ctx);
+  const resultSide = scene.phase === "RESULT" ? scene.outcome?.winner : null;
+  drawLanePlaque(ctx, "andar", 208, resultSide === "andar" || activeSide === "andar", laneRows.andar.length);
+  drawLanePlaque(ctx, "bahar", 386, resultSide === "bahar" || activeSide === "bahar", laneRows.bahar.length);
+}
+
+function drawFlightTrail(ctx, x, y, progress, side,
+  width = TABLE_CARD_WIDTH, height = TABLE_CARD_HEIGHT) {
+  if (progress >= 1) return;
+  ctx.save();
+  const alpha = Math.max(0, (1 - progress) * 0.58);
+  const color = side === "andar"
+    ? `rgba(255,102,132,${alpha})`
+    : side === "bahar" ? `rgba(99,153,255,${alpha})` : `rgba(241,210,122,${alpha})`;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(CARD_RELEASE_X + 6, CARD_RELEASE_Y + 5);
+  ctx.quadraticCurveTo((CARD_RELEASE_X + x) / 2, Math.min(y, CARD_RELEASE_Y) - 70,
+    x + width / 2, y + height / 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSettleHalo(ctx, x, y, progress, side) {
+  const accent = side === "andar" ? "227,21,59" : "40,87,165";
+  ctx.save();
+  rounded(ctx, x - 6 - progress * 7, y - 6 - progress * 7,
+    TABLE_CARD_WIDTH + 12 + progress * 14, TABLE_CARD_HEIGHT + 12 + progress * 14, 13);
+  ctx.strokeStyle = `rgba(${accent},${Math.max(0, .58 * (1 - progress))})`;
+  ctx.lineWidth = 3 - progress;
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -337,6 +552,10 @@ function AndarBaharTable({ game, live, demo = false }) {
   const [modal, setModal] = useState(null);
   const [lastWin, setLastWin] = useState(0);
   const [announcement, setAnnouncement] = useState(null);
+  const [reducedMotion, setReducedMotion] = useState(() => (
+    (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+    || (typeof document !== "undefined" && document.body.classList.contains("rm"))
+  ));
 
   const {
     state, countdown, balance, betting, phase, outcome, result,
@@ -366,6 +585,20 @@ function AndarBaharTable({ game, live, demo = false }) {
     return bettingOpenAt(phaseRef.current, liveCountdown, CLIENT_BETTING_GUARD_SECONDS);
   }, []);
   useEffect(() => onMuteChange(setMuted), []);
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(Boolean(
+      media?.matches || document.body.classList.contains("rm")
+    ));
+    update();
+    media?.addEventListener?.("change", update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    return () => {
+      media?.removeEventListener?.("change", update);
+      observer.disconnect();
+    };
+  }, []);
   useEffect(() => {
     if (Number(result?.payout || 0) > 0) setLastWin(Number(result.payout));
   }, [result]);
@@ -406,6 +639,7 @@ function AndarBaharTable({ game, live, demo = false }) {
     revealDuration,
     actionProfile,
     dealTimeline,
+    reducedMotion,
     demo,
   };
 
@@ -460,34 +694,67 @@ function AndarBaharTable({ game, live, demo = false }) {
         lastDealCountRef.current = scene.phase === "RESULT" ? scene.run.length : 0;
       }
 
-      label(ctx, "ANDAR", 500, 560, 22, "rgba(255,250,235,.86)", "left", 700);
-      label(ctx, "BAHAR", 500, 632, 22, "rgba(255,250,235,.86)", "left", 700);
-      ctx.strokeStyle = "rgba(255,250,235,.55)";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(500, 582); ctx.lineTo(930, 582); ctx.stroke();
-
-      if (scene.joker && (scene.phase === "REVEAL" || scene.phase === "RESULT")) {
-        drawCard(ctx, scene.joker, 1110, 548, 54, 76, Math.min(1, elapsed / 0.35), -0.035);
-      }
       const visible = scene.run.slice(0, visibleCount);
       const laneRows = { andar: [], bahar: [] };
       visible.forEach((card, index) => laneRows[card.side || (index % 2 ? "andar" : "bahar")].push({ card, index }));
+      const activeSide = visible.length
+        ? (visible[visible.length - 1].side || (visible.length % 2 ? "bahar" : "andar"))
+        : null;
+      drawRoyalRevealStage(ctx, scene, laneRows, activeSide, ratio);
+
+      if (scene.joker && (scene.phase === "REVEAL" || scene.phase === "RESULT")) {
+        const jokerFlight = cardFlightFrame({
+          elapsed,
+          releaseAt: 0,
+          flightDuration: ANDAR_BAHAR_MOTION.jokerFlightSeconds,
+          targetX: JOKER_SLOT.x,
+          targetY: JOKER_SLOT.y,
+          arc: 34,
+          reducedMotion: scene.reducedMotion,
+        });
+        if (jokerFlight.trail) drawFlightTrail(ctx, jokerFlight.x, jokerFlight.y,
+          jokerFlight.progress, "joker", JOKER_SLOT.width, JOKER_SLOT.height);
+        drawCard(ctx, scene.joker, jokerFlight.x, jokerFlight.y, JOKER_SLOT.width, JOKER_SLOT.height,
+          jokerFlight.opacity, -0.025 * jokerFlight.eased);
+      }
       Object.entries(laneRows).forEach(([side, rows]) => {
-        rows.slice(-8).forEach(({ card, index }, laneIndex) => {
-          const targetX = 990 - laneIndex * 54 + scene.actionProfile.drift * (index % 2 ? 0.35 : -0.35);
-          const targetY = side === "andar" ? 535 : 604;
+        const newest = rows[rows.length - 1];
+        const newestBeat = newest ? scene.dealTimeline.cards[newest.index] : null;
+        const arrivalProgress = newestBeat
+          ? cardMotionProgress(elapsed, newestBeat.releaseAt,
+            cardFlightDuration(newestBeat.flightDuration), scene.reducedMotion)
+          : 1;
+        layoutLaneCards(rows, arrivalProgress).forEach(({ card, index, targetX: laneTargetX }) => {
+          const targetX = laneTargetX + scene.actionProfile.drift * (index % 2 ? 0.35 : -0.35);
+          const targetY = TABLE_CARD_Y[side] || TABLE_CARD_Y.bahar;
           // Release the rendered card at the same point in every deal cycle,
-          // then animate its short flight from the shoe to the lane.
+          // then animate its short flight from the visible shoe to the lane.
           const cardBeat = scene.dealTimeline.cards[index];
-          const appearedAt = cardBeat?.releaseAt || 0;
-          const progress = Math.max(0, Math.min(1,
-            (elapsed - appearedAt) / Math.max(0.001, cardBeat?.flightDuration || 0.001)
-          ));
-          const eased = 1 - Math.pow(1 - progress, 3);
-          const x = CARD_RELEASE_X + (targetX - CARD_RELEASE_X) * eased;
-          const y = CARD_RELEASE_Y + (targetY - CARD_RELEASE_Y) * eased - Math.sin(progress * Math.PI) * scene.actionProfile.arc;
+          const visualFlightDuration = cardFlightDuration(cardBeat?.flightDuration);
+          const flight = cardFlightFrame({
+            elapsed,
+            releaseAt: cardBeat?.releaseAt || 0,
+            flightDuration: visualFlightDuration,
+            targetX,
+            targetY,
+            arc: scene.actionProfile.arc,
+            reducedMotion: scene.reducedMotion,
+          });
           const turn = (side === "andar" ? -0.025 : 0.025) + scene.actionProfile.drift * 0.001;
-          drawCard(ctx, card, x, y, 46, 64, progress, turn * eased);
+          if (flight.trail) drawFlightTrail(ctx, flight.x, flight.y, flight.progress, side);
+          const settleAge = elapsed - (Number(cardBeat?.releaseAt || 0) + visualFlightDuration);
+          if (!scene.reducedMotion && settleAge >= 0 && settleAge < ANDAR_BAHAR_MOTION.settleHaloSeconds) {
+            drawSettleHalo(ctx, targetX, targetY,
+              settleAge / ANDAR_BAHAR_MOTION.settleHaloSeconds, side);
+          }
+          if (scene.phase === "RESULT" && index === scene.run.length - 1) {
+            rounded(ctx, targetX - 7, targetY - 7, TABLE_CARD_WIDTH + 14, TABLE_CARD_HEIGHT + 14, 14);
+            ctx.strokeStyle = "rgba(255,232,145,.92)";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+          }
+          drawCard(ctx, card, flight.x, flight.y, TABLE_CARD_WIDTH, TABLE_CARD_HEIGHT,
+            flight.opacity, turn * flight.eased);
         });
       });
 
@@ -525,11 +792,14 @@ function AndarBaharTable({ game, live, demo = false }) {
           : "BETS LOCKED"
         : scene.phase === "REVEAL" ? "NO MORE BETS"
           : `${String(scene.outcome?.winner || "").toUpperCase()} WON`;
-      const phaseY = scene.betting ? 542 : 663;
-      rounded(ctx, 730, phaseY, 140, 34, 5);
-      ctx.fillStyle = scene.phase === "RESULT" ? (scene.outcome?.winner === "andar" ? "#e3153b" : "#2857a5") : "rgba(20,24,49,.9)";
-      ctx.fill();
-      label(ctx, phaseText, 800, phaseY + 17, phaseText.length > 18 ? 11 : 13, "#f8f1df", "center", 900);
+      const phaseY = PHASE_RIBBON_Y;
+      if (scene.phase !== "RESULT") {
+        rounded(ctx, 730, phaseY, 140, 34, 5);
+        ctx.fillStyle = "rgba(20,24,49,.9)";
+        ctx.fill();
+        label(ctx, phaseText, 800, phaseY + 17, phaseText.length > 18 ? 11 : 13,
+          "#f8f1df", "center", 900);
+      }
       label(ctx, "BET HOW MANY CARDS WILL BE DEALT", 1328, 696, 13, "#f8f1df", "center", 800);
 
       const history = scene.lastResults.slice(0, 72).reverse();
@@ -598,7 +868,7 @@ function AndarBaharTable({ game, live, demo = false }) {
         ctx.fillStyle = gradient; ctx.fill();
         ctx.strokeStyle = winning ? "#fff0a7" : "#d8c384"; ctx.lineWidth = 2; ctx.stroke();
         label(ctx, range, x + 59, y + 23, 18, winning ? "#fff8dc" : "#f2ddb0", "center", 900);
-        label(ctx, `${Math.max(0, Number(scene.options[selection] || 1) - 1).toFixed(1)}:1`, x + 59, y + 47, 13, "#c7b078", "center", 800);
+        label(ctx, formatProfitOdds(scene.options[selection]), x + 59, y + 47, 13, "#c7b078", "center", 800);
         if (scene.totals[selection]) drawChip(ctx, scene.chip, x + 100, y + 32, 30, true, scene.totals[selection]);
       });
 

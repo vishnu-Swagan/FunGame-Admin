@@ -1,7 +1,6 @@
 """Player and administrator HTTP routes for the feature-gated financial core."""
 from __future__ import annotations
 
-import os
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
@@ -16,9 +15,13 @@ import compliance
 from auth_utils import get_current_user, require_recent_admin_step_up
 from db import db
 import financial_wallet as finance
+import operator_rail
 from payment_providers import (
     MAX_WEBHOOK_BODY_BYTES,
+    DepositStatus,
     ProviderConfigurationError,
+    ProviderEvent,
+    ProviderRequestError,
     WebhookVerificationError,
     load_payment_provider,
 )
@@ -93,6 +96,26 @@ class WithdrawalHoldClear(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
 
 
+class OperatorDepositCreate(BaseModel):
+    amount_paise: int = Field(ge=1, le=operator_rail.OPERATOR_LIMITS["max_deposit_paise"])
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class UtrSubmission(BaseModel):
+    utr: str = Field(min_length=4, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class OperatorWithdrawalCreate(BaseModel):
+    amount_chips: int = Field(ge=1, le=operator_rail.OPERATOR_LIMITS["max_withdrawal_chips"])
+    bank_detail_id: str = Field(min_length=8, max_length=80)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class OperatorResolve(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=500)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
 def _financial_http(exc: finance.FinancialError):
     detail = {"code": exc.code, "message": exc.message}
     detail.update(exc.details)
@@ -164,21 +187,22 @@ async def _require_player(feature: str, user: dict) -> dict:
             status_code=403,
             detail={"code": "FINANCIAL_ACCOUNT_NOT_ACTIVE", "message": "An active player account is required."},
         )
-    if not user.get("contact_verified") or not (
-        user.get("email_verified") or user.get("phone_verified")
-    ):
+    verification = _payment_verification_state(user)
+    if not verification["contact_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "CONTACT_NOT_VERIFIED", "message": "Verify your email address or phone number first."},
         )
-    if not user.get("age_verified"):
+    if not verification["age_verified"]:
         raise HTTPException(
             status_code=403,
             detail={"code": "AGE_NOT_VERIFIED", "message": "Age verification is required."},
         )
-    # Contact OTP verification is not KYC.  Until an audited identity workflow
-    # writes this explicit status, money mutations remain fail-closed.
-    if str(user.get("kyc_status", "")).upper() != "VERIFIED":
+    # KYC is a cash-OUT control, not a chip-purchase control. Deposits only add
+    # value to the game wallet, so a self-serve player can buy chips without an
+    # operator hand-verifying identity first; identity/KYC stays fail-closed on
+    # the withdrawal path where money leaves the platform.
+    if feature != "deposits" and not verification["kyc_verified"]:
         raise HTTPException(
             status_code=403,
             detail={
@@ -213,6 +237,22 @@ async def require_payment_reader(user: dict = Depends(get_current_user)):
     return user
 
 
+async def require_operator_player(user: dict = Depends(get_current_user)):
+    if user.get("role") != "PLAYER" or user.get("status") != "ACTIVE":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "PLAYER_REQUIRED", "message": "An active player account is required."},
+        )
+    return user
+
+
+async def require_operator_deposit_player(user: dict = Depends(get_current_user)):
+    user = await require_operator_player(user)
+    if not operator_rail.hosted_upi_requested():
+        return user
+    return await operator_rail.require_hosted_deposit_eligible(user)
+
+
 async def require_deposit_player(user: dict = Depends(get_current_user)):
     return await _require_player("deposits", user)
 
@@ -224,6 +264,19 @@ async def require_withdrawal_player(user: dict = Depends(get_current_user)):
 
 
 def _permissions(user: dict) -> set[str]:
+    pre_rbac = (
+        not str(user.get("admin_role") or "").strip()
+        and "permissions" not in user
+        and (
+            "admin_permissions" not in user
+            or not bool(user.get("admin_permissions") or [])
+        )
+    )
+    if pre_rbac:
+        # The original production operator predates granular RBAC. Keep its
+        # verification workspace usable until the account is migrated; manual
+        # trust decisions still require the normal recent MFA/password step-up.
+        return {"PAYMENTS_VIEW", "AUDIT_VIEW", "KYC_VIEW", "KYC_REVIEW"}
     if "admin_permissions" not in user and "permissions" not in user:
         # Pre-RBAC production administrators retain read-only access to the
         # provider-readiness and audit surfaces during migration. No payment
@@ -374,6 +427,8 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
     return {
         "wallet": wallet,
         "money_config": money_config,
+        "promo": promo,
+        "free_cash": free_cash_state,
         "financial": {
             "ready": bool(internal["ready"] and config_ready),
             "features": (
@@ -384,6 +439,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
                 "AVAILABLE" if internal["ready"] and config_ready
                 else "PAYMENTS_UNAVAILABLE"
             ),
+            "operator": operator,
         },
     }
 
@@ -408,36 +464,96 @@ async def create_deposit(
 @router.get("/payments/deposits")
 async def list_deposits(user: dict = Depends(require_payment_reader)):
     rows = await db.deposit_orders.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return {"deposits": [finance.deposit_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_user(user["id"], "DEPOSIT")
+    deposits = [finance.deposit_dto(row) for row in rows] + [
+        operator_rail.as_player_deposit(row) for row in operator_rows
+    ]
+    return {"deposits": operator_rail.sort_newest(deposits)}
 
 
 @router.get("/payments/deposits/{deposit_id}")
 async def deposit_detail(deposit_id: str, user: dict = Depends(require_payment_reader)):
     row = await db.deposit_orders.find_one({"id": deposit_id, "user_id": user["id"]}, {"_id": 0})
+    if row:
+        return {"deposit": finance.deposit_dto(row)}
+    operator_row = await db[operator_rail.COLLECTION].find_one({
+        "id": deposit_id, "user_id": user["id"], "kind": "DEPOSIT",
+    }, {"_id": 0})
+    if operator_row:
+        return {"deposit": operator_rail.as_player_deposit(operator_row)}
+    raise HTTPException(status_code=404, detail={"code": "DEPOSIT_NOT_FOUND", "message": "Deposit was not found."})
+
+
+@router.post("/payments/deposits/{deposit_id}/refresh")
+async def refresh_deposit_status(
+    deposit_id: str, user: dict = Depends(require_payment_reader),
+):
+    operator_row = await db[operator_rail.COLLECTION].find_one({
+        "id": deposit_id, "user_id": user["id"], "kind": "DEPOSIT",
+        "source": operator_rail.UPI_SOURCE,
+    }, {"_id": 0})
+    if operator_row:
+        refreshed = await operator_rail.refresh_hosted_deposit(deposit_id, user["id"])
+        return {"deposit": operator_rail.as_player_deposit(refreshed)}
+    row = await db.deposit_orders.find_one({"id": deposit_id, "user_id": user["id"]}, {"_id": 0})
     if not row:
         raise HTTPException(status_code=404, detail={"code": "DEPOSIT_NOT_FOUND", "message": "Deposit was not found."})
-    return {"deposit": finance.deposit_dto(row)}
+    if row.get("status") in {"CREATED", "PENDING", "RECONCILIATION_REQUIRED"}:
+        try:
+            await finance.reconcile_deposit(deposit_id, _provider(), actor=f"player-return:{user['id']}")
+        except finance.FinancialError as exc:
+            if exc.status_code < 500:
+                _financial_http(exc)
+    stored = await db.deposit_orders.find_one({"id": deposit_id, "user_id": user["id"]}, {"_id": 0})
+    return {"deposit": finance.deposit_dto(stored or row)}
+
+
+@router.post("/payments/deposits/{deposit_id}/utr")
+async def submit_deposit_utr(
+    deposit_id: str,
+    body: UtrSubmission,
+    user: dict = Depends(require_payment_reader),
+):
+    await _financial_rate_limit(user["id"], "upi-utr-submit", 8, 3600)
+    deposit = await operator_rail.submit_hosted_utr(deposit_id, user["id"], body.utr)
+    return {"deposit": operator_rail.as_player_deposit(deposit)}
 
 
 @router.get("/payments/bank-details")
-async def bank_details(user: dict = Depends(require_withdrawal_player)):
+async def bank_details(user: dict = Depends(require_operator_player)):
     return {"bank_details": await finance.list_payout_methods(user["id"])}
 
 
 @router.post("/payments/bank-details", status_code=201)
-async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require_withdrawal_player)):
+async def add_bank_details(body: BankDetailsCreate, user: dict = Depends(require_operator_player)):
     try:
         await _financial_rate_limit(user["id"], "bank-details-create", 5, 3600)
         method = await finance.create_payout_method(user["id"], **body.model_dump())
         return {"bank_detail": finance.payout_method_dto(method)}
+    except ProviderConfigurationError:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "PAYOUT_ENCRYPTION_NOT_READY",
+                "message": "Bank details cannot be saved until payout encryption is configured.",
+            },
+        )
     except finance.FinancialError as exc:
         _financial_http(exc)
 
 
 @router.delete("/payments/bank-details/{method_id}")
 async def remove_bank_details(
-    method_id: str, user: dict = Depends(require_withdrawal_player),
+    method_id: str, user: dict = Depends(require_operator_player),
 ):
+    if await operator_rail.has_open_withdrawal(user["id"], method_id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "BANK_DETAILS_IN_USE",
+                "message": "This bank account is used by a pending withdrawal request.",
+            },
+        )
     try:
         await _financial_rate_limit(user["id"], "bank-details-remove", 5, 3600)
         method = await finance.deactivate_payout_method(user["id"], method_id)
@@ -454,7 +570,11 @@ async def list_withdrawals(user: dict = Depends(require_payment_reader)):
     rows = await db.withdrawal_requests.find(
         {"user_id": user["id"]}, {"_id": 0},
     ).sort("created_at", -1).to_list(200)
-    return {"withdrawals": [finance.withdrawal_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_user(user["id"], "WITHDRAWAL")
+    withdrawals = [finance.withdrawal_dto(row) for row in rows] + [
+        operator_rail.as_player_withdrawal(row) for row in operator_rows
+    ]
+    return {"withdrawals": operator_rail.sort_newest(withdrawals)}
 
 
 @router.post("/payments/withdrawals", status_code=201)
@@ -474,10 +594,52 @@ async def create_withdrawal(
         _financial_http(exc)
 
 
+@router.post("/payments/operator/deposits", status_code=201)
+async def create_operator_deposit(
+    body: OperatorDepositCreate,
+    idempotency_key: str = Header(default="", alias="Idempotency-Key"),
+    user: dict = Depends(require_operator_deposit_player),
+):
+    await _financial_rate_limit(user["id"], "operator-deposit-create", 10, 900)
+    if operator_rail.hosted_upi_requested():
+        row, checkout_url = await operator_rail.create_hosted_deposit(
+            user, body.amount_paise, idempotency_key,
+        )
+        return {
+            "deposit": operator_rail.as_player_deposit(row),
+            "checkout_url": checkout_url,
+            "source": operator_rail.UPI_SOURCE,
+        }
+    row = await operator_rail.create_request(
+        user, kind="DEPOSIT", amount_paise=body.amount_paise, note=body.note or "",
+    )
+    return {"deposit": operator_rail.as_player_deposit(row), "source": operator_rail.ADMIN_SOURCE}
+
+
+@router.post("/payments/operator/withdrawals", status_code=201)
+async def create_operator_withdrawal(
+    body: OperatorWithdrawalCreate,
+    user: dict = Depends(require_operator_player),
+):
+    await _financial_rate_limit(user["id"], "operator-withdrawal-create", 5, 3600)
+    paise = (int(body.amount_chips) * 100) // operator_rail.OPERATOR_LIMITS["chips_per_inr"]
+    row = await operator_rail.create_request(
+        user,
+        kind="WITHDRAWAL",
+        amount_paise=paise,
+        chips=body.amount_chips,
+        bank_detail_id=body.bank_detail_id,
+        note=body.note or "",
+    )
+    return {"withdrawal": operator_rail.as_player_withdrawal(row), "source": "ADMIN_REVIEW"}
+
+
 @router.post("/payments/webhooks/{provider_name}")
 async def provider_webhook(provider_name: str, request: Request):
     status = finance.financial_status()
-    if not status["ready"] or not status["features"]["real_money"]:
+    financial_live = bool(status["ready"] and status["features"]["real_money"])
+    operator_live = await operator_rail.hosted_upi_reconciliation_needed()
+    if not financial_live and not operator_live:
         raise HTTPException(status_code=404, detail="Not found")
     chunks: list[bytes] = []
     body_size = 0
@@ -500,6 +662,61 @@ async def provider_webhook(provider_name: str, request: Request):
             status_code=401,
             detail={"code": "INVALID_WEBHOOK", "message": "Webhook verification failed."},
         ) from exc
+    if event.data.get("requires_authenticated_status_lookup"):
+        operator_order = await db[operator_rail.COLLECTION].find_one({
+            "kind": "DEPOSIT",
+            "$or": [
+                {"provider_order_id": event.object_id},
+                {"id": event.object_id},
+            ],
+        }, {"_id": 0})
+        financial_order = None
+        if not operator_order and financial_live:
+            financial_order = await db.deposit_orders.find_one({
+                "provider": provider.name, "provider_order_id": event.object_id,
+            }, {"_id": 0})
+        order = operator_order or financial_order
+        if not order:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            authoritative = await provider.get_payment_status(
+                str(event.object_id), expected_amount_paise=int(order["amount_paise"]),
+            )
+        except (ProviderConfigurationError, ProviderRequestError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "PAYMENT_STATUS_UNAVAILABLE", "message": "Payment status could not be verified."},
+            ) from exc
+        provider_status = str(authoritative.status or "").strip().upper()
+        if operator_order:
+            return await operator_rail.settle_operator_deposit(
+                str(operator_order["id"]), authoritative, actor="sgpay24-status-webhook",
+            )
+        if provider_status in {"CREATED", "PENDING", "PROCESSING", "AUTHORIZED"}:
+            return {"status": "PENDING", "verified": True}
+        event_type = (
+            "deposit.paid"
+            if provider_status in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}
+            else "deposit.failed"
+        )
+        canonical = {
+            "order_id": event.object_id,
+            "status": provider_status,
+            "amount_paise": authoritative.amount_paise,
+            "currency": authoritative.currency,
+            "provider_reference": authoritative.provider_reference,
+        }
+        raw_body = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        event = ProviderEvent(
+            event_id=f"sgpay24-status:{hashlib.sha256(raw_body).hexdigest()[:40]}",
+            event_type=event_type,
+            object_id=str(event.object_id),
+            amount_paise=authoritative.amount_paise,
+            currency=authoritative.currency,
+            provider_reference=authoritative.provider_reference,
+            occurred_at=None,
+            data={"authenticated_status_lookup": True},
+        )
     try:
         return await finance.process_provider_event(provider, event, raw_body)
     except finance.FinancialError as exc:
@@ -525,7 +742,11 @@ async def admin_deposits(
 ):
     query = {"status": status.upper()} if status else {}
     rows = await db.deposit_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"deposits": [_admin_deposit_dto(row) for row in rows]}
+    operator_rows = await operator_rail.list_for_admin("DEPOSIT", status)
+    deposits = [_admin_deposit_dto(row) for row in rows] + [
+        operator_rail.as_admin_deposit(row) for row in operator_rows
+    ]
+    return {"deposits": operator_rail.sort_newest(deposits)}
 
 
 @admin_router.get("/payments/withdrawals")
@@ -535,7 +756,14 @@ async def admin_withdrawals(
 ):
     query = {"status": status.upper()} if status else {}
     rows = await db.withdrawal_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"withdrawals": [finance.withdrawal_dto(row, admin=True) for row in rows]}
+    operator_status = None if not status else (
+        "PENDING" if status.upper() in {"PENDING", "REQUESTED", "PENDING_ADMIN"} else status
+    )
+    operator_rows = await operator_rail.list_for_admin("WITHDRAWAL", operator_status)
+    withdrawals = [finance.withdrawal_dto(row, admin=True) for row in rows] + [
+        operator_rail.as_admin_withdrawal(row) for row in operator_rows
+    ]
+    return {"withdrawals": operator_rail.sort_newest(withdrawals)}
 
 
 @admin_router.get("/payments/events")
@@ -562,6 +790,12 @@ async def admin_payment_summary(admin: dict = Depends(payments_view)):
     })
     pending_withdrawals = await db.withdrawal_requests.count_documents({
         "status": {"$nin": list(finance.WITHDRAWAL_TERMINAL)},
+    })
+    pending_deposits += await db[operator_rail.COLLECTION].count_documents({
+        "kind": "DEPOSIT", "status": "PENDING",
+    })
+    pending_withdrawals += await db[operator_rail.COLLECTION].count_documents({
+        "kind": "WITHDRAWAL", "status": {"$in": ["PENDING", "PROCESSING"]},
     })
     failed_payment_events = await db.provider_webhook_events.count_documents({
         "status": {"$in": ["RETRY", "REVIEW_REQUIRED"]},
@@ -640,15 +874,37 @@ async def admin_kyc_queue(
         "_id": 0, "id": 1, "email": 1, "phone": 1, "country": 1,
         "age_verified": 1, "email_verified": 1, "phone_verified": 1,
         "kyc_status": 1, "kyc_reviewed_at": 1,
+        "age_verification_status": 1, "mobile_verification_status": 1,
+        "mobile_review_status": 1, "mobile_reviewed_at": 1,
+        "mobile_reviewed_by": 1, "mobile_review_note": 1,
+        "mobile_review_phone_snapshot": 1, "phone_normalized": 1,
+        "registration_source": 1, "activation_mode": 1,
+        "manual_contact_reviewed": 1, "contact_verification_status": 1,
+        "manual_contact_reviewed_at": 1, "manual_contact_reviewed_by": 1,
+        "approved_at": 1, "approved_by": 1, "accepted_terms": 1,
+        "submitted_at": 1, "email_normalized": 1, "primary_identity": 1,
+        "primary_identity_channel": 1, "pending_email": 1, "pending_phone": 1,
     }).sort("created_at", -1).to_list(500)
-    return {"players": [{
-        "id": row.get("id"), "email_masked": _mask_email(row.get("email")),
-        "phone_masked": _mask_phone(row.get("phone")), "country": row.get("country"),
-        "age_verified": bool(row.get("age_verified")),
-        "contact_verified": bool(row.get("email_verified") or row.get("phone_verified")),
-        "kyc_status": str(row.get("kyc_status") or "UNVERIFIED").upper(),
-        "reviewed_at": row.get("kyc_reviewed_at"),
-    } for row in rows]}
+    players = []
+    for row in rows:
+        contact = operator_rail.payment_contact_state(row)
+        players.append({
+            "id": row.get("id"), "email_masked": _mask_email(row.get("email")),
+            "phone_masked": _mask_phone(row.get("phone")), "country": row.get("country"),
+            "phone_available": bool(row.get("phone_normalized") or row.get("phone")),
+            # Preserve compatibility for older admin clients: the account-backed
+            # 18+ confirmation is the canonical launch age signal, so it must
+            # never be presented as unverified merely because no manual review
+            # flag was written.
+            "age_verified": bool(row.get("age_verified") or row.get("accepted_terms")),
+            "age_verification_status": row.get("age_verification_status") or "NOT_REQUESTED",
+            "mobile_verification_status": row.get("mobile_verification_status") or "NOT_REQUESTED",
+            "mobile_manually_verified": row.get("mobile_review_status") == "ADMIN_APPROVED",
+            "contact_verified": contact["phone_verified"] or contact["email_verified"],
+            "kyc_status": str(row.get("kyc_status") or "UNVERIFIED").upper(),
+            "reviewed_at": row.get("kyc_reviewed_at"),
+        })
+    return {"players": players}
 
 
 @admin_router.patch("/payments/kyc/{user_id}")
@@ -745,6 +1001,60 @@ async def update_withdrawal_mode(
         return {"message": "Withdrawal mode updated.", **(await _settings_response())}
     except finance.FinancialError as exc:
         _financial_http(exc)
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/approve")
+async def admin_approve_operator_request(
+    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+):
+    row = await operator_rail.resolve_request(
+        request_id, admin, approve=True, note=body.note or body.reason or "",
+    )
+    return {
+        "message": "Request approved.",
+        "request": row,
+        "deposit": operator_rail.as_admin_deposit(row) if row.get("kind") == "DEPOSIT" else None,
+        "withdrawal": operator_rail.as_admin_withdrawal(row) if row.get("kind") == "WITHDRAWAL" else None,
+    }
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/reject")
+async def admin_reject_operator_request(
+    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+):
+    reason = str(body.reason or body.note or "").strip()
+    if len(reason) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "OPERATOR_REASON_REQUIRED", "message": "Enter a rejection reason."},
+        )
+    row = await operator_rail.resolve_request(request_id, admin, approve=False, note=reason)
+    return {
+        "message": "Request rejected.",
+        "request": row,
+        "deposit": operator_rail.as_admin_deposit(row) if row.get("kind") == "DEPOSIT" else None,
+        "withdrawal": operator_rail.as_admin_withdrawal(row) if row.get("kind") == "WITHDRAWAL" else None,
+    }
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/retry-payout")
+async def admin_retry_operator_payout(
+    request_id: str, admin: dict = Depends(payments_view),
+):
+    from db import db
+    row = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    if not row or row.get("kind") != "WITHDRAWAL":
+        raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
+    if str(row.get("status") or "").upper() != "APPROVED":
+        raise HTTPException(status_code=409, detail={"code": "PAYOUT_NOT_APPROVED", "message": "Approve the withdrawal before sending it to SgPay."})
+    import sgpay_payout
+    result = await sgpay_payout.send_operator_payout(row, actor=str(admin.get("id") or "admin"), retry=True)
+    refreshed = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    return {
+        "message": "Payout retried.",
+        "payout": result,
+        "withdrawal": operator_rail.as_admin_withdrawal(refreshed or row),
+    }
 
 
 @admin_router.post("/withdrawals/{withdrawal_id}/approve")

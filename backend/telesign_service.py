@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from datetime import timezone
+from email.utils import format_datetime, parsedate_to_datetime
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -21,14 +24,184 @@ VERIFY_API_URL = 'https://verify.telesign.com/verification'
 INTELLIGENCE_URL = 'https://detect.telesign.com/intelligence/phone'
 PHONE_ID_URL = 'https://rest-ww.telesign.com/v1/phoneid/{phone_number}'
 MAX_RESPONSE_BYTES = 65_536
+MAX_PROVIDER_ERROR_CODES = 20
+MAX_PROVIDER_CODE = 2_147_483_647
+MAX_RETRY_AFTER_SECONDS = 2_147_483_647
+MAX_RETRY_AFTER_LENGTH = 128
+
+
+def _safe_http_status(value) -> int | None:
+    if type(value) is int and 100 <= value <= 599:
+        return value
+    return None
+
+
+def _safe_provider_status_code(value) -> int | None:
+    if type(value) is int and 0 <= value <= MAX_PROVIDER_CODE:
+        return value
+    return None
+
+
+def _safe_provider_error_code(value) -> int | None:
+    if type(value) is int and -MAX_PROVIDER_CODE <= value <= MAX_PROVIDER_CODE:
+        return value
+    return None
+
+
+def _safe_provider_error_codes(values) -> tuple[int, ...]:
+    if not isinstance(values, (list, tuple)):
+        return ()
+    codes = []
+    for value in values[:MAX_PROVIDER_ERROR_CODES]:
+        code = _safe_provider_error_code(value)
+        if code is not None:
+            codes.append(code)
+    return tuple(codes)
+
+
+def _safe_retry_after(value) -> str | None:
+    if type(value) is int:
+        value = str(value)
+    if not isinstance(value, str) or len(value) > MAX_RETRY_AFTER_LENGTH:
+        return None
+    stripped = value.strip()
+    if '\r' in stripped or '\n' in stripped:
+        return None
+    if re.fullmatch(r'\d{1,10}', stripped):
+        seconds = int(stripped)
+        if not 0 <= seconds <= MAX_RETRY_AFTER_SECONDS:
+            return None
+        return str(seconds)
+    try:
+        parsed = parsedate_to_datetime(stripped)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed is None or parsed.tzinfo is None or not 1900 <= parsed.year <= 9999:
+        return None
+    try:
+        return format_datetime(parsed.astimezone(timezone.utc), usegmt=True)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _provider_response_codes(payload) -> tuple[int | None, tuple[int, ...]]:
+    if not isinstance(payload, dict):
+        return None, ()
+    status = payload.get('status')
+    provider_status_code = _safe_provider_status_code(
+        status.get('code') if isinstance(status, dict) else None,
+    )
+    errors = payload.get('errors')
+    if not isinstance(errors, list):
+        return provider_status_code, ()
+    provider_error_codes = []
+    for item in errors[:MAX_PROVIDER_ERROR_CODES]:
+        code = _safe_provider_error_code(
+            item.get('code') if isinstance(item, dict) else None,
+        )
+        if code is not None:
+            provider_error_codes.append(code)
+    return provider_status_code, tuple(provider_error_codes)
 
 
 class TelesignServiceError(Exception):
     """A metadata-only provider error safe to handle without exposing PII."""
 
-    def __init__(self, reason: str):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        http_status=None,
+        provider_status_code=None,
+        provider_error_codes=(),
+        retry_after=None,
+    ):
         super().__init__(reason)
         self.reason = reason
+        self.http_status = _safe_http_status(http_status)
+        self.provider_status_code = _safe_provider_status_code(
+            provider_status_code,
+        )
+        self.provider_error_codes = _safe_provider_error_codes(
+            provider_error_codes,
+        )
+        self.retry_after = _safe_retry_after(retry_after)
+        self.metadata = {
+            key: value for key, value in {
+                'http_status': self.http_status,
+                'provider_status_code': self.provider_status_code,
+                'provider_error_codes': self.provider_error_codes,
+                'retry_after': self.retry_after,
+            }.items() if value not in (None, ())
+        }
+
+
+def verify_api_unavailable(error: TelesignServiceError) -> bool:
+    """True when Unified Verify is not enabled for this Customer ID.
+
+    HTTP 401 + status 3906 means the Verify API (verify.telesign.com) is not
+    on the contract. Self-service accounts still have SMS Verify
+    (rest-ww.telesign.com/v1/verify/sms). This is a product-gate, not a
+    leaked credential.
+    """
+    return (
+        error.http_status == 401
+        and error.provider_status_code == 3906
+    )
+
+
+def _provider_response_error(
+    reason: str, http_status, payload, *, retry_after=None,
+) -> TelesignServiceError:
+    provider_status_code, provider_error_codes = _provider_response_codes(payload)
+    return TelesignServiceError(
+        reason,
+        http_status=http_status,
+        provider_status_code=provider_status_code,
+        provider_error_codes=provider_error_codes,
+        retry_after=retry_after,
+    )
+
+
+def _http_error(error: urllib.error.HTTPError) -> TelesignServiceError:
+    """Extract bounded, non-sensitive metadata from one urllib HTTP failure."""
+    try:
+        retry_after_values = (
+            error.headers.get_all('Retry-After')
+            if error.headers and hasattr(error.headers, 'get_all') else None
+        )
+        if retry_after_values is not None:
+            retry_after = (
+                retry_after_values[0] if len(retry_after_values) == 1 else None
+            )
+        else:
+            retry_after = (
+                error.headers.get('Retry-After') if error.headers else None
+            )
+    except Exception:
+        retry_after = None
+    try:
+        raw_body = error.read(MAX_RESPONSE_BYTES + 1)
+    except Exception:
+        raw_body = b''
+    finally:
+        try:
+            error.close()
+        except Exception:
+            pass
+
+    payload = None
+    if isinstance(raw_body, bytes) and len(raw_body) <= MAX_RESPONSE_BYTES:
+        try:
+            candidate = json.loads(raw_body.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        else:
+            if isinstance(candidate, dict):
+                payload = candidate
+    return _provider_response_error(
+        type(error).__name__, error.code, payload, retry_after=retry_after,
+    )
 
 
 def _truthy(name: str) -> bool:
@@ -133,16 +306,24 @@ async def _request_json(
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, response.read(MAX_RESPONSE_BYTES + 1)
 
+    request_error = None
     try:
         http_status, raw_body = await asyncio.to_thread(perform_request)
+    except urllib.error.HTTPError as exc:
+        # Extract and close the raw error here, then raise after leaving this
+        # handler so the HTTPError body/request cannot remain as exception
+        # context reachable by callers or logging infrastructure.
+        request_error = _http_error(exc)
     except Exception as exc:
-        raise TelesignServiceError(type(exc).__name__) from exc
+        request_error = TelesignServiceError(type(exc).__name__)
+    if request_error is not None:
+        raise request_error
     if len(raw_body) > MAX_RESPONSE_BYTES:
         raise TelesignServiceError('response_too_large')
     try:
         parsed = json.loads(raw_body.decode('utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise TelesignServiceError('invalid_response') from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        parsed = None
     if not isinstance(parsed, dict):
         raise TelesignServiceError('invalid_response')
     return http_status, parsed
@@ -175,7 +356,7 @@ async def create_verification(
         body=json.dumps(payload, separators=(',', ':')).encode('utf-8'),
         content_type='application/json; charset=utf-8',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     reference_id = str(response.get('reference_id') or '').strip()
     if not (
         200 <= http_status < 300
@@ -183,7 +364,7 @@ async def create_verification(
         and reference_id
         and not (response.get('errors') or [])
     ):
-        raise TelesignServiceError('provider_rejected')
+        raise _provider_response_error('provider_rejected', http_status, response)
     return {'reference_id': reference_id, 'status_code': provider_code}
 
 
@@ -201,9 +382,9 @@ async def finalize_verification(reference_id: str, code: str) -> dict:
         content_type='application/json; charset=utf-8',
         method='PATCH',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     if not (200 <= http_status < 300 and provider_code == 3900):
-        raise TelesignServiceError('completion_rejected')
+        raise _provider_response_error('completion_rejected', http_status, response)
     return {'status_code': provider_code}
 
 
@@ -218,9 +399,9 @@ async def report_sms_completion(reference_id: str) -> dict:
         content_type='application/x-www-form-urlencoded; charset=utf-8',
         method='PUT',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     if not (200 <= http_status < 300 and provider_code == 1900):
-        raise TelesignServiceError('completion_rejected')
+        raise _provider_response_error('completion_rejected', http_status, response)
     return {'status_code': provider_code}
 
 
@@ -239,7 +420,7 @@ async def send_verify_sms(phone: str, code: str, purpose: str) -> dict:
         body=body,
         content_type='application/x-www-form-urlencoded; charset=utf-8',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     reference_id = str(response.get('reference_id') or '').strip()
     if not (
         200 <= http_status < 300
@@ -247,7 +428,7 @@ async def send_verify_sms(phone: str, code: str, purpose: str) -> dict:
         and not (response.get('errors') or [])
         and reference_id
     ):
-        raise TelesignServiceError('provider_rejected')
+        raise _provider_response_error('provider_rejected', http_status, response)
     return {'reference_id': reference_id, 'status_code': provider_code}
 
 
@@ -288,14 +469,14 @@ async def evaluate_phone(
         body=urllib.parse.urlencode(fields).encode('utf-8'),
         content_type='application/x-www-form-urlencoded; charset=utf-8',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     risk = response.get('risk') or {}
     if not (
         200 <= http_status < 300
         and provider_code in {300, 301}
         and risk.get('recommendation') in {'allow', 'flag', 'block'}
     ):
-        raise TelesignServiceError('provider_rejected')
+        raise _provider_response_error('provider_rejected', http_status, response)
     phone_type = response.get('phone_type') or {}
     location = response.get('location') or {}
     country = location.get('country') or {}
@@ -325,9 +506,9 @@ async def phone_id_contact(phone: str, *, include_contact: bool = False) -> dict
         body=json.dumps(payload, separators=(',', ':')).encode('utf-8'),
         content_type='application/json',
     )
-    provider_code = (response.get('status') or {}).get('code')
+    provider_code, _ = _provider_response_codes(response)
     if not (200 <= http_status < 300 and provider_code in {300, 301}):
-        raise TelesignServiceError('provider_rejected')
+        raise _provider_response_error('provider_rejected', http_status, response)
     phone_type = response.get('phone_type') or {}
     location = response.get('location') or {}
     country = location.get('country') or {}

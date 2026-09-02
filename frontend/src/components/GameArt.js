@@ -1,19 +1,20 @@
 import { useState } from "react";
 import {
   Plane, Dices, Layers, LayoutGrid, Crown, Trophy, Flame, CircleDot, Target, Gem,
-  Sparkles, Hash, Infinity as InfinityIcon, Zap, Sun, Boxes, Spade, Club, Images,
+  Sparkles, Hash, Infinity as InfinityIcon, Zap, Sun, Boxes, Spade, Club, Images, Bird,
 } from "lucide-react";
 
 const ICONS = {
   plane: Plane, dices: Dices, layers: Layers, "grid-3x3": LayoutGrid, crown: Crown,
   trophy: Trophy, flame: Flame, "circle-dot": CircleDot, target: Target, gem: Gem,
   sparkles: Sparkles, hash: Hash, infinity: InfinityIcon, zap: Zap, sun: Sun,
-  boxes: Boxes, spade: Spade, club: Club, images: Images,
+  boxes: Boxes, spade: Spade, club: Club, images: Images, bird: Bird,
 };
 
 // Unique silhouette language per game (original CSS compositions)
 const PATTERNS = {
   aviator: "arcs",
+  "chicken-road": "lanes",
   "seven-up-down": "dots",
   "andar-bahar": "cardfan",
   bingo: "grid",
@@ -62,6 +63,8 @@ function patternStyle(type, accent) {
       return { backgroundImage: `radial-gradient(${a}30 2.5px, transparent 3.5px), radial-gradient(${a}1e 2px, transparent 3px)`, backgroundSize: "42px 42px, 27px 27px", backgroundPosition: "0 0, 14px 18px" };
     case "lines":
       return { backgroundImage: `repeating-linear-gradient(0deg, ${a}1a 0 3px, transparent 3px 22px)` };
+    case "lanes":
+      return { backgroundImage: `repeating-linear-gradient(90deg, ${a}22 0 3px, transparent 3px 8px, transparent 8px 30px), repeating-linear-gradient(0deg, ${a}10 0 2px, transparent 2px 26px)`, backgroundSize: "30px 100%, 100% 26px" };
     case "streaks":
       return { backgroundImage: `repeating-linear-gradient(160deg, ${a}20 0 4px, transparent 4px 34px)` };
     case "wheel":

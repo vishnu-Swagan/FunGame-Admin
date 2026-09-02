@@ -1,6 +1,5 @@
 import React from "react";
 
-import logo from "../assets/images/logo.svg";
 import refound from "../assets/images/refund.png";
 import "../index.scss";
 import Context from "../context";
@@ -49,7 +48,10 @@ export default function Header() {
               if (event.key === "Enter" || event.key === " ") returnToLobby();
             }}
           >
-            <img src={logo} alt="Aviator" className="logo" />
+            <span className="game-logo" aria-label="Chakri Aviator">
+              <span className="game-logo__operator">Chakri</span>
+              <strong>Aviator</strong>
+            </span>
           </div>
           <div
             className={`round-status ${errorBackend ? "is-offline" : ""}`}

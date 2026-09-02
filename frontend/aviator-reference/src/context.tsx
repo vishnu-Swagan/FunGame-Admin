@@ -43,6 +43,23 @@ export const shouldAcceptAviatorSnapshot = (
   return incomingOrder >= previousOrder;
 };
 
+export const deriveAviatorElapsed = (data: any, receivedAtSeconds = Date.now() / 1000) => {
+  const phase = String(data?.phase || "").toUpperCase();
+  const serverNow = Number(data?.server_now);
+  const responseAge = Number.isFinite(serverNow)
+    ? Math.max(0, Math.min(2, receivedAtSeconds - serverNow))
+    : 0;
+  if (phase === "BETTING") {
+    const bettingSeconds = Math.max(0, Number(data?.betting_seconds || 5));
+    const elapsed = bettingSeconds - Number(data?.phase_ends_in || 0) + responseAge;
+    return Math.max(0, Math.min(bettingSeconds, elapsed));
+  }
+  if (phase === "FLYING") {
+    return Math.max(0, Number(data?.fly_elapsed || 0) + responseAge);
+  }
+  return Math.max(0, Number(data?.flight_seconds || 0));
+};
+
 const Context = React.createContext<ContextType>(null!);
 
 let cashOutImplementation: (at: number, index: PanelKey) => void = () => undefined;
@@ -141,6 +158,7 @@ export const Provider = ({ children }: any) => {
   const lastRound = useRef<number | null>(null);
   const acceptedServerRound = useRef<number | null>(null);
   const acceptedServerPhase = useRef("");
+  const visualClock = useRef({ round: 0, phase: "", elapsed: 0 });
   const requestInFlight = useRef<Record<PanelKey, boolean>>({ f: false, s: false });
   const pollInFlight = useRef(false);
 
@@ -205,11 +223,13 @@ export const Provider = ({ children }: any) => {
     setErrorBackend(false);
     const phase = data.phase === "BETTING" ? "BET" : data.phase === "FLYING" ? "PLAYING" : "GAMEEND";
     const crashPoint = Number(data.crash_point || data.multiplier || 1);
-    const elapsed = data.phase === "BETTING"
-      ? Math.max(0, Number(data.betting_seconds || 5) - Number(data.phase_ends_in || 0))
-      : data.phase === "FLYING"
-        ? Number(data.fly_elapsed || 0)
-        : Number(data.flight_seconds ?? flightTimeFor(crashPoint));
+    const measuredElapsed = data.phase === "CRASHED"
+      ? Number(data.flight_seconds ?? flightTimeFor(crashPoint))
+      : deriveAviatorElapsed(data);
+    const elapsed = visualClock.current.round === incomingRound && visualClock.current.phase === incomingPhase
+      ? Math.max(visualClock.current.elapsed, measuredElapsed)
+      : measuredElapsed;
+    visualClock.current = { round: incomingRound, phase: incomingPhase, elapsed };
     setGameState({
       currentNum: crashPoint.toFixed(2),
       currentSecondNum: elapsed,
@@ -531,6 +551,10 @@ export const Provider = ({ children }: any) => {
         createdAt: new Date().toISOString(), serverSeed: "", serverSeedHash: "",
         resultHash: "", seedOfUsers: [], flyDetailID: round, crashPoint: 0, target: 0,
         verificationFactor: 0,
+        verificationFactorText: "",
+        fairnessVersion: 0,
+        commitmentPayload: "",
+        algorithm: "",
       };
     }
   }, []);

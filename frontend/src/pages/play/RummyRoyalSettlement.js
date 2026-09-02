@@ -123,28 +123,34 @@ export function normalizeSettlementGroups(row) {
   return groups;
 }
 
-function SettlementCard({ card, compact = false }) {
+function SettlementCard({ card, compact = false, wildRank = null }) {
   const joker = card?.printedJoker || card?.code === "PJ";
+  const rankWild = !joker && wildRank != null && Number(card?.rank) === Number(wildRank);
   const suit = SUITS[card?.suit];
   const rank = cardRank(card);
   const red = Boolean(suit?.red);
   return (
     <span
-      className={`rrs-card ${red ? "is-red" : ""} ${joker ? "is-joker" : ""} ${compact ? "is-compact" : ""}`}
+      className={`rrs-card ${red ? "is-red" : ""} ${joker ? "is-joker" : ""} ${rankWild ? "is-rank-wild" : ""} ${compact ? "is-compact" : ""}`}
       role="img"
-      aria-label={joker ? "Printed joker" : `${rank} of ${suit?.name || "unknown suit"}`}
+      aria-label={joker ? "Printed joker" : `${rank} of ${suit?.name || "unknown suit"}${rankWild ? ", wild joker" : ""}`}
       data-card-id={card?.id}
+      data-joker-kind={joker ? "printed" : rankWild ? "rank-wild" : "none"}
     >
       {joker ? (
-        <><b>J</b><i aria-hidden="true">♛</i><small>JOKER</small></>
+        <>
+          <span className="rrs-joker-corner" aria-hidden="true"><b>J</b><em>✦</em></span>
+          <span className="rrs-joker-emblem" aria-hidden="true"><i>J</i><b>JOKER</b></span>
+          <span className="rrs-joker-corner is-lower" aria-hidden="true"><b>J</b><em>✦</em></span>
+        </>
       ) : (
-        <><b>{rank}</b><i aria-hidden="true">{suit?.symbol || "?"}</i><em aria-hidden="true">{suit?.symbol || "?"}</em></>
+        <><b>{rank}</b><i aria-hidden="true">{suit?.symbol || "?"}</i><em aria-hidden="true">{suit?.symbol || "?"}</em>{rankWild && <small className="rrs-wild-badge" aria-hidden="true">W</small>}</>
       )}
     </span>
   );
 }
 
-function AuthoritativeHand({ row, compact = false, ownerLabel = "Winner" }) {
+function AuthoritativeHand({ row, compact = false, ownerLabel = "Winner", wildRank = null }) {
   const groups = useMemo(() => normalizeSettlementGroups(row), [row]);
   if (!groups.length) {
     return <p className="rrs-cards-unavailable">Final cards were not supplied with this settlement.</p>;
@@ -160,7 +166,7 @@ function AuthoritativeHand({ row, compact = false, ownerLabel = "Winner" }) {
           aria-label={`${group.label}, ${group.cards.length} cards`}
         >
           <div className="rrs-card-stack">
-            {group.cards.map((card) => <SettlementCard key={card.id} card={card} compact={compact} />)}
+            {group.cards.map((card) => <SettlementCard key={card.id} card={card} compact={compact} wildRank={wildRank} />)}
           </div>
           <span className="rrs-group-band"><Check aria-hidden="true" />{group.label}</span>
         </section>
@@ -227,6 +233,7 @@ function Standings({ rows, winnerSeat }) {
 export function RummyRoyalSettlement({
   result,
   viewerSeatIndex,
+  wildRank = null,
   onLobby,
   reducedMotion = false,
   phase: controlledPhase,
@@ -462,7 +469,7 @@ export function RummyRoyalSettlement({
             <p id="rrs-description">{reason}</p>
           </header>
           <div className="rrs-showcase-hand">
-            <AuthoritativeHand row={showcaseRow} ownerLabel={playerWon ? "Your" : `${winnerName}'s`} />
+            <AuthoritativeHand row={showcaseRow} ownerLabel={playerWon ? "Your" : `${winnerName}'s`} wildRank={wildRank} />
           </div>
           <footer className="rrs-celebration-footer">
             <PayoutFigure value={result.payoutChips} displayValue={displayPayout} />
@@ -487,7 +494,7 @@ export function RummyRoyalSettlement({
 
           <div className="rrs-final-hand">
             <div className="rrs-final-hand-title"><Crown aria-hidden="true" /><span>WINNING HAND</span><b>{winnerName}</b></div>
-            <AuthoritativeHand row={showcaseRow} compact ownerLabel={`${winnerName}'s`} />
+            <AuthoritativeHand row={showcaseRow} compact ownerLabel={`${winnerName}'s`} wildRank={wildRank} />
           </div>
 
           <Standings rows={rows} winnerSeat={winnerSeat} />

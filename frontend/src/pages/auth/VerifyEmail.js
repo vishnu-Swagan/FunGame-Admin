@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertTriangle, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { normalizeContactChannel, normalizeContactIdentifier, registrationChanne
 import { useAuth } from "@/context/AuthContext";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
-const DEFAULT_RESEND_SECONDS = 30;
+const DEFAULT_RESEND_SECONDS = 60;
 
 export default function VerifyEmail() {
   const navigate = useNavigate();
@@ -22,7 +23,11 @@ export default function VerifyEmail() {
   const issuedChallenge = Boolean(initial.identifier || initial.email);
   const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "PHONE", initial.identifier || initial.email));
   const [identifier, setIdentifier] = useState(initial.identifier || initial.email || "");
+  const [challengeId, setChallengeId] = useState(
+    initial.challengeId || initial.challenge_id || initial.verificationId || initial.verification_id || "",
+  );
   const [secondaryIdentifier] = useState(initial.secondaryIdentifier || "");
+  const [loginId, setLoginId] = useState(initial.loginId || "");
   const [destinationMasked, setDestinationMasked] = useState(initial.destinationMasked || "");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -57,7 +62,8 @@ export default function VerifyEmail() {
     event?.preventDefault();
     if (!verificationAvailable) return toast.info("Verification is temporarily unavailable for this contact method.");
     if (!identifier.trim()) return toast.error(`Enter your ${channel === "PHONE" ? "mobile number" : "email"}`);
-    if (code.length !== 6) return toast.error("Enter the 6-digit code");
+    if (initial.loginId && !/^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$/.test(loginId.trim())) return toast.error("Start your Login ID with a letter or number; use 4–32 letters, numbers, dots, underscores, or hyphens");
+    if (!/^\d{6}$/.test(code)) return toast.error("Enter the 6-digit code");
     if (password.length < 8) return toast.error("Password must be at least 8 characters");
     if (password !== confirmPassword) return toast.error("Passwords do not match");
     setBusy(true);
@@ -68,6 +74,9 @@ export default function VerifyEmail() {
         identifier: contact,
         email: channel === "EMAIL" ? contact : undefined,
         phone: channel === "PHONE" ? contact : undefined,
+        username: loginId.trim() || undefined,
+        challenge_id: challengeId || undefined,
+        verification_id: challengeId || undefined,
         code,
         password,
       });
@@ -82,6 +91,7 @@ export default function VerifyEmail() {
         }
         setChannel(nextChannel);
         setIdentifier(nextIdentifier);
+        setChallengeId(next.challenge_id || next.verification_id || "");
         setDestinationMasked(next.destination_masked || next.destination || "");
         setResendIn(Number(next.resend_after_seconds || next.resend_in || DEFAULT_RESEND_SECONDS));
         setCode("");
@@ -116,10 +126,15 @@ export default function VerifyEmail() {
         phone: channel === "PHONE" ? contact : undefined,
       });
       setDestinationMasked(data.destination_masked || destinationMasked);
+      setChallengeId(data.challenge_id || data.verification_id || "");
       setResendIn(Number(data.resend_after_seconds || DEFAULT_RESEND_SECONDS));
       setCode("");
-      toast.success(data.message || "A new code was sent");
+      toast.success(data.message || "If an unverified account matches, a new code has been requested");
     } catch (error) {
+      if (error?.response?.status === 429) {
+        const retryAfter = Number(error?.response?.headers?.["retry-after"] || DEFAULT_RESEND_SECONDS);
+        setResendIn(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : DEFAULT_RESEND_SECONDS);
+      }
       toast.error(errMsg(error));
     } finally {
       setResending(false);
@@ -142,7 +157,7 @@ export default function VerifyEmail() {
   }
 
   return (
-    <AuthShell title="Verify your account" subtitle={`Enter the 6-digit code sent to ${destination}.`} backTo="/register">
+    <AuthShell title="Verify your account" subtitle={`Enter the 6-digit code issued for ${destination}.`} backTo="/register">
       {!issuedChallenge && !capabilitiesLoading && !anyChannelAvailable && (
         <div data-testid="verification-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
@@ -167,8 +182,15 @@ export default function VerifyEmail() {
         </div>
       )}
       <form onSubmit={submit} className="space-y-5">
+        {initial.loginId && (
+          <div className="space-y-1.5">
+            <Label htmlFor="verify-login-id">Your Login ID</Label>
+            <Input id="verify-login-id" data-testid="verify-login-id-input" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} required minLength={4} maxLength={32} value={loginId} onChange={(event) => setLoginId(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
+            <p className="text-[11px] leading-relaxed text-white/45">You can change it before verification if the ID becomes unavailable.</p>
+          </div>
+        )}
         <div data-testid="verify-email-otp" className="flex justify-center">
-          <InputOTP maxLength={6} value={code} onChange={setCode}>
+          <InputOTP maxLength={6} pattern={REGEXP_ONLY_DIGITS} value={code} onChange={setCode}>
             <InputOTPGroup className="gap-2">
               {[0, 1, 2, 3, 4, 5].map((index) => <InputOTPSlot key={index} index={index} className="h-12 w-11 rounded-xl border-white/15 bg-white/5 text-lg" />)}
             </InputOTPGroup>
@@ -183,13 +205,24 @@ export default function VerifyEmail() {
           <label htmlFor="verify-password-confirm" className="text-sm font-medium">Confirm password</label>
           <Input id="verify-password-confirm" data-testid="verify-password-confirm-input" type="password" autoComplete="new-password" required minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="h-12 rounded-xl bg-white/5 border-white/12" />
         </div>
-        <Button data-testid="verify-email-submit-button" type="submit" disabled={busy || !verificationAvailable || code.length !== 6 || password.length < 8 || password !== confirmPassword} className="w-full h-12 rounded-xl text-base font-bold">
+        <Button data-testid="verify-email-submit-button" type="submit" disabled={busy || resending || !verificationAvailable || !/^\d{6}$/.test(code) || password.length < 8 || password !== confirmPassword} className="w-full h-12 rounded-xl text-base font-bold">
           {busy ? "Verifying…" : "Verify account"}
         </Button>
       </form>
-      <button data-testid="verify-email-resend-button" type="button" onClick={resend} disabled={resending || resendIn > 0 || capabilitiesLoading || !selectedChannelAvailable} className="mt-5 text-sm text-primary font-semibold hover:underline disabled:text-white/35 disabled:no-underline">
+      <button data-testid="verify-email-resend-button" type="button" onClick={resend} disabled={busy || resending || resendIn > 0 || capabilitiesLoading || !selectedChannelAvailable} className="mt-5 text-sm text-primary font-semibold hover:underline disabled:text-white/35 disabled:no-underline">
         {resending ? "Sending…" : resendIn > 0 ? `Send a new code in ${resendIn}s` : "Send a new code"}
       </button>
+      <div data-testid="verification-recovery-guidance" className="mt-5 rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-white/60">
+        <p>
+          {channel === "PHONE"
+            ? "No SMS? Confirm the number starts with +country code. If these details were registered before, use login or account recovery instead."
+            : "No email? Check spam or junk. If these details were registered before, use login or account recovery instead."}
+        </p>
+        <div className="mt-2 flex gap-4 font-semibold text-primary">
+          <Link to="/login" className="hover:underline">Log in</Link>
+          <Link to="/forgot-password" className="hover:underline">Forgot password</Link>
+        </div>
+      </div>
     </AuthShell>
   );
 }

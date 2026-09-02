@@ -21,7 +21,13 @@ export const SeedModal = ({ setModal, modalParam }: any) => {
         const localTime = newDate.toLocaleTimeString([], { hour12: false });
         setDate(localTime);
 
-        const commitment = CryptoJS.SHA256(data.serverSeed).toString(CryptoJS.enc.Hex);
+        const fairnessVersion = Number(data.fairnessVersion || 1);
+        const verificationFactorText = data.verificationFactorText
+            || Number(data.verificationFactor || 0).toFixed(12);
+        const commitmentPayload = fairnessVersion >= 2
+            ? `aviator-commit-v2:${verificationFactorText}:${data.serverSeed}`
+            : data.serverSeed;
+        const commitment = CryptoJS.SHA256(commitmentPayload).toString(CryptoJS.enc.Hex);
         const computedResultHash = CryptoJS.SHA256(`aviator-crash-v1:${data.serverSeed}`).toString(CryptoJS.enc.Hex);
         setCommitmentVerified(commitment === data.serverSeedHash);
         setResultHash(computedResultHash);
@@ -39,7 +45,7 @@ export const SeedModal = ({ setModal, modalParam }: any) => {
     }, [getSeedDetails])
     return (
         <div className={`modal ${modalParam.modalState && 'active'}`}>
-            <div className="back" onClick={() => setModal({ modalState: false, flyDetailId: '' })}></div>
+            <button type="button" className="back" aria-label="Close round verification" onClick={() => setModal({ modalState: false, flyDetailId: '' })} />
             <div className="modal-dialog">
                 <div className="modal-content">
                     <div className="modal-header">
@@ -48,7 +54,7 @@ export const SeedModal = ({ setModal, modalParam }: any) => {
                             <div className="header__info">
                                 <div className={`bubble-multiplier ${Number(seedDetails?.target) < 2 ? "blue" : Number(seedDetails?.target) < 10 ? "purple" : "big"}`}>{Number(seedDetails?.target).toFixed(2)}x</div>
 
-                                <div style={{ paddingLeft: '5px' }}>{date}</div>
+                                <div className="seed-time">{date}</div>
                             </div>
                         }
                         <button className="close" onClick={() => setModal({ modalState: false, flyDetailId: '' })}>
@@ -142,11 +148,13 @@ export const SeedModal = ({ setModal, modalParam }: any) => {
                                             <span>Hex:</span>
                                             <span>Decimal:</span>
                                             <span>Result:</span>
+                                            <span>Commitment:</span>
                                         </div>
                                         <div className="value">
                                             <span className="white">{resultHash?.slice(0, 13)}</span>
                                             <span className="white">{parseInt(resultHash.slice(0, 13) || '', 16)}</span>
                                             <span className="white">{Number(seedDetails?.target || 0).toFixed(2)}</span>
+                                            <span className="white">v{Number(seedDetails?.fairnessVersion || 1)} · factor {seedDetails?.verificationFactorText || Number(seedDetails?.verificationFactor || 0).toFixed(12)}</span>
                                         </div>
                                     </div>
                                 </div>

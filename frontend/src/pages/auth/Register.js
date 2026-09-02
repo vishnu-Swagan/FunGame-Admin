@@ -21,6 +21,7 @@ export default function Register() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [dob, setDob] = useState("");
   const [country, setCountry] = useState("");
   const [password, setPassword] = useState("");
@@ -100,6 +101,7 @@ export default function Register() {
         identifier: normalized,
         phone: normalized,
         email: email.trim().toLowerCase() || undefined,
+        username: loginId.trim(),
         full_name: fullName.trim(),
         date_of_birth: dob,
         country,
@@ -115,13 +117,19 @@ export default function Register() {
         navigate("/login", { state: { registrationSubmitted: true } });
         return;
       }
+      const verificationChannel = String(data?.channel || "PHONE").toUpperCase() === "EMAIL" ? "EMAIL" : "PHONE";
+      const verificationIdentifier = verificationChannel === "EMAIL"
+        ? email.trim().toLowerCase()
+        : normalized;
       navigate("/verify", {
         state: {
-          channel: "PHONE",
-          identifier: normalized,
+          channel: verificationChannel,
+          identifier: verificationIdentifier,
+          challengeId: data?.challenge_id || data?.verification_id || "",
           destinationMasked: data?.destination_masked,
           resendAfter: data?.resend_after_seconds,
           secondaryIdentifier: email.trim().toLowerCase(),
+          loginId: loginId.trim(),
         },
       });
     } catch (error) {
@@ -298,7 +306,7 @@ export default function Register() {
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
             : emailVerificationRequired
-              ? "First verify the SMS code, then verify the code sent to your email. Your account activates only after both steps succeed."
+              ? "Use a mobile number and email not already linked to an account. First verify the SMS code, then the email code; your account activates only after both steps succeed."
               : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
         </p>
         <p className="text-[11px] text-white/45 leading-relaxed">Real-money play is available only to eligible adults in supported territories. Deposits, wagers, withdrawals, and bonus balances are recorded in your wallet activity.</p>

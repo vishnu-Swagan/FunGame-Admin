@@ -46,8 +46,18 @@ export default function AdminStepUpDialog({ actionLabel, open, onCancel, onVerif
       const { data } = await api.post("/admin/security/step-up/start", {
         current_password: password,
       });
-      setChallenge(data);
       setPassword("");
+      if (data?.verified || data?.password_only) {
+        toast.success(data.message || "Administrator verification complete");
+        try {
+          await onVerified?.();
+        } finally {
+          setBusy(false);
+          onCancel?.();
+        }
+        return;
+      }
+      setChallenge(data);
       setStage("CODE");
       toast.success(data.message || "Security code sent");
     } catch (error) {

@@ -42,8 +42,10 @@ import routes_compliance
 import routes_player
 from models import (
     AgeVerify,
+    AdminVerificationRequest,
     AdminExclusion,
     AdminUserAction,
+    AuthenticatedOtpVerify,
     ComplianceConfigUpdate,
     LoginRequest,
     OnboardingProfileRequest,
@@ -158,7 +160,7 @@ async def main():
     # soon as the phone challenge is consumed.
     registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Player One',
+        email='player@example.com', username='Player.One', full_name='Player One',
         date_of_birth='1990-01-01', country='India',
         accepted_terms=True,
     ))
@@ -173,7 +175,7 @@ async def main():
     # never fabricates or sends a second delivery.
     duplicate_unverified = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Someone Else',
+        email='player@example.com', username='Player.One', full_name='Someone Else',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     assert duplicate_unverified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
@@ -226,7 +228,7 @@ async def main():
         await expect_http_error(
             routes_auth.register(RegisterRequest(
                 channel='PHONE', identifier='+919100000002', phone='+919100000002',
-                email='crm-failure@example.com',
+                email='crm-failure@example.com', username='CRM.Failure.Player',
                 full_name='CRM Failure', date_of_birth='1990-01-01', country='India',
                 accepted_terms=True,
             )),
@@ -286,15 +288,18 @@ async def main():
     )
     assert verified_error.detail == unknown_error.detail
 
-    duplicate_verified = await routes_auth.register(RegisterRequest(
+    duplicate_verified = await expect_http_error(routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000001', phone='+919100000001',
-        email='player@example.com', full_name='Another Name',
+        email='player@example.com', username='Player.One', full_name='Another Name',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
-    ))
-    assert duplicate_verified['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
-    assert duplicate_verified['verification_required'] is True
-    assert duplicate_verified['channel'] == 'PHONE'
-    assert 'dev_code' not in duplicate_verified
+    )), 409, 'LOGIN_ID_UNAVAILABLE')
+    duplicate_unknown = await expect_http_error(routes_auth.register(RegisterRequest(
+        channel='PHONE', identifier='+919100000099', phone='+919100000099',
+        email='unknown-contact@example.com', username='Player.One',
+        full_name='Unknown Contact', date_of_birth='1990-01-01', country='India',
+        accepted_terms=True,
+    )), 409, 'LOGIN_ID_UNAVAILABLE')
+    assert duplicate_verified.detail == duplicate_unknown.detail
 
     planted_password = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='player@example.com', email='player@example.com',
@@ -401,7 +406,7 @@ async def main():
 
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
-        full_name='Phone Player', date_of_birth='1990-01-01', country='India',
+        username='Phone.Player', full_name='Phone Player', date_of_birth='1990-01-01', country='India',
         accepted_terms=True,
     ))
     assert phone_registration['channel'] == 'PHONE'
@@ -431,7 +436,7 @@ async def main():
 
     race_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919100000003', phone='+919100000003',
-        email='race@example.com', full_name='Race Player',
+        email='race@example.com', username='Race.Player', full_name='Race Player',
         date_of_birth='1990-01-01', country='India', accepted_terms=True,
     ))
     race_request = VerifyEmailRequest(
@@ -876,6 +881,17 @@ async def main():
         ),
         403, 'ADMIN_PERMISSION_REQUIRED',
     )
+    bootstrap_admin = {
+        'id': 'bootstrap-admin', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'admin_permissions': [],
+    }
+    await expect_http_error(
+        routes_compliance.verify_age(
+            'adult-age-review', AgeVerify(verified=True, note='Evidence checked'),
+            bootstrap_admin,
+        ),
+        403, 'ADMIN_MFA_REQUIRED',
+    )
     kyc_admin = {
         'id': 'kyc-admin', 'role': 'ADMIN', 'status': 'ACTIVE',
         'admin_permissions': ['KYC_REVIEW'],
@@ -913,6 +929,47 @@ async def main():
     })
     assert age_audit['before']['age_verified'] is False
     assert age_audit['after']['age_verified'] is True
+
+    # Existing active players can complete mobile OTP without registering a
+    # second account, while an authorised step-up admin can request or record
+    # a manual review with a durable audit trail.
+    await database.users.insert_one({
+        'id': 'mobile-review-player', 'role': 'PLAYER', 'status': 'ACTIVE',
+        'phone': '+919876543219', 'phone_normalized': '+919876543219',
+        'phone_verified': False, 'country': 'India',
+        'date_of_birth': '1990-01-01',
+    })
+    mobile_request = await routes_auth.request_my_mobile_verification(
+        await database.users.find_one({'id': 'mobile-review-player'}),
+    )
+    mobile_confirm = await routes_auth.confirm_my_mobile_verification(
+        AuthenticatedOtpVerify(
+            challenge_id=mobile_request['challenge_id'],
+            code=mobile_request['dev_code'],
+        ),
+        await database.users.find_one({'id': 'mobile-review-player'}),
+    )
+    assert mobile_confirm['user']['phone_verified'] is True
+    await routes_compliance.admin_request_verification(
+        'mobile-review-player',
+        AdminVerificationRequest(kind='MOBILE', note='Please reconfirm this mobile'),
+        kyc_admin,
+    )
+    requested = await database.verification_requests.find_one({
+        'id': 'mobile-review-player:MOBILE',
+    })
+    assert requested['status'] == 'REQUESTED' and requested['requested_by'] == 'kyc-admin'
+    await routes_compliance.verify_mobile_manually(
+        'mobile-review-player', AgeVerify(verified=True, note='Carrier record checked'),
+        kyc_admin,
+    )
+    mobile_player = await database.users.find_one({'id': 'mobile-review-player'})
+    assert mobile_player['mobile_review_status'] == 'ADMIN_APPROVED'
+    assert mobile_player['mobile_review_phone_snapshot'] == '+919876543219'
+    mobile_audit = await database.financial_audit.find_one({
+        'target_id': 'mobile-review-player', 'action': 'MOBILE_MANUALLY_VERIFIED',
+    })
+    assert mobile_audit['reason'] == 'Carrier record checked'
 
     # The age floor is not a mutable business setting. A corrupt historical
     # config is clamped to 18, and both default and country-specific attempts

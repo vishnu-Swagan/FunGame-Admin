@@ -155,6 +155,7 @@ test("manual-review registration submits both contacts and confirmed password wi
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "New Player");
+  change(container.querySelector("#reg-login-id"), "Lucky.Player_7");
   change(container.querySelector("#reg-contact"), "+91 98765-43210");
   change(container.querySelector("#reg-email"), "New.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -169,6 +170,7 @@ test("manual-review registration submits both contacts and confirmed password wi
     identifier: "+919876543210",
     phone: "+919876543210",
     email: "new.player@example.com",
+    username: "Lucky.Player_7",
     full_name: "New Player",
     date_of_birth: "1990-05-20",
     country: "IN",
@@ -188,6 +190,7 @@ test("manual-review registration submits both contacts and confirmed password wi
 test("mismatched passwords are rejected before the registration API call", async () => {
   const { container, root } = await renderRegister();
   change(container.querySelector("#reg-name"), "Review Player");
+  change(container.querySelector("#reg-login-id"), "Review_Player");
   change(container.querySelector("#reg-contact"), "+919999888877");
   change(container.querySelector("#reg-email"), "review@example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -221,6 +224,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   await submit(container.querySelector("form"));
 
   expect(mockPost.mock.calls[0][1]).not.toHaveProperty("password");
+  expect(mockPost.mock.calls[0][1].username).toBe("OTP.Player");
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
     state: expect.objectContaining({ channel: "PHONE", identifier: "+447700900123" }),
   }));

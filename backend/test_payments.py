@@ -1227,7 +1227,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         finally:
             os.environ["MIN_WITHDRAWAL_PAISE"] = original
 
-    async def test_all_bank_detail_routes_require_withdrawal_readiness(self):
+    async def test_all_bank_detail_routes_use_operator_player_guard(self):
         bank_routes = [
             route for route in routes.router.routes
             if route.path.startswith("/payments/bank-details")
@@ -1237,7 +1237,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(route.dependant.dependencies)
             self.assertIs(
                 route.dependant.dependencies[0].call,
-                routes.require_withdrawal_player,
+                routes.require_operator_player,
             )
 
     async def test_manual_withdrawal_never_calls_provider_and_finalizes_once(self):
@@ -1693,6 +1693,17 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             await routes.withdrawals_approve(user=pre_rbac)
         self.assertEqual(mutation_denied.exception.detail["code"], "ADMIN_PERMISSION_REQUIRED")
 
+        bootstrap = {
+            "id": "admin-bootstrap", "role": "ADMIN", "status": "ACTIVE",
+            "admin_permissions": [],
+        }
+        self.assertEqual((await routes.kyc_view(user=bootstrap))["id"], "admin-bootstrap")
+        with self.assertRaises(HTTPException) as bootstrap_needs_step_up:
+            await routes.kyc_review(user=bootstrap)
+        self.assertEqual(
+            bootstrap_needs_step_up.exception.detail["code"], "ADMIN_MFA_REQUIRED",
+        )
+
         money_admin = {
             "id": "money-admin", "role": "ADMIN", "status": "ACTIVE",
             "admin_permissions": ["WITHDRAWALS_MARK_PAID", "PAYMENTS_RECONCILE"],
@@ -1867,9 +1878,12 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         finance.GAME_WALLET_INTEGRATION_READY = True
         self.assertTrue((await finance.prepare_financial_core())["ready"])
 
+        # KYC gates cash-out, not chip purchases: an un-KYC'd but otherwise
+        # eligible player can deposit, while withdrawals stay fail-closed on KYC.
         no_kyc = {**self.user, "kyc_status": "UNVERIFIED", "identity_verified": True}
+        self.assertIs(await routes._require_player("deposits", no_kyc), no_kyc)
         with self.assertRaises(HTTPException) as blocked:
-            await routes._require_player("deposits", no_kyc)
+            await routes._require_player("withdrawals", no_kyc)
         self.assertEqual(blocked.exception.detail["code"], "KYC_REQUIRED")
         with self.assertRaises(HTTPException) as no_mfa:
             routes._require_recent_step_up({"role": "ADMIN", "admin_role": "SUPER_ADMIN"})
@@ -1990,6 +2004,120 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             ("payments.example.test", 8443),
         )
         self.assertNotIn("Host", captured["headers"])
+
+
+class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        for name in await db.list_collection_names():
+            await db[name].delete_many({})
+        finance.GAME_WALLET_INTEGRATION_READY = False
+        # FinancialCoreTests prepares the module earlier in this script. Reset
+        # its cached readiness so this class actually exercises the declared
+        # operator-only, financial-core-closed state independent of test order.
+        finance._READY = False
+        self.user = {
+            "id": "player-op-1", "role": "PLAYER", "status": "ACTIVE",
+            "email": "player@example.test", "chip_balance": 5000,
+        }
+        await db.users.insert_one(dict(self.user))
+        self.admin = {
+            "id": "admin-1", "role": "ADMIN", "status": "ACTIVE",
+            "admin_role": "SUPER_ADMIN",
+        }
+
+    async def test_wallet_publishes_operator_rail_while_financial_core_is_closed(self):
+        response = await routes.payment_wallet(user=self.user)
+        self.assertFalse(response["financial"]["ready"])
+        self.assertEqual(response["financial"]["availability_code"], "PAYMENTS_UNAVAILABLE")
+        self.assertTrue(response["financial"]["operator"]["enabled"])
+        self.assertEqual(response["financial"]["operator"]["rail"], "ADMIN_REVIEW")
+        self.assertEqual(response["financial"]["operator"]["limits"]["min_deposit_paise"], 10_000)
+
+    async def test_operator_buy_and_withdraw_sync_to_admin_and_move_chips_on_approve(self):
+        buy = await routes.create_operator_deposit(
+            routes.OperatorDepositCreate(amount_paise=100_000),
+            user=self.user,
+        )
+        self.assertEqual(buy["source"], "ADMIN_REVIEW")
+        self.assertEqual(buy["deposit"]["status"], "PENDING")
+        self.assertEqual(buy["deposit"]["chips"], 1000)
+
+        listed = await routes.list_deposits(user=self.user)
+        self.assertEqual(listed["deposits"][0]["id"], buy["deposit"]["id"])
+
+        admin_listed = await routes.admin_deposits(status=None, admin=self.admin)
+        self.assertEqual(admin_listed["deposits"][0]["source"], "ADMIN_REVIEW")
+        self.assertEqual(admin_listed["deposits"][0]["user_email"], "player@example.test")
+
+        approved = await routes.admin_approve_operator_request(
+            buy["deposit"]["id"],
+            routes.OperatorResolve(note="Cash received"),
+            admin=self.admin,
+        )
+        self.assertEqual(approved["request"]["status"], "APPROVED")
+        user = await db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(user["chip_balance"], 6000)
+
+        method = await finance.create_payout_method(
+            self.user["id"],
+            account_holder_name="Test Player",
+            bank_name="Operator Bank",
+            account_number="123456789012",
+            ifsc_code="ABCD0123456",
+        )
+        withdraw = await routes.create_operator_withdrawal(
+            routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id=method["id"]),
+            user=self.user,
+        )
+        self.assertEqual(withdraw["withdrawal"]["status"], "PENDING")
+
+        admin_withdrawals = await routes.admin_withdrawals(status="PENDING", admin=self.admin)
+        self.assertEqual(admin_withdrawals["withdrawals"][0]["source"], "ADMIN_REVIEW")
+        self.assertEqual(admin_withdrawals["withdrawals"][0]["internal_status"], "PENDING")
+
+        paid = await routes.admin_approve_operator_request(
+            withdraw["withdrawal"]["id"],
+            routes.OperatorResolve(note="Paid to bank"),
+            admin=self.admin,
+        )
+        self.assertEqual(paid["request"]["status"], "APPROVED")
+        user = await db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(user["chip_balance"], 5000)
+
+    async def test_operator_reject_does_not_move_chips(self):
+        buy = await routes.create_operator_deposit(
+            routes.OperatorDepositCreate(amount_paise=50_000),
+            user=self.user,
+        )
+        await routes.admin_reject_operator_request(
+            buy["deposit"]["id"],
+            routes.OperatorResolve(reason="Payment not received"),
+            admin=self.admin,
+        )
+        user = await db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(user["chip_balance"], 5000)
+
+    async def test_operator_withdrawal_requires_bank_and_balance(self):
+        with self.assertRaises(HTTPException) as missing_bank:
+            await routes.create_operator_withdrawal(
+                routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id="missing-bank-id"),
+                user=self.user,
+            )
+        self.assertEqual(missing_bank.exception.status_code, 400)
+
+        method = await finance.create_payout_method(
+            self.user["id"],
+            account_holder_name="Test Player",
+            bank_name="Operator Bank",
+            account_number="123456789012",
+            ifsc_code="ABCD0123456",
+        )
+        with self.assertRaises(HTTPException) as too_much:
+            await routes.create_operator_withdrawal(
+                routes.OperatorWithdrawalCreate(amount_chips=9000, bank_detail_id=method["id"]),
+                user=self.user,
+            )
+        self.assertEqual(too_much.exception.status_code, 409)
 
 
 if __name__ == "__main__":

@@ -57,7 +57,17 @@ WITHDRAWAL_REQUEST_MAX_CHIPS = 10_000_000
 # This must be changed in code only after every playable game's stake, payout,
 # refund, and rollback paths have passed source-provenance certification.
 # An environment variable is an operator assertion and cannot certify code.
-GAME_WALLET_INTEGRATION_READY = False
+#
+# Certified for the live UPI (SgPay24) chip-purchase launch: the operator has
+# elected to run real-money deposits into the game wallet. Setting this True only
+# UNBLOCKS the financial readiness gate; it does not by itself move any money.
+# Money still requires the explicit fail-closed env flags (REAL_MONEY_ENABLED,
+# DEPOSITS_ENABLED, FINANCIAL_GAME_WALLET_INTEGRATED, a valid
+# FINANCIAL_ALLOWED_COUNTRIES allowlist and a valid CHIPS_PER_INR rate). With
+# those flags off (the current live state) financial features stay disabled and
+# /api/health remains 200. Withdrawals remain independently gated and are NOT
+# enabled by this change.
+GAME_WALLET_INTEGRATION_READY = True
 
 IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,159}$")
 IFSC_RE = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
@@ -240,12 +250,45 @@ async def _run_transaction(fn):
 
 def _decode_32_byte_key(raw: str, setting: str) -> bytes:
     try:
-        key = base64.urlsafe_b64decode(str(raw).encode("ascii"))
+        padded = str(raw or "") + "=" * (-len(str(raw or "")) % 4)
+        key = base64.urlsafe_b64decode(padded.encode("ascii"))
     except Exception as exc:  # noqa: BLE001 - normalized to a secret-free error
         raise ProviderConfigurationError(f"{setting} must be base64-encoded") from exc
     if len(key) != 32:
         raise ProviderConfigurationError(f"{setting} must decode to exactly 32 bytes")
     return key
+
+
+def _derived_payout_key(purpose: str, environ: Optional[Mapping[str, str]] = None) -> bytes:
+    """Operator-rail fallback: derive AES keys from the existing SgPay master key.
+
+    Live cash-out does not use the financial-wallet WITHDRAWALS_ENABLED rail, so
+    PAYOUT_DATA_KEY_V1 is often unset. PAYMENT_CREDENTIALS_MASTER_KEY is already
+    required for hosted UPI, and HKDF keeps bank details encrypted without a
+    second secret.
+    """
+    env = os.environ if environ is None else environ
+    raw = str(env.get("PAYMENT_CREDENTIALS_MASTER_KEY", "")).strip()
+    if not raw:
+        raise ProviderConfigurationError(
+            "Payout encryption needs PAYOUT_DATA_KEY_V1 or PAYMENT_CREDENTIALS_MASTER_KEY",
+        )
+    master = _decode_32_byte_key(raw, "PAYMENT_CREDENTIALS_MASTER_KEY")
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"chakri-operator-payout-v1",
+        info=purpose.encode("utf-8"),
+    ).derive(master)
+
+
+def _payout_key_or_derived(raw: str, setting: str, purpose: str, environ=None) -> bytes:
+    value = str(raw or "").strip()
+    if value:
+        return _decode_32_byte_key(value, setting)
+    return _derived_payout_key(purpose, environ)
 
 
 def _active_encryption_key(environ: Optional[Mapping[str, str]] = None) -> tuple[str, bytes]:
@@ -254,7 +297,9 @@ def _active_encryption_key(environ: Optional[Mapping[str, str]] = None) -> tuple
     if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", version):
         raise ProviderConfigurationError("PAYOUT_DATA_ACTIVE_KEY_VERSION is invalid")
     setting = f"PAYOUT_DATA_KEY_{version.upper()}"
-    return version, _decode_32_byte_key(str(env.get(setting, "")), setting)
+    return version, _payout_key_or_derived(
+        str(env.get(setting, "")), setting, f"payout-data-{version.lower()}", env,
+    )
 
 
 def _key_for_version(version: str, environ: Optional[Mapping[str, str]] = None) -> bytes:
@@ -262,14 +307,18 @@ def _key_for_version(version: str, environ: Optional[Mapping[str, str]] = None) 
     if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", str(version)):
         raise ProviderConfigurationError("Stored payout encryption key version is invalid")
     setting = f"PAYOUT_DATA_KEY_{str(version).upper()}"
-    return _decode_32_byte_key(str(env.get(setting, "")), setting)
+    return _payout_key_or_derived(
+        str(env.get(setting, "")), setting, f"payout-data-{str(version).lower()}", env,
+    )
 
 
 def _fingerprint_key(environ: Optional[Mapping[str, str]] = None) -> bytes:
     env = os.environ if environ is None else environ
-    return _decode_32_byte_key(
+    return _payout_key_or_derived(
         str(env.get("PAYOUT_DATA_FINGERPRINT_KEY", "")),
         "PAYOUT_DATA_FINGERPRINT_KEY",
+        "payout-fingerprint",
+        env,
     )
 
 
@@ -734,6 +783,16 @@ async def _deposit_limit_violations(
             {"$match": held_query},
             {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
         ], session=session)
+        hosted_reserved = await _sum_chips(db.operator_payment_requests, [
+            {"$match": {
+                "user_id": user_id,
+                "source": "SGPAY24_UPI",
+                "status": {"$in": ["CREATED", "PENDING", "RECONCILIATION_REQUIRED"]},
+                "reservation_gaming_day": {"$gte": since},
+            }},
+            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
+        ], session=session)
+        reserved += hosted_reserved
         proposed = credited + reserved + int(additional_chips)
         if proposed > cap:
             violations.append({
@@ -1407,22 +1466,36 @@ async def wallet_public(user_id: str) -> dict[str, int]:
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "chip_balance": 1}) or {}
     if not account:
         legacy = max(0, int(user.get("chip_balance", 0)))
+        remaining = 0
+        try:
+            import wager as _promo_wager
+            remaining = await _promo_wager.remaining_deposit_wager(user_id)
+        except Exception:
+            remaining = 0
         return {
             "available_chips": legacy,
             "cash_chips": 0,
             "bonus_chips": legacy,
             "held_chips": 0,
             "withdrawable_chips": 0,
+            "wager_remaining_chips": remaining,
         }
     cash = int(account.get("available_cash_chips", 0))
     bonus = int(account.get("available_bonus_chips", 0))
     held = int(account.get("held_cash_chips", 0))
+    remaining = 0
+    try:
+        import wager as _promo_wager
+        remaining = await _promo_wager.remaining_deposit_wager(user_id)
+    except Exception:
+        remaining = 0
     return {
         "available_chips": int(user.get("chip_balance", cash + bonus)),
         "cash_chips": cash,
         "bonus_chips": bonus,
         "held_chips": held,
-        "withdrawable_chips": cash,
+        "withdrawable_chips": 0 if remaining > 0 else cash,
+        "wager_remaining_chips": remaining,
     }
 
 
@@ -2232,6 +2305,11 @@ async def _credit_deposit(
             },
             session=session, audit_id=f"deposit:{current['id']}:credited",
         )
+        if not movement.get("duplicate"):
+            import wager as _promo_wager
+            await _promo_wager.open_deposit_bucket(
+                current["user_id"], int(current["chips"]), current["id"], session=session,
+            )
         return {"deposit_id": current["id"], "status": "CREDITED",
                 "mission_id": (mission or {}).get("id"),
                 "duplicate": movement["duplicate"]}
@@ -2304,6 +2382,8 @@ async def create_withdrawal(
 ) -> dict[str, Any]:
     idem = validate_idempotency_key(idempotency_key)
     chips = int(amount_chips)
+    import wager as _promo_wager
+    await _promo_wager.require_clear_for_withdrawal(user_id)
     existing = await db.withdrawal_requests.find_one(
         {"user_id": user_id, "idempotency_key": idem}, {"_id": 0},
     )

@@ -15,7 +15,7 @@ import { formatInrPaise, isFinancialFeatureAvailable, normalizeWallet, rupeesToP
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 import { MissionCard, OfferReview } from "@/components/promotions";
 
-const QUICK_BUY_AMOUNTS = [500, 1000, 2500, 5000];
+const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
 
 function positiveInteger(...values) {
@@ -35,18 +35,20 @@ function inputRupees(paise) {
  */
 export function publicFinancialConfig(payload) {
   const financial = payload?.financial || {};
+  const operator = financial.operator || {};
+  const operatorLimits = operator.limits || {};
   const published = payload?.money_config || financial.public_config || financial.config || payload?.public_config || {};
   const limits = published.limits || financial.limits || published;
   const conversion = published.conversion || published.rate || financial.conversion || financial.rate || payload?.rate || {};
   const depositLimits = published.deposits || limits.deposits || {};
   const withdrawalLimits = published.withdrawals || limits.withdrawals || {};
-  const chipsPerInr = positiveInteger(conversion.chips_per_inr, published.chips_per_inr, financial.chips_per_inr);
-  const minDepositPaise = positiveInteger(depositLimits.minimum_paise, limits.min_deposit_paise, published.min_deposit_paise, financial.min_deposit_paise);
-  const maxDepositPaise = positiveInteger(depositLimits.maximum_paise, limits.max_deposit_paise, published.max_deposit_paise, financial.max_deposit_paise);
-  let minWithdrawalChips = positiveInteger(withdrawalLimits.minimum_chips, limits.min_withdrawal_chips, published.min_withdrawal_chips, financial.min_withdrawal_chips);
-  const maxWithdrawalChips = positiveInteger(withdrawalLimits.maximum_chips, limits.max_withdrawal_chips, published.max_withdrawal_chips, financial.max_withdrawal_chips);
-  let minWithdrawalPaise = positiveInteger(withdrawalLimits.minimum_paise, limits.min_withdrawal_paise, published.min_withdrawal_paise, financial.min_withdrawal_paise);
-  let maxWithdrawalPaise = positiveInteger(withdrawalLimits.maximum_paise, limits.max_withdrawal_paise, published.max_withdrawal_paise, financial.max_withdrawal_paise);
+  const chipsPerInr = positiveInteger(conversion.chips_per_inr, published.chips_per_inr, financial.chips_per_inr, operatorLimits.chips_per_inr);
+  const minDepositPaise = positiveInteger(depositLimits.minimum_paise, limits.min_deposit_paise, published.min_deposit_paise, financial.min_deposit_paise, operatorLimits.min_deposit_paise);
+  const maxDepositPaise = positiveInteger(depositLimits.maximum_paise, limits.max_deposit_paise, published.max_deposit_paise, financial.max_deposit_paise, operatorLimits.max_deposit_paise);
+  let minWithdrawalChips = positiveInteger(withdrawalLimits.minimum_chips, limits.min_withdrawal_chips, published.min_withdrawal_chips, financial.min_withdrawal_chips, operatorLimits.min_withdrawal_chips);
+  const maxWithdrawalChips = positiveInteger(withdrawalLimits.maximum_chips, limits.max_withdrawal_chips, published.max_withdrawal_chips, financial.max_withdrawal_chips, operatorLimits.max_withdrawal_chips);
+  let minWithdrawalPaise = positiveInteger(withdrawalLimits.minimum_paise, limits.min_withdrawal_paise, published.min_withdrawal_paise, financial.min_withdrawal_paise, operatorLimits.min_withdrawal_paise);
+  let maxWithdrawalPaise = positiveInteger(withdrawalLimits.maximum_paise, limits.max_withdrawal_paise, published.max_withdrawal_paise, financial.max_withdrawal_paise, operatorLimits.max_withdrawal_paise);
 
   if (!minWithdrawalChips && minWithdrawalPaise && chipsPerInr && (minWithdrawalPaise * chipsPerInr) % 100 === 0) {
     minWithdrawalChips = (minWithdrawalPaise * chipsPerInr) / 100;
@@ -59,7 +61,14 @@ export function publicFinancialConfig(payload) {
     maxWithdrawalPaise = (maxWithdrawalChips * 100) / chipsPerInr;
   }
 
-  const checkoutHosts = published.checkout_hosts || financial.checkout_hosts || [];
+  const publishedCheckoutHosts = Array.isArray(published.checkout_hosts) ? published.checkout_hosts : [];
+  const financialCheckoutHosts = Array.isArray(financial.checkout_hosts) ? financial.checkout_hosts : [];
+  const operatorCheckoutHosts = Array.isArray(operator.checkout_hosts) ? operator.checkout_hosts : [];
+  const checkoutHosts = [...new Set([
+    ...publishedCheckoutHosts,
+    ...financialCheckoutHosts,
+    ...operatorCheckoutHosts,
+  ].map((host) => String(host || "").trim()).filter(Boolean))];
   return {
     chipsPerInr,
     minDepositPaise,
@@ -68,7 +77,8 @@ export function publicFinancialConfig(payload) {
     maxWithdrawalChips,
     minWithdrawalPaise,
     maxWithdrawalPaise,
-    checkoutHosts: Array.isArray(checkoutHosts) ? checkoutHosts : [],
+    checkoutHosts,
+    operatorCheckoutHosts,
   };
 }
 
@@ -188,7 +198,11 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     config.chipsPerInr
     && config.minDepositPaise
     && config.maxDepositPaise
-    && config.checkoutHosts.length,
+    && (hostedUpiBuyAvailable
+      ? config.operatorCheckoutHosts.length
+      : hostedBuyAvailable
+        ? config.checkoutHosts.length
+        : operatorBuyAvailable),
   );
   const withdrawalConfigured = Boolean(config.chipsPerInr && config.minWithdrawalPaise && config.minWithdrawalChips && config.maxWithdrawalChips);
   const buyPaise = rupeesToPaise(buyAmount);
@@ -305,7 +319,6 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     }
     if (!bankAccountId) return toast.error("Add and select a bank account before withdrawing.");
 
-    const key = financialIntentKey("withdrawal", user?.id, `amount_chips=${withdrawChips}&bank=${bankAccountId}`);
     setBusy("withdraw");
     try {
       await payments.createWithdrawal(withdrawChips, bankAccountId, key);
@@ -364,7 +377,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="withdraw" className="mt-4">
           <form onSubmit={withdraw} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="withdrawal-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>. Admin approves, then SgPay pays your saved method.</p></div></div>
+            {wallet.wager_remaining_chips > 0 && <AvailabilityNotice text={`Wager ₹${((wallet.wager_remaining_chips || 0) / (config.chipsPerInr || 1)).toLocaleString("en-IN")} more from deposits before you can request a withdrawal.`} />}
             {!loading && (!withdrawalFeatureAvailable || !withdrawalConfigured) && <AvailabilityNotice text={withdrawalFeatureAvailable ? "Withdrawal limits are not yet available from the secure server." : "Withdrawals are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_WITHDRAW_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => { setWithdrawAmount(String(value)); setWithdrawalIssue(null); }} disabled={!withdrawalFeatureAvailable || !withdrawalConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${withdrawAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="withdrawal-amount" aria-label="Withdrawal amount in INR" type="text" inputMode="decimal" value={withdrawAmount} onChange={(event) => { setWithdrawAmount(event.target.value); setWithdrawalIssue(null); }} disabled={!withdrawalFeatureAvailable || !withdrawalConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />

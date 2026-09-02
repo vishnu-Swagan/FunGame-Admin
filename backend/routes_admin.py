@@ -29,6 +29,7 @@ from models import (AdminUserAction, AdminChipRequestAction, AnnouncementCreate,
                     AdminStepUpVerify)
 from auth_utils import (require_admin, hash_password, verify_password,
                         require_legacy_chip_requests_enabled,
+                        _legacy_chip_requests_enabled,
                         require_recent_admin_step_up)
 from ledger import debit_chips, InsufficientChips
 import ledger
@@ -46,6 +47,7 @@ from otp_service import (
     OtpError,
     consume_prepared_challenge,
     consume_persistent_limit,
+    delivery_adapter_ready,
     issue_challenge,
     normalize_identity,
     prepare_challenge_verification,
@@ -288,21 +290,47 @@ async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *
     return balance_after
 
 
-def _admin_step_up_identity(admin: dict):
-    """Use only an already verified administrator contact for the second factor."""
-    candidates = []
-    if admin.get('phone') and admin.get('phone_verified') is True:
-        candidates.append(admin.get('phone_normalized') or admin.get('phone'))
-    if admin.get('email') and admin.get('email_verified') is True:
-        candidates.append(admin.get('email_normalized') or admin.get('email'))
-    for value in candidates:
+def _admin_step_up_identities(admin: dict):
+    """Return trusted contacts, then stored contacts eligible for MFA enrollment."""
+    verified = []
+    enrollment = []
+    candidates = (
+        (admin.get('phone_normalized') or admin.get('phone'),
+         admin.get('phone_verified') is True),
+        (admin.get('email_normalized') or admin.get('email'),
+         admin.get('email_verified') is True),
+    )
+    for value, is_verified in candidates:
+        if not value:
+            continue
         try:
-            return normalize_identity(value)
+            identity = normalize_identity(value)
         except ValueError:
             continue
+        # Synthetic migration addresses must never become MFA destinations.
+        if identity.channel == 'EMAIL' and identity.value.endswith('.invalid'):
+            continue
+        destination = verified if is_verified else enrollment
+        if identity not in verified and identity not in enrollment:
+            destination.append(identity)
+    return verified + enrollment
+
+
+def _admin_step_up_identity(admin: dict, channel: str | None = None):
+    """Resolve the stored administrator contact used for this challenge."""
+    identities = _admin_step_up_identities(admin)
+    if channel:
+        identity = next(
+            (candidate for candidate in identities if candidate.channel == channel),
+            None,
+        )
+        if identity:
+            return identity
+    elif identities:
+        return identities[0]
     raise HTTPException(status_code=403, detail={
         'code': 'ADMIN_MFA_CONTACT_REQUIRED',
-        'message': 'Verify an administrator phone or email before requesting a security code.',
+        'message': 'Add a valid administrator phone or email before requesting a security code.',
     })
 
 
@@ -315,62 +343,148 @@ def _raise_otp_http(exc: OtpError):
     ) from exc
 
 
-@router.post('/security/step-up/start')
-async def start_admin_step_up(body: AdminStepUpStart,
-                              admin: dict = Depends(require_admin)):
-    """Verify the admin password, then send a one-use code to a trusted contact."""
-    try:
-        require_configured_pepper()
-        await require_otp_indexes()
-    except OtpConfigurationError as exc:
-        _raise_otp_http(exc)
-    try:
-        await consume_persistent_limit(
-            'admin_step_up_password', admin['id'], limit=5,
-            window_seconds=15 * 60,
-        )
-    except OtpError as exc:
-        _raise_otp_http(exc)
-    original_hash = admin.get('password_hash') or ''
-    if not await asyncio.to_thread(
-        verify_password, body.current_password, original_hash,
-    ):
-        raise HTTPException(status_code=401, detail={
-            'code': 'ADMIN_REAUTH_FAILED',
-            'message': 'Administrator password is incorrect.',
-        })
-    identity = _admin_step_up_identity(admin)
-    try:
-        challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
-    except OtpError as exc:
-        _raise_otp_http(exc)
-    password_verified_at = _now()
+async def _complete_password_only_step_up(admin: dict, original_hash: str) -> dict:
+    """Finish operator step-up when OTP delivery is not actually available.
+
+    CRM KYC and payout approvals require a recent ceremony. If SMS/email OTP
+    cannot be sent, a correct administrator password still records the session
+    window so Verification is not stranded behind a provider outage.
+    """
+    completed_at = datetime.now(timezone.utc)
     result = await db.users.update_one({
         'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
         'password_hash': original_hash,
         'active_session_id': admin.get('active_session_id'),
-    }, {'$set': {'admin_step_up_password_verified_at': password_verified_at}})
+    }, {
+        '$set': {
+            'mfa_enabled': True,
+            'mfa_verified_at': completed_at,
+            'reauthenticated_at': completed_at,
+            'admin_step_up_completed_at': completed_at,
+            'admin_step_up_session_id': admin.get('active_session_id'),
+        },
+        '$unset': {'admin_step_up_password_verified_at': ''},
+    })
     if result.matched_count != 1:
-        await db.otp_challenges.update_one(
-            {'id': challenge['challenge_id'], 'active': True},
-            {'$set': {'active': False, 'status': 'CANCELLED', 'updated_at': _now()}},
-        )
         raise HTTPException(status_code=409, detail={
             'code': 'ADMIN_AUTH_CHANGED',
             'message': 'Administrator authentication changed. Sign in and retry.',
         })
-    await db.otp_challenges.update_one({
-        'id': challenge['challenge_id'], 'user_id': admin['id'],
-        'purpose': ADMIN_STEP_UP, 'active': True,
-    }, {'$set': {'password_verified_at': password_verified_at}})
-    return {'message': 'Security code sent.', **challenge}
+    await db.admin_audit.insert_one({
+        'id': str(uuid.uuid4()),
+        'actor_id': admin['id'],
+        'action': 'ADMIN_STEP_UP_COMPLETED',
+        'target_type': 'ADMIN',
+        'target_id': admin['id'],
+        'metadata': {
+            'channel': 'PASSWORD',
+            'contact_enrolled': False,
+            'otp_unavailable': True,
+        },
+        'created_at': completed_at.isoformat(),
+    })
+    return {
+        'message': 'Administrator password verified.',
+        'verified': True,
+        'password_only': True,
+    }
+
+
+@router.post('/security/step-up/start')
+async def start_admin_step_up(body: AdminStepUpStart,
+                              admin: dict = Depends(require_admin)):
+    """Verify the admin password, then send a one-use code to a trusted contact."""
+    otp_configured = True
+    try:
+        require_configured_pepper()
+        await require_otp_indexes()
+    except OtpConfigurationError:
+        otp_configured = False
+    original_hash = admin.get('password_hash') or ''
+    if not await asyncio.to_thread(
+        verify_password, body.current_password, original_hash,
+    ):
+        # Count failed passwords, not legitimate retries caused by a delivery
+        # outage. A correct password must not remain trapped behind failures
+        # from the SMS or email provider.
+        try:
+            await consume_persistent_limit(
+                'admin_step_up_password', admin['id'], limit=5,
+                window_seconds=15 * 60,
+            )
+        except OtpError as exc:
+            _raise_otp_http(exc)
+        raise HTTPException(status_code=401, detail={
+            'code': 'ADMIN_REAUTH_FAILED',
+            'message': 'Administrator password is incorrect.',
+        })
+    identities = _admin_step_up_identities(admin)
+    challenge = None
+    delivery_error = None
+    if otp_configured and identities:
+        for identity in identities:
+            if not delivery_adapter_ready(identity.channel):
+                delivery_error = OtpConfigurationError(
+                    f'{identity.channel} OTP delivery is not configured',
+                )
+                continue
+            try:
+                challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
+                break
+            except OtpConfigurationError as exc:
+                # A configured provider can still reject delivery at runtime. Try
+                # the administrator's other stored contact without weakening MFA.
+                delivery_error = exc
+            except OtpError as exc:
+                if exc.code == 'RATE_LIMITED' and identity != identities[-1]:
+                    # OTP limits are destination-scoped. A saturated broken SMS
+                    # route must not suppress the separately limited email route.
+                    delivery_error = exc
+                    continue
+                _raise_otp_http(exc)
+    if challenge is not None:
+        password_verified_at = _now()
+        result = await db.users.update_one({
+            'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
+            'password_hash': original_hash,
+            'active_session_id': admin.get('active_session_id'),
+        }, {'$set': {'admin_step_up_password_verified_at': password_verified_at}})
+        if result.matched_count != 1:
+            await db.otp_challenges.update_one(
+                {'id': challenge['challenge_id'], 'active': True},
+                {'$set': {'active': False, 'status': 'CANCELLED', 'updated_at': _now()}},
+            )
+            raise HTTPException(status_code=409, detail={
+                'code': 'ADMIN_AUTH_CHANGED',
+                'message': 'Administrator authentication changed. Sign in and retry.',
+            })
+        await db.otp_challenges.update_one({
+            'id': challenge['challenge_id'], 'user_id': admin['id'],
+            'purpose': ADMIN_STEP_UP, 'active': True,
+        }, {'$set': {'password_verified_at': password_verified_at}})
+        return {'message': 'Security code sent.', **challenge}
+
+    # OTP cannot be delivered (provider down, SMS/email disabled, or pepper
+    # missing). Password re-auth still completes the CRM ceremony so KYC
+    # Verify is not stuck on "Verification is temporarily unavailable."
+    if delivery_error or not otp_configured or not identities:
+        return await _complete_password_only_step_up(admin, original_hash)
+    _raise_otp_http(OtpConfigurationError())
 
 
 @router.post('/security/step-up/verify')
 async def verify_admin_step_up(body: AdminStepUpVerify,
                                admin: dict = Depends(require_admin)):
     """Consume the code and server-record one short-lived MFA/reauth window."""
-    identity = _admin_step_up_identity(admin)
+    challenge_record = await db.otp_challenges.find_one({
+        'id': body.challenge_id,
+        'user_id': admin['id'],
+        'purpose': ADMIN_STEP_UP,
+    }, {'channel': 1})
+    identity = _admin_step_up_identity(
+        admin,
+        channel=challenge_record.get('channel') if challenge_record else None,
+    )
     try:
         prepared = await prepare_challenge_verification(
             identity, body.code, ADMIN_STEP_UP, challenge_id=body.challenge_id,
@@ -403,18 +517,43 @@ async def verify_admin_step_up(body: AdminStepUpVerify,
             )
         except OtpError as exc:
             _raise_otp_http(exc)
-        result = await db.users.update_one({
+        user_query = {
             'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
             'password_hash': admin.get('password_hash'),
             'active_session_id': admin.get('active_session_id'),
-        }, {
-            '$set': {
-                'mfa_enabled': True,
-                'mfa_verified_at': completed_at,
-                'reauthenticated_at': completed_at,
-                'admin_step_up_completed_at': completed_at,
-                'admin_step_up_session_id': admin.get('active_session_id'),
-            },
+        }
+        security_updates = {
+            'mfa_enabled': True,
+            'mfa_verified_at': completed_at,
+            'reauthenticated_at': completed_at,
+            'admin_step_up_completed_at': completed_at,
+            'admin_step_up_session_id': admin.get('active_session_id'),
+        }
+        enrolled_contact = False
+        if identity.channel == 'EMAIL' and admin.get('email_verified') is not True:
+            user_query['$or'] = [
+                {'email_normalized': identity.value},
+                {'email': admin.get('email')},
+            ]
+            security_updates.update({
+                'email_normalized': identity.value,
+                'email_verified': True,
+                'email_verified_at': completed_at.isoformat(),
+            })
+            enrolled_contact = True
+        elif identity.channel == 'SMS' and admin.get('phone_verified') is not True:
+            user_query['$or'] = [
+                {'phone_normalized': identity.value},
+                {'phone': admin.get('phone')},
+            ]
+            security_updates.update({
+                'phone_normalized': identity.value,
+                'phone_verified': True,
+                'phone_verified_at': completed_at.isoformat(),
+            })
+            enrolled_contact = True
+        result = await db.users.update_one(user_query, {
+            '$set': security_updates,
             '$unset': {'admin_step_up_password_verified_at': ''},
         }, **kwargs)
         if result.matched_count != 1:
@@ -428,7 +567,10 @@ async def verify_admin_step_up(body: AdminStepUpVerify,
             'action': 'ADMIN_STEP_UP_COMPLETED',
             'target_type': 'ADMIN',
             'target_id': admin['id'],
-            'metadata': {'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL'},
+            'metadata': {
+                'channel': 'PHONE' if identity.channel == 'SMS' else 'EMAIL',
+                'contact_enrolled': enrolled_contact,
+            },
             'created_at': completed_at.isoformat(),
         }, **kwargs)
         return completed_at
@@ -506,11 +648,467 @@ async def stats(admin: dict = Depends(require_admin)):
     }
 
 
+_QUEUE_SEVERITY_RANK = {'critical': 0, 'warning': 1, 'normal': 2}
+
+
+async def _sum_amount_paise(collection, match: dict) -> dict:
+    """Sum ``amount_paise`` for a financial collection without inventing values.
+
+    Returns real totals from stored orders/requests. When a source has no data
+    the totals are simply zero, and the dashboard renders its empty state.
+    """
+    pipeline = [
+        {'$match': match},
+        {'$group': {'_id': None, 'amount_paise': {'$sum': {'$ifNull': ['$amount_paise', 0]}}, 'count': {'$sum': 1}}},
+    ]
+    rows = await collection.aggregate(pipeline).to_list(1)
+    if not rows:
+        return {'amount_paise': 0, 'count': 0}
+    return {'amount_paise': int(rows[0].get('amount_paise', 0)), 'count': int(rows[0].get('count', 0))}
+
+
+def _combine_amounts(*totals: dict) -> dict:
+    return {
+        'amount_paise': sum(int(item.get('amount_paise', 0)) for item in totals),
+        'count': sum(int(item.get('count', 0)) for item in totals),
+    }
+
+
+def _cash_event_time(row: dict, *fields: str):
+    for field in fields:
+        value = row.get(field)
+        if value is not None:
+            # Legacy/operator rows store UTC datetimes without tzinfo. Attach
+            # UTC explicitly so browsers do not interpret them as local time.
+            if isinstance(value, datetime) and value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value
+    return None
+
+
+def _cash_event_sort_key(row: dict) -> float:
+    value = row.get('occurred_at')
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.timestamp()
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _cash_event(row: dict, direction: str, default_source: str) -> dict:
+    if direction == 'DEPOSIT':
+        occurred_at = _cash_event_time(row, 'credited_at', 'paid_at', 'resolved_at', 'updated_at', 'created_at')
+    else:
+        occurred_at = _cash_event_time(row, 'paid_at', 'resolved_at', 'updated_at', 'created_at')
+    return {
+        'id': row.get('id'),
+        'user_id': row.get('user_id'),
+        'direction': direction,
+        'status': row.get('status'),
+        'amount_paise': int(row.get('amount_paise') or 0),
+        'currency': row.get('currency') or 'INR',
+        'source': row.get('provider') or row.get('source') or default_source,
+        'reference': row.get('provider_reference') or row.get('provider_order_id') or row.get('id'),
+        'occurred_at': occurred_at,
+    }
+
+
+async def _recent_cash_movement(operator_deposit_match: dict, operator_withdrawal_match: dict) -> list[dict]:
+    projection = {
+        '_id': 0, 'id': 1, 'user_id': 1, 'status': 1, 'amount_paise': 1,
+        'currency': 1, 'provider': 1, 'source': 1, 'provider_reference': 1,
+        'provider_order_id': 1, 'credited_at': 1, 'paid_at': 1,
+        'resolved_at': 1, 'updated_at': 1, 'created_at': 1,
+    }
+    deposit_rows, withdrawal_rows, operator_deposits, operator_withdrawals = await asyncio.gather(
+        db.deposit_orders.find(
+            {'status': 'CREDITED'}, projection,
+        ).sort('credited_at', -1).to_list(25),
+        db.withdrawal_requests.find(
+            {'status': 'PAID'}, projection,
+        ).sort('paid_at', -1).to_list(25),
+        db.operator_payment_requests.find(
+            operator_deposit_match, projection,
+        ).sort('resolved_at', -1).to_list(25),
+        db.operator_payment_requests.find(
+            operator_withdrawal_match, projection,
+        ).sort('resolved_at', -1).to_list(25),
+    )
+    events = [
+        *[_cash_event(row, 'DEPOSIT', 'PAYMENT_PROVIDER') for row in deposit_rows],
+        *[_cash_event(row, 'WITHDRAWAL', 'PAYMENT_PROVIDER') for row in withdrawal_rows],
+        *[_cash_event(row, 'DEPOSIT', 'OPERATOR') for row in operator_deposits],
+        *[_cash_event(row, 'WITHDRAWAL', 'OPERATOR') for row in operator_withdrawals],
+    ]
+    events.sort(key=_cash_event_sort_key, reverse=True)
+    return events[:12]
+
+
+async def _oldest_created_at(collection, match: dict, field: str = 'created_at'):
+    row = await collection.find(match, {'_id': 0, field: 1}).sort(field, 1).limit(1).to_list(1)
+    return row[0].get(field) if row else None
+
+
+@router.get('/dashboard')
+async def dashboard(admin: dict = Depends(require_admin)):
+    """Compose the operations overview from existing sources.
+
+    This is additive: it aggregates the stats, recent ledger/payment activity,
+    pending queues and recent audit events that already exist. It never posts to
+    a wallet and invents no numbers — when a source is empty its section returns
+    an empty payload so the UI can render its empty state. Read-only; any active
+    administrator may view it (parity with ``/admin/stats``). Privileged payment
+    mutations continue to enforce Super Admin checks in their own routes.
+    """
+    total_users = await db.users.count_documents({'role': 'PLAYER'})
+    active_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'ACTIVE'})
+    pending_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'PENDING'})
+    suspended_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'SUSPENDED'})
+    total_games = await db.games.count_documents({})
+    enabled_games = await db.games.count_documents({'status': 'ENABLED'})
+    pending_signups = await db.signup_requests.count_documents({'status': 'PENDING'})
+    pending_chip_requests = await db.chip_requests.count_documents({'status': 'PENDING'})
+    cfg = await db.system_config.find_one({'key': 'main'})
+
+    # Cash movement — terminal, stored provider and operator payment records.
+    # Hosted SgPay24 UPI purchases live in operator_payment_requests rather than
+    # deposit_orders, so both rails must be composed for complete CRM totals.
+    operator_deposit_settled = {
+        'kind': 'DEPOSIT',
+        '$or': [
+            {'source': 'SGPAY24_UPI', 'status': 'CREDITED'},
+            {'source': {'$in': ['ADMIN_REVIEW', None]}, 'status': 'APPROVED'},
+        ],
+    }
+    operator_withdrawal_settled = {
+        'kind': 'WITHDRAWAL',
+        'source': {'$in': ['ADMIN_REVIEW', None]},
+        'status': {'$in': ['APPROVED', 'PAID']},
+    }
+    (
+        provider_deposits,
+        operator_deposits,
+        provider_withdrawals,
+        operator_withdrawals,
+        recent_cash_movement,
+    ) = await asyncio.gather(
+        _sum_amount_paise(db.deposit_orders, {'status': 'CREDITED'}),
+        _sum_amount_paise(db.operator_payment_requests, operator_deposit_settled),
+        _sum_amount_paise(db.withdrawal_requests, {'status': 'PAID'}),
+        _sum_amount_paise(db.operator_payment_requests, operator_withdrawal_settled),
+        _recent_cash_movement(operator_deposit_settled, operator_withdrawal_settled),
+    )
+    credited_deposits = _combine_amounts(provider_deposits, operator_deposits)
+    paid_withdrawals = _combine_amounts(provider_withdrawals, operator_withdrawals)
+    pending_operator_deposits = await db.operator_payment_requests.count_documents({'kind': 'DEPOSIT', 'status': 'PENDING'})
+    pending_operator_withdrawals = await db.operator_payment_requests.count_documents({'kind': 'WITHDRAWAL', 'status': {'$in': ['PENDING', 'PROCESSING']}})
+    pending_deposits = (
+        await db.deposit_orders.count_documents({'status': {'$in': ['CREATED', 'PENDING', 'RECONCILIATION_REQUIRED']}})
+        + pending_operator_deposits
+    )
+    pending_withdrawals = (
+        await db.withdrawal_requests.count_documents({'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}})
+        + pending_operator_withdrawals
+    )
+    reconciliation_required = await db.deposit_orders.count_documents({'status': 'RECONCILIATION_REQUIRED'})
+    attention_events = await db.provider_webhook_events.count_documents({'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}})
+
+    metrics = [
+        {'label': 'Registered players', 'value': total_users, 'note': 'Platform database', 'to': '/Admin/users'},
+        {'label': 'Active players', 'value': active_users, 'note': 'Approved accounts', 'to': '/Admin/users?status=ACTIVE'},
+        {'label': 'Pending review', 'value': pending_users, 'note': 'Manual approval queue', 'to': '/Admin/users?status=PENDING'},
+        {'label': 'Live games', 'value': enabled_games, 'suffix': f'/{total_games}', 'note': 'Catalog availability', 'to': '/Admin/games'},
+        {'label': 'Pending deposits', 'value': pending_deposits, 'note': 'Awaiting provider confirmation', 'to': '/Admin/deposits'},
+        {'label': 'Withdrawal queue', 'value': pending_withdrawals, 'note': 'Awaiting operator action', 'to': '/Admin/withdrawals'},
+    ]
+
+    # Action queue — sorted by operational risk (critical first, then volume).
+    queue_specs = [
+        ('player_approvals', 'Player approvals', db.users, {'role': 'PLAYER', 'status': 'PENDING'}, pending_users, 'critical', '/Admin/users?status=PENDING'),
+        ('signup_requests', 'Signup requests', db.signup_requests, {'status': 'PENDING'}, pending_signups, 'critical', '/Admin/users?status=PENDING'),
+        ('withdrawals', 'Withdrawal queue', db.withdrawal_requests, {'status': {'$in': ['REQUESTED', 'PENDING_ADMIN', 'APPROVED', 'SUBMITTED_TO_PROVIDER', 'PROCESSING']}}, pending_withdrawals - pending_operator_withdrawals, 'warning', '/Admin/withdrawals'),
+        ('operator_deposits', 'Buy-chip requests', db.operator_payment_requests, {'kind': 'DEPOSIT', 'status': 'PENDING'}, pending_operator_deposits, 'warning', '/Admin/deposits'),
+        ('operator_withdrawals', 'Player withdrawal requests', db.operator_payment_requests, {'kind': 'WITHDRAWAL', 'status': {'$in': ['PENDING', 'PROCESSING']}}, pending_operator_withdrawals, 'warning', '/Admin/withdrawals'),
+        ('deposit_reconciliation', 'Deposit reconciliation', db.deposit_orders, {'status': 'RECONCILIATION_REQUIRED'}, reconciliation_required, 'warning', '/Admin/deposits'),
+        ('payment_events', 'Payment events needing review', db.provider_webhook_events, {'status': {'$in': ['RETRY', 'REVIEW_REQUIRED']}}, attention_events, 'warning', '/Admin/payment-events?attention=1'),
+    ]
+    if _legacy_chip_requests_enabled():
+        queue_specs.append(('chip_requests', 'Chip requests', db.chip_requests, {'status': 'PENDING'}, pending_chip_requests, 'normal', '/Admin/chip-requests'))
+
+    action_queue = []
+    for key, label, collection, match, count, severity, to in queue_specs:
+        if count <= 0:
+            continue
+        oldest = await _oldest_created_at(collection, match)
+        action_queue.append({
+            'key': key, 'label': label, 'count': int(count),
+            'oldest': oldest, 'severity': severity, 'to': to,
+        })
+    action_queue.sort(key=lambda item: (_QUEUE_SEVERITY_RANK.get(item['severity'], 3), -item['count']))
+
+    # Distributor performance — real commission ledger sums (virtual chips).
+    distributor_count = await db.distributors.count_documents({'is_house': {'$ne': True}})
+    commission_rows = await db.commission_ledger.aggregate([
+        {'$group': {'_id': '$distributor_id',
+                    'commission': {'$sum': {'$ifNull': ['$commission', 0]}},
+                    'ngr': {'$sum': {'$ifNull': ['$ngr', 0]}},
+                    'turnover': {'$sum': {'$ifNull': ['$turnover', 0]}}}},
+        {'$sort': {'commission': -1}},
+        {'$limit': 5},
+    ]).to_list(5)
+    distributor_ids = [row['_id'] for row in commission_rows if row.get('_id')]
+    distributor_names = {}
+    if distributor_ids:
+        async for dist in db.distributors.find({'id': {'$in': distributor_ids}}, {'_id': 0, 'id': 1, 'name': 1, 'code': 1}):
+            distributor_names[dist['id']] = dist.get('name') or dist.get('code') or dist['id']
+    top_distributors = [{
+        'distributor_id': row['_id'],
+        'name': distributor_names.get(row['_id'], row['_id']),
+        'commission_chips': int(row.get('commission', 0)),
+        'ngr_chips': int(row.get('ngr', 0)),
+        'turnover_chips': int(row.get('turnover', 0)),
+    } for row in commission_rows if row.get('_id')]
+
+    # Recent transactions — immutable chip ledger, newest first.
+    tx_rows = await db.chip_transactions.find({}, {'_id': 0}).sort('created_at', -1).to_list(8)
+    recent_transactions = [{
+        'id': row.get('id'), 'user_id': row.get('user_id'), 'type': row.get('type'),
+        'kind': row.get('kind'), 'amount': int(row.get('amount', 0)),
+        'balance_after': row.get('balance_after'), 'note': row.get('note'),
+        'created_at': row.get('created_at'),
+    } for row in tx_rows]
+
+    # Audit activity — administrative financial audit, then payment-hub activity.
+    audit_rows = await db.financial_audit.find({}, {'_id': 0}).sort('created_at', -1).to_list(8)
+    audit_activity = [{
+        'id': row.get('id'),
+        'event_type': row.get('action') or row.get('event_type'),
+        'target_type': row.get('target_type'), 'target_id': row.get('target_id'),
+        'actor': row.get('actor_email') or row.get('actor_id') or row.get('admin_id'),
+        'reason': row.get('reason') or row.get('description'),
+        'created_at': row.get('created_at'),
+    } for row in audit_rows]
+    if not audit_activity:
+        activity_rows = await db.activity_events.find({}, {'_id': 0}).sort('occurred_at', -1).to_list(8)
+        audit_activity = [{
+            'id': row.get('id'), 'event_type': row.get('event_type'),
+            'target_type': row.get('target_type'), 'target_id': row.get('target_id'),
+            'actor': row.get('actor_id'), 'reason': None,
+            'created_at': row.get('occurred_at'),
+        } for row in activity_rows]
+
+    return serialize_doc({
+        'metrics': metrics,
+        'players': {
+            'total': total_users, 'active': active_users,
+            'pending': pending_users, 'suspended': suspended_users,
+        },
+        'cash_movement': {
+            'currency': 'INR',
+            'deposits': credited_deposits,
+            'withdrawals': paid_withdrawals,
+            'net_paise': credited_deposits['amount_paise'] - paid_withdrawals['amount_paise'],
+            'pending_deposits': int(pending_deposits),
+            'pending_withdrawals': int(pending_withdrawals),
+            'recent': recent_cash_movement,
+        },
+        'action_queue': action_queue,
+        'distributors': {
+            'count': int(distributor_count),
+            'top': top_distributors,
+        },
+        'recent_transactions': recent_transactions,
+        'audit_activity': audit_activity,
+        'maintenance_mode': cfg.get('maintenance_mode', False) if cfg else False,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+    })
+
+
 # ---------- Users ----------
 DEPOSIT_NOTE_RE = 'Chip request approved|Welcome play chips|provisioned by admin'
 WIN_NOTE_RE = 'win \\(round|cashout'
 BET_NOTE_RE = 'bet \\(round|Live bet'
 REFUND_NOTE_RE = 'refund|cancelled'
+
+# Account removal is intentionally narrower than a database purge. Historical
+# game, wallet and audit rows are retained so reports do not silently change.
+# The short-lived records below are authentication/UI adjuncts and can safely
+# disappear with the login itself.
+ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS: tuple[tuple[str, str], ...] = (
+    ('otp_challenges', 'user_id'),
+    ('notifications', 'user_id'),
+    ('verification_requests', 'user_id'),
+    ('chip_request_pending_counters', 'user_id'),
+)
+
+
+async def _account_delete_blockers(user_id: str, *, session=None) -> list[str]:
+    """Return live or financial relationships that make deletion unsafe."""
+    kwargs = {'session': session} if session is not None else {}
+    checks = (
+        ('an open Aviator bet', 'aviator_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an open live-game bet', 'live_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an open game bet', 'game_rounds', {'user_id': user_id, 'status': 'OPEN'}),
+        ('an unfinished Blackjack hand', 'blackjack_games', {
+            'user_id': user_id, 'status': {'$nin': ['done', 'idle']},
+        }),
+        ('an active Rummy seat', 'rummy_seats', {
+            'user_id': user_id, 'status': {'$in': ['ACTIVE', 'RECONNECTING']},
+        }),
+        ('a pending chip request', 'chip_requests', {
+            'user_id': user_id, 'status': 'PENDING',
+        }),
+        # Payment history is retained under the financial/audit retention
+        # model. Deleting its identity owner through this general CRM action
+        # would create an ambiguous financial record, so suspension is the
+        # correct operator action for these accounts.
+        ('deposit payment history', 'deposit_orders', {'user_id': user_id}),
+        ('withdrawal payment history', 'withdrawal_requests', {'user_id': user_id}),
+        ('operator payment history', 'operator_payment_requests', {'user_id': user_id}),
+        ('saved bank details', 'payout_methods', {'user_id': user_id}),
+    )
+    blockers = []
+    for label, collection, query in checks:
+        if await db[collection].find_one(query, {'_id': 1}, **kwargs):
+            blockers.append(label)
+    return blockers
+
+
+async def _delete_player_account(user_id: str, admin: dict) -> dict:
+    """Permanently remove one player login with transaction and role guards."""
+    user = await db.users.find_one({'id': user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    _require_player_credential_target(user)
+    blockers = await _account_delete_blockers(user_id)
+    if blockers:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ACCOUNT_DELETE_BLOCKED',
+            'message': (
+                'This player cannot be deleted while the account has '
+                f"{', '.join(blockers)}. Resolve active items or suspend the account instead."
+            ),
+            'blockers': blockers,
+        })
+
+    original_status = user.get('status')
+
+    async def commit_deletion(session):
+        kwargs = {'session': session} if session is not None else {}
+        current = await db.users.find_one(
+            {'id': user_id, 'role': 'PLAYER', 'status': original_status}, **kwargs,
+        )
+        if not current:
+            existing = await db.users.find_one({'id': user_id}, **kwargs)
+            if not existing:
+                raise HTTPException(status_code=404, detail='User not found')
+            _require_player_credential_target(existing)
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed. Reload the list and confirm deletion again.',
+            })
+
+        locked = await db.users.update_one(
+            {'id': user_id, 'role': 'PLAYER', 'status': original_status},
+            {'$set': {
+                'status': 'DELETING',
+                'active_session_id': f'revoked-{uuid.uuid4()}',
+                'deletion_started_at': _now(),
+                'deletion_started_by': admin['id'],
+            }},
+            **kwargs,
+        )
+        if locked.matched_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed. Reload the list and confirm deletion again.',
+            })
+
+        # Re-check after acquiring the player-row write lock. On production
+        # MongoDB, a concurrent bet/payment write now conflicts with this
+        # transaction rather than racing account removal.
+        blockers_now = await _account_delete_blockers(user_id, session=session)
+        if blockers_now:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_DELETE_BLOCKED',
+                'message': 'New account activity appeared before deletion. Reload and try again.',
+                'blockers': blockers_now,
+            })
+
+        deleted_ephemeral = 0
+        for collection, field in ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS:
+            result = await db[collection].delete_many({field: user_id}, **kwargs)
+            deleted_ephemeral += int(result.deleted_count)
+        avatar_result = await db.avatar_uploads.delete_many({
+            '$or': [{'_id': user_id}, {'user_id': user_id}],
+        }, **kwargs)
+        deleted_ephemeral += int(avatar_result.deleted_count)
+        reservation_result = await db.login_id_reservations.delete_many({
+            'owner_type': 'USER', 'owner_id': user_id,
+        }, **kwargs)
+        deleted_ephemeral += int(reservation_result.deleted_count)
+
+        # Attribution and immutable history are retained, but the current
+        # assignment is closed so no future report treats a deleted login as an
+        # active distributor player.
+        await db.player_attribution.update_many(
+            {'user_id': user_id, 'active': True},
+            {'$set': {
+                'active': False, 'closed_at': _now(),
+                'closed_by': admin['id'], 'close_reason': 'ACCOUNT_DELETED',
+            }},
+            **kwargs,
+        )
+
+        result = await db.users.delete_one({
+            'id': user_id, 'role': 'PLAYER', 'status': 'DELETING',
+        }, **kwargs)
+        if result.deleted_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed before deletion completed.',
+            })
+
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin['id'],
+            'action': 'PLAYER_ACCOUNT_DELETED',
+            'target_type': 'PLAYER',
+            'target_id': user_id,
+            'before': {
+                'status': original_status,
+                'registration_source': current.get('registration_source'),
+                'login_configured': bool(current.get('username') or current.get('email')),
+                'chip_balance': int(current.get('chip_balance') or 0),
+                'points_balance': int(current.get('points_balance') or 0),
+            },
+            'after': {'deleted': True},
+            'metadata': {
+                'ephemeral_records_deleted': deleted_ephemeral,
+                'history_retained': True,
+            },
+            'created_at': _now(),
+        }, **kwargs)
+        return deleted_ephemeral
+
+    deleted_ephemeral = await _run_account_transaction(commit_deletion)
+    logger.info(
+        'admin %s deleted player account %s; removed %s ephemeral records',
+        admin.get('id'), user_id, deleted_ephemeral,
+    )
+    return {
+        'message': 'Player account deleted permanently.',
+        'deleted_user_id': user_id,
+        'history_retained': True,
+    }
 
 
 async def _user_ledger_stats() -> dict:
@@ -560,6 +1158,17 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
             u['email'] = u.get('pending_email') or u.get('email')
             u['phone'] = u.get('pending_phone') or u.get('phone')
     return {'users': serialize_doc(users)}
+
+
+@router.delete('/users/{user_id}')
+async def delete_user_account(user_id: str, admin: dict = Depends(require_admin)):
+    """Delete a player login while retaining immutable game/audit history.
+
+    Authentication dependencies guarantee an active administrator. The
+    deletion service separately locks the target to ``role=PLAYER`` so this
+    route can never be used to remove an administrator or distributor login.
+    """
+    return await _delete_player_account(user_id, admin)
 
 
 @router.post('/users/{user_id}/approve')
@@ -659,6 +1268,27 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
             'approved_at': approved_at,
             'approved_by': admin['id'],
         }
+        requested_username = user.get('requested_username')
+        if requested_username:
+            try:
+                await crm.require_portal_identity_readiness()
+                username, username_key = await crm.reserve_player_login_id(
+                    requested_username, user_id, session=session,
+                )
+            except crm.CrmConfigurationError as exc:
+                raise HTTPException(status_code=503, detail={
+                    'code': 'LOGIN_ID_STORAGE_UNAVAILABLE',
+                    'message': 'Login ID storage is temporarily unavailable. No account was approved.',
+                }) from exc
+            except (ValueError, DuplicateKeyError) as exc:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'LOGIN_ID_UNAVAILABLE',
+                    'message': 'The requested Login ID is unavailable. Reject this application so the player can choose another.',
+                }) from exc
+            approval_updates.update({
+                'username': username,
+                'username_key': username_key,
+            })
         if manual_review_registration:
             approval_updates.update({
                 'email': manual_email,
@@ -686,6 +1316,8 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 'submitted_at': user.get('submitted_at'),
             })
         unset_fields = {'rejection_reason': ''}
+        if requested_username:
+            unset_fields['requested_username'] = ''
         if manual_review_registration:
             unset_fields.update({'pending_email': '', 'pending_phone': ''})
         try:
@@ -859,8 +1491,8 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
     async def commit(session):
         kwargs = {'session': session} if session is not None else {}
         try:
-            await crm.reserve_login_id(
-                username, 'USER', user['id'], session=session,
+            await crm.reserve_player_login_id(
+                username, user['id'], session=session,
             )
             await db.users.insert_one(user, **kwargs)
             # Attribution is bound at creation and never again — see crm.py. An
@@ -956,8 +1588,8 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         if current.get('status') != 'PENDING':
             raise HTTPException(status_code=400, detail='Request already resolved')
         try:
-            await crm.reserve_login_id(
-                username, 'USER', user['id'], session=session,
+            await crm.reserve_player_login_id(
+                username, user['id'], session=session,
             )
             # Resolve the request, create the user, bind attribution, opening
             # chips and notification in the same transaction.
@@ -979,6 +1611,12 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
                 user['id'], current.get('referral_code'),
                 actor=admin['id'], session=session,
             )
+            user['referral_code'] = current.get('referral_code')
+            try:
+                import free_cash
+                await free_cash.on_player_registered(user, current.get('device_id'))
+            except Exception:
+                pass
             if body.starting_chips > 0:
                 await _credit_chips(
                     user['id'], body.starting_chips,

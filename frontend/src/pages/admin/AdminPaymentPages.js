@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
 import { auditState, formatAuditValue, reconciliationSummary } from "@/lib/adminPaymentUtils";
 import { useSearchParams } from "react-router-dom";
+import AdminStepUpDialog, { requiresAdminStepUp } from "@/components/AdminStepUpDialog";
 
 const ALL = "ALL";
 
@@ -58,10 +59,14 @@ function DataCard({ children }) { return <div className="overflow-hidden rounded
 function Empty({ icon, loading, noun }) { return loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : <EmptyState icon={icon} title={`No ${noun}`} subtitle={`Matching ${noun} will appear here.`} />; }
 
 export function AdminDeposits() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const loader = useCallback(() => adminPayments.deposits(), []);
   const { rows, loading, load } = useAdminRows(loader);
-  const [query, setQuery] = useState(""); const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
+  const [drafts, setDrafts] = useState({});
+  const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status), [rows, query, status]);
   return <PageTransition className="space-y-4"><PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Provider-created deposits. Credit status is driven only by verified server webhooks." onRefresh={load} loading={loading} /><FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["CREATED", "PENDING", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />{shown.length ? <DataCard>{shown.map((item) => <div key={item.id} className="grid gap-3 p-4 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div><div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">Balance credit {formatChips(item.chips)}</p></div><div><p className="truncate font-mono text-[10px] text-white/55">{valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div><PaymentStatus status={item.status} /></div>)}</DataCard> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}</PageTransition>;
 }
@@ -69,6 +74,7 @@ export function AdminDeposits() {
 const WITHDRAWAL_ACTIONS = {
   REQUESTED: [["approve", "Approve"], ["reject", "Reject"]],
   PENDING_ADMIN: [["approve", "Approve"], ["reject", "Reject"]],
+  PENDING: [["approve", "Approve"], ["reject", "Reject"]],
   APPROVED: [["mark-submitted", "Mark submitted"]],
   SUBMITTED_TO_PROVIDER: [["mark-paid", "Mark paid"]],
   PROCESSING: [["mark-paid", "Mark paid"]],
@@ -85,6 +91,7 @@ export function AdminWithdrawals() {
   const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status, "internal_status"), [rows, query, status]);
   const canApprove = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_APPROVE);
+  const canReviewOperator = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
   const canMarkPaid = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_MARK_PAID);
   const act = async (item, action) => {
     const key = `${item.id}:${action}`;
@@ -93,8 +100,15 @@ export function AdminWithdrawals() {
     if (["mark-submitted", "mark-paid"].includes(action) && !note) return toast.error("Enter the provider or payment reference first");
     setActing(key);
     try {
-      const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
-      await adminPayments.withdrawalAction(item.id, action, body);
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
+      if (operator && action === "retry-payout") {
+        await adminPayments.retryOperatorPayout(item.id);
+      } else if (operator) {
+        await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
+      } else {
+        const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
+        await adminPayments.withdrawalAction(item.id, action, body);
+      }
       toast.success(`Withdrawal ${action.replaceAll("-", " ")}`);
       setDrafts((current) => ({ ...current, [item.id]: "" }));
       await load();
@@ -106,15 +120,17 @@ export function AdminWithdrawals() {
   };
   return <PageTransition className="space-y-4">
     <PageHead icon={ArrowUpFromLine} title="Withdrawal queue" subtitle="Approve, reject and record provider settlement without exposing full bank data." onRefresh={load} loading={loading} />
-    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["REQUESTED", "PENDING_ADMIN", "APPROVED", "SUBMITTED_TO_PROVIDER", "PROCESSING", "PAID", "REJECTED", "FAILED", "CANCELLED"]} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "REQUESTED", "PENDING_ADMIN", "APPROVED", "SUBMITTED_TO_PROVIDER", "PROCESSING", "PAID", "REJECTED", "FAILED", "CANCELLED"]} />
     {shown.length ? <div className="space-y-3">{shown.map((item) => {
       const internalStatus = String(item.internal_status || item.status).toUpperCase();
       const automatic = String(item.withdrawal_mode || "").toUpperCase() === "AUTOMATIC";
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
       const permittedActions = (WITHDRAWAL_ACTIONS[internalStatus] || []).filter(([action]) => {
+        if (operator) return ["approve", "reject"].includes(action) && canReviewOperator;
         if (automatic && ["mark-submitted", "mark-paid"].includes(action)) return false;
         return ["approve", "reject"].includes(action) ? canApprove : canMarkPaid;
       });
-      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4">
+      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-withdrawal-${item.id}` : `withdrawal-${item.id}`}>
         <div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
           <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p><p className="text-[10px] text-white/35">Balance debit {formatChips(item.amount_chips)}</p></div>
@@ -122,6 +138,10 @@ export function AdminWithdrawals() {
           <PaymentStatus status={internalStatus} />
         </div>
         {item.provider_reference && <div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Provider reference</p><p className="mt-0.5 break-all font-mono text-xs text-white/70">{item.provider_reference}</p></div>}
+        {operator && item.payout_status && <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/8 px-3 py-2 text-[11px] text-emerald-100">SgPay payout: {item.payout_status}{item.payout_error ? ` · ${item.payout_error}` : ""}</p>}
+        {operator && String(item.internal_status || "").toUpperCase() === "APPROVED" && String(item.payout_status || "").toUpperCase() !== "PAID" && canReviewOperator && (
+          <Button type="button" size="sm" className="mt-3 h-10 rounded-xl" onClick={() => act(item, "retry-payout")} disabled={Boolean(acting)}>Retry SgPay payout</Button>
+        )}
         {automatic && <p className="mt-3 rounded-lg border border-sky-400/20 bg-sky-400/8 px-3 py-2 text-[11px] text-sky-200">Automatic route · provider/outbox events control submission and settlement.</p>}
         {permittedActions.length > 0 && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={permittedActions.some(([action]) => action === "reject") ? "Reason (required to reject)" : "Provider/payment reference"} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" />{permittedActions.map(([action, label]) => <Button key={action} type="button" size="sm" variant={action === "reject" ? "destructive" : "default"} onClick={() => act(item, action)} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:${action}` ? "Working…" : label}</Button>)}</div>}
       </article>;
@@ -224,30 +244,104 @@ export function AdminKyc() {
   const [query, setQuery] = useState("");
   const [drafts, setDrafts] = useState({});
   const [acting, setActing] = useState("");
+  const [pendingSensitiveAction, setPendingSensitiveAction] = useState(null);
   const loader = useCallback(() => adminPayments.kyc(status === ALL ? undefined : status), [status]);
   const { rows, loading, load } = useAdminRows(loader);
   const canReview = hasPermission(user, ADMIN_PERMISSIONS.KYC_REVIEW);
   const needle = query.trim().toLowerCase();
   const shown = rows.filter((item) => !needle || [item.id, item.email_masked, item.phone_masked, item.country].some((value) => String(value || "").toLowerCase().includes(needle)));
 
-  const review = async (player, decision) => {
-    const reason = String(drafts[player.id] || "").trim();
-    if (reason.length < 5) return toast.error("Enter a clear review reason");
-    const key = `${player.id}:${decision}`;
-    setActing(key);
+  const performSensitiveAction = async (action) => {
+    if (action.kind === "KYC") {
+      await adminPayments.reviewKyc(action.playerId, action.decision, action.reason);
+      toast.success(`KYC marked ${action.decision.toLowerCase()}`);
+    } else if (action.kind === "VERIFY_MOBILE") {
+      await adminPayments.reviewPlayerMobile(action.playerId, true, action.reason);
+      toast.success("Mobile verification recorded and player notified");
+    }
+    setDrafts((current) => ({ ...current, [action.playerId]: "" }));
+    await load();
+  };
+
+  const runSensitiveAction = async (action, offerStepUp = true) => {
+    setActing(action.key);
     try {
-      await adminPayments.reviewKyc(player.id, decision, reason);
-      toast.success(`KYC marked ${decision.toLowerCase()}`);
-      setDrafts((current) => ({ ...current, [player.id]: "" }));
-      await load();
+      await performSensitiveAction(action);
     } catch (error) {
-      toast.error(errMsg(error));
+      if (offerStepUp && requiresAdminStepUp(error)) {
+        // The rejected request made no mutation. Preserve its exact player,
+        // decision and audit reason while the admin completes password + OTP,
+        // then retry it once.
+        setPendingSensitiveAction(action);
+      } else {
+        toast.error(errMsg(error));
+      }
     } finally {
       setActing("");
     }
   };
 
-  return <PageTransition className="space-y-4"><PageHead icon={ShieldCheck} title="KYC review" subtitle="Review masked player identities. Every decision requires step-up authentication and an audit reason." onRefresh={load} loading={loading} /><FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />{shown.length ? <div className="space-y-3">{shown.map((player) => <article key={player.id} className="rounded-2xl border border-white/10 bg-card/55 p-4"><div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.75fr_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{player.email_masked || player.phone_masked || "Masked player"}</p><p className="truncate font-mono text-[10px] text-white/35">{player.id}</p></div><div><p className="text-xs text-white/60">{player.country || "Country unavailable"}</p><p className={`text-[10px] ${player.contact_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.contact_verified ? "Contact verified" : "Contact not verified"}</p></div><div><p className={`text-xs ${player.age_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.age_verified ? "Age verified" : "Age not verified"}</p><p className="text-[10px] text-white/35">{player.reviewed_at ? when(player.reviewed_at) : "Not reviewed"}</p></div><PaymentStatus status={player.kyc_status} /></div>{canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[player.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [player.id]: event.target.value }))} placeholder="Review reason (required)" minLength={5} maxLength={500} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" onClick={() => review(player, "VERIFIED")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${player.id}:VERIFIED` ? "Saving…" : "Verify"}</Button><Button type="button" size="sm" variant="destructive" onClick={() => review(player, "REJECTED")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${player.id}:REJECTED` ? "Saving…" : "Reject"}</Button></div>}</article>)}</div> : <Empty icon={ShieldCheck} loading={loading} noun="KYC records" />}</PageTransition>;
+  const retryPendingSensitiveAction = async () => {
+    const action = pendingSensitiveAction;
+    if (!action) return;
+    await runSensitiveAction(action, false);
+  };
+
+  const review = async (player, decision) => {
+    const reason = String(drafts[player.id] || "").trim();
+    if (reason.length < 5) return toast.error("Enter a clear review reason");
+    await runSensitiveAction({
+      kind: "KYC", playerId: player.id, decision, reason,
+      key: `${player.id}:${decision}`,
+    });
+  };
+
+  const verificationAction = async (player, action) => {
+    const reason = String(drafts[player.id] || "").trim();
+    if (reason.length < 5) return toast.error("Enter a clear verification reason");
+    if (action === "VERIFY_MOBILE") {
+      await runSensitiveAction({
+        kind: action, playerId: player.id, reason,
+        key: `${player.id}:${action}`,
+      });
+      return;
+    }
+    const key = `${player.id}:${action}`;
+    setActing(key);
+    try {
+      if (action === "REQUEST_MOBILE") await adminPayments.requestPlayerVerification(player.id, "MOBILE", reason);
+      toast.success("Verification action recorded and player notified");
+      setDrafts((current) => ({ ...current, [player.id]: "" }));
+      await load();
+    } catch (error) { toast.error(errMsg(error)); } finally { setActing(""); }
+  };
+
+  return <PageTransition className="space-y-4">
+    <PageHead icon={ShieldCheck} title="Player verification" subtitle="Review contact verification and KYC status." onRefresh={load} loading={loading} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["UNVERIFIED", "PENDING", "VERIFIED", "REJECTED"]} />
+    {shown.length ? <div className="space-y-3">{shown.map((player) => <article key={player.id} className="rounded-2xl border border-white/10 bg-card/55 p-4">
+      <div className="grid gap-3 sm:grid-cols-[1.2fr_.8fr_auto] sm:items-center">
+        <div className="min-w-0"><p className="truncate text-sm font-semibold">{player.email_masked || player.phone_masked || "Masked player"}</p><p className="truncate font-mono text-[10px] text-white/35">{player.id}</p></div>
+        <div><p className="text-xs text-white/60">{player.phone_masked || "No mobile"}</p><p className={`text-[10px] ${player.contact_verified ? "text-emerald-300" : "text-amber-300"}`}>{player.mobile_manually_verified ? "Mobile admin reviewed" : player.contact_verified ? "Contact verified" : player.mobile_verification_status === "REQUESTED" ? "Mobile requested" : "Mobile not verified"}</p></div>
+        <PaymentStatus status={player.kyc_status} />
+      </div>
+      {canReview && <div className="mt-4 space-y-2 border-t border-white/5 pt-3">
+        <Input value={drafts[player.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [player.id]: event.target.value }))} placeholder="Verification reason / instructions (required)" minLength={5} maxLength={500} className="h-10 rounded-xl border-white/10 bg-white/5" />
+        <div className="flex flex-wrap gap-2">
+          {!player.contact_verified && player.phone_available && <Button type="button" size="sm" variant="outline" onClick={() => verificationAction(player, "REQUEST_MOBILE")} disabled={Boolean(acting)}>Request mobile OTP</Button>}
+          {!player.contact_verified && player.phone_available && <Button type="button" size="sm" onClick={() => verificationAction(player, "VERIFY_MOBILE")} disabled={Boolean(acting)}>Approve mobile manually</Button>}
+          <Button type="button" size="sm" onClick={() => review(player, "VERIFIED")} disabled={Boolean(acting)}>Verify KYC</Button>
+          <Button type="button" size="sm" variant="destructive" onClick={() => review(player, "REJECTED")} disabled={Boolean(acting)}>Reject KYC</Button>
+        </div>
+      </div>}
+    </article>)}</div> : <Empty icon={ShieldCheck} loading={loading} noun="verification records" />}
+    <AdminStepUpDialog
+      open={Boolean(pendingSensitiveAction)}
+      actionLabel={pendingSensitiveAction?.kind === "KYC" ? "completing this KYC decision" : "recording this manual verification"}
+      onCancel={() => setPendingSensitiveAction(null)}
+      onVerified={retryPendingSensitiveAction}
+    />
+  </PageTransition>;
 }
 
 export function AdminPaymentSettings() {

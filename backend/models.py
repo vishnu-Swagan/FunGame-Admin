@@ -22,6 +22,17 @@ def _bcrypt_password_size(value):
     return value
 
 
+def _normalise_login_id(value):
+    if value is None:
+        return None
+    username = str(value).strip()
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{3,31}', username):
+        raise ValueError(
+            'Login ID must start with a letter or number and use 4-32 letters, numbers, dots, underscores or hyphens'
+        )
+    return username
+
+
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -33,6 +44,10 @@ class RegisterRequest(BaseModel):
     identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
     email: Optional[EmailStr] = None
     phone: str = Field(min_length=8, max_length=20)
+    # Kept optional in the DTO only so an already-started verification session
+    # from a cached client can recover. Both new registration routes reject a
+    # missing value before creating an account.
+    username: Optional[str] = Field(default=None, min_length=4, max_length=32)
     channel: Optional[str] = Field(default='PHONE')
     full_name: Optional[str] = Field(default=None, min_length=2, max_length=64)
     date_of_birth: Optional[str] = None
@@ -55,6 +70,11 @@ class RegisterRequest(BaseModel):
     _password_bytes = field_validator(
         'password', 'password_confirmation',
     )(_bcrypt_password_size)
+
+    @field_validator('username')
+    @classmethod
+    def register_login_id(cls, value):
+        return _normalise_login_id(value)
 
     @model_validator(mode='after')
     def phone_is_registration_identity(self):
@@ -112,6 +132,7 @@ class SignupRequestCreate(BaseModel):
     # cost the operator the registration. It is carried through and resolved at
     # approval, falling back to the house account.
     referral_code: Optional[str] = Field(default=None, max_length=16)
+    device_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator('phone')
     @classmethod
@@ -135,7 +156,7 @@ class SignupRequestCreate(BaseModel):
 
 
 class AdminSignupApprove(BaseModel):
-    username: str = Field(min_length=3, max_length=24)
+    username: str = Field(min_length=4, max_length=24)
     password: str = Field(min_length=8, max_length=128)
     starting_chips: int = Field(default=1000, ge=0, le=1_000_000)
     note: Optional[str] = Field(default=None, max_length=280)
@@ -146,8 +167,8 @@ class AdminSignupApprove(BaseModel):
     @classmethod
     def valid_username(cls, v):
         v = v.strip().lower()
-        if not re.fullmatch(r'[a-z0-9][a-z0-9._]{2,23}', v):
-            raise ValueError('Username must be 3-24 chars: letters, numbers, dot or underscore')
+        if not re.fullmatch(r'[a-z0-9][a-z0-9._]{3,23}', v):
+            raise ValueError('Username must be 4-24 chars: letters, numbers, dot or underscore')
         return v
 
 
@@ -173,6 +194,7 @@ class VerifyEmailRequest(BaseModel):
     identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
     email: Optional[str] = Field(default=None, min_length=3, max_length=254)
     phone: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    username: Optional[str] = Field(default=None, min_length=4, max_length=32)
     channel: Optional[str] = None
     challenge_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
     verification_id: Optional[str] = Field(default=None, min_length=32, max_length=64)
@@ -182,6 +204,11 @@ class VerifyEmailRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
     _password_bytes = field_validator('password')(_bcrypt_password_size)
+
+    @field_validator('username')
+    @classmethod
+    def verified_login_id(cls, value):
+        return _normalise_login_id(value)
 
     @model_validator(mode='after')
     def verification_identity(self):
@@ -203,9 +230,25 @@ class ResendVerificationRequest(BaseModel):
         return self
 
 
+class AuthenticatedOtpVerify(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    challenge_id: str = Field(min_length=32, max_length=64)
+    code: str = Field(pattern=r'^\d{6}$')
+
+
+class PlayerMobileVerificationFallback(BaseModel):
+    """Authenticated password re-check when mobile OTP cannot be delivered."""
+    model_config = ConfigDict(extra='forbid')
+
+    current_password: str = Field(min_length=1, max_length=128)
+
+    _password_bytes = field_validator('current_password')(_bcrypt_password_size)
+
+
 class LoginRequest(BaseModel):
     # ``email`` is the legacy Login ID/email field and intentionally remains a
-    # plain string because it also carries GK usernames.
+    # plain string because it also carries user-chosen Login IDs.
     identity: Optional[str] = Field(default=None, min_length=3, max_length=254)
     identifier: Optional[str] = Field(default=None, min_length=3, max_length=254)
     email: Optional[str] = Field(default=None, min_length=3, max_length=254)
@@ -591,6 +634,19 @@ class ComplianceConfigUpdate(BaseModel):
 class AgeVerify(BaseModel):
     verified: bool = True
     note: Optional[str] = None
+
+
+class PlayerVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class AdminVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    kind: str = Field(pattern=r'^(AGE|MOBILE)$')
+    note: str = Field(min_length=5, max_length=500)
 
 
 class AdminExclusion(BaseModel):

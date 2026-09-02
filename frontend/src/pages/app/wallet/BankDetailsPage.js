@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { PageTransition } from "@/components/common";
 import { payments } from "@/lib/paymentApi";
 import { errMsg } from "@/lib/api";
-import { isFinancialFeatureAvailable } from "@/lib/walletUtils";
+import { isPlayerPaymentAvailable } from "@/lib/walletUtils";
 
 export default function BankDetailsPage() {
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export default function BankDetailsPage() {
     Promise.allSettled([payments.wallet(), payments.bankDetails()]).then(([walletResult, bankResult]) => {
       if (walletResult.status === "fulfilled") {
         const financial = walletResult.value?.financial;
-        setAvailable(isFinancialFeatureAvailable(financial, "withdrawals"));
+        setAvailable(isPlayerPaymentAvailable(financial, "withdrawals"));
       } else {
         setAvailable(false);
       }
@@ -76,7 +76,7 @@ export default function BankDetailsPage() {
     <PageTransition className="space-y-5">
       <button type="button" onClick={() => navigate(-1)} aria-label="Go back" className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5"><ArrowLeft className="h-4 w-4" /></button>
       <div><h1 className="text-2xl font-bold tracking-tight">Bank details</h1><p className="mt-1 text-sm text-white/50">Used only for approved withdrawals.</p></div>
-      {available === false && <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300/25 bg-amber-300/8 p-4 text-xs leading-relaxed text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><span><strong>Bank details are temporarily unavailable.</strong> This section opens after payment-provider approval and withdrawal readiness checks are complete.</span></div>}
+      {available === false && <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300/25 bg-amber-300/8 p-4 text-xs leading-relaxed text-amber-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><span><strong>Bank details are temporarily unavailable.</strong> This section opens after withdrawal review is enabled for your account.</span></div>}
       {methods.length > 0 && <section className="space-y-2" aria-labelledby="saved-bank-accounts"><h2 id="saved-bank-accounts" className="text-sm font-semibold text-white/70">Saved bank accounts</h2>{methods.map((method) => <div key={method.id} className="flex items-center gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-400/8 p-4"><Landmark className="h-5 w-5 shrink-0 text-emerald-300" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{method.bank_name || "Saved bank account"}</p><p className="truncate text-xs text-white/50">{method.account_number_masked || method.masked_account_number || "Account saved"} · {method.ifsc_masked || method.masked_ifsc_code || method.ifsc_code_masked || "IFSC secured"}</p>{method.payout_identifier_masked && <p className="mt-1 truncate font-mono text-[10px] text-white/40">Payout ID {method.payout_identifier_masked}</p>}</div><button type="button" onClick={() => remove(method)} disabled={Boolean(removeBusy)} aria-label={`Remove ${method.bank_name || "saved bank"} account`} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-400/25 bg-red-400/10 text-red-300 disabled:opacity-45"><Trash2 className="h-4 w-4" /></button></div>)}</section>}
       <form onSubmit={submit} autoComplete="off" className="space-y-4 rounded-2xl border border-white/10 bg-card/55 p-4" data-testid="bank-details-form">
         <Field label="Account holder name" id="bank-holder"><Input id="bank-holder" disabled={!available} required autoComplete="off" value={form.account_holder_name} onChange={update("account_holder_name")} className="h-12 rounded-xl border-white/12 bg-white/5" /></Field>

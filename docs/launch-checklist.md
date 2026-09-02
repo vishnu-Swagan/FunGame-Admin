@@ -4,9 +4,9 @@ Product: Chakri.Casino player web app, same-origin operator/distributor portal a
 
 Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, wallet, and transaction ledger.
 
-Deployment decision: **manual promotion only.** The reviewed Blueprint now disables service auto-deploys, but the Render Dashboard and Blueprint Auto Sync must still be verified off before merging because dashboard state is authoritative until a reviewed manual sync.
+Deployment decision: **reviewed commits to <code>main</code> deploy automatically.** The checked-in Render Blueprint enables <code>autoDeployTrigger: commit</code> for both the API and static frontend. Treat merging to <code>main</code> as the production release action and keep the previous successful Render deployment available for rollback.
 
-Recommended path: create an isolated manual staging stack inside the existing Render workspace, validate one release branch there, and only then promote the same reviewed commit to production. Do not use the production MongoDB database for staging.
+Recommended path: validate a release branch locally or against an isolated staging database, merge the exact reviewed commit to <code>main</code>, then monitor both Render services and run the public smoke test. Do not use the production MongoDB database for staging.
 
 Estimated time: **8–12 hours of hands-on work**, normally spread across one or two working days. DNS and email-domain verification can add up to 24 hours without requiring continuous work.
 

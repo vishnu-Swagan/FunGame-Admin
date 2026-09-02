@@ -3,17 +3,8 @@ import fs from "fs";
 import path from "path";
 import { act, render } from "@testing-library/react";
 import Context from "../../context";
-import WebGLStarter from ".";
-import { aviatorUnityContext } from "../../unity";
+import CrashStage, { flightCurveValue, flightGeometryFor, interpolateVisualProgress } from ".";
 
-jest.mock("react-unity-webgl", () => () => <div data-testid="unity-stage" />);
-jest.mock("../../unity", () => ({
-  aviatorUnityContext: {
-    on: jest.fn(),
-    removeEventListener: jest.fn(),
-    send: jest.fn(),
-  },
-}));
 jest.mock("../../sound", () => ({ playGameSound: jest.fn() }));
 jest.mock("../../assets/images/aviator-craft.svg", () => ({
 	__esModule: true,
@@ -26,6 +17,18 @@ jest.mock("../../assets/images/aviator-craft.svg", () => ({
 	),
 }));
 
+const originalRequestAnimationFrame = window.requestAnimationFrame;
+const originalCancelAnimationFrame = window.cancelAnimationFrame;
+const originalMatchMedia = window.matchMedia;
+let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+let nextAnimationFrameId = 1;
+
+const flushAnimationFrame = (timestamp: number) => {
+  const callbacks = Array.from(animationFrameCallbacks.values());
+  animationFrameCallbacks.clear();
+  callbacks.forEach((callback) => callback(timestamp));
+};
+
 const value = (overrides = {}) => ({
   GameState: "",
   currentNum: "1",
@@ -36,8 +39,37 @@ const value = (overrides = {}) => ({
 }) as any;
 
 beforeEach(() => {
-	jest.useFakeTimers();
-	jest.clearAllMocks();
+  jest.useFakeTimers();
+  jest.clearAllMocks();
+  animationFrameCallbacks = new Map();
+  nextAnimationFrameId = 1;
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    value: jest.fn((callback: FrameRequestCallback) => {
+      const animationFrameId = nextAnimationFrameId++;
+      animationFrameCallbacks.set(animationFrameId, callback);
+      return animationFrameId;
+    }),
+  });
+  Object.defineProperty(window, "cancelAnimationFrame", {
+    configurable: true,
+    value: jest.fn((animationFrameId: number) => {
+      animationFrameCallbacks.delete(animationFrameId);
+    }),
+  });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: jest.fn(() => ({
+      matches: false,
+      media: "(prefers-reduced-motion: reduce)",
+      onchange: null,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    })),
+  });
 });
 afterEach(() => jest.useRealTimers());
 
@@ -83,29 +115,23 @@ test("decorative atmosphere is scoped to the flight stage and hidden from assist
 test("cold startup without server state keeps the neutral renderer gate", () => {
   const { container } = render(
     <Context.Provider value={value()}>
-      <WebGLStarter />
+      <CrashStage />
     </Context.Provider>,
   );
 
   const stage = container.querySelector(".space-box");
   expect(stage?.getAttribute("data-server-state-ready")).toBe("false");
   expect(stage?.getAttribute("data-renderer-ready")).toBe("false");
-  expect(stage?.classList.contains("renderer-pending")).toBe(true);
+  expect(stage?.getAttribute("data-renderer-mode")).toBe("pending");
   expect(container.querySelector(".aviator-renderer-gate")?.textContent).toContain("Synchronising live round");
-  expect(container.querySelector(".fallback-flight-visual")).toBeNull();
-  expect(container.querySelector(".flight-curve")).toBeNull();
-  expect(container.querySelector(".plane")).toBeNull();
+  expect(container.querySelector(".native-flight-visual")).toBeNull();
   expect(container.querySelector(".multiplier")?.textContent).toBe("");
-
-	act(() => jest.advanceTimersByTime(5000));
-	expect(stage?.getAttribute("data-renderer-mode")).toBe("pending");
-	expect(container.querySelector(".fallback-flight-visual")).toBeNull();
 });
 
 test("an authoritative round renders immediately without a WebGL startup window", () => {
   const { container } = render(
     <Context.Provider value={value({ GameState: "GAMEEND", currentNum: "87.40", time: 12000, latestRoundNumber: 90 })}>
-      <WebGLStarter />
+      <CrashStage />
     </Context.Provider>,
   );
 

@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
 /**
- * The reference Aviator is deliberately built as an isolated React 18 app.
- * Its original global SCSS and Unity loader can therefore run unchanged next
- * to the React 19 website without leaking styles into the casino catalogue.
+ * The live Aviator surface is deliberately built as an isolated React 18 app.
+ * Its dense game-specific styling and native SVG flight renderer can therefore
+ * run next to the React 19 website without leaking into the casino catalogue.
  * Authentication and balance still come from the same origin/session.
  */
 export default function AviatorGame() {
@@ -36,7 +36,7 @@ export default function AviatorGame() {
       {/* Version the document URL so browsers that cached Render's former
           X-Frame-Options: DENY response do not keep showing a blocked frame. */}
       <iframe
-        data-testid="aviator-reference-game"
+        data-testid="aviator-live-game"
         title="Aviator live game"
         src="/aviator-live/index.html?v=20260818-frame-policy"
         allow="autoplay; fullscreen"
