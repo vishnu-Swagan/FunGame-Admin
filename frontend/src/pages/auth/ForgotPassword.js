@@ -21,6 +21,9 @@ export default function ForgotPassword() {
     try {
       const { data } = await api.post("/auth/forgot-password", { identifier, email: identifier });
       toast.success(data.message || "If that account exists, a reset code has been sent.");
+      if (data?.delivery_available === false) {
+        return;
+      }
       setStep(2);
     } catch (error) {
       toast.error(errMsg(error));

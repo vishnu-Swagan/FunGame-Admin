@@ -598,15 +598,65 @@ class TelesignVerifyAdapter:
                 'status_code': result['status_code'],
             }
         except telesign_service.TelesignServiceError as exc:
+            # Metadata only: the code, key and recipient never enter logs.
             logger.error(
                 'Telesign Verify delivery failed: reason=%s metadata=%s',
                 exc.reason, exc.metadata,
             )
+            if telesign_service.verify_api_unavailable(exc):
+                return await self._fallback_from_unprovisioned_verify(
+                    identity, code, purpose, exc,
+                )
             return {
                 'sent': False,
                 'provider': 'telesign_verify',
                 'error': exc.reason,
             }
+
+    async def _fallback_from_unprovisioned_verify(
+        self, identity: Identity, code: str, purpose: str,
+        original: telesign_service.TelesignServiceError,
+    ) -> dict:
+        """SMS Verify / email_service when Unified Verify is not on the account.
+
+        401/3906 is 'Unified Verification Product not enabled for Customer ID'.
+        Self-service Telesign accounts still have SMS Verify. Email uses a
+        different provider when EMAIL_PROVIDER is configured.
+        """
+        if identity.channel == 'SMS':
+            logger.warning(
+                'Telesign Verify API is not enabled; retrying SMS Verify API',
+            )
+            try:
+                result = await telesign_service.send_verify_sms(
+                    identity.value, code, purpose,
+                )
+            except telesign_service.TelesignServiceError as exc:
+                logger.error(
+                    'Telesign SMS Verify fallback failed: reason=%s metadata=%s',
+                    exc.reason, exc.metadata,
+                )
+                return {
+                    'sent': False,
+                    'provider': 'telesign',
+                    'error': exc.reason,
+                }
+            return {
+                'sent': True,
+                'provider': 'telesign',
+                'reference_id': result['reference_id'],
+                'status_code': result['status_code'],
+            }
+        if identity.channel == 'EMAIL' and email_service_configured():
+            logger.warning(
+                'Telesign Verify API is not enabled; retrying email_service',
+            )
+            return await EmailOtpAdapter().send(identity, code, purpose)
+        return {
+            'sent': False,
+            'provider': 'telesign_verify',
+            'error': original.reason,
+        }
 
 
 class MockOtpAdapter:
@@ -686,6 +736,22 @@ def delivery_adapter_ready(channel: str) -> bool:
     return False
 
 
+def email_service_configured() -> bool:
+    """True when a non-Telesign email provider can actually send mail."""
+    provider = (os.environ.get('EMAIL_PROVIDER') or 'disabled').strip().lower()
+    if provider == 'resend':
+        return bool((os.environ.get('RESEND_API_KEY') or '').strip()
+                    and (os.environ.get('SENDER_EMAIL') or '').strip())
+    if provider == 'sendgrid':
+        return bool((os.environ.get('SENDGRID_API_KEY') or '').strip()
+                    and (os.environ.get('SENDER_EMAIL') or '').strip())
+    if provider == 'smtp':
+        return all((os.environ.get(name) or '').strip() for name in (
+            'SMTP_HOST', 'SMTP_USERNAME', 'SMTP_PASSWORD',
+        ))
+    return False
+
+
 async def report_delivery_completion(challenge: dict, code: str, *, database=None) -> None:
     """Best-effort provider completion reporting after the Mongo commit wins."""
     if database is None:
@@ -739,7 +805,8 @@ async def _restore_previous_challenge(database, previous: dict | None,
 
 async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
                           database=None, now: datetime | None = None,
-                          consume_limit: bool = True) -> dict:
+                          consume_limit: bool = True,
+                          fallback_identity: Identity | None = None) -> dict:
     if database is None:
         database = db
     if purpose not in OTP_PURPOSES:
@@ -799,6 +866,22 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
 
     try:
         delivery = await delivery_adapter(identity.channel).send(identity, code, purpose)
+        if (
+            not delivery.get('sent')
+            and fallback_identity is not None
+            and fallback_identity.value != identity.value
+        ):
+            try:
+                fallback_delivery = await delivery_adapter(
+                    fallback_identity.channel,
+                ).send(fallback_identity, code, purpose)
+            except OtpError:
+                fallback_delivery = {'sent': False}
+            except Exception as exc:
+                logger.error('OTP fallback adapter failed: %s', type(exc).__name__)
+                fallback_delivery = {'sent': False, 'error': type(exc).__name__}
+            if fallback_delivery.get('sent'):
+                delivery = fallback_delivery
     except OtpError:
         await database.otp_challenges.update_one(
             {'id': challenge_id, 'active': True},
@@ -806,6 +889,9 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         )
         await _restore_previous_challenge(database, active, now)
         raise
+    except Exception as exc:
+        logger.error('OTP delivery adapter failed: %s', type(exc).__name__)
+        delivery = {'sent': False, 'provider': 'unknown', 'error': type(exc).__name__}
     if not delivery.get('sent'):
         await database.otp_challenges.update_one(
             {'id': challenge_id, 'active': True},

@@ -50,6 +50,8 @@ export function Profile() {
   const [presetSelectionMade, setPresetSelectionMade] = useState(false);
   const [mobileChallenge, setMobileChallenge] = useState(null);
   const [mobileCode, setMobileCode] = useState("");
+  const [mobilePasswordFallback, setMobilePasswordFallback] = useState(false);
+  const [mobilePassword, setMobilePassword] = useState("");
   const [verificationBusy, setVerificationBusy] = useState("");
   const avatarInputRef = useRef(null);
   const filteredAvatars = useMemo(() => filterCartoonAvatars(avatarSearch), [avatarSearch]);
@@ -81,7 +83,13 @@ export function Profile() {
       const { data } = await api.post("/auth/me/mobile-verification/request");
       if (data.verified) {
         setUser((current) => ({ ...current, phone_verified: true, mobile_verification_status: "VERIFIED" }));
+        setMobilePasswordFallback(false);
+      } else if (data.otp_unavailable || data.password_fallback) {
+        setMobileChallenge(null);
+        setMobilePasswordFallback(true);
+        if (data.user) setUser(data.user);
       } else {
+        setMobilePasswordFallback(false);
         setMobileChallenge(data.challenge_id || data.verification_id);
       }
       toast.success(data.message);
@@ -99,6 +107,19 @@ export function Profile() {
       if (data.user) setUser(data.user);
       setMobileChallenge(null);
       setMobileCode("");
+      toast.success(data.message);
+    } catch (error) { toast.error(errMsg(error)); } finally { setVerificationBusy(""); }
+  };
+
+  const confirmMobilePasswordFallback = async () => {
+    if (!mobilePassword) return toast.error("Enter your account password");
+    setVerificationBusy("mobile-password");
+    try {
+      const { data } = await api.post("/auth/me/mobile-verification/password-fallback", {
+        current_password: mobilePassword,
+      });
+      if (data.user) setUser(data.user);
+      setMobilePassword("");
       toast.success(data.message);
     } catch (error) { toast.error(errMsg(error)); } finally { setVerificationBusy(""); }
   };
@@ -441,8 +462,17 @@ export function Profile() {
           <div className="mt-4 space-y-3">
             <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
               <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-medium"><Smartphone className="h-4 w-4 text-primary" />Mobile number</span><span data-testid="profile-mobile-status" className={`text-xs font-semibold ${mobileVerified || mobileManuallyVerified ? "text-emerald-300" : "text-amber-300"}`}>{mobileVerified ? "OTP verified" : mobileManuallyVerified ? "Admin reviewed" : user?.mobile_verification_status === "REQUESTED" ? "Requested by admin" : "Not verified"}</span></div>
-              {!mobileVerified && !mobileChallenge && <Button type="button" size="sm" onClick={requestMobileVerification} disabled={Boolean(verificationBusy) || !user?.phone} className="mt-3 h-9 rounded-lg" data-testid="profile-mobile-request">{verificationBusy === "mobile-request" ? "Sending…" : "Send mobile OTP"}</Button>}
+              {!mobileVerified && !mobileChallenge && !mobilePasswordFallback && <Button type="button" size="sm" onClick={requestMobileVerification} disabled={Boolean(verificationBusy) || !user?.phone} className="mt-3 h-9 rounded-lg" data-testid="profile-mobile-request">{verificationBusy === "mobile-request" ? "Sending…" : "Send mobile OTP"}</Button>}
               {mobileChallenge && <div className="mt-3 flex gap-2"><Input value={mobileCode} onChange={(event) => setMobileCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="6-digit OTP" className="h-10 rounded-lg border-white/12 bg-white/5" data-testid="profile-mobile-code" /><Button type="button" onClick={confirmMobileVerification} disabled={Boolean(verificationBusy)} className="h-10 rounded-lg" data-testid="profile-mobile-confirm">{verificationBusy === "mobile-confirm" ? "Verifying…" : "Verify"}</Button></div>}
+              {mobilePasswordFallback && !mobileVerified && (
+                <div className="mt-3 space-y-2" data-testid="profile-mobile-password-fallback">
+                  <p className="text-[11px] leading-relaxed text-amber-200">SMS delivery is unavailable. Confirm your password to request administrator-assisted review. Withdrawals still require a verified mobile number.</p>
+                  <div className="flex gap-2">
+                    <Input type="password" value={mobilePassword} onChange={(event) => setMobilePassword(event.target.value)} placeholder="Account password" className="h-10 rounded-lg border-white/12 bg-white/5" data-testid="profile-mobile-password" autoComplete="current-password" />
+                    <Button type="button" onClick={confirmMobilePasswordFallback} disabled={Boolean(verificationBusy)} className="h-10 rounded-lg" data-testid="profile-mobile-password-confirm">{verificationBusy === "mobile-password" ? "Confirming…" : "Confirm password"}</Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>

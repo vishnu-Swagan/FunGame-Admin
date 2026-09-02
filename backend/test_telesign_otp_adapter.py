@@ -340,3 +340,98 @@ def test_legacy_sms_acceptance_is_not_assumed_delivered(
         'accepted_at', 'delivered_at', 'provider_initial_status_code',
         'delivery_reference_id',
     }.intersection(response)
+
+
+def test_verify_api_unavailable_detects_401_3906():
+    error = telesign_service.TelesignServiceError(
+        'HTTPError', http_status=401, provider_status_code=3906,
+    )
+    assert telesign_service.verify_api_unavailable(error) is True
+    assert telesign_service.verify_api_unavailable(
+        telesign_service.TelesignServiceError(
+            'HTTPError', http_status=401, provider_status_code=3400,
+        )
+    ) is False
+    assert telesign_service.verify_api_unavailable(
+        telesign_service.TelesignServiceError('HTTPError', http_status=401)
+    ) is False
+
+
+def test_verify_api_3906_falls_back_to_sms_verify(monkeypatch):
+    monkeypatch.setenv('TELESIGN_CUSTOMER_ID', 'customer-id')
+    monkeypatch.setenv('TELESIGN_API_KEY', 'provider-secret')
+    monkeypatch.setenv('OTP_SMS_ADAPTER', 'telesign_verify')
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(request.full_url)
+        if 'verify.telesign.com' in request.full_url:
+            raw_body = json.dumps({
+                'status': {
+                    'code': 3906,
+                    'description': 'Unified Verification Product not enabled',
+                },
+                'errors': [],
+            }).encode('utf-8')
+            raise urllib.error.HTTPError(
+                request.full_url, 401, 'Unauthorized', {}, io.BytesIO(raw_body),
+            )
+        return FakeResponse({
+            'reference_id': 'sms-verify-fallback-ref',
+            'errors': [],
+            'status': {'code': 290, 'description': 'Message in progress'},
+        })
+
+    monkeypatch.setattr(telesign_service.urllib.request, 'urlopen', fake_urlopen)
+    result = asyncio.run(otp_service.TelesignVerifyAdapter().send(
+        otp_service.Identity('SMS', '+919876543210'),
+        '123456',
+        otp_service.VERIFY_CONTACT,
+    ))
+    assert result == {
+        'sent': True,
+        'provider': 'telesign',
+        'reference_id': 'sms-verify-fallback-ref',
+        'status_code': 290,
+    }
+    assert any('verify.telesign.com' in url for url in captured)
+    assert any('/v1/verify/sms' in url for url in captured)
+    joined = ' '.join(captured)
+    assert 'customer-id' not in joined
+    assert 'provider-secret' not in joined
+    assert '123456' not in joined
+
+
+def test_verify_api_3906_email_falls_back_to_email_service(monkeypatch):
+    monkeypatch.setenv('TELESIGN_CUSTOMER_ID', 'customer-id')
+    monkeypatch.setenv('TELESIGN_API_KEY', 'provider-secret')
+    monkeypatch.setenv('OTP_EMAIL_ADAPTER', 'telesign_verify')
+    monkeypatch.setenv('EMAIL_PROVIDER', 'resend')
+    monkeypatch.setenv('RESEND_API_KEY', 're_test')
+    monkeypatch.setenv('SENDER_EMAIL', 'noreply@chakri.casino')
+
+    def fake_urlopen(request, timeout):
+        raw_body = json.dumps({
+            'status': {'code': 3906, 'description': 'not enabled'},
+            'errors': [],
+        }).encode('utf-8')
+        raise urllib.error.HTTPError(
+            request.full_url, 401, 'Unauthorized', {}, io.BytesIO(raw_body),
+        )
+
+    async def fake_email_send(self, identity, code, purpose):
+        assert identity.channel == 'EMAIL'
+        assert purpose == otp_service.RESET_PASSWORD
+        assert code == '654321'
+        return {'sent': True, 'provider': 'resend'}
+
+    monkeypatch.setattr(telesign_service.urllib.request, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(
+        otp_service.EmailOtpAdapter, 'send', fake_email_send,
+    )
+    result = asyncio.run(otp_service.TelesignVerifyAdapter().send(
+        otp_service.Identity('EMAIL', 'player@example.com'),
+        '654321',
+        otp_service.RESET_PASSWORD,
+    ))
+    assert result == {'sent': True, 'provider': 'resend'}
