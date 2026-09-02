@@ -136,6 +136,20 @@ class TelesignServiceError(Exception):
         }
 
 
+def verify_api_unavailable(error: TelesignServiceError) -> bool:
+    """True when Unified Verify is not enabled for this Customer ID.
+
+    HTTP 401 + status 3906 means the Verify API (verify.telesign.com) is not
+    on the contract. Self-service accounts still have SMS Verify
+    (rest-ww.telesign.com/v1/verify/sms). This is a product-gate, not a
+    leaked credential.
+    """
+    return (
+        error.http_status == 401
+        and error.provider_status_code == 3906
+    )
+
+
 def _provider_response_error(
     reason: str, http_status, payload, *, retry_after=None,
 ) -> TelesignServiceError:

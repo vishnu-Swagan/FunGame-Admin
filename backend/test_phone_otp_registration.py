@@ -140,22 +140,26 @@ async def main():
     original_adapter = otp_service.delivery_adapter
     otp_service.delivery_adapter = lambda channel: FailingSmsAdapter()
     try:
-        await expect_http_error(routes_auth.register(registration(
+        failed_delivery = await routes_auth.register(registration(
             identifier='+919876543212', phone='+919876543212',
             email='delivery.failure@example.com',
             username='Delivery.Failure',
-        )), 503, 'OTP_UNAVAILABLE')
+        ))
     finally:
         otp_service.delivery_adapter = original_adapter
-    assert await database.users.count_documents({
-        'phone_normalized': '+919876543212',
-    }) == 0
+    assert failed_delivery['verification_required'] is True
+    assert failed_delivery['message'] == routes_auth.GENERIC_REGISTER_MESSAGE
+    assert 'access_token' not in failed_delivery
+    stalled = await database.users.find_one({'phone_normalized': '+919876543212'})
+    assert stalled is not None
+    assert stalled['status'] == 'PENDING'
+    assert stalled['phone_verified'] is False
+    assert stalled['activation_mode'] == routes_auth.PHONE_OTP_ACTIVATION_MODE
+    assert 'password_hash' not in stalled
     assert await database.player_attribution.count_documents({
+        'user_id': stalled['id'],
         'attributed_by': 'self-registration-phone-otp',
-    }) == 0
-    assert await database.otp_challenges.count_documents({
-        'user_id': {'$exists': True},
-    }) == 0
+    }) == 1
     assert await database.login_id_reservations.count_documents({
         'key': 'delivery.failure',
     }) == 0

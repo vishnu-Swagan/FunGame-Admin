@@ -20,6 +20,7 @@ SCRIPT_SUITES = (
     "test_live_play_unblock.py",
     "test_manual_admin_registration.py",
     "test_migration_export.py",
+    "test_otp_delivery_fallback.py",
     "test_otp_identity.py",
     "test_payments.py",
     "test_payouts.py",

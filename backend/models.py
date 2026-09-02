@@ -214,6 +214,15 @@ class AuthenticatedOtpVerify(BaseModel):
     code: str = Field(pattern=r'^\d{6}$')
 
 
+class PlayerMobileVerificationFallback(BaseModel):
+    """Authenticated password re-check when mobile OTP cannot be delivered."""
+    model_config = ConfigDict(extra='forbid')
+
+    current_password: str = Field(min_length=1, max_length=128)
+
+    _password_bytes = field_validator('current_password')(_bcrypt_password_size)
+
+
 class LoginRequest(BaseModel):
     # ``email`` is the legacy Login ID/email field and intentionally remains a
     # plain string because it also carries user-chosen Login IDs.

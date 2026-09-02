@@ -20,6 +20,7 @@ from models import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    PlayerMobileVerificationFallback,
     RegisterRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
@@ -43,6 +44,7 @@ from otp_service import (
     consume_prepared_challenge,
     consume_persistent_limit,
     delivery_adapter_ready,
+    email_service_configured,
     identity_query,
     issue_challenge,
     masked_destination,
@@ -67,7 +69,12 @@ GENERIC_RESEND_MESSAGE = (
     'If an unverified account matches, a new verification code has been sent.'
 )
 GENERIC_RESET_MESSAGE = (
-    'If an account exists for this contact, a reset code has been sent.'
+    'If an account exists for this contact, a reset code has been sent. '
+    'If you do not receive it, contact support for an administrator-assisted reset.'
+)
+RESET_UNAVAILABLE_MESSAGE = (
+    'Password reset codes cannot be sent right now. '
+    'Contact support for an administrator-assisted reset.'
 )
 INVALID_LOGIN_MESSAGE = 'Invalid login ID or password'
 PASSWORD_FAILURE_LIMIT = 5
@@ -344,6 +351,20 @@ def _identity_is_verified(user: dict, identity: Identity) -> bool:
     return bool(user.get(identity.verified_field))
 
 
+def _verified_email_identity(user: dict) -> Identity | None:
+    """Return a verified email that can receive a code without enumerating."""
+    if not user or user.get('email_verified') is not True:
+        return None
+    raw = user.get('email_normalized') or user.get('email')
+    if not raw or str(raw).endswith(('.phone.invalid', '.manual.invalid')):
+        return None
+    try:
+        identity = normalize_identity(str(raw))
+    except ValueError:
+        return None
+    return identity if identity.channel == 'EMAIL' else None
+
+
 def _self_service_needs_profile(user: dict) -> bool:
     """Repair the pre-profile state without reopening submitted applications."""
     return bool(
@@ -403,11 +424,19 @@ async def _run_auth_transaction(callback):
         }) from exc
 
 
-async def _issue_or_raise(user: dict, identity: Identity, purpose: str) -> dict:
+async def _issue_or_public_challenge(user: dict, identity: Identity, purpose: str) -> dict:
+    """Issue an OTP or return a dummy challenge when delivery is down.
+
+    Rate limits still surface. Delivery failures must not 500, and they must
+    not delete a pending registration that already exists.
+    """
     try:
         return await issue_challenge(user, identity, purpose)
     except OtpError as exc:
-        _raise_otp(exc)
+        if exc.code in {'OTP_RESEND_COOLDOWN', 'RATE_LIMITED', 'OTP_LOCKED'}:
+            _raise_otp(exc)
+        logger.warning('OTP challenge not delivered: %s', exc.code)
+        return _dummy_challenge(identity)
 
 
 def _raise_public_code_error(exc: OtpError, message: str) -> None:
@@ -597,7 +626,7 @@ async def _register_phone_otp(body: RegisterRequest):
                 }
             # With no live challenge, a replacement still goes only to the
             # already-recorded phone.
-            challenge = await _issue_or_raise(phone_existing, identity, VERIFY_CONTACT)
+            challenge = await _issue_or_public_challenge(phone_existing, identity, VERIFY_CONTACT)
             return {
                 'message': GENERIC_REGISTER_MESSAGE,
                 'verification_required': True,
@@ -624,7 +653,7 @@ async def _register_phone_otp(body: RegisterRequest):
                     'verification_required': True,
                     **active_challenge,
                 }
-            challenge = await _issue_or_raise(
+            challenge = await _issue_or_public_challenge(
                 phone_existing, email_identity, VERIFY_CONTACT,
             )
             return {
@@ -709,25 +738,10 @@ async def _register_phone_otp(body: RegisterRequest):
         # response generic so it does not disclose which identity matched.
         return _opaque_registration_response(identity)
 
-    try:
-        challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
-    except OtpError as exc:
-        # A registration is not successful unless the SMS provider accepted
-        # the challenge. Remove the unusable pending row and its attribution so
-        # the player can retry cleanly when delivery recovers.
-        async def rollback_failed_registration(session):
-            kwargs = {'session': session} if session is not None else {}
-            await db.otp_challenges.delete_many({'user_id': user['id']}, **kwargs)
-            await db.player_attribution.delete_many({'user_id': user['id']}, **kwargs)
-            await db.users.delete_one({
-                'id': user['id'], 'status': 'PENDING', 'phone_verified': False,
-            }, **kwargs)
-
-        try:
-            await _run_auth_transaction(rollback_failed_registration)
-        except HTTPException:
-            logger.error('Failed to roll back undeliverable registration')
-        _raise_otp(exc)
+    # Delivery failure must not erase the pending player. Verification still
+    # gates withdrawals/UPI; the account itself has to exist so retry/resend
+    # and administrator review can proceed.
+    challenge = await _issue_or_public_challenge(user, identity, VERIFY_CONTACT)
     return {
         'message': GENERIC_REGISTER_MESSAGE,
         'verification_required': True,
@@ -1556,13 +1570,23 @@ async def logout(user: dict = Depends(get_current_user)):
 @router.post('/forgot-password', status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(body: ForgotPasswordRequest):
     identity = _request_identity(body)
+    requested_ready = delivery_adapter_ready(identity.channel)
+    email_ready = delivery_adapter_ready('EMAIL') or email_service_configured()
+    delivery_available = requested_ready or (
+        identity.channel == 'SMS' and email_ready
+    )
     user = await _find_identity_user(identity)
     if user and user.get('role') == 'PLAYER' and _identity_is_verified(user, identity):
+        fallback = None
+        if identity.channel == 'SMS' and email_ready:
+            fallback = _verified_email_identity(user)
         try:
-            await issue_challenge(user, identity, RESET_PASSWORD)
+            await issue_challenge(
+                user, identity, RESET_PASSWORD, fallback_identity=fallback,
+            )
         except OtpError as exc:
             # Enumeration safety wins here: delivery/cooldown state must not
-            # reveal whether the contact belongs to an account.
+            # reveal whether the contact belongs to an account. Never 500.
             logger.warning('Password reset challenge not issued: %s', exc.code)
     else:
         try:
@@ -1572,7 +1596,15 @@ async def forgot_password(body: ForgotPasswordRequest):
             )
         except OtpError:
             pass
-    return {'message': GENERIC_RESET_MESSAGE}
+    if not delivery_available:
+        return {
+            'message': RESET_UNAVAILABLE_MESSAGE,
+            'delivery_available': False,
+        }
+    return {
+        'message': GENERIC_RESET_MESSAGE,
+        'delivery_available': True,
+    }
 
 
 @router.post('/reset-password')
@@ -1696,18 +1728,52 @@ def _verified_player_mobile(user: dict) -> Identity:
     return identity
 
 
+def _player_otp_unavailable_response() -> dict:
+    """Documented fallback when an authenticated player cannot receive SMS."""
+    return {
+        'message': (
+            'A verification code could not be sent. Confirm your password to '
+            'request administrator-assisted mobile review. Withdrawals and UPI '
+            'payouts still require a verified mobile number.'
+        ),
+        'verified': False,
+        'otp_unavailable': True,
+        'password_fallback': True,
+        'password_only': False,
+    }
+
+
 @router.post('/me/mobile-verification/request')
 async def request_my_mobile_verification(user: dict = Depends(get_current_user)):
     identity = _verified_player_mobile(user)
     if user.get('phone_verified') is True:
         return {'message': 'Your mobile number is already verified.', 'verified': True}
+    now = _now().isoformat()
     if not delivery_adapter_ready('SMS'):
-        _raise_otp(OtpConfigurationError('Mobile OTP delivery is not configured'))
+        await db.users.update_one(
+            {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE', 'phone_verified': {'$ne': True}},
+            {'$set': {
+                'mobile_verification_status': 'OTP_UNAVAILABLE',
+                'mobile_verification_requested_at': now,
+                'mobile_verification_request_source': 'PLAYER',
+            }},
+        )
+        return _player_otp_unavailable_response()
     try:
         challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
     except OtpError as exc:
-        _raise_otp(exc)
-    now = _now().isoformat()
+        if exc.code in {'OTP_RESEND_COOLDOWN', 'RATE_LIMITED', 'OTP_LOCKED'}:
+            _raise_otp(exc)
+        logger.warning('Player mobile OTP not delivered: %s', exc.code)
+        await db.users.update_one(
+            {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE', 'phone_verified': {'$ne': True}},
+            {'$set': {
+                'mobile_verification_status': 'OTP_UNAVAILABLE',
+                'mobile_verification_requested_at': now,
+                'mobile_verification_request_source': 'PLAYER',
+            }},
+        )
+        return _player_otp_unavailable_response()
     await db.users.update_one(
         {'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE', 'phone_verified': {'$ne': True}},
         {'$set': {
@@ -1720,6 +1786,85 @@ async def request_my_mobile_verification(user: dict = Depends(get_current_user))
         'message': 'A verification code was sent to your mobile number.',
         'verified': False,
         **challenge,
+    }
+
+
+@router.post('/me/mobile-verification/password-fallback')
+async def player_mobile_verification_password_fallback(
+    body: PlayerMobileVerificationFallback,
+    user: dict = Depends(get_current_user),
+):
+    """Password re-auth when SMS OTP cannot be delivered.
+
+    Mirrors admin step-up's password-only ceremony for an already-authenticated
+    player. It records the outage and queues admin-assisted review. It does
+    NOT mark the phone verified and does not unlock withdrawals/UPI.
+    """
+    _verified_player_mobile(user)
+    if user.get('phone_verified') is True:
+        return {
+            'message': 'Your mobile number is already verified.',
+            'verified': True,
+            'user': public_user(user),
+        }
+    original_hash = user.get('password_hash') or ''
+    if not original_hash or not await asyncio.to_thread(
+        verify_password, body.current_password, original_hash,
+    ):
+        try:
+            await consume_persistent_limit(
+                'player_mobile_password_fallback', user['id'], limit=5,
+                window_seconds=15 * 60,
+            )
+        except OtpError as exc:
+            _raise_otp(exc)
+        raise HTTPException(status_code=401, detail={
+            'code': 'PLAYER_REAUTH_FAILED',
+            'message': 'Account password is incorrect.',
+        })
+    now = _now()
+    result = await db.users.update_one({
+        'id': user['id'], 'role': 'PLAYER', 'status': 'ACTIVE',
+        'password_hash': original_hash,
+        'phone_verified': {'$ne': True},
+        'active_session_id': user.get('active_session_id'),
+    }, {'$set': {
+        'mobile_verification_status': 'OTP_UNAVAILABLE',
+        'mobile_verification_password_confirmed_at': now.isoformat(),
+        'mobile_verification_request_source': 'PLAYER_PASSWORD_FALLBACK',
+    }})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'PLAYER_AUTH_CHANGED',
+            'message': 'Account authentication changed. Sign in and retry.',
+        })
+    await db.financial_audit.insert_one({
+        'id': str(uuid.uuid4()),
+        'actor_id': user['id'],
+        'action': 'MOBILE_OTP_UNAVAILABLE',
+        'target_type': 'PLAYER',
+        'target_id': user['id'],
+        'reason': 'Authenticated password fallback; SMS OTP could not be delivered',
+        'before': {'phone_verified': False},
+        'after': {
+            'phone_verified': False,
+            'mobile_verification_status': 'OTP_UNAVAILABLE',
+            'password_only': True,
+        },
+        'created_at': now,
+    })
+    updated = await db.users.find_one({'id': user['id']})
+    return {
+        'message': (
+            'Password confirmed. Your mobile number is not yet verified. '
+            'An administrator can complete review. Withdrawals still require '
+            'a verified mobile number.'
+        ),
+        'verified': False,
+        'otp_unavailable': True,
+        'password_fallback': True,
+        'password_only': True,
+        'user': public_user(updated or user),
     }
 
 
