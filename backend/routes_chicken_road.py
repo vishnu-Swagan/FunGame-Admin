@@ -1,26 +1,20 @@
-"""Chicken Road - a server-authoritative crash table with universal live rounds.
+"""Chicken Road — a server-authoritative hop-across-lanes table.
 
-Chicken Road is original IP built on the SAME crash round engine as Aviator: a
-chicken crosses a night highway, the multiplier climbs on Aviator's shared
-flight curve, and the player cashes out before a vehicle hits it. Every player
-sees the SAME rounds (a DB-chained BETTING -> RUNNING -> CRASHED machine kept
-alive 24/7 by a background task in server.py), and all chip movement is
-server-authoritative through the same ledger every other table uses.
+The chicken starts on the sidewalk. Play debits the stake and hops onto the
+first manhole. GO hops one more lane. CASH OUT credits bet × the current
+lane multiplier. A seeded crash lane ends the round with a loss (no credit).
 
-This module deliberately mirrors the Aviator machine in routes_live.py rather
-than sharing its internals, so a change to one table can never destabilise the
-other. Wallet/bet mutations run through run_game_transaction (the same atomic
-runner the generic live tables use), which keeps the settlement paths unit
-testable against a mock database.
+This is original IP: discrete lanes, not an Aviator climb curve. Chip movement
+still goes through run_game_transaction / the shared ledger so the table stays
+unit-testable against a mock database.
 
 PLAY CHIPS ONLY.
 """
 import uuid
 import time
-import asyncio
 import logging
-import secrets
 import hashlib
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -33,11 +27,13 @@ from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
-    CHICKEN_ROAD_GROWTH, CHICKEN_ROAD_FAIRNESS_VERSION,
-    aviator_factor_text,
-    chicken_road_commitment, chicken_road_commitment_payload,
-    chicken_road_crash_point, chicken_road_multiplier, chicken_road_return_factor,
-    chicken_road_time_for,
+    CHICKEN_ROAD_DIFFICULTIES,
+    CHICKEN_ROAD_FAIRNESS_VERSION,
+    CHICKEN_ROAD_LANE_COUNT,
+    chicken_road_commitment,
+    chicken_road_commitment_payload,
+    chicken_road_crash_lane,
+    chicken_road_lane_multipliers,
 )
 from live_engines import limits_for
 from game_access import require_playable_game
@@ -48,11 +44,6 @@ router = APIRouter(tags=['chicken-road'])
 
 SLUG = 'chicken-road'
 GAME_NAME = 'Chicken Road'
-
-# A short crossing cadence keeps consecutive crash rounds snappy. Both values are
-# returned by /state so every client draws the same countdown from the server.
-CR_BETTING = 5.0   # seconds bets are open before the chicken starts crossing
-CR_RESULT = 3.0    # crash-result hold before the next round opens
 
 
 def _now_iso():
@@ -71,85 +62,156 @@ def _mask(name: str):
     return f"{name[0]}***{name[-1]}"
 
 
-class ChickenRoadBet(BaseModel):
-    amount: int = Field(ge=1, le=100_000)
-    panel: int = Field(default=1, ge=1, le=2)
-    auto_cashout: Optional[float] = Field(default=None, ge=1.01, le=1000)
+def _payout_for(amount: int, multiplier: float) -> int:
+    return int(round(int(amount) * float(multiplier)))
 
 
-class BetRef(BaseModel):
-    bet_id: str
-
-
-# ======================================================================
-# Round machine
-# ======================================================================
-async def _cr_create_round(round_number: int, start_ts: float):
-    server_seed = secrets.token_hex(32)
-    return_factor = chicken_road_return_factor()
-    fairness_version = CHICKEN_ROAD_FAIRNESS_VERSION
-    server_seed_hash = chicken_road_commitment(server_seed, return_factor, fairness_version)
-    crash = chicken_road_crash_point(server_seed, return_factor)
-    run_start = start_ts + CR_BETTING
-    crash_at = run_start + chicken_road_time_for(crash)
-    doc = {
-        'round_number': round_number, 'betting_start': start_ts, 'run_start': run_start,
-        'crash_point': crash, 'crash_at': crash_at, 'ends_at': crash_at + CR_RESULT,
-        'status': 'OPEN', 'created_at': _now_iso(),
-        # Never serialized by /state. Revealed only after settlement by the
-        # authenticated fairness endpoint below.
-        'server_seed': server_seed, 'server_seed_hash': server_seed_hash,
-        'verification_factor': return_factor, 'fairness_version': fairness_version,
+def _public_round(r: dict, *, reveal: bool = False) -> dict:
+    """Serialize a hop round without leaking the crash lane while PLAYING."""
+    status = r.get('status')
+    current_lane = int(r.get('current_lane') or 0)
+    current_mult = float(r.get('current_multiplier') or 1.0)
+    amount = int(r.get('amount') or 0)
+    out = {
+        'id': r['id'],
+        'round_number': r.get('round_number'),
+        'amount': amount,
+        'difficulty': r.get('difficulty', 'easy'),
+        'lane_count': int(r.get('lane_count') or CHICKEN_ROAD_LANE_COUNT),
+        'multipliers': list(r.get('multipliers') or []),
+        'current_lane': current_lane,
+        'current_multiplier': current_mult,
+        'cashout_amount': _payout_for(amount, current_mult) if current_lane >= 1 and status == 'PLAYING' else 0,
+        'status': status,
+        'server_seed_hash': r.get('server_seed_hash', ''),
+        'fairness_version': int(r.get('fairness_version') or CHICKEN_ROAD_FAIRNESS_VERSION),
     }
-    try:
-        await db.chicken_road_rounds.insert_one(dict(doc))
-        return doc
-    except DuplicateKeyError:
-        persisted = await db.chicken_road_rounds.find_one({'round_number': round_number})
-        if persisted is None:
-            raise RuntimeError('Chicken Road round insert raced but no persisted round exists')
-        return persisted
+    if status in ('CRASHED', 'CASHED') or reveal:
+        out['crash_lane'] = r.get('crash_lane')
+        out['server_seed'] = r.get('server_seed')
+        out['payout'] = int(r.get('payout') or 0)
+    return out
 
 
-async def _cr_history_doc(bet, payout, outcome, session=None):
+class PlayBody(BaseModel):
+    amount: int = Field(ge=1, le=100_000)
+    difficulty: str = Field(default='easy')
+
+
+class RoundRef(BaseModel):
+    round_id: str
+
+
+# ======================================================================
+# Round helpers
+# ======================================================================
+async def _next_round_number():
+    last = await db.chicken_road_rounds.find_one({}, sort=[('round_number', -1)])
+    return int((last or {}).get('round_number') or 0) + 1
+
+
+async def _history_doc(round_doc, payout, outcome, session=None):
     kwargs = {'session': session} if session is not None else {}
     await db.game_rounds.insert_one({
-        'id': str(uuid.uuid4()), 'user_id': bet['user_id'], 'slug': SLUG, 'game_name': GAME_NAME,
-        'round_number': bet['round_number'], 'bet': bet['amount'], 'payout': payout,
-        'status': 'SETTLED', 'outcome': outcome,
-        'created_at': _now_iso(), 'settled_at': _now_iso(),
+        'id': str(uuid.uuid4()),
+        'user_id': round_doc['user_id'],
+        'slug': SLUG,
+        'game_name': GAME_NAME,
+        'round_number': round_doc.get('round_number'),
+        'bet': round_doc['amount'],
+        'payout': payout,
+        'status': 'SETTLED',
+        'outcome': outcome,
+        'created_at': _now_iso(),
+        'settled_at': _now_iso(),
     }, **kwargs)
 
 
-async def _cr_cash_bet(bet, mult, crash_point=None, auto=False, cashout_deadline=None):
-    """Atomically settle one OPEN bet and its wallet/history movements."""
+def _hop_onto(round_doc, next_lane: int):
+    """Apply one hop. Mutates a copy of the round fields; does not write."""
+    crash_lane = int(round_doc['crash_lane'])
+    multipliers = list(round_doc['multipliers'])
+    lane_count = int(round_doc['lane_count'])
+    if next_lane < 1 or next_lane > lane_count:
+        return {'crashed': False, 'blocked': True, 'lane': round_doc['current_lane'],
+                'multiplier': float(round_doc['current_multiplier'])}
+    if next_lane == crash_lane:
+        return {'crashed': True, 'blocked': False, 'lane': next_lane,
+                'multiplier': float(multipliers[next_lane - 1])}
+    return {'crashed': False, 'blocked': False, 'lane': next_lane,
+            'multiplier': float(multipliers[next_lane - 1])}
+
+
+async def _settle_crash(round_doc):
     async def settle(session):
         kwargs = {'session': session} if session is not None else {}
-        if cashout_deadline is not None and time.time() >= cashout_deadline:
-            return None
-        current = await db.chicken_road_bets.find_one(
-            {'id': bet['id'], 'status': 'OPEN'}, **kwargs,
+        current = await db.chicken_road_rounds.find_one(
+            {'id': round_doc['id'], 'status': 'PLAYING'}, **kwargs,
         )
         if not current:
             return None
-        payout = int(round(current['amount'] * mult))
-        res = await db.chicken_road_bets.update_one(
-            {'id': current['id'], 'status': 'OPEN'},
+        res = await db.chicken_road_rounds.update_one(
+            {'id': current['id'], 'status': 'PLAYING'},
             {'$set': {
-                'status': 'CASHED', 'active': False, 'payout': payout,
-                'multiplier': mult, 'auto': auto, 'settled_at': _now_iso(),
+                'status': 'CRASHED',
+                'payout': 0,
+                'settled_at': _now_iso(),
+            }},
+            **kwargs,
+        )
+        if res.modified_count == 0:
+            return None
+        await _history_doc(
+            current, 0,
+            {
+                'result': 'crashed',
+                'lane': current.get('current_lane'),
+                'crash_lane': current.get('crash_lane'),
+                'difficulty': current.get('difficulty'),
+            },
+            session=session,
+        )
+        return True
+
+    return await run_game_transaction(client, settle)
+
+
+async def _settle_cashout(round_doc, multiplier: float):
+    payout = _payout_for(round_doc['amount'], multiplier)
+
+    async def settle(session):
+        kwargs = {'session': session} if session is not None else {}
+        current = await db.chicken_road_rounds.find_one(
+            {'id': round_doc['id'], 'status': 'PLAYING'}, **kwargs,
+        )
+        if not current:
+            return None
+        if int(current.get('current_lane') or 0) < 1:
+            return None
+        res = await db.chicken_road_rounds.update_one(
+            {'id': current['id'], 'status': 'PLAYING'},
+            {'$set': {
+                'status': 'CASHED',
+                'payout': payout,
+                'current_multiplier': float(multiplier),
+                'settled_at': _now_iso(),
             }},
             **kwargs,
         )
         if res.modified_count == 0:
             return None
         await credit_chips(
-            current['user_id'], payout, f'Chicken Road cashout {mult}x', ref=current['id'],
-            kind=ledger.PAYOUT, game=SLUG, session=session,
+            current['user_id'], payout, f'Chicken Road cashout {multiplier}x',
+            ref=current['id'], kind=ledger.PAYOUT, game=SLUG, session=session,
         )
-        await _cr_history_doc(
+        await _history_doc(
             current, payout,
-            {'result': 'cashed_out', 'multiplier': mult, 'crash_point': crash_point},
+            {
+                'result': 'cashed_out',
+                'lane': current.get('current_lane'),
+                'multiplier': float(multiplier),
+                'difficulty': current.get('difficulty'),
+            },
             session=session,
         )
         return payout
@@ -157,96 +219,23 @@ async def _cr_cash_bet(bet, mult, crash_point=None, auto=False, cashout_deadline
     return await run_game_transaction(client, settle)
 
 
-async def _cr_lose_bet(bet, crash_point):
-    """Atomically mark one bet lost and append its personal round history."""
-    async def settle(session):
-        kwargs = {'session': session} if session is not None else {}
-        current = await db.chicken_road_bets.find_one(
-            {'id': bet['id'], 'status': 'OPEN'}, **kwargs,
-        )
-        if not current:
-            return False
-        res = await db.chicken_road_bets.update_one(
-            {'id': current['id'], 'status': 'OPEN'},
-            {'$set': {
-                'status': 'LOST', 'active': False, 'payout': 0, 'settled_at': _now_iso(),
-            }},
-            **kwargs,
-        )
-        if res.modified_count == 0:
-            return False
-        await _cr_history_doc(
-            current, 0, {'result': 'crashed', 'crash_point': crash_point}, session=session,
-        )
-        return True
-
-    return await run_game_transaction(client, settle)
-
-
-async def _cr_settle_round(r):
-    """Settle every OPEN bet of a crashed round. Idempotent."""
-    crash = r['crash_point']
-    while True:
-        bets = await db.chicken_road_bets.find(
-            {'round_number': r['round_number'], 'status': 'OPEN'}
-        ).to_list(500)
-        if not bets:
-            break
-        for b in bets:
-            auto = b.get('auto_cashout')
-            if auto and auto <= crash:
-                await _cr_cash_bet(b, auto, crash_point=crash, auto=True)
-            else:
-                await _cr_lose_bet(b, crash)
-    await db.chicken_road_rounds.update_one(
-        {'round_number': r['round_number'], 'status': 'OPEN'}, {'$set': {'status': 'SETTLED'}}
-    )
-
-
-async def _cr_auto_cash_running(r, now):
-    """Eagerly cash out auto-cashout bets whose target multiplier was reached."""
-    mult = chicken_road_multiplier(now - r['run_start'])
-    while True:
-        if time.time() >= r['crash_at']:
-            return
-        bets = await db.chicken_road_bets.find({
-            'round_number': r['round_number'], 'status': 'OPEN',
-            'auto_cashout': {'$ne': None, '$lte': mult},
-        }).to_list(200)
-        if not bets:
-            break
-        for b in bets:
-            payout = await _cr_cash_bet(
-                b, b['auto_cashout'], crash_point=None, auto=True,
-                cashout_deadline=r['crash_at'],
-            )
-            if payout is None and time.time() >= r['crash_at']:
-                return
-
-
 async def advance_chicken_road():
-    """Advance the global Chicken Road machine. Idempotent - safe to call from
-    the background keepalive task AND from any request."""
-    now = time.time()
-    r = await db.chicken_road_rounds.find_one({}, sort=[('round_number', -1)])
-    if r is None:
-        return await _cr_create_round(1, now)
-    if now >= r['crash_at'] and r.get('status') == 'OPEN':
-        await _cr_settle_round(r)
-        r = await db.chicken_road_rounds.find_one({'round_number': r['round_number']})
-    if now >= r['ends_at']:
-        return await _cr_create_round(r['round_number'] + 1, max(now, r['ends_at']))
-    if r['run_start'] <= now < r['crash_at']:
-        await _cr_auto_cash_running(r, now)
-    return r
+    """Kept so the Aviator keepalive can still import us.
 
-
-def _cr_phase(r, now):
-    if now < r['run_start']:
-        return 'BETTING', r['run_start'] - now
-    if now < r['crash_at']:
-        return 'RUNNING', now - r['run_start']
-    return 'CRASHED', max(0.0, r['ends_at'] - now)
+    Hop rounds are player-paced, so there is no global clock to tick. Abandoned
+    PLAYING rounds older than 15 minutes are settled as crashes so a dropped
+    client cannot hold chips in limbo forever.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    stale = await db.chicken_road_rounds.find(
+        {'status': 'PLAYING', 'created_at': {'$lt': cutoff}},
+    ).to_list(50)
+    for r in stale:
+        try:
+            await _settle_crash(r)
+        except Exception:
+            logger.exception('chicken-road stale crash %s', r.get('id'))
+    return None
 
 
 # ======================================================================
@@ -255,76 +244,70 @@ def _cr_phase(r, now):
 @router.get('/live/chicken-road/state')
 async def chicken_road_state(user: dict = Depends(require_active_player)):
     await require_playable_game(SLUG)
-    r = await advance_chicken_road()
-    now = time.time()
-    phase, t = _cr_phase(r, now)
-    rn = r['round_number']
-
-    my, feed_raw, previous_raw, hist, balance = await asyncio.gather(
-        db.chicken_road_bets.find(
-            {'user_id': user['id'], 'round_number': {'$in': [rn - 1, rn, rn + 1]}},
-            {'_id': 0, 'user_id': 0},
-        ).sort('created_at', 1).to_list(20),
-        db.chicken_road_bets.find(
-            {'round_number': rn, 'status': {'$in': ['OPEN', 'CASHED', 'LOST']}}, {'_id': 0}
-        ).sort('amount', -1).to_list(40),
-        db.chicken_road_bets.find(
-            {'round_number': rn - 1, 'status': {'$in': ['CASHED', 'LOST']}}, {'_id': 0}
-        ).sort('amount', -1).to_list(40),
-        db.chicken_road_rounds.find(
-            {'status': 'SETTLED'},
-            {'_id': 0, 'round_number': 1, 'crash_point': 1, 'server_seed': 1},
-        ).sort('round_number', -1).to_list(20),
-        _fresh_balance(user['id']),
+    balance = await _fresh_balance(user['id'])
+    active = await db.chicken_road_rounds.find_one(
+        {'user_id': user['id'], 'status': 'PLAYING'}, {'_id': 0},
     )
-    proof_rounds = {h['round_number'] for h in hist if h.get('server_seed')}
-    for b in my:
-        b['queued'] = b['round_number'] > rn
-        b['proof_available'] = b['round_number'] in proof_rounds or (
-            b['round_number'] == rn and bool(r.get('server_seed'))
-        )
+    hist = await db.chicken_road_rounds.find(
+        {'user_id': user['id'], 'status': {'$in': ['CASHED', 'CRASHED']}},
+        {'_id': 0, 'round_number': 1, 'status': 1, 'current_multiplier': 1,
+         'payout': 1, 'crash_lane': 1, 'current_lane': 1, 'difficulty': 1},
+    ).sort('round_number', -1).to_list(12)
 
-    ids = list({b['user_id'] for b in [*feed_raw, *previous_raw]})
+    wins_raw = await db.game_rounds.find(
+        {'slug': SLUG, 'status': 'SETTLED', 'payout': {'$gt': 0}},
+        {'_id': 0, 'user_id': 1, 'payout': 1, 'outcome': 1, 'created_at': 1},
+    ).sort('created_at', -1).to_list(12)
     names = {}
-    if ids:
+    user_ids = list({row['user_id'] for row in wins_raw})
+    if user_ids:
         users = await db.users.find(
-            {'id': {'$in': ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}
-        ).to_list(len(ids))
-        names = {u['id']: (u.get('display_name') or u.get('email', 'Player').split('@')[0]) for u in users}
+            {'id': {'$in': user_ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1},
+        ).to_list(40)
+        names = {
+            item['id']: (item.get('display_name') or item.get('email', 'Player').split('@')[0])
+            for item in users
+        }
+    live_wins = [{
+        'name': _mask(names.get(row['user_id'], 'Player')),
+        'payout': int(row.get('payout') or 0),
+        'multiplier': float((row.get('outcome') or {}).get('multiplier') or 0),
+    } for row in wins_raw]
 
-    def public_bet(b):
-        return {
-            'name': _mask(names.get(b['user_id'], 'Player')), 'amount': b['amount'],
-            'status': b['status'], 'multiplier': b.get('multiplier'),
-            'payout': b.get('payout', 0),
+    playing_now = await db.chicken_road_rounds.count_documents({'status': 'PLAYING'})
+    # A lively floor so the ticker matches the reference cabinet's "Online" feel
+    # without implying a scraped third-party count.
+    minute_jitter = int(time.time() // 20) % 1800
+    online = 45200 + playing_now + minute_jitter
+
+    difficulties = {}
+    for key, spec in CHICKEN_ROAD_DIFFICULTIES.items():
+        difficulties[key] = {
+            'label': spec['label'],
+            'traffic': spec['traffic'],
+            'speed': spec['speed'],
+            'multipliers': chicken_road_lane_multipliers(key),
         }
 
-    feed = [public_bet(b) for b in feed_raw]
-    previous_feed = [public_bet(b) for b in previous_raw]
-    resp = {
-        'round_number': rn, 'phase': phase, 'server_now': now,
-        'server_seed_hash': r.get('server_seed_hash', ''),
-        'betting_seconds': CR_BETTING, 'result_seconds': CR_RESULT, 'growth': CHICKEN_ROAD_GROWTH,
-        'my_bets': my, 'all_bets': feed, 'players': len(feed_raw),
-        'previous_bets': previous_feed,
-        'total_staked': sum(b['amount'] for b in feed_raw),
-        'history': [{
-            'round_number': h['round_number'], 'crash_point': h['crash_point'],
-            'proof_available': bool(h.get('server_seed')),
-        } for h in hist],
+    low, high = limits_for(SLUG)
+    return {
         'balance': balance,
-        'min_bet': limits_for(SLUG)[0], 'max_bet': limits_for(SLUG)[1],
+        'min_bet': low,
+        'max_bet': high,
+        'chip_presets': [20, 50, 100, 500],
+        'difficulties': difficulties,
+        'active': _public_round(active) if active else None,
+        'history': [{
+            'round_number': h.get('round_number'),
+            'status': h.get('status'),
+            'lane': h.get('current_lane'),
+            'multiplier': h.get('current_multiplier'),
+            'payout': h.get('payout') or 0,
+        } for h in hist],
+        'live_wins': live_wins,
+        'online': online,
+        'players': playing_now,
     }
-    if phase == 'BETTING':
-        resp['phase_ends_in'] = round(t, 2)
-    elif phase == 'RUNNING':
-        resp['run_elapsed'] = round(t, 3)
-        resp['multiplier'] = chicken_road_multiplier(t)
-    else:
-        resp['phase_ends_in'] = round(t, 2)
-        resp['crash_point'] = r['crash_point']
-        resp['run_seconds'] = round(max(0, r['crash_at'] - r['run_start']), 3)
-    return resp
 
 
 @router.get('/live/chicken-road/rounds/{round_number}/fairness')
@@ -333,26 +316,24 @@ async def chicken_road_round_fairness(round_number: int, user: dict = Depends(re
     r = await db.chicken_road_rounds.find_one({'round_number': round_number}, {'_id': 0})
     if not r:
         raise HTTPException(status_code=404, detail='Round not found')
-    if r.get('status') != 'SETTLED' or not r.get('server_seed'):
+    if r.get('status') not in ('CASHED', 'CRASHED') or not r.get('server_seed'):
         raise HTTPException(status_code=409, detail='The server seed is revealed after the round settles')
-    fairness_version = int(r.get('fairness_version') or 1)
-    verification_factor_text = aviator_factor_text(r['verification_factor'])
-    result_hash = hashlib.sha256(f"chicken-road-crash-v1:{r['server_seed']}".encode()).hexdigest()
+    fairness_version = int(r.get('fairness_version') or CHICKEN_ROAD_FAIRNESS_VERSION)
+    difficulty = r.get('difficulty', 'easy')
+    result_hash = hashlib.sha256(f"chicken-road-hop-v1:{r['server_seed']}".encode()).hexdigest()
     return {
         'createdAt': r.get('created_at'),
         'serverSeed': r['server_seed'],
         'serverSeedHash': r.get('server_seed_hash', ''),
         'resultHash': result_hash,
         'roundNumber': round_number,
-        'crashPoint': r['crash_point'],
-        'target': r['crash_point'],
-        'verificationFactor': r['verification_factor'],
-        'verificationFactorText': verification_factor_text,
+        'crashLane': r.get('crash_lane'),
+        'difficulty': difficulty,
         'fairnessVersion': fairness_version,
         'commitmentPayload': chicken_road_commitment_payload(
-            r['server_seed'], r['verification_factor'], fairness_version,
+            r['server_seed'], difficulty, fairness_version,
         ),
-        'algorithm': 'SHA256 / chicken-road-crash-v1',
+        'algorithm': 'SHA256 / chicken-road-hop-v1',
     }
 
 
@@ -371,7 +352,7 @@ async def chicken_road_top(period: str = 'day', user: dict = Depends(require_act
     names = {}
     if user_ids:
         users = await db.users.find(
-            {'id': {'$in': user_ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1}
+            {'id': {'$in': user_ids}}, {'_id': 0, 'id': 1, 'display_name': 1, 'email': 1},
         ).to_list(60)
         names = {
             item['id']: (item.get('display_name') or item.get('email', 'Player').split('@')[0])
@@ -386,126 +367,199 @@ async def chicken_road_top(period: str = 'day', user: dict = Depends(require_act
     } for row in rows]}
 
 
-@router.post('/live/chicken-road/bets')
-async def chicken_road_place_bet(body: ChickenRoadBet, user: dict = Depends(require_active_player)):
+@router.post('/live/chicken-road/play')
+async def chicken_road_play(body: PlayBody, user: dict = Depends(require_active_player)):
     await require_playable_game(SLUG)
+    difficulty = (body.difficulty or 'easy').strip().lower()
+    if difficulty not in CHICKEN_ROAD_DIFFICULTIES:
+        raise HTTPException(status_code=400, detail='Difficulty must be easy, medium, hard, or hardcore')
     _min, _max = limits_for(SLUG)
     if body.amount < _min:
         raise HTTPException(status_code=400, detail=f'Minimum bet is {_min} chips')
     if body.amount > _max:
         raise HTTPException(status_code=400, detail=f'Maximum bet is {_max} chips')
-    r = await advance_chicken_road()
-    now = time.time()
-    phase, t = _cr_phase(r, now)
-    # Bets during a run/result queue for the next round.
-    if phase == 'BETTING' and t > 0.3:
-        target_rn = r['round_number']
-    else:
-        target_rn = r['round_number'] + 1
-    bet_id = str(uuid.uuid4())
-    auto = round(float(body.auto_cashout), 2) if body.auto_cashout else None
-    bet = {
-        'id': bet_id, 'user_id': user['id'], 'round_number': target_rn, 'panel': body.panel,
-        'amount': body.amount, 'auto_cashout': auto, 'status': 'OPEN', 'active': True,
-        'payout': 0, 'multiplier': None, 'created_at': _now_iso(),
+
+    existing = await db.chicken_road_rounds.find_one(
+        {'user_id': user['id'], 'status': 'PLAYING'},
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail='You already have a chicken on the road')
+
+    server_seed = secrets.token_hex(32)
+    multipliers = chicken_road_lane_multipliers(difficulty)
+    lane_count = len(multipliers)
+    crash_lane = chicken_road_crash_lane(server_seed, difficulty, lane_count)
+    fairness_version = CHICKEN_ROAD_FAIRNESS_VERSION
+    server_seed_hash = chicken_road_commitment(server_seed, difficulty, fairness_version)
+    round_id = str(uuid.uuid4())
+    round_number = await _next_round_number()
+
+    # Play always attempts the first hop onto lane 1 (the 1.01x manhole).
+    first = _hop_onto({
+        'crash_lane': crash_lane,
+        'multipliers': multipliers,
+        'lane_count': lane_count,
+        'current_lane': 0,
+        'current_multiplier': 1.0,
+    }, 1)
+    crashed = bool(first['crashed'])
+    status = 'CRASHED' if crashed else 'PLAYING'
+    current_lane = 1
+    current_mult = first['multiplier']
+
+    doc = {
+        'id': round_id,
+        'user_id': user['id'],
+        'round_number': round_number,
+        'amount': body.amount,
+        'difficulty': difficulty,
+        'lane_count': lane_count,
+        'multipliers': multipliers,
+        'crash_lane': crash_lane,
+        'current_lane': current_lane,
+        'current_multiplier': current_mult,
+        'status': status,
+        'payout': 0,
+        'server_seed': server_seed,
+        'server_seed_hash': server_seed_hash,
+        'fairness_version': fairness_version,
+        'created_at': _now_iso(),
     }
+    if crashed:
+        doc['settled_at'] = _now_iso()
 
     async def reserve_and_debit(session):
         kwargs = {'session': session} if session is not None else {}
-        existing = await db.chicken_road_bets.find_one({
-            'user_id': user['id'], 'round_number': target_rn,
-            'panel': body.panel, 'status': 'OPEN',
-        }, **kwargs)
-        if existing:
-            raise DuplicateKeyError('active Chicken Road panel bet already exists')
-        await debit_chips(
-            user['id'], body.amount, f'Chicken Road bet (round {target_rn})', ref=bet_id,
-            kind=ledger.STAKE, game=SLUG, session=session,
+        existing_again = await db.chicken_road_rounds.find_one(
+            {'user_id': user['id'], 'status': 'PLAYING'}, **kwargs,
         )
-        await db.chicken_road_bets.insert_one(dict(bet), **kwargs)
+        if existing_again:
+            raise DuplicateKeyError('active Chicken Road round already exists')
+        await debit_chips(
+            user['id'], body.amount, f'Chicken Road bet (round {round_number})',
+            ref=round_id, kind=ledger.STAKE, game=SLUG, session=session,
+        )
+        await db.chicken_road_rounds.insert_one(dict(doc), **kwargs)
+        if crashed:
+            await _history_doc(
+                doc, 0,
+                {
+                    'result': 'crashed',
+                    'lane': 1,
+                    'crash_lane': crash_lane,
+                    'difficulty': difficulty,
+                },
+                session=session,
+            )
 
     try:
         await run_game_transaction(client, reserve_and_debit)
     except DuplicateKeyError:
-        raise HTTPException(status_code=409, detail='You already have an active bet on this panel for that round')
+        raise HTTPException(status_code=409, detail='You already have a chicken on the road')
     except InsufficientChips:
         raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
+
     balance = await _fresh_balance(user['id'])
+    persisted = await db.chicken_road_rounds.find_one({'id': round_id}, {'_id': 0})
     return {
-        'bet_id': bet_id, 'round_number': target_rn, 'panel': body.panel,
-        'queued': target_rn != r['round_number'], 'balance': balance,
+        'result': 'crashed' if crashed else 'hopped',
+        'balance': balance,
+        'round': _public_round(persisted),
     }
 
 
-@router.post('/live/chicken-road/bets/cancel')
-async def chicken_road_cancel_bet(body: BetRef, user: dict = Depends(require_active_player)):
+@router.post('/live/chicken-road/go')
+async def chicken_road_go(body: RoundRef, user: dict = Depends(require_active_player)):
     await require_playable_game(SLUG)
-    b = await db.chicken_road_bets.find_one({'id': body.bet_id, 'user_id': user['id']})
-    if not b:
-        raise HTTPException(status_code=404, detail='Bet not found')
-    if b['status'] != 'OPEN':
-        raise HTTPException(status_code=400, detail='Bet already settled')
-    r = await db.chicken_road_rounds.find_one({}, sort=[('round_number', -1)])
-    now = time.time()
-    phase, t = _cr_phase(r, now) if r else ('BETTING', 99)
-    cancellable = b['round_number'] > r['round_number'] or (
-        b['round_number'] == r['round_number'] and phase == 'BETTING' and t > 0.3)
-    if not cancellable:
-        raise HTTPException(status_code=400, detail='Too late to cancel - the chicken is crossing')
+    r = await db.chicken_road_rounds.find_one({'id': body.round_id, 'user_id': user['id']})
+    if not r:
+        raise HTTPException(status_code=404, detail='Round not found')
+    if r.get('status') != 'PLAYING':
+        raise HTTPException(status_code=400, detail='This crossing has already ended')
 
-    async def cancel_and_refund(session):
-        kwargs = {'session': session} if session is not None else {}
-        current = await db.chicken_road_bets.find_one(
-            {'id': b['id'], 'user_id': user['id'], 'status': 'OPEN'}, **kwargs,
-        )
-        if not current:
-            return None
-        res = await db.chicken_road_bets.update_one(
-            {'id': current['id'], 'status': 'OPEN'},
-            {'$set': {'status': 'CANCELLED', 'active': False, 'settled_at': _now_iso()}},
-            **kwargs,
-        )
-        if res.modified_count == 0:
-            return None
-        return await credit_chips(
-            user['id'], current['amount'], 'Chicken Road bet cancelled', ref=current['id'],
-            kind=ledger.REFUND, game=SLUG, session=session,
-        )
+    hop = _hop_onto(r, int(r.get('current_lane') or 0) + 1)
+    if hop['blocked']:
+        raise HTTPException(status_code=400, detail='The chicken is already on the last lane — cash out')
 
-    balance = await run_game_transaction(client, cancel_and_refund)
-    if balance is None:
-        raise HTTPException(status_code=400, detail='Bet already settled')
-    return {'message': 'Bet cancelled', 'refunded': b['amount'], 'balance': balance}
+    if hop['crashed']:
+        await db.chicken_road_rounds.update_one(
+            {'id': r['id'], 'status': 'PLAYING'},
+            {'$set': {
+                'current_lane': hop['lane'],
+                'current_multiplier': hop['multiplier'],
+            }},
+        )
+        r['current_lane'] = hop['lane']
+        r['current_multiplier'] = hop['multiplier']
+        settled = await _settle_crash(r)
+        if settled is None:
+            latest = await db.chicken_road_rounds.find_one({'id': r['id']}, {'_id': 0})
+            balance = await _fresh_balance(user['id'])
+            return {
+                'result': 'crashed' if latest and latest.get('status') == 'CRASHED' else latest.get('status'),
+                'balance': balance,
+                'round': _public_round(latest) if latest else None,
+            }
+        latest = await db.chicken_road_rounds.find_one({'id': r['id']}, {'_id': 0})
+        balance = await _fresh_balance(user['id'])
+        return {'result': 'crashed', 'balance': balance, 'round': _public_round(latest)}
+
+    res = await db.chicken_road_rounds.update_one(
+        {'id': r['id'], 'status': 'PLAYING', 'current_lane': r['current_lane']},
+        {'$set': {
+            'current_lane': hop['lane'],
+            'current_multiplier': hop['multiplier'],
+        }},
+    )
+    if res.modified_count == 0:
+        latest = await db.chicken_road_rounds.find_one({'id': r['id']}, {'_id': 0})
+        raise HTTPException(status_code=409, detail='Hop already applied')
+    latest = await db.chicken_road_rounds.find_one({'id': r['id']}, {'_id': 0})
+    balance = await _fresh_balance(user['id'])
+    return {'result': 'hopped', 'balance': balance, 'round': _public_round(latest)}
 
 
 @router.post('/live/chicken-road/cashout')
-async def chicken_road_cashout(body: BetRef, user: dict = Depends(require_active_player)):
+async def chicken_road_cashout(body: RoundRef, user: dict = Depends(require_active_player)):
     await require_playable_game(SLUG)
-    b = await db.chicken_road_bets.find_one({'id': body.bet_id, 'user_id': user['id']})
-    if not b:
-        raise HTTPException(status_code=404, detail='Bet not found')
-    if b['status'] != 'OPEN':
-        raise HTTPException(status_code=400, detail='Bet already settled')
-    r = await db.chicken_road_rounds.find_one({'round_number': b['round_number']})
+    r = await db.chicken_road_rounds.find_one({'id': body.round_id, 'user_id': user['id']})
     if not r:
-        raise HTTPException(status_code=400, detail='Round not found')
-    now = time.time()
-    if now < r['run_start']:
-        raise HTTPException(status_code=400, detail='The chicken has not started crossing yet')
-    if now >= r['crash_at']:
-        if r.get('status') == 'OPEN':
-            await _cr_settle_round(r)
-        balance = await _fresh_balance(user['id'])
-        return {'result': 'crashed', 'crash_point': r['crash_point'], 'payout': 0, 'balance': balance}
-    mult = chicken_road_multiplier(now - r['run_start'])
-    payout = await _cr_cash_bet(b, mult, cashout_deadline=r['crash_at'])
-    if payout is None:
-        now = time.time()
-        if now >= r['crash_at']:
-            if r.get('status') == 'OPEN':
-                await _cr_settle_round(r)
-            balance = await _fresh_balance(user['id'])
-            return {'result': 'crashed', 'crash_point': r['crash_point'], 'payout': 0, 'balance': balance}
-        raise HTTPException(status_code=400, detail='Bet already settled')
+        raise HTTPException(status_code=404, detail='Round not found')
+    if r.get('status') != 'PLAYING':
+        raise HTTPException(status_code=400, detail='This crossing has already ended')
+    if int(r.get('current_lane') or 0) < 1:
+        raise HTTPException(status_code=400, detail='The chicken has not reached a manhole yet')
+
+    payout = await _settle_cashout(r, float(r.get('current_multiplier') or 1.0))
+    latest = await db.chicken_road_rounds.find_one({'id': r['id']}, {'_id': 0})
     balance = await _fresh_balance(user['id'])
-    return {'result': 'cashed_out', 'multiplier': mult, 'payout': payout, 'balance': balance}
+    if payout is None:
+        if latest and latest.get('status') == 'CRASHED':
+            return {'result': 'crashed', 'payout': 0, 'balance': balance, 'round': _public_round(latest)}
+        raise HTTPException(status_code=400, detail='Round already settled')
+    return {
+        'result': 'cashed_out',
+        'multiplier': float(latest.get('current_multiplier') or 0),
+        'payout': payout,
+        'balance': balance,
+        'round': _public_round(latest),
+    }
+
+
+# Back-compat aliases so a stale client that still posts /bets cannot silently
+# talk to the deleted Aviator-style machine. These always 410.
+class _Gone(BaseModel):
+    amount: Optional[int] = None
+    bet_id: Optional[str] = None
+    panel: Optional[int] = None
+    auto_cashout: Optional[float] = None
+
+
+@router.post('/live/chicken-road/bets')
+async def chicken_road_place_bet_gone(body: _Gone = None, user: dict = Depends(require_active_player)):
+    raise HTTPException(status_code=410, detail='Chicken Road now uses /play, /go and /cashout')
+
+
+@router.post('/live/chicken-road/bets/cancel')
+async def chicken_road_cancel_gone(body: _Gone = None, user: dict = Depends(require_active_player)):
+    raise HTTPException(status_code=410, detail='Chicken Road now uses /play, /go and /cashout')

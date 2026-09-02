@@ -5,7 +5,7 @@ import { API_BASE } from "@/lib/api";
 
 /**
  * The live Chicken Road surface is an isolated same-origin Canvas 2D micro-app
- * (public/chicken-road-live), embedded exactly like the Aviator cabinet so its
+ * (public/chicken-road-live), embedded as a same-origin iframe so its
  * dense game-specific renderer and Web Audio engine stay out of the React
  * bundle. Authentication (the fg_token in localStorage) and the chip balance
  * still come from the same session; the API origin is handed to the frame so it
@@ -35,10 +35,10 @@ export default function ChickenRoadGame() {
   }, [navigate, setUser]);
 
   const apiOrigin = String(API_BASE || "").replace(/\/api\/?$/, "");
-  const src = `/chicken-road-live/index.html?v=20260902&api=${encodeURIComponent(apiOrigin)}`;
+  const src = `/chicken-road-live/index.html?v=20260902-hop&api=${encodeURIComponent(apiOrigin)}`;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-[#0a0705]">
+    <div className="fixed inset-0 z-[100] bg-[#5a6570]">
       <iframe
         data-testid="chicken-road-live-game"
         title="Chicken Road live game"
@@ -51,8 +51,8 @@ export default function ChickenRoadGame() {
           width: "var(--fg-usable-w, 100vw)",
           height: "var(--fg-usable-h, 100dvh)",
           border: 0,
-          background: "#0a0705",
-          boxShadow: "0 0 0 100vmax #0a0705",
+          background: "#5a6570",
+          boxShadow: "0 0 0 100vmax #5a6570",
           zIndex: 100,
         }}
       />

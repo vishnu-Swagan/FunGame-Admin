@@ -15,8 +15,7 @@ import ChickenRoadGame from "@/pages/play/ChickenRoadGame";
 export const AviatorCabinet = () => <AviatorGame />;
 
 /**
- * Chicken Road is the second self-sizing crash cabinet. Like Aviator it renders
- * its own fullscreen Canvas surface inside the frame, so it gets the wrapper but
- * not the fixed-canvas scaling.
+ * Chicken Road is a self-sizing hop cabinet. It renders its own fullscreen
+ * Canvas street inside the frame, so it gets the wrapper but not fixed-canvas scaling.
  */
 export const ChickenRoadCabinet = () => <ChickenRoadGame />;

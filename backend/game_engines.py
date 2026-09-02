@@ -971,23 +971,55 @@ def aviator_time_for(mult):
 
 
 # ---------------- Chicken Road helpers ----------------
-# Chicken Road is a crash table (original IP): a chicken crosses a night highway,
-# the multiplier climbs, and the player cashes out before a vehicle hits it.
-# It reuses the very same server-authoritative crash engine as Aviator - the
-# flight/climb curve (aviator_multiplier) and its inverse (aviator_time_for) are
-# shared verbatim so the on-screen multiplier is locked to elapsed time exactly
-# like Aviator. Only the fairness namespace and the configurable return factor
-# are distinct, so the two tables can never share a seed or commitment.
-CHICKEN_ROAD_GROWTH = AVIATOR_GROWTH
+# Chicken Road is a hop-across-lanes table (original IP): the chicken starts on
+# the sidewalk and hops right onto successive manhole covers. Each lane has a
+# published multiplier; a seeded crash lane ends the crossing. This is NOT the
+# Aviator climb curve — the two tables share a chip ledger, not a flight engine.
 CHICKEN_ROAD_FAIRNESS_VERSION = 1
-# Unlike Aviator (a private, fail-closed operator setting), Chicken Road ships a
-# safe default so the play-chip table runs locally and in tests without extra
-# configuration. An operator may still pin it via the environment.
+CHICKEN_ROAD_LANE_COUNT = 30
 CHICKEN_ROAD_DEFAULT_RETURN_FACTOR = 0.97
+
+# Per-hop crash probability, plus the client traffic density/speed the cabinet
+# uses to draw cars. Harder difficulties crash earlier AND look busier.
+CHICKEN_ROAD_DIFFICULTIES = {
+    'easy':     {'label': 'Easy',     'p': 0.05, 'traffic': 0.55, 'speed': 1.00},
+    'medium':   {'label': 'Medium',   'p': 0.10, 'traffic': 0.80, 'speed': 1.35},
+    'hard':     {'label': 'Hard',     'p': 0.16, 'traffic': 1.05, 'speed': 1.80},
+    'hardcore': {'label': 'Hardcore', 'p': 0.25, 'traffic': 1.30, 'speed': 2.25},
+}
+
+# Easy table is authored to match the reference stills (1.01x, 1.03x, 1.06x,
+# 1.15x / 1.19x, 8.36x / 12.08x). Other difficulties grow faster.
+_EASY_LANE_MULTS = [
+    1.01, 1.03, 1.06, 1.10, 1.15, 1.19, 1.24, 1.31, 1.39, 1.48,
+    1.58, 1.70, 1.84, 2.00, 2.20, 2.45, 2.75, 3.12, 3.58, 4.20,
+    5.00, 6.05, 7.40, 8.36, 12.08, 18.20, 28.50, 46.00, 78.00, 140.00,
+]
+_MEDIUM_LANE_MULTS = [
+    1.02, 1.07, 1.15, 1.25, 1.38, 1.54, 1.74, 2.00, 2.32, 2.72,
+    3.22, 3.86, 4.68, 5.74, 7.12, 8.95, 11.40, 14.70, 19.20, 25.50,
+    34.40, 47.00, 65.00, 91.00, 130.00, 188.00, 275.00, 410.00, 620.00, 950.00,
+]
+_HARD_LANE_MULTS = [
+    1.05, 1.18, 1.36, 1.60, 1.92, 2.35, 2.92, 3.70, 4.75, 6.20,
+    8.20, 11.00, 15.00, 20.80, 29.20, 41.50, 60.00, 88.00, 130.00, 195.00,
+    300.00, 465.00, 730.00, 1160.00, 1860.00, 3000.00, 4900.00, 8000.00, 13200.00, 22000.00,
+]
+_HARDCORE_LANE_MULTS = [
+    1.12, 1.40, 1.82, 2.45, 3.40, 4.85, 7.10, 10.60, 16.20, 25.20,
+    40.00, 64.50, 106.00, 176.00, 296.00, 505.00, 870.00, 1520.00, 2680.00, 4780.00,
+    8600.00, 15600.00, 28500.00, 52500.00, 98000.00, 184000.00, 348000.00, 662000.00, 999999.00, 999999.00,
+]
+_LANE_TABLES = {
+    'easy': _EASY_LANE_MULTS,
+    'medium': _MEDIUM_LANE_MULTS,
+    'hard': _HARD_LANE_MULTS,
+    'hardcore': _HARDCORE_LANE_MULTS,
+}
 
 
 def chicken_road_return_factor():
-    """Return the Chicken Road probability factor (env override, else default)."""
+    """Operator RTP pin (env override, else default). Hop crash-p is separate."""
     raw_factor = os.environ.get('CHICKEN_ROAD_RETURN_FACTOR', '').strip()
     if not raw_factor:
         return CHICKEN_ROAD_DEFAULT_RETURN_FACTOR
@@ -998,41 +1030,41 @@ def chicken_road_return_factor():
 
 
 def chicken_road_uniform_from_seed(server_seed):
-    digest = hashlib.sha256(f'chicken-road-crash-v1:{server_seed}'.encode()).hexdigest()
+    digest = hashlib.sha256(f'chicken-road-hop-v1:{server_seed}'.encode()).hexdigest()
     return int(digest[:13], 16) / (2 ** 52)
 
 
-def chicken_road_commitment_payload(server_seed, return_factor,
+def chicken_road_commitment_payload(server_seed, difficulty='easy',
                                     version=CHICKEN_ROAD_FAIRNESS_VERSION):
-    """Bind the seed and the return factor before bets close for a round."""
-    return f'chicken-road-commit-v1:{aviator_factor_text(return_factor)}:{server_seed}'
+    """Bind the seed and the difficulty before the first hop."""
+    return f'chicken-road-hop-commit-v{int(version)}:{difficulty}:{server_seed}'
 
 
-def chicken_road_commitment(server_seed, return_factor,
+def chicken_road_commitment(server_seed, difficulty='easy',
                             version=CHICKEN_ROAD_FAIRNESS_VERSION):
-    payload = chicken_road_commitment_payload(server_seed, return_factor, version)
+    payload = chicken_road_commitment_payload(server_seed, difficulty, version)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def chicken_road_crash_point(server_seed=None, return_factor=None):
-    """The immutable multiplier a round crashes at (the vehicle hits the chicken)."""
-    return_factor = chicken_road_return_factor() if return_factor is None else return_factor
-    u = chicken_road_uniform_from_seed(server_seed) if server_seed is not None else RNG.random()
-    crash = max(1.0, return_factor / max(1e-9, 1 - u))
-    # The displayed crash is the last fully reached cent, exactly as Aviator does,
-    # so an auto-cashout target the run never reached is never paid.
-    return min(1_000_000.0, math.floor(crash * 100) / 100)
+def chicken_road_lane_multipliers(difficulty='easy', lane_count=None):
+    """Published per-lane multipliers (1-indexed via list position)."""
+    key = (difficulty or 'easy').strip().lower()
+    table = list(_LANE_TABLES.get(key) or _EASY_LANE_MULTS)
+    n = CHICKEN_ROAD_LANE_COUNT if lane_count is None else int(lane_count)
+    return [round(float(x), 2) for x in table[:n]]
 
 
-def chicken_road_multiplier(elapsed_seconds):
-    """The climbing multiplier - shares Aviator's reference curve verbatim."""
-    return aviator_multiplier(elapsed_seconds)
-
-
-def chicken_road_time_for(mult):
-    """Inverse of the climb curve - shares Aviator's reference inverse verbatim."""
-    return aviator_time_for(mult)
-
+def chicken_road_crash_lane(server_seed, difficulty='easy', lane_count=None):
+    """1-indexed lane the chicken is hit on. May be lane_count+1 (safe crossing)."""
+    n = CHICKEN_ROAD_LANE_COUNT if lane_count is None else int(lane_count)
+    key = (difficulty or 'easy').strip().lower()
+    spec = CHICKEN_ROAD_DIFFICULTIES.get(key) or CHICKEN_ROAD_DIFFICULTIES['easy']
+    p = float(spec['p'])
+    u = chicken_road_uniform_from_seed(server_seed)
+    u = min(max(u, 1e-12), 1 - 1e-12)
+    # Inverse CDF of Geometric(p) with support 1,2,3,...
+    k = int(math.floor(math.log(1.0 - u) / math.log(1.0 - p))) + 1
+    return min(n + 1, max(1, k))
 
 # ---------------- Engine registry (instant games) ----------------
 def make_slot_engine(slug):

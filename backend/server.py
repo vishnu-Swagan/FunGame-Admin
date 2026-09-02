@@ -75,11 +75,10 @@ async def _hold_keepalive_lock():
 
 
 async def _aviator_keepalive():
-    """Keep the universal crash-table round machines ticking 24/7 (leader only).
+    """Keep the Aviator crash-table ticking 24/7 (leader only).
 
-    One leader lock drives both crash tables (Aviator and Chicken Road) so their
-    DB-chained rounds keep advancing between requests without two competing
-    keepalive tasks."""
+    Chicken Road is player-paced (Play / GO / CASH OUT). The hop engine still
+    exposes advance_chicken_road so abandoned crossings can be expired."""
     from routes_live import advance_aviator
     from routes_chicken_road import advance_chicken_road
     while True:
@@ -179,13 +178,17 @@ async def _core_indexes():
         name='aviator_one_active_bet_per_panel',
     )
     await db.chicken_road_rounds.create_index('round_number', unique=True)
-    await db.chicken_road_bets.create_index([('round_number', 1), ('status', 1)])
-    await db.chicken_road_bets.create_index([('user_id', 1), ('round_number', 1)])
-    await db.chicken_road_bets.create_index(
-        [('user_id', 1), ('round_number', 1), ('panel', 1)],
+    await db.chicken_road_rounds.create_index(
+        'id', unique=True,
+        partialFilterExpression={'id': {'$type': 'string'}},
+        name='chicken_road_round_id_unique_string',
+    )
+    await db.chicken_road_rounds.create_index([('user_id', 1), ('status', 1)])
+    await db.chicken_road_rounds.create_index(
+        [('user_id', 1)],
         unique=True,
-        partialFilterExpression={'active': True},
-        name='chicken_road_one_active_bet_per_panel',
+        partialFilterExpression={'status': 'PLAYING'},
+        name='chicken_road_one_active_round_per_user',
     )
 
 
