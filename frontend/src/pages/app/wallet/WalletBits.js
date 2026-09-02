@@ -33,6 +33,11 @@ export function WalletBalanceCard({ wallet }) {
             <p data-testid="wallet-available-balance" className="tabular-nums text-4xl font-extrabold text-primary">{formatChips(wallet.available_chips)}</p>
           </div>
         </div>
+        {wallet.wager_remaining_chips > 0 && (
+          <p className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-[11px] text-amber-100">
+            Wager remaining: {formatChips(wallet.wager_remaining_chips)} chips before withdrawal unlocks.
+          </p>
+        )}
         <div className="mt-5 grid grid-cols-3 gap-2">
           {items.map(({ label, value, icon: Icon, accent }) => (
             <div key={label} className="rounded-xl border border-white/10 bg-black/15 p-3 min-w-0">

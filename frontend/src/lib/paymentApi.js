@@ -252,6 +252,14 @@ export const adminPayments = {
     );
     return data;
   },
+  async retryOperatorPayout(id) {
+    const { data } = await financialApi.post(
+      `${ADMIN_ROOT}/operator-requests/${encodeURIComponent(id)}/retry-payout`,
+      {},
+      { __noFailover: true },
+    );
+    return data;
+  },
   async reconcileEvent(id) {
     const { data } = await financialApi.post(`${ADMIN_ROOT}/events/${encodeURIComponent(id)}/reconcile`, {}, { __noFailover: true });
     return data;

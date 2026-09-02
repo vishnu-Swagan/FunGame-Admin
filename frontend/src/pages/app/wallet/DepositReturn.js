@@ -9,6 +9,8 @@ import { errMsg } from "@/lib/api";
 import { payments } from "@/lib/paymentApi";
 import { TERMINAL_DEPOSIT_STATUSES } from "@/lib/walletUtils";
 import { PaymentStatus } from "@/pages/app/wallet/WalletBits";
+import WagerBonusOverlay from "@/components/promo/WagerBonusOverlay";
+import { promoApi } from "@/lib/promoApi";
 
 export const DEPOSIT_REFRESH_INTERVAL_MS = 7000;
 
@@ -87,6 +89,7 @@ export default function DepositReturn() {
   const [utrBusy, setUtrBusy] = useState(false);
   const [utrError, setUtrError] = useState("");
   const [utrNotice, setUtrNotice] = useState("");
+  const [overlay, setOverlay] = useState(null);
   const requestInFlight = useRef(false);
 
   const check = useCallback(async () => {
@@ -100,6 +103,11 @@ export default function DepositReturn() {
       setError("");
       if (String(result?.status).toUpperCase() === "CREDITED") {
         try { await refreshUser(); } catch (_error) { /* Status remains authoritative if profile refresh fails. */ }
+        try {
+          const promo = result?.overlay ? { overlay: result.overlay } : await promoApi.state();
+          const next = result?.overlay || promo?.wager?.overlay;
+          if (next) setOverlay(next);
+        } catch (_error) { /* Overlay is optional after credit. */ }
       }
     } catch (requestError) {
       setError("We could not refresh this payment yet. Your wallet changes only after the server verifies it with the payment provider; we will keep checking.");
@@ -166,6 +174,7 @@ export default function DepositReturn() {
         </form>
       )}
       <div className="grid grid-cols-2 gap-3"><Button type="button" variant="outline" onClick={check} disabled={checking} className="h-12 rounded-xl border-white/15"><RefreshCw className={`mr-2 h-4 w-4 ${checking ? "animate-spin" : ""}`} />Refresh payment status</Button><Button type="button" onClick={() => navigate("/chips/activity", { replace: true })} className="h-12 rounded-xl font-bold">Wallet activity</Button></div>
+      <WagerBonusOverlay overlay={overlay} onClose={() => setOverlay(null)} />
     </PageTransition>
   );
 }

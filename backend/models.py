@@ -109,6 +109,7 @@ class SignupRequestCreate(BaseModel):
     # cost the operator the registration. It is carried through and resolved at
     # approval, falling back to the house account.
     referral_code: Optional[str] = Field(default=None, max_length=16)
+    device_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator('phone')
     @classmethod

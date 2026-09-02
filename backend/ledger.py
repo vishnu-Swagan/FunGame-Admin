@@ -155,4 +155,11 @@ async def debit_chips(user_id: str, amount: int, note: str, ref: str = None,
         raise InsufficientChips()
     balance_after = result.get('chip_balance', 0)
     await _write(user_id, kind, 'DEBIT', amount, balance_after, note, ref, game, session=session)
+    if kind == STAKE:
+        try:
+            import wager
+            await wager.consume_stake(user_id, amount, session=session)
+        except Exception:
+            import logging
+            logging.getLogger("ledger").exception("wager consume failed for %s", user_id)
     return balance_after

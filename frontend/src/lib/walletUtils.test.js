@@ -18,6 +18,7 @@ test("normalizes wallet balance aliases while preserving split balances", () => 
     bonus_chips: 20,
     held_chips: 10,
     withdrawable_chips: 60,
+    wager_remaining_chips: 0,
   });
   expect(normalizeWallet({}, 25).available_chips).toBe(25);
 });

@@ -28,6 +28,7 @@ export function normalizeWallet(payload, fallbackAvailable = 0) {
     bonus_chips: Number(source.bonus_chips ?? source.promotional_chips ?? source.bonus ?? 0) || 0,
     held_chips: Number(source.held_chips ?? source.held ?? 0) || 0,
     withdrawable_chips: Number(source.withdrawable_chips ?? source.withdrawable ?? source.cash_chips ?? available) || 0,
+    wager_remaining_chips: Number(source.wager_remaining_chips ?? 0) || 0,
   };
 }
 

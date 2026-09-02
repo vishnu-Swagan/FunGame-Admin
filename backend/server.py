@@ -38,6 +38,7 @@ import routes_migration_export
 import routes_game_settlement
 import routes_payments
 import routes_payment_hub
+import routes_promo
 import financial_wallet
 import operator_rail
 from payment_hub import service as payment_hub_service
@@ -433,6 +434,7 @@ api_router.include_router(routes_payments.router)
 api_router.include_router(routes_payments.admin_router)
 api_router.include_router(routes_payment_hub.router)
 api_router.include_router(routes_payment_hub.admin_router)
+api_router.include_router(routes_promo.router)
 app.include_router(api_router)
 
 # --- Security middleware ---
