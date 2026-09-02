@@ -14,6 +14,7 @@ from db import db
 
 PLAYABLE_GAME_SLUGS = frozenset({
     'aviator',
+    'chicken-road',
     'seven-up-down',
     'fun-roulette',
     'keno',

@@ -1,4 +1,5 @@
 import AviatorGame from "@/pages/play/AviatorGame";
+import ChickenRoadGame from "@/pages/play/ChickenRoadGame";
 
 /**
  * The machine that already fits itself.
@@ -12,3 +13,10 @@ import AviatorGame from "@/pages/play/AviatorGame";
  * shares this wrapper.
  */
 export const AviatorCabinet = () => <AviatorGame />;
+
+/**
+ * Chicken Road is the second self-sizing crash cabinet. Like Aviator it renders
+ * its own fullscreen Canvas surface inside the frame, so it gets the wrapper but
+ * not the fixed-canvas scaling.
+ */
+export const ChickenRoadCabinet = () => <ChickenRoadGame />;

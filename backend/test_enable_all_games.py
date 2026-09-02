@@ -42,7 +42,7 @@ async def main():
     config = await database.system_config.find_one({'key': 'main'})
 
     assert updated == len(rows)
-    assert len(reviewed_slugs) == 10
+    assert len(reviewed_slugs) == 11
     assert all(by_slug[slug]['status'] == 'ENABLED' for slug in reviewed_slugs)
     assert all(
         by_slug[slug]['status'] == 'COMING_SOON'
@@ -95,6 +95,10 @@ async def main():
             'aviator_state', 'aviator_round_fairness', 'aviator_top',
             'aviator_place_bet', 'aviator_cancel_bet', 'aviator_cashout',
             'live_state', 'live_place_bet', 'live_clear_bets', 'live_undo_bet',
+        },
+        'routes_chicken_road.py': {
+            'chicken_road_state', 'chicken_road_round_fairness', 'chicken_road_top',
+            'chicken_road_place_bet', 'chicken_road_cancel_bet', 'chicken_road_cashout',
         },
         'routes_blackjack.py': {'bj_state', 'bj_deal', 'bj_insurance', 'bj_action'},
         'routes_rummy.py': {
