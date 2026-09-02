@@ -7,6 +7,9 @@ import { playGameSound } from "../../sound";
 
 const BETTING_WINDOW_MS = 5000;
 const FLIGHT_HOVER_PROGRESS = 0.82;
+const REDUCED_MOTION_FLIGHT_PROGRESS = 0.035;
+const VISUAL_INTERPOLATION_MS = 80;
+const RADIAL_RAY_ANGLES = Array.from({ length: 24 }, (_, index) => index * 15);
 const FLIGHT_VIEWBOX_WIDTH = 1000;
 const FLIGHT_FLOOR_Y = 532;
 const PLANE_WIDTH = 190;
@@ -27,6 +30,15 @@ export const flightCurveValue = (seconds: number) => (
 	+ Math.pow(0.04 * seconds, 4)
 );
 
+export const interpolateVisualProgress = (
+	currentProgress: number,
+	targetProgress: number,
+	deltaMs: number,
+) => {
+	const interpolationStep = Math.min(1, Math.max(0, deltaMs) / VISUAL_INTERPOLATION_MS);
+	return currentProgress + ((targetProgress - currentProgress) * interpolationStep);
+};
+
 export const flightGeometryFor = (rawProgress: number) => {
 	const progress = Math.max(0.035, Math.min(FLIGHT_HOVER_PROGRESS, rawProgress));
 	const horizontalProgress = 1 - Math.pow(1 - progress, 1.3);
@@ -39,6 +51,12 @@ export const flightGeometryFor = (rawProgress: number) => {
 	const firstControlX = tailX * 0.34;
 	const secondControlX = tailX * 0.76;
 	const secondControlY = tailY + Math.max(42, (FLIGHT_FLOOR_Y - tailY) * 0.42);
+	const horizontalDerivative = 810 * 1.3 * Math.pow(Math.max(0.001, 1 - progress), 0.3);
+	const verticalDerivative = 420 * (
+		(2.33 * progress) + (1.05 * Math.pow(progress, 2))
+	);
+	const rawTangentDegrees = Math.atan2(verticalDerivative, horizontalDerivative) * (180 / Math.PI);
+	const restrainedTangentRotation = -Math.min(12, Math.max(7, 6.7 + (rawTangentDegrees * 0.09)));
 	const path = [
 		`M 4 ${FLIGHT_FLOOR_Y}`,
 		`C ${firstControlX.toFixed(2)} ${FLIGHT_FLOOR_Y}`,
@@ -53,7 +71,7 @@ export const flightGeometryFor = (rawProgress: number) => {
 		tailY,
 		planeX: tailX - PLANE_TAIL_X,
 		planeY: tailY - PLANE_TAIL_Y,
-		planeRotation: -7 - (5 * progress),
+		planeRotation: restrainedTangentRotation,
 		planeWidth: PLANE_WIDTH,
 		planeHeight: PLANE_HEIGHT,
 		propellerX: tailX - PLANE_TAIL_X + PLANE_PROPELLER_X,
@@ -67,7 +85,43 @@ export default function CrashStage() {
 	const [target, setTarget] = React.useState(1);
 	const [waiting, setWaiting] = React.useState(0);
 	const [flightSeconds, setFlightSeconds] = React.useState(0);
+	const [visualFlightProgress, setVisualFlightProgress] = React.useState(0);
+	const [decorativeMotionPaused, setDecorativeMotionPaused] = React.useState(
+		() => typeof document !== "undefined" && document.hidden,
+	);
+	const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(
+		() => typeof window !== "undefined"
+			&& typeof window.matchMedia === "function"
+			&& window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+	);
+	const propellerRef = React.useRef<SVGGElement>(null);
+	const propellerAnimationRef = React.useRef<Animation | null>(null);
+	const visualProgressRef = React.useRef(0);
+	const visualTargetProgressRef = React.useRef(0);
+	const visualAnimationFrameRef = React.useRef<number | null>(null);
+	const visualLastFrameRef = React.useRef<number | null>(null);
 	const stateReady = GameState === "BET" || GameState === "PLAYING" || GameState === "GAMEEND";
+	const visualPhase = GameState === "PLAYING"
+		? "is-flying"
+		: GameState === "GAMEEND"
+			? "is-ended"
+			: "is-waiting";
+
+	React.useEffect(() => {
+		const syncVisibility = () => setDecorativeMotionPaused(document.hidden);
+		document.addEventListener("visibilitychange", syncVisibility);
+		syncVisibility();
+		return () => document.removeEventListener("visibilitychange", syncVisibility);
+	}, []);
+
+	React.useEffect(() => {
+		if (typeof window.matchMedia !== "function") return undefined;
+		const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const syncPreference = () => setPrefersReducedMotion(query.matches);
+		query.addEventListener?.("change", syncPreference);
+		syncPreference();
+		return () => query.removeEventListener?.("change", syncPreference);
+	}, []);
 
 	React.useEffect(() => {
 		let interval: number | undefined;
@@ -120,19 +174,145 @@ export default function CrashStage() {
 	const flightProgress = GameState === "PLAYING" || GameState === "GAMEEND"
 		? multiplierProgress
 		: 0;
-	const flightGeometry = flightGeometryFor(flightProgress);
+
+	React.useLayoutEffect(() => {
+		visualTargetProgressRef.current = GameState === "PLAYING"
+			? Math.max(visualTargetProgressRef.current, flightProgress)
+			: flightProgress;
+
+		if (GameState === "PLAYING" && !prefersReducedMotion) return;
+
+		const staticProgress = prefersReducedMotion && flightProgress > 0
+			? REDUCED_MOTION_FLIGHT_PROGRESS
+			: flightProgress;
+		visualProgressRef.current = staticProgress;
+		setVisualFlightProgress((previousProgress) => (
+			Math.abs(previousProgress - staticProgress) < 0.00001
+				? previousProgress
+				: staticProgress
+		));
+	}, [GameState, flightProgress, prefersReducedMotion]);
+
+	React.useLayoutEffect(() => {
+		const cancelVisualFrame = () => {
+			if (visualAnimationFrameRef.current !== null) {
+				window.cancelAnimationFrame(visualAnimationFrameRef.current);
+				visualAnimationFrameRef.current = null;
+			}
+			visualLastFrameRef.current = null;
+		};
+
+		cancelVisualFrame();
+		if (GameState !== "PLAYING" || prefersReducedMotion || decorativeMotionPaused) {
+			return cancelVisualFrame;
+		}
+
+		// Entering or resuming a live round starts from the latest authoritative
+		// sample. Subsequent 20 ms logic samples only retarget this visual loop.
+		visualProgressRef.current = visualTargetProgressRef.current;
+		setVisualFlightProgress(visualTargetProgressRef.current);
+
+		const updateVisualProgress = (timestamp: number) => {
+			const previousTimestamp = visualLastFrameRef.current ?? timestamp;
+			const deltaMs = Math.min(64, Math.max(0, timestamp - previousTimestamp));
+			visualLastFrameRef.current = timestamp;
+
+			const nextProgress = interpolateVisualProgress(
+				visualProgressRef.current,
+				visualTargetProgressRef.current,
+				deltaMs,
+			);
+			visualProgressRef.current = nextProgress;
+			setVisualFlightProgress((previousProgress) => (
+				Math.abs(previousProgress - nextProgress) < 0.00001
+					? previousProgress
+					: nextProgress
+			));
+			visualAnimationFrameRef.current = window.requestAnimationFrame(updateVisualProgress);
+		};
+
+		visualAnimationFrameRef.current = window.requestAnimationFrame(updateVisualProgress);
+		return cancelVisualFrame;
+	}, [GameState, prefersReducedMotion, decorativeMotionPaused]);
+
+	const flightGeometry = flightGeometryFor(visualFlightProgress);
 	const showFlightTrail = GameState === "PLAYING" || GameState === "GAMEEND";
 	const bettingProgress = Math.max(0, Math.min(100, 100 - ((waiting / BETTING_WINDOW_MS) * 100)));
+
+	React.useLayoutEffect(() => {
+		const propeller = propellerRef.current;
+		if (!propeller || typeof propeller.animate !== "function") return;
+
+		propeller.dataset.motionDriver = "waapi";
+		const computedTransform = window.getComputedStyle(propeller).transform;
+		const matrix = computedTransform.match(/^matrix\(([^)]+)\)$/)?.[1]
+			.split(",")
+			.map((value) => Number(value.trim()));
+		const currentAngle = matrix && matrix.length >= 2
+			? Math.atan2(matrix[1], matrix[0]) * (180 / Math.PI)
+			: 0;
+
+		propellerAnimationRef.current?.cancel();
+		propellerAnimationRef.current = null;
+
+		if (prefersReducedMotion || GameState === "BET") {
+			propeller.style.transform = "rotate(0deg)";
+			return;
+		}
+
+		propeller.style.transform = `rotate(${currentAngle}deg)`;
+		const isFlying = GameState === "PLAYING";
+		propellerAnimationRef.current = propeller.animate(
+			[
+				{ transform: `rotate(${currentAngle}deg)` },
+				{ transform: `rotate(${currentAngle + (isFlying ? 360 : 150)}deg)` },
+			],
+			{
+				duration: isFlying ? 110 : 200,
+				iterations: isFlying ? Infinity : 1,
+				easing: isFlying ? "linear" : "cubic-bezier(0.23, 1, 0.32, 1)",
+				fill: "forwards",
+			},
+		);
+	}, [GameState, prefersReducedMotion, stateReady]);
+
+	React.useEffect(() => {
+		const animation = propellerAnimationRef.current;
+		if (!animation) return;
+		if (decorativeMotionPaused) animation.pause();
+		else if (animation.playState === "paused") animation.play();
+	}, [decorativeMotionPaused, GameState]);
+
+	React.useEffect(() => () => {
+		propellerAnimationRef.current?.cancel();
+		propellerAnimationRef.current = null;
+	}, []);
 
 	return (
 		<div className="crash-container">
 			<div
-				className={`space-box ${stateReady ? "native-visual-ready" : "renderer-pending"}`}
+				className={`space-box phase-${GameState.toLowerCase() || "pending"} ${stateReady ? "native-visual-ready" : "renderer-pending"}`}
 				id="space"
 				data-server-state-ready={stateReady ? "true" : "false"}
 				data-renderer-ready={stateReady ? "true" : "false"}
 				data-renderer-mode={stateReady ? "native" : "pending"}
+				data-motion-paused={decorativeMotionPaused ? "true" : "false"}
 			>
+				<div className="flight-atmosphere" aria-hidden="true">
+					<svg className="flight-rays" viewBox="0 0 156 156" preserveAspectRatio="none">
+						<defs>
+							<path id="aviator-flight-ray-wedge" d="M32 124 L174 124 L173.1 140.1 Z" />
+						</defs>
+						<g className="flight-rays-rotor">
+							{RADIAL_RAY_ANGLES.map((angle) => (
+								<use key={angle} href="#aviator-flight-ray-wedge" transform={`rotate(${angle} 32 124)`} />
+							))}
+						</g>
+					</svg>
+					<div className="flight-glow">
+						<div className="flight-glow-core" />
+					</div>
+				</div>
 				{stateReady && (
 					<div className="native-flight-visual" aria-hidden="true">
 						<svg className="flight-curve" viewBox={`0 0 ${FLIGHT_VIEWBOX_WIDTH} 560`} preserveAspectRatio="none">
@@ -160,23 +340,24 @@ export default function CrashStage() {
 								className={`plane-flight ${GameState === "GAMEEND" ? "crashed" : ""}`}
 								data-tail-x={flightGeometry.tailX.toFixed(2)}
 								data-tail-y={flightGeometry.tailY.toFixed(2)}
-								transform={`rotate(${flightGeometry.planeRotation.toFixed(2)} ${flightGeometry.tailX.toFixed(2)} ${flightGeometry.tailY.toFixed(2)})`}
+								transform={`translate(${flightGeometry.tailX.toFixed(2)} ${flightGeometry.tailY.toFixed(2)}) rotate(${flightGeometry.planeRotation.toFixed(2)})`}
 							>
 								<g className={`aircraft-sprite ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}>
 									<image
 										href={aviatorCraft}
 										data-flight-style="attachment-line-art"
 										data-aircraft-asset="transparent-png"
-										x={flightGeometry.planeX}
-										y={flightGeometry.planeY}
+										x={-PLANE_TAIL_X}
+										y={-PLANE_TAIL_Y}
 										width={flightGeometry.planeWidth}
 										height={flightGeometry.planeHeight}
 										className={`plane ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
 									/>
-									<g transform={`translate(${flightGeometry.propellerX.toFixed(2)} ${flightGeometry.propellerY.toFixed(2)})`}>
-										<g
-											className={`aircraft-propeller ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
-											data-propeller="spinning"
+									<g transform={`translate(${(-PLANE_TAIL_X + PLANE_PROPELLER_X).toFixed(2)} ${(-PLANE_TAIL_Y + PLANE_PROPELLER_Y).toFixed(2)})`}>
+									<g
+										ref={propellerRef}
+										className={`aircraft-propeller ${visualPhase} ${GameState === "PLAYING" || GameState === "GAMEEND" ? "visible" : ""}`}
+										data-propeller={GameState === "PLAYING" ? "spinning" : GameState === "GAMEEND" ? "coasting" : "stopped"}
 										>
 											<path
 												className="propeller-blade"
