@@ -7,6 +7,7 @@ can drive an operator-rail purchase to a terminal state or credit chips.
 from __future__ import annotations
 
 import asyncio
+import uuid
 import json
 import os
 import sys
@@ -399,11 +400,17 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.original_finance_db = operator_rail.finance.db
         self.original_compliance_db = operator_rail.compliance.db
         self.original_routes_db = routes.db
+        import wager
+        import free_cash
+        self.original_wager_db = wager.db
+        self.original_free_cash_db = free_cash.db
         operator_rail.db = self.db
         operator_rail.ledger.db = self.db
         operator_rail.finance.db = self.db
         operator_rail.compliance.db = self.db
         routes.db = self.db
+        wager.db = self.db
+        free_cash.db = self.db
         self.user = {
             "id": "player-sgpay24",
             "role": "PLAYER",
@@ -428,6 +435,10 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         operator_rail.finance.db = self.original_finance_db
         operator_rail.compliance.db = self.original_compliance_db
         routes.db = self.original_routes_db
+        import wager
+        import free_cash
+        wager.db = self.original_wager_db
+        free_cash.db = self.original_free_cash_db
         for key, value in self.saved_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -1009,7 +1020,107 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         }), 1)
 
 
+
+    async def test_admin_review_paid_utr_credits_like_admin_approve(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        self.assertEqual(deposit["source"], "ADMIN_REVIEW")
+        self.assertTrue(operator_rail._is_uuid_id(deposit["id"]))
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", "661158806148")
+
+        with patch.dict(os.environ, {"UPI_CHIP_PURCHASES_ENABLED": "false"}, clear=False):
+            self.assertTrue(await operator_rail.hosted_upi_reconciliation_needed())
+            result = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+
+        self.assertEqual(result["status"], "APPROVED")
+        self.assertFalse(result.get("duplicate"))
+        self.assertEqual(self.gateway.status_calls[-1], (deposit["id"], 10_000))
+        self.assertEqual(len(self.gateway.create_calls), 0)
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": deposit["id"]})
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertEqual(stored["source"], "ADMIN_REVIEW")
+        self.assertEqual(stored["provider_reference"], "661158806148")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "user_id": self.user["id"],
+            "kind": operator_rail.ledger.DEPOSIT,
+            "ref": f"operator-deposit:{deposit['id']}",
+        }), 1)
+
+    async def test_admin_review_already_credited_does_not_double(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", "661158806148")
+        first = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+        self.assertEqual(first["status"], "APPROVED")
+
+        second = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+        self.assertTrue(second.get("duplicate") or second.get("terminal"))
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "ref": f"operator-deposit:{deposit['id']}",
+        }), 1)
+
+        other = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        await self.db[operator_rail.COLLECTION].update_one(
+            {"id": other["id"]},
+            {"$set": {"status": "CREDITED", "provider_reference": "ALREADY-CREDITED-UTR"}},
+        )
+        credited = await operator_rail.reconcile_hosted_deposit(other["id"], self.gateway)
+        self.assertEqual(credited["status"], "CREDITED")
+        self.assertTrue(credited.get("duplicate") or credited.get("terminal"))
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "kind": operator_rail.ledger.DEPOSIT,
+        }), 1)
+
+    async def test_admin_review_failed_does_not_credit(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        self.gateway.status = DepositStatus(
+            "FAILED", 10_000, "INR", f"sgpay24:{deposit['id']}:failed",
+        )
+        result = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+        self.assertEqual(result["status"], "FAILED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": deposit["id"]})
+        self.assertEqual(stored["status"], "PENDING")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 100)
+        self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
+
+    async def test_admin_review_batch_credits_paid_and_skips_withdrawals(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        withdrawal_id = str(uuid.uuid4())
+        await self.db[operator_rail.COLLECTION].insert_one({
+            "id": withdrawal_id,
+            "user_id": self.user["id"],
+            "kind": "WITHDRAWAL",
+            "status": "PENDING",
+            "source": "ADMIN_REVIEW",
+            "amount_paise": 100_000,
+            "chips": 1_000,
+            "created_at": operator_rail.utcnow(),
+        })
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", "661158806148")
+        with patch.dict(os.environ, {"UPI_CHIP_PURCHASES_ENABLED": "false"}, clear=False):
+            result = await operator_rail.reconcile_hosted_batch(self.gateway)
+
+        self.assertEqual(result["checked"], 1)
+        self.assertEqual(result["updated"], 1)
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": deposit["id"]})
+        self.assertEqual(stored["status"], "APPROVED")
+        withdrawn = await self.db[operator_rail.COLLECTION].find_one({"id": withdrawal_id})
+        self.assertEqual(withdrawn["status"], "PENDING")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+
     def test_webhook_accepts_string_complete_as_paid_notice(self):
+
         gateway = provider()
         raw = json.dumps({
             "order_id": "order-12345678",

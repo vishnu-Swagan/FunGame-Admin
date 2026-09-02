@@ -39,7 +39,13 @@ DAILY_GUARD_COLLECTION = "upi_daily_purchase_guards"
 UPI_SOURCE = "SGPAY24_UPI"
 ADMIN_SOURCE = "ADMIN_REVIEW"
 HOSTED_TERMINAL = frozenset({"CREDITED", "FAILED", "EXPIRED", "RECONCILIATION_REQUIRED"})
+ADMIN_REVIEW_TERMINAL = frozenset({
+    "APPROVED", "REJECTED", "CREDITED", "FAILED", "EXPIRED", "RECONCILIATION_REQUIRED",
+})
 IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,159}$")
+_UUID_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 _TEST_HOSTED_LOCKS: dict[str, asyncio.Lock] = {}
 
 OPERATOR_LIMITS = {
@@ -115,6 +121,44 @@ def hosted_upi_reconciliation_provider(
     return provider
 
 
+def _is_uuid_id(value: Any) -> bool:
+    text_id = str(value or "").strip()
+    if not _UUID_ID_RE.fullmatch(text_id):
+        return False
+    try:
+        uuid.UUID(text_id)
+    except ValueError:
+        return False
+    return True
+
+
+def _admin_review_source(row: Mapping[str, Any] | None) -> bool:
+    source = str((row or {}).get("source") or "").strip()
+    return source in {"", ADMIN_SOURCE}
+
+
+def _sgpay_lookup_order_id(row: Mapping[str, Any]) -> str | None:
+    stored = str(row.get("provider_order_id") or "").strip()
+    if stored and stored != ADMIN_SOURCE:
+        return stored
+    request_id = str(row.get("id") or "").strip()
+    if _is_uuid_id(request_id):
+        return request_id
+    return None
+
+
+def _pending_sgpay_deposit_query() -> dict[str, Any]:
+    """Pending operator deposits that SgPay can identify (hosted UPI or uuid id)."""
+    return {
+        "kind": "DEPOSIT",
+        "status": {"$in": ["CREATED", "PENDING"]},
+        "$or": [
+            {"source": UPI_SOURCE},
+            {"id": {"$regex": _UUID_ID_RE.pattern}},
+        ],
+    }
+
+
 async def hosted_upi_reconciliation_needed() -> bool:
     if hosted_upi_requested():
         return True
@@ -123,11 +167,9 @@ async def hosted_upi_reconciliation_needed() -> bool:
     # stay configured, so existing open orders continue through the query below.
     if str(os.environ.get("PAYMENT_PROVIDER", "")).strip().lower() != "sgpay24":
         return False
-    open_order = await db[COLLECTION].find_one({
-        "source": UPI_SOURCE,
-        "kind": "DEPOSIT",
-        "status": {"$in": ["CREATED", "PENDING"]},
-    }, {"_id": 0, "id": 1})
+    open_order = await db[COLLECTION].find_one(
+        _pending_sgpay_deposit_query(), {"_id": 0, "id": 1},
+    )
     return bool(open_order)
 
 
@@ -938,17 +980,124 @@ async def settle_hosted_deposit(
     return result
 
 
-async def reconcile_hosted_deposit(
-    request_id: str, provider: PaymentProvider | None = None, *, actor: str = "upi-status-worker",
+async def _schedule_admin_review_retry(request_id: str, last_error: str | None = None) -> None:
+    current = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0, "reconcile_attempts": 1})
+    attempts = int((current or {}).get("reconcile_attempts") or 0)
+    delay = min(8 * (2 ** min(attempts, 4)), 60)
+    update: dict[str, Any] = {
+        "next_reconcile_at": utcnow() + timedelta(seconds=delay),
+        "updated_at": utcnow(),
+    }
+    if last_error:
+        update["last_error"] = last_error
+    await db[COLLECTION].update_one(
+        {"id": request_id, "kind": "DEPOSIT", "status": "PENDING"},
+        {"$set": update, "$inc": {"reconcile_attempts": 1}},
+    )
+
+
+async def settle_admin_review_deposit(
+    request_id: str, authoritative: DepositStatus, *, actor: str,
 ) -> dict[str, Any]:
-    gateway = provider or hosted_upi_reconciliation_provider()
-    row = await db[COLLECTION].find_one({
-        "id": request_id, "source": UPI_SOURCE, "kind": "DEPOSIT",
-    }, {"_id": 0})
-    if not row:
+    """Credit an ADMIN_REVIEW deposit the same way admin approve does, once."""
+    current = await db[COLLECTION].find_one({"id": request_id, "kind": "DEPOSIT"}, {"_id": 0})
+    if not current or not _admin_review_source(current):
         raise HTTPException(status_code=404, detail={
-            "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+            "code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found.",
         })
+    stored_status = str(current.get("status") or "PENDING").upper()
+    if stored_status in {"APPROVED", "CREDITED"}:
+        return {"id": request_id, "status": stored_status, "duplicate": True, "terminal": True}
+    if stored_status in ADMIN_REVIEW_TERMINAL:
+        return {"id": request_id, "status": stored_status, "terminal": True}
+    provider_status = str(authoritative.status or "").strip().upper()
+    if provider_status in {"CREATED", "PENDING", "PROCESSING", "AUTHORIZED"}:
+        await _schedule_admin_review_retry(request_id)
+        return {"id": request_id, "status": "PENDING"}
+    if provider_status in {"FAILED", "EXPIRED"}:
+        await _schedule_admin_review_retry(request_id, provider_status)
+        return {"id": request_id, "status": provider_status}
+    if provider_status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+        await _schedule_admin_review_retry(request_id, "UNSUPPORTED_STATUS")
+        return {"id": request_id, "status": "PENDING"}
+    reference = str(authoritative.provider_reference or "").strip().upper()
+    if (
+        authoritative.amount_paise != int(current["amount_paise"])
+        or authoritative.currency != "INR"
+        or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
+    ):
+        await _schedule_admin_review_retry(request_id, "SGPAY_MISMATCH")
+        return {"id": request_id, "status": "PENDING"}
+    claimed = await db[COLLECTION].find_one_and_update(
+        {
+            "id": request_id,
+            "kind": "DEPOSIT",
+            "status": "PENDING",
+            "$or": [
+                {"source": ADMIN_SOURCE},
+                {"source": {"$exists": False}},
+                {"source": None},
+            ],
+        },
+        {"$set": {"status": "PROCESSING", "updated_at": utcnow()}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not claimed:
+        existing = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0, "status": 1})
+        existing_status = str((existing or {}).get("status") or "").upper()
+        if existing_status in {"APPROVED", "CREDITED"}:
+            return {"id": request_id, "status": existing_status, "duplicate": True, "terminal": True}
+        return {"id": request_id, "status": existing_status or "PENDING"}
+    claimed.pop("_id", None)
+    try:
+        await ledger.credit_chips(
+            claimed["user_id"], int(claimed["chips"]),
+            "Admin-reviewed chip purchase",
+            ref=f"operator-deposit:{claimed['id']}",
+            kind=ledger.DEPOSIT,
+        )
+    except Exception:
+        await db[COLLECTION].update_one(
+            {"id": request_id, "status": "PROCESSING"},
+            {"$set": {"status": "PENDING", "updated_at": utcnow()}},
+        )
+        raise
+    try:
+        import wager
+        await wager.open_deposit_bucket(claimed["user_id"], int(claimed["chips"]), claimed["id"])
+    except Exception:
+        logging.getLogger("operator_rail").exception(
+            "wager overlay failed for admin-review deposit %s", request_id,
+        )
+    await db[COLLECTION].find_one_and_update(
+        {"id": request_id, "status": "PROCESSING"},
+        {"$set": {
+            "status": "APPROVED",
+            "provider_reference": reference,
+            "resolved_at": utcnow(),
+            "resolved_by": actor,
+            "last_error": None,
+            "updated_at": utcnow(),
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    return {"id": request_id, "status": "APPROVED", "duplicate": False}
+
+
+async def settle_operator_deposit(
+    request_id: str, authoritative: DepositStatus, *, actor: str,
+) -> dict[str, Any]:
+    row = await db[COLLECTION].find_one({"id": request_id, "kind": "DEPOSIT"}, {"_id": 0, "source": 1})
+    source = str((row or {}).get("source") or "").strip() or ADMIN_SOURCE
+    if source == UPI_SOURCE:
+        return await settle_hosted_deposit(request_id, authoritative, actor=actor)
+    return await settle_admin_review_deposit(request_id, authoritative, actor=actor)
+
+
+async def _reconcile_upi_row(
+    row: Mapping[str, Any], gateway: PaymentProvider, *, actor: str,
+) -> dict[str, Any]:
+    request_id = str(row["id"])
     if row.get("status") in HOSTED_TERMINAL:
         return {"id": request_id, "status": row["status"], "terminal": True}
     lookup_order_id = str(row.get("provider_order_id") or "").strip()
@@ -991,10 +1140,61 @@ async def reconcile_hosted_deposit(
             "code": "UPI_STATUS_UNAVAILABLE",
             "message": "UPI payment status is temporarily unavailable.",
         }) from exc
-    result = await settle_hosted_deposit(request_id, authoritative, actor=actor)
+    return await settle_hosted_deposit(request_id, authoritative, actor=actor)
+
+
+async def _reconcile_admin_review_row(
+    row: Mapping[str, Any], gateway: PaymentProvider, *, actor: str,
+) -> dict[str, Any]:
+    request_id = str(row["id"])
+    stored_status = str(row.get("status") or "PENDING").upper()
+    if stored_status in ADMIN_REVIEW_TERMINAL:
+        return {
+            "id": request_id,
+            "status": stored_status,
+            "terminal": True,
+            "duplicate": stored_status in {"APPROVED", "CREDITED"},
+        }
+    lookup_order_id = _sgpay_lookup_order_id(row)
+    if not lookup_order_id:
+        logging.getLogger("operator_rail").info(
+            "hosted UPI reconcile request_id=%s result=NO_SGPAY_LOOKUP",
+            request_id,
+        )
+        return {"id": request_id, "status": stored_status or "PENDING"}
+    try:
+        authoritative = await gateway.get_payment_status(
+            lookup_order_id, expected_amount_paise=int(row["amount_paise"]),
+        )
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        await _schedule_admin_review_retry(request_id, type(exc).__name__)
+        return {"id": request_id, "status": "PENDING", "result": "UNAVAILABLE"}
+    return await settle_admin_review_deposit(request_id, authoritative, actor=actor)
+
+
+async def reconcile_hosted_deposit(
+    request_id: str, provider: PaymentProvider | None = None, *, actor: str = "upi-status-worker",
+) -> dict[str, Any]:
+    gateway = provider or hosted_upi_reconciliation_provider()
+    row = await db[COLLECTION].find_one({
+        "id": request_id, "kind": "DEPOSIT",
+    }, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail={
+            "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+        })
+    source = str(row.get("source") or "").strip() or ADMIN_SOURCE
+    if source == UPI_SOURCE:
+        result = await _reconcile_upi_row(row, gateway, actor=actor)
+    elif source == ADMIN_SOURCE:
+        result = await _reconcile_admin_review_row(row, gateway, actor=actor)
+    else:
+        raise HTTPException(status_code=404, detail={
+            "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
+        })
     logging.getLogger("operator_rail").info(
-        "hosted UPI reconcile request_id=%s status=%s actor=%s",
-        request_id, result.get("status"), actor,
+        "hosted UPI reconcile request_id=%s source=%s status=%s actor=%s",
+        request_id, source, result.get("status"), actor,
     )
     return result
 
@@ -1096,21 +1296,28 @@ async def reconcile_hosted_batch(
         return {"checked": 0, "updated": 0, "errors": 0}
     gateway = provider or hosted_upi_reconciliation_provider()
     cap = max(1, min(int(limit), 100))
-    rows = await db[COLLECTION].find({
-        "source": UPI_SOURCE,
-        "kind": "DEPOSIT",
-        "status": {"$in": ["CREATED", "PENDING"]},
-        "$or": [
-            {"next_reconcile_at": {"$exists": False}},
-            {"next_reconcile_at": {"$lte": utcnow()}},
+    pending = _pending_sgpay_deposit_query()
+    query = {
+        "kind": pending["kind"],
+        "status": pending["status"],
+        "$and": [
+            {"$or": pending["$or"]},
+            {"$or": [
+                {"next_reconcile_at": {"$exists": False}},
+                {"next_reconcile_at": {"$lte": utcnow()}},
+            ]},
         ],
-    }, {"_id": 0, "id": 1}).sort("created_at", 1).limit(cap).to_list(cap)
+    }
+    rows = await db[COLLECTION].find(
+        query, {"_id": 0, "id": 1},
+    ).sort("created_at", 1).limit(cap).to_list(cap)
     updated = errors = 0
     request_ids = [row["id"] for row in rows]
+    settled = HOSTED_TERMINAL | {"APPROVED"}
     for row in rows:
         try:
             result = await reconcile_hosted_deposit(row["id"], gateway)
-            if result.get("status") in HOSTED_TERMINAL:
+            if result.get("status") in settled:
                 updated += 1
         except HTTPException:
             errors += 1

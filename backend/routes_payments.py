@@ -607,9 +607,11 @@ async def provider_webhook(provider_name: str, request: Request):
         ) from exc
     if event.data.get("requires_authenticated_status_lookup"):
         operator_order = await db[operator_rail.COLLECTION].find_one({
-            "source": operator_rail.UPI_SOURCE,
-            "provider": provider.name,
-            "provider_order_id": event.object_id,
+            "kind": "DEPOSIT",
+            "$or": [
+                {"provider_order_id": event.object_id},
+                {"id": event.object_id},
+            ],
         }, {"_id": 0})
         financial_order = None
         if not operator_order and financial_live:
@@ -630,7 +632,7 @@ async def provider_webhook(provider_name: str, request: Request):
             ) from exc
         provider_status = str(authoritative.status or "").strip().upper()
         if operator_order:
-            return await operator_rail.settle_hosted_deposit(
+            return await operator_rail.settle_operator_deposit(
                 str(operator_order["id"]), authoritative, actor="sgpay24-status-webhook",
             )
         if provider_status in {"CREATED", "PENDING", "PROCESSING", "AUTHORIZED"}:
