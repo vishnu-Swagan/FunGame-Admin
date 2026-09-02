@@ -51,6 +51,21 @@
     return { label: "Easy", traffic: 0.55, speed: 1, multipliers: [] };
   }
 
+  /* Frame ~3 hop-lanes in the portrait view. On the sidewalk, pin cam to 0
+   * so grass + curb stay in shot. On the road, sit the chicken in the left
+   * third so the next manhole reads as the centre lane. */
+  function frameCameraX(chickenX, viewW, onRoad) {
+    var x = Number(chickenX) || 0;
+    var w = Number(viewW) || 0;
+    if (!onRoad) return 0;
+    return x - w * 0.17;
+  }
+
+  function manholeRadius(laneW) {
+    var w = Number(laneW) || 96;
+    return Math.max(26, Math.min(42, w * 0.30));
+  }
+
   return {
     SIDEWALK: SIDEWALK,
     formatMult: formatMult,
@@ -60,5 +75,7 @@
     laneWorldX: laneWorldX,
     clamp: clamp,
     difficultySpec: difficultySpec,
+    frameCameraX: frameCameraX,
+    manholeRadius: manholeRadius,
   };
 });

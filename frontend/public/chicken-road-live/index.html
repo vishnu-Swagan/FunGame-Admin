@@ -3,22 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#2f3540" />
+  <meta name="theme-color" content="#2c3038" />
   <title>Chicken Road - Chakri.Casino</title>
   <style>
     :root {
       --dock: #2a2e36;
-      --dock-2: #343942;
-      --dock-3: #3d424c;
+      --dock-2: #32373f;
+      --dock-3: #3c424c;
       --line: rgba(255,255,255,0.10);
       --text: #f4f6f8;
       --muted: #a8b0bc;
       --green: #3dcc6a;
-      --green-2: #2daa54;
+      --green-2: #2bb656;
       --yellow: #f5c400;
-      --yellow-2: #d4a800;
-      --red: #e24b4b;
+      --yellow-2: #e0b000;
+      --red: #e53935;
       --teal: #2ec4c6;
+      --header: #2c3038;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -29,13 +30,13 @@
     #app {
       display: flex; flex-direction: column;
       height: 100dvh; width: 100vw; max-width: 520px; margin: 0 auto;
-      background: #5a6570; position: relative;
+      background: #7a828c; position: relative;
     }
     header {
       display: flex; align-items: center; gap: 8px;
-      padding: 8px 10px 6px; flex: 0 0 auto;
-      background: linear-gradient(180deg, rgba(20,22,26,0.55), rgba(20,22,26,0.12));
-      position: absolute; top: 0; left: 0; right: 0; z-index: 6;
+      padding: 8px 10px; flex: 0 0 auto;
+      background: var(--header);
+      z-index: 8;
     }
     .back {
       width: 36px; height: 36px; border-radius: 8px; border: 0; cursor: pointer;
@@ -43,16 +44,22 @@
     }
     .back svg { width: 18px; height: 18px; }
     .brand {
-      flex: 1; font-weight: 900; letter-spacing: 0.6px; font-size: 13px; line-height: 1.15;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+      flex: 1; min-width: 0;
+      display: flex; align-items: center; gap: 6px;
+      font-weight: 900; letter-spacing: 0.4px;
+      color: #fff;
     }
-    .brand .cas { font-size: 9px; letter-spacing: 1.6px; color: #dfe7ee; font-weight: 700; display: block; }
-    .brand .title { font-size: 15px; }
-    .brand .title em { font-style: normal; color: #ff4d4d; }
+    .brand .word { font-size: 15px; line-height: 1; }
+    .brand .mark2 {
+      width: 22px; height: 26px; flex: 0 0 auto;
+      display: block; margin: 0 -1px;
+      filter: drop-shadow(0 1px 0 #8a1515);
+    }
     .balance-pill {
       display: flex; align-items: center; gap: 6px;
-      background: rgba(20,22,26,0.72); border: 1px solid var(--line);
-      border-radius: 999px; padding: 5px 10px; font-weight: 800; font-size: 14px;
+      background: #1f232a; border: 1px solid var(--line);
+      border-radius: 999px; padding: 5px 10px 5px 12px; font-weight: 800; font-size: 14px;
+      flex: 0 0 auto;
     }
     .balance-pill .coin {
       width: 18px; height: 18px; border-radius: 50%; background: #fff;
@@ -60,30 +67,31 @@
     }
     .icon-btn {
       width: 36px; height: 36px; border-radius: 8px; border: 0; cursor: pointer;
-      background: rgba(20,22,26,0.55); color: #fff; display: grid; place-items: center;
+      background: transparent; color: #fff; display: grid; place-items: center;
     }
-    .icon-btn svg { width: 18px; height: 18px; }
+    .icon-btn svg { width: 20px; height: 20px; }
     button { font-family: inherit; }
 
+    .stage { flex: 1 1 auto; min-height: 0; position: relative; background: #7a828c; }
+    #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
     .ticker {
-      position: absolute; top: 52px; left: 10px; right: 10px; z-index: 6;
-      display: flex; align-items: center; gap: 10px; font-size: 11px;
+      position: absolute; top: 10px; left: 10px; right: 10px; z-index: 6;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; font-weight: 700;
       text-shadow: 0 1px 3px rgba(0,0,0,0.7); pointer-events: none;
     }
     .ticker .live { font-weight: 800; }
-    .ticker .online { display: flex; align-items: center; gap: 5px; color: #e8edf2; }
+    .ticker .online { display: flex; align-items: center; gap: 6px; color: #e8edf2; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #3dcc6a; box-shadow: 0 0 8px #3dcc6a; }
     .win-row {
-      position: absolute; top: 72px; left: 10px; z-index: 6;
+      position: absolute; top: 32px; left: 10px; z-index: 6;
       display: flex; align-items: center; gap: 6px; font-size: 12px;
       background: rgba(20,22,26,0.55); border-radius: 8px; padding: 4px 8px;
       pointer-events: none; max-width: 70%;
     }
     .win-row .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
     .win-row .amt { color: #3dcc6a; font-weight: 800; }
-
-    .stage { flex: 1 1 auto; min-height: 0; position: relative; }
-    #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
     .win-pop, .crash-pop {
       position: absolute; left: 50%; top: 38%; transform: translate(-50%,-50%) scale(0.7);
@@ -110,27 +118,33 @@
     }
     .bet-row { display: flex; align-items: center; gap: 8px; }
     .minmax {
-      flex: 0 0 auto; min-width: 58px; height: 40px; border: 0; border-radius: 8px;
+      flex: 0 0 auto; min-width: 58px; height: 42px; border: 0; border-radius: 8px;
       background: var(--dock-3); color: var(--text); font-weight: 800; font-size: 12px; cursor: pointer;
     }
     .amount {
-      flex: 1; height: 40px; border-radius: 8px; background: var(--dock-2);
+      flex: 1; height: 42px; border-radius: 8px; background: var(--dock-2);
       display: grid; place-items: center; font-weight: 800; font-size: 20px;
       border: 1px solid var(--line);
     }
     .amount input {
       width: 100%; height: 100%; background: transparent; border: 0; outline: none;
-      color: var(--text); font: inherit; text-align: center;
+      color: #c5ccd6; font: inherit; text-align: center;
     }
     .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .chip {
-      height: 40px; border: 0; border-radius: 8px; background: var(--dock-3);
+      height: 42px; border: 0; border-radius: 8px; background: var(--dock-3);
       color: var(--text); font-weight: 800; font-size: 13px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 4px;
+    }
+    .chip .coin {
+      width: 14px; height: 14px; border-radius: 50%; background: #fff;
+      color: #222; font-size: 9px; font-weight: 900; display: grid; place-items: center;
     }
     .chip.active { outline: 2px solid var(--yellow); color: var(--yellow); }
     .diff-row { position: relative; }
+    #app.playing .diff-row { display: none; }
     .diff {
-      width: 100%; height: 40px; border: 0; border-radius: 8px;
+      width: 100%; height: 42px; border: 0; border-radius: 8px;
       background: var(--dock-3); color: var(--text); font-weight: 800; font-size: 14px;
       display: flex; align-items: center; justify-content: space-between; padding: 0 14px; cursor: pointer;
     }
@@ -149,19 +163,20 @@
     .actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
     .actions.split { grid-template-columns: 1fr 1fr; }
     .action {
-      height: 56px; border: 0; border-radius: 12px; cursor: pointer;
-      font-weight: 900; font-size: 18px; letter-spacing: 0.4px;
+      height: 64px; border: 0; border-radius: 12px; cursor: pointer;
+      font-weight: 900; font-size: 20px; letter-spacing: 0.4px;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     .action.play, .action.go {
       background: linear-gradient(180deg, #4adf75, var(--green-2)); color: #fff;
       box-shadow: 0 6px 16px rgba(45,170,84,0.35);
     }
+    .action.go { font-size: 26px; letter-spacing: 1px; }
     .action.cashout {
-      background: linear-gradient(180deg, #ffd84a, var(--yellow-2)); color: #2a2208;
-      box-shadow: 0 6px 16px rgba(212,168,0,0.35); font-size: 15px;
+      background: linear-gradient(180deg, #ffd84a, var(--yellow-2)); color: #1a1404;
+      box-shadow: 0 6px 16px rgba(212,168,0,0.35); font-size: 16px; line-height: 1.1;
     }
-    .action.cashout .sub { font-size: 12px; font-weight: 800; }
+    .action.cashout .sub { font-size: 13px; font-weight: 800; margin-top: 2px; opacity: 0.9; }
     .action:disabled { filter: grayscale(0.5) brightness(0.7); pointer-events: none; }
     .action:active { transform: translateY(1px); }
 
@@ -201,11 +216,6 @@
       pointer-events: none; max-width: 90%;
     }
     .toast.show { opacity: 1; }
-    .lane-tag {
-      position: absolute; left: 50%; transform: translateX(-50%);
-      background: #2b7de9; color: #fff; font-weight: 900; font-size: 13px;
-      padding: 3px 10px; border-radius: 6px; pointer-events: none; z-index: 5; display: none;
-    }
     @media (prefers-reduced-motion: reduce) {
       .win-pop.show, .crash-pop.show { animation-duration: 0.01s; }
     }
@@ -213,27 +223,33 @@
 </head>
 <body>
   <div id="app">
+    <header>
+      <button class="back" id="exitBtn" title="Back" aria-label="Exit to lounge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18 9 12l6-6"/></svg>
+      </button>
+      <div class="brand" aria-label="Chicken Road">
+        <span class="word">CHICKEN</span>
+        <svg class="mark2" viewBox="0 0 36 42" aria-hidden="true">
+          <!-- Original Chakri "2": chunky numeral with a tiny comb. Not an IN OUT lockup. -->
+          <path fill="#c62828" d="M10 6.2c1.1-2.6 3.2-3.6 4.7-1.2 1.2-2.2 3.1-2.4 4.2-.2 1-1.8 2.8-1.6 3.4.4"/>
+          <path fill="#e53935" d="M7.2 9.4C7.2 5 11.4 2 18 2c6.8 0 11.2 3.1 11.2 8.1 0 4.6-3.2 7.4-9.2 10.6L11 27.2v1.6h17.2c1.3 0 2.2.9 2.2 2.2v3.6c0 1.3-.9 2.2-2.2 2.2H7.4c-1.3 0-2.2-.9-2.2-2.2v-4.6c0-2.1 1-4.1 3.1-5.8L20.2 16c2.6-1.6 3.6-2.7 3.6-4.4 0-2.1-1.9-3.4-5.4-3.4-3.4 0-5.4 1.3-5.6 3.6H7.2z"/>
+          <path fill="#ff8a80" d="M14.5 6.6c2.2-1.4 6.4-1.6 9.2 0 0 0-1.6-1.8-4.7-1.8s-4.5.9-4.5 1.8z" opacity=".55"/>
+        </svg>
+        <span class="word">ROAD</span>
+      </div>
+      <div class="balance-pill"><span id="balance">0</span><span class="coin">₹</span></div>
+      <button class="icon-btn" id="menuBtn" title="Menu" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </header>
+
     <div class="stage">
       <canvas id="scene"></canvas>
-      <header>
-        <button class="back" id="exitBtn" title="Back" aria-label="Exit to lounge">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18 9 12l6-6"/></svg>
-        </button>
-        <div class="brand">
-          <span class="cas">CHAKRI.CASINO</span>
-          <span class="title">CHICKEN <em>ROAD</em></span>
-        </div>
-        <div class="balance-pill"><span id="balance">0</span><span class="coin">₹</span></div>
-        <button class="icon-btn" id="menuBtn" title="Menu" aria-label="Open menu">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-        </button>
-      </header>
       <div class="ticker">
         <span class="live">Live wins</span>
         <span class="online"><span class="dot"></span> Online: <b id="online">0</b></span>
       </div>
       <div class="win-row" id="liveWin"><span class="who" id="liveWho">—</span> <span class="amt" id="liveAmt"></span></div>
-      <div class="lane-tag" id="laneTag">1.03x</div>
       <div class="win-pop" id="winPop">WIN!<span class="sub" id="winSub"></span></div>
       <div class="crash-pop" id="crashPop">HIT!</div>
     </div>
@@ -245,7 +261,7 @@
         <button class="minmax" id="maxBtn">MAX</button>
       </div>
       <div class="chips" id="chips"></div>
-      <div class="diff-row">
+      <div class="diff-row" id="diffRow">
         <button class="diff" id="diffBtn">Easy <span>▾</span></button>
         <div class="diff-menu" id="diffMenu"></div>
       </div>
@@ -269,8 +285,8 @@
     <div class="toast" id="toast"></div>
   </div>
 
-  <script src="engine.js"></script>
-  <script src="audio.js"></script>
-  <script src="game.js"></script>
+  <script src="engine.js?v=20260902-ns"></script>
+  <script src="audio.js?v=20260902-ns"></script>
+  <script src="game.js?v=20260902-ns"></script>
 </body>
 </html>
