@@ -10,6 +10,7 @@ import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parent
 SCRIPT_SUITES = (
+    "test_chicken_road_rounds.py",
     "test_commission.py",
     "test_compliance.py",
     "test_crm.py",
