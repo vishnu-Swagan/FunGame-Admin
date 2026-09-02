@@ -80,10 +80,16 @@ async def send_operator_payout(
     method = await load_payout_method(user_id, method_id)
     details = await _decrypt_method(method)
 
-    chips = int(request.get("amount") or request.get("chips") or 0)
+    chips = int(request.get("chips") or 0)
     from wager import chips_to_paise
     paise = int(request.get("amount_paise") or chips_to_paise(chips))
     idempotency = f"op-wd-{request_id}"
+
+    user = await db.users.find_one({"id": user_id}, {
+        "_id": 0, "email": 1, "email_normalized": 1, "phone": 1, "phone_normalized": 1,
+    }) or {}
+    phone = str(user.get("phone_normalized") or user.get("phone") or request.get("phone") or "")
+    email = str(user.get("email_normalized") or user.get("email") or request.get("user_email") or "")
 
     from payment_providers import load_payment_provider
     provider = load_payment_provider()
@@ -99,7 +105,8 @@ async def send_operator_payout(
             ifsc_code=details["ifsc_code"],
             payout_identifier=details["payout_identifier"],
             bank_name=details["bank_name"],
-            phone=str(request.get("phone") or ""),
+            phone=phone,
+            email=email,
         )
     except Exception as exc:
         log.exception("SgPay payout failed for %s", request_id)
