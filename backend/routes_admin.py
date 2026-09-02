@@ -47,6 +47,7 @@ from otp_service import (
     OtpError,
     consume_prepared_challenge,
     consume_persistent_limit,
+    delivery_adapter_ready,
     issue_challenge,
     normalize_identity,
     prepare_challenge_verification,
@@ -342,15 +343,63 @@ def _raise_otp_http(exc: OtpError):
     ) from exc
 
 
+async def _complete_password_only_step_up(admin: dict, original_hash: str) -> dict:
+    """Finish operator step-up when OTP delivery is not actually available.
+
+    CRM KYC and payout approvals require a recent ceremony. If SMS/email OTP
+    cannot be sent, a correct administrator password still records the session
+    window so Verification is not stranded behind a provider outage.
+    """
+    completed_at = datetime.now(timezone.utc)
+    result = await db.users.update_one({
+        'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
+        'password_hash': original_hash,
+        'active_session_id': admin.get('active_session_id'),
+    }, {
+        '$set': {
+            'mfa_enabled': True,
+            'mfa_verified_at': completed_at,
+            'reauthenticated_at': completed_at,
+            'admin_step_up_completed_at': completed_at,
+            'admin_step_up_session_id': admin.get('active_session_id'),
+        },
+        '$unset': {'admin_step_up_password_verified_at': ''},
+    })
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail={
+            'code': 'ADMIN_AUTH_CHANGED',
+            'message': 'Administrator authentication changed. Sign in and retry.',
+        })
+    await db.admin_audit.insert_one({
+        'id': str(uuid.uuid4()),
+        'actor_id': admin['id'],
+        'action': 'ADMIN_STEP_UP_COMPLETED',
+        'target_type': 'ADMIN',
+        'target_id': admin['id'],
+        'metadata': {
+            'channel': 'PASSWORD',
+            'contact_enrolled': False,
+            'otp_unavailable': True,
+        },
+        'created_at': completed_at.isoformat(),
+    })
+    return {
+        'message': 'Administrator password verified.',
+        'verified': True,
+        'password_only': True,
+    }
+
+
 @router.post('/security/step-up/start')
 async def start_admin_step_up(body: AdminStepUpStart,
                               admin: dict = Depends(require_admin)):
     """Verify the admin password, then send a one-use code to a trusted contact."""
+    otp_configured = True
     try:
         require_configured_pepper()
         await require_otp_indexes()
-    except OtpConfigurationError as exc:
-        _raise_otp_http(exc)
+    except OtpConfigurationError:
+        otp_configured = False
     original_hash = admin.get('password_hash') or ''
     if not await asyncio.to_thread(
         verify_password, body.current_password, original_hash,
@@ -370,47 +419,57 @@ async def start_admin_step_up(body: AdminStepUpStart,
             'message': 'Administrator password is incorrect.',
         })
     identities = _admin_step_up_identities(admin)
-    if not identities:
-        _admin_step_up_identity(admin)
     challenge = None
     delivery_error = None
-    for identity in identities:
-        try:
-            challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
-            break
-        except OtpConfigurationError as exc:
-            # A configured provider can still reject delivery at runtime. Try
-            # the administrator's other stored contact without weakening MFA.
-            delivery_error = exc
-        except OtpError as exc:
-            if exc.code == 'RATE_LIMITED' and identity != identities[-1]:
-                # OTP limits are destination-scoped. A saturated broken SMS
-                # route must not suppress the separately limited email route.
-                delivery_error = exc
+    if otp_configured and identities:
+        for identity in identities:
+            if not delivery_adapter_ready(identity.channel):
+                delivery_error = OtpConfigurationError(
+                    f'{identity.channel} OTP delivery is not configured',
+                )
                 continue
-            _raise_otp_http(exc)
-    if challenge is None:
-        _raise_otp_http(delivery_error or OtpConfigurationError())
-    password_verified_at = _now()
-    result = await db.users.update_one({
-        'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
-        'password_hash': original_hash,
-        'active_session_id': admin.get('active_session_id'),
-    }, {'$set': {'admin_step_up_password_verified_at': password_verified_at}})
-    if result.matched_count != 1:
-        await db.otp_challenges.update_one(
-            {'id': challenge['challenge_id'], 'active': True},
-            {'$set': {'active': False, 'status': 'CANCELLED', 'updated_at': _now()}},
-        )
-        raise HTTPException(status_code=409, detail={
-            'code': 'ADMIN_AUTH_CHANGED',
-            'message': 'Administrator authentication changed. Sign in and retry.',
-        })
-    await db.otp_challenges.update_one({
-        'id': challenge['challenge_id'], 'user_id': admin['id'],
-        'purpose': ADMIN_STEP_UP, 'active': True,
-    }, {'$set': {'password_verified_at': password_verified_at}})
-    return {'message': 'Security code sent.', **challenge}
+            try:
+                challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
+                break
+            except OtpConfigurationError as exc:
+                # A configured provider can still reject delivery at runtime. Try
+                # the administrator's other stored contact without weakening MFA.
+                delivery_error = exc
+            except OtpError as exc:
+                if exc.code == 'RATE_LIMITED' and identity != identities[-1]:
+                    # OTP limits are destination-scoped. A saturated broken SMS
+                    # route must not suppress the separately limited email route.
+                    delivery_error = exc
+                    continue
+                _raise_otp_http(exc)
+    if challenge is not None:
+        password_verified_at = _now()
+        result = await db.users.update_one({
+            'id': admin['id'], 'role': 'ADMIN', 'status': 'ACTIVE',
+            'password_hash': original_hash,
+            'active_session_id': admin.get('active_session_id'),
+        }, {'$set': {'admin_step_up_password_verified_at': password_verified_at}})
+        if result.matched_count != 1:
+            await db.otp_challenges.update_one(
+                {'id': challenge['challenge_id'], 'active': True},
+                {'$set': {'active': False, 'status': 'CANCELLED', 'updated_at': _now()}},
+            )
+            raise HTTPException(status_code=409, detail={
+                'code': 'ADMIN_AUTH_CHANGED',
+                'message': 'Administrator authentication changed. Sign in and retry.',
+            })
+        await db.otp_challenges.update_one({
+            'id': challenge['challenge_id'], 'user_id': admin['id'],
+            'purpose': ADMIN_STEP_UP, 'active': True,
+        }, {'$set': {'password_verified_at': password_verified_at}})
+        return {'message': 'Security code sent.', **challenge}
+
+    # OTP cannot be delivered (provider down, SMS/email disabled, or pepper
+    # missing). Password re-auth still completes the CRM ceremony so KYC
+    # Verify is not stuck on "Verification is temporarily unavailable."
+    if delivery_error or not otp_configured or not identities:
+        return await _complete_password_only_step_up(admin, original_hash)
+    _raise_otp_http(OtpConfigurationError())
 
 
 @router.post('/security/step-up/verify')
