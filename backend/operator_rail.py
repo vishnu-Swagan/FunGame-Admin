@@ -191,6 +191,9 @@ def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
         "payout_status": row.get("payout_status"),
         "payout_ref": row.get("payout_ref"),
         "payout_error": row.get("payout_error"),
+        "last_error": row.get("last_error"),
+        "provider_order_id": row.get("provider_order_id"),
+        "provider_reference": row.get("provider_reference"),
     }
 
 
@@ -257,6 +260,8 @@ def as_admin_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         "provider_reference": row.get("provider_reference"),
         "admin_note": dto["admin_note"],
         "note": dto["note"],
+        "last_error": dto.get("last_error") or row.get("last_error"),
+        "utr_required": dto["utr_required"],
     }
 
 
@@ -818,19 +823,9 @@ async def settle_hosted_deposit(
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
         claim = str(current.get("utr_claim") or "").strip().upper()
-        if not claim:
-            await db[COLLECTION].update_one(
-                {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
-                {"$set": {
-                    "status": "PENDING",
-                    "last_error": "WAITING_FOR_UTR",
-                    "next_reconcile_at": utcnow() + timedelta(seconds=60),
-                    "updated_at": utcnow(),
-                }},
-                **kwargs,
-            )
-            return {"id": request_id, "status": "PENDING", "utr_required": True}
-        if claim != reference.upper():
+        # Authenticated SgPay PAID/Complete already carries the provider UTR.
+        # Credit immediately unless the player pasted a conflicting claim.
+        if claim and claim != reference.upper():
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
                 {"$set": {
@@ -908,6 +903,7 @@ async def settle_hosted_deposit(
             {"$set": {
                 "status": "CREDITED",
                 "provider_reference": reference,
+                "last_error": None,
                 "resolved_at": utcnow(),
                 "resolved_by": actor,
                 "updated_at": utcnow(),
@@ -955,12 +951,32 @@ async def reconcile_hosted_deposit(
         })
     if row.get("status") in HOSTED_TERMINAL:
         return {"id": request_id, "status": row["status"], "terminal": True}
-    if not row.get("provider_order_id"):
-        stored, _ = await _ensure_hosted_checkout(row, gateway)
-        return {"id": request_id, "status": stored.get("status", "PENDING")}
+    lookup_order_id = str(row.get("provider_order_id") or "").strip()
+    if not lookup_order_id:
+        # Checkout uses deposit_id as the SgPay order_id. A pending row may
+        # already exist at the provider even if we never persisted the id.
+        try:
+            authoritative = await gateway.get_payment_status(
+                str(row["id"]), expected_amount_paise=int(row["amount_paise"]),
+            )
+        except (ProviderConfigurationError, ProviderRequestError):
+            stored, _ = await _ensure_hosted_checkout(row, gateway)
+            logging.getLogger("operator_rail").info(
+                "hosted UPI missing provider_order_id request_id=%s fell back to checkout",
+                request_id,
+            )
+            return {"id": request_id, "status": stored.get("status", "PENDING")}
+        await db[COLLECTION].update_one(
+            {"id": request_id, "source": UPI_SOURCE},
+            {"$set": {"provider_order_id": str(row["id"]), "updated_at": utcnow()}},
+        )
+        logging.getLogger("operator_rail").info(
+            "hosted UPI looked up request_id=%s by deposit id", request_id,
+        )
+        return await settle_hosted_deposit(request_id, authoritative, actor=actor)
     try:
         authoritative = await gateway.get_payment_status(
-            str(row["provider_order_id"]), expected_amount_paise=int(row["amount_paise"]),
+            lookup_order_id, expected_amount_paise=int(row["amount_paise"]),
         )
     except (ProviderConfigurationError, ProviderRequestError) as exc:
         await db[COLLECTION].update_one(
@@ -975,7 +991,12 @@ async def reconcile_hosted_deposit(
             "code": "UPI_STATUS_UNAVAILABLE",
             "message": "UPI payment status is temporarily unavailable.",
         }) from exc
-    return await settle_hosted_deposit(request_id, authoritative, actor=actor)
+    result = await settle_hosted_deposit(request_id, authoritative, actor=actor)
+    logging.getLogger("operator_rail").info(
+        "hosted UPI reconcile request_id=%s status=%s actor=%s",
+        request_id, result.get("status"), actor,
+    )
+    return result
 
 
 async def refresh_hosted_deposit(
@@ -1085,6 +1106,7 @@ async def reconcile_hosted_batch(
         ],
     }, {"_id": 0, "id": 1}).sort("created_at", 1).limit(cap).to_list(cap)
     updated = errors = 0
+    request_ids = [row["id"] for row in rows]
     for row in rows:
         try:
             result = await reconcile_hosted_deposit(row["id"], gateway)
@@ -1092,6 +1114,10 @@ async def reconcile_hosted_batch(
                 updated += 1
         except HTTPException:
             errors += 1
+    logging.getLogger("operator_rail").info(
+        "hosted UPI batch checked=%s updated=%s errors=%s ids=%s",
+        len(rows), updated, errors, request_ids,
+    )
     return {"checked": len(rows), "updated": updated, "errors": errors}
 
 
