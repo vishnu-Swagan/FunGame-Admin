@@ -70,7 +70,7 @@ export default function PartnerDashboard() {
         action={<span className="text-[10px] text-amber-300 flex items-center gap-1"><Clock className="h-3 w-3" /> Provisional</span>}
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Metric label="CHIPS PLAYED" value={formatChips(s.today.turnover)} provisional />
+          <Metric label="SETTLED STAKES" value={formatChips(s.today.turnover)} provisional />
           <Metric label="GROSS RESULT" value={<Money value={s.today.ggr} />} provisional />
           <Metric label="NET RESULT" value={<Money value={s.today.ngr} />} tone={s.today.ngr < 0 ? "loss" : "win"} provisional />
           <Metric label="PLAYERS" value={s.today.players} hint={`${s.today.bets} rounds`} provisional />
@@ -84,13 +84,13 @@ export default function PartnerDashboard() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card title="Yesterday" subtitle={s.yesterday.day} testId="partner-yesterday">
           <div className="grid grid-cols-2 gap-3">
-            <Metric label="CHIPS PLAYED" value={formatChips(s.yesterday.turnover)} />
+            <Metric label="SETTLED STAKES" value={formatChips(s.yesterday.turnover)} />
             <Metric label="NET RESULT" value={<Money value={s.yesterday.ngr} />} tone={s.yesterday.ngr < 0 ? "loss" : "win"} />
           </div>
         </Card>
         <Card title="Month to date" subtitle={`${s.month.from} → ${s.month.to}`} testId="partner-month">
           <div className="grid grid-cols-2 gap-3">
-            <Metric label="CHIPS PLAYED" value={formatChips(s.month.turnover)} />
+            <Metric label="SETTLED STAKES" value={formatChips(s.month.turnover)} />
             <Metric label="NET RESULT" value={<Money value={s.month.ngr} />} tone={s.month.ngr < 0 ? "loss" : "win"} />
           </div>
         </Card>
@@ -112,9 +112,9 @@ export default function PartnerDashboard() {
       </Card>
 
       <p className="text-[11px] text-white/40 leading-relaxed">
-        Commission records settle nightly from virtual-chip activity. Player chips
-        have no cash value and cannot be purchased, transferred, withdrawn, exchanged,
-        or redeemed. Period detail appears under{" "}
+        Commission records settle nightly from attributed player activity. Cash deposits,
+        bonus balances, player withdrawals, and partner commission remain separate in the
+        platform ledger. Period detail appears under{" "}
         <Link to="/distributor/my-commission" className="text-primary">My commission</Link>.
       </p>
     </div>

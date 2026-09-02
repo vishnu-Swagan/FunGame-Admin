@@ -26,7 +26,7 @@ async def _safe_insert(coro):
 
 GAMES = [
     {"slug": "aviator", "name": "Aviator", "category": "Crash", "tagline": "Fly high, ride the multiplier", "featured": True,
-     "description": "Watch the plane climb and lock in your play chips before it flies away. The longer it flies, the higher the multiplier.",
+     "description": "Watch the plane climb and cash out your stake before it flies away. The longer it flies, the higher the multiplier.",
      "art": {"from": "#0d1b3e", "to": "#e0353f", "accent": "#ff5964", "icon": "plane", "glyph": "2.4x"}},
     {"slug": "seven-up-down", "name": "Seven-Up-Down", "category": "Dice", "tagline": "Above, below or lucky seven", "featured": False,
      "description": "Two dice roll. Will the total land above seven, below seven, or exactly on the lucky number?",
@@ -35,10 +35,10 @@ GAMES = [
      "description": "A joker card is drawn. Bet on Andar or Bahar — which side will the matching card appear on first?",
      "art": {"from": "#3d0f24", "to": "#a11d4b", "accent": "#ff6b9d", "icon": "layers", "glyph": "A\u2660"}},
     {"slug": "bingo", "name": "Bingo", "category": "Numbers", "tagline": "Daub your way to full house", "featured": False,
-     "description": "Mark the called numbers on your card. Lines, corners and full house all pay in play chips.",
+     "description": "Mark the called numbers on your card. Lines, corners and full house each have published payouts.",
      "art": {"from": "#1a1440", "to": "#5b3bd1", "accent": "#9d7bff", "icon": "grid-3x3", "glyph": "B7"}},
-    {"slug": "checker", "name": "Checker", "category": "Board", "tagline": "Classic strategy, chip rewards", "featured": False,
-     "description": "The timeless board game reimagined. Outsmart your opponent to win play-chip pots.",
+    {"slug": "checker", "name": "Checker", "category": "Board", "tagline": "Classic strategy, clear rewards", "featured": False,
+     "description": "The timeless board game reimagined. Outsmart your opponent to win the pot.",
      "art": {"from": "#26160a", "to": "#8a5a2b", "accent": "#e0aa5f", "icon": "crown", "glyph": "\u26c1"}},
     {"slug": "champion-poker", "name": "Champion Poker", "category": "Cards", "tagline": "Hold the winning hand", "featured": False,
      "description": "Five-card video poker with champion payouts. Jacks or better starts the win ladder.",
@@ -50,16 +50,16 @@ GAMES = [
      "description": "American double-zero roulette with live synchronized rounds, neighbour bets, inside bets and classic outside chances.",
      "art": {"from": "#101f12", "to": "#1f7a33", "accent": "#4ade80", "icon": "circle-dot", "glyph": "00"}},
     {"slug": "fun-target", "name": "Fun Target", "category": "Numbers", "tagline": "Hit the target number", "featured": False,
-     "description": "Pick a number from 0 to 9 and watch the wheel. Direct hits pay big in play chips.",
+     "description": "Pick a number from 0 to 9 and watch the wheel. Direct hits use the published payout table.",
      "art": {"from": "#2b0d0d", "to": "#b23b3b", "accent": "#ff7b7b", "icon": "target", "glyph": "9"}},
     {"slug": "giant-jackpot", "name": "Giant Jackpot", "category": "Slots", "tagline": "Colossal reels, giant wins", "featured": True,
-     "description": "A towering five-reel slot with cascading symbols and a giant progressive play-chip jackpot.",
+     "description": "A towering five-reel slot with cascading symbols and a giant progressive jackpot.",
      "art": {"from": "#241a03", "to": "#a97d0b", "accent": "#ffd447", "icon": "gem", "glyph": "777"}},
     {"slug": "joker-bonus", "name": "Joker Bonus", "category": "Slots", "tagline": "The joker pays the bonus", "featured": False,
      "description": "Classic fruit-style reels where collecting jokers unlocks the bonus wheel.",
      "art": {"from": "#1f0a33", "to": "#7b2fbe", "accent": "#c084fc", "icon": "sparkles", "glyph": "J"}},
     {"slug": "keno", "name": "Keno", "category": "Numbers", "tagline": "Pick your lucky numbers", "featured": False,
-     "description": "Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.",
+     "description": "Choose up to 10 numbers from 36 in one synchronized live draw. More matches produce a higher published payout.",
      "art": {"from": "#52001f", "to": "#be0045", "accent": "#ff9a1e", "icon": "hash", "glyph": "36"}},
     {"slug": "pappu-pictures", "name": "Pappu Pictures", "category": "Pictures", "tagline": "Pick a picture, reveal the winner", "featured": True,
      "description": "Choose from twelve colourful pictures and watch one shared live card reveal. Extra Pay rounds can boost the winning picture up to 200x.",
@@ -68,30 +68,52 @@ GAMES = [
      "description": "A retro 8-line slot with lucky red eights and golden ingots across three reels.",
      "art": {"from": "#330b0b", "to": "#c0392b", "accent": "#ffb347", "icon": "infinity", "glyph": "8"}},
     {"slug": "no-hold", "name": "No Hold", "category": "Cards", "tagline": "Fast poker, no holding back", "featured": False,
-     "description": "Rapid-fire draw poker — no holds, straight deals, instant play-chip results.",
+     "description": "Rapid-fire draw poker with no holds, straight deals and instant results.",
      "art": {"from": "#0f2419", "to": "#2e8b57", "accent": "#66d9a3", "icon": "zap", "glyph": "Q\u2663"}},
     {"slug": "super-golden-wheel", "name": "Super Golden Wheel", "category": "Wheel", "tagline": "Golden spins, super rewards", "featured": False,
-     "description": "Spin the gleaming golden wheel across three reward tiers of play chips.",
+     "description": "Spin the golden wheel across three published reward tiers.",
      "art": {"from": "#2b2005", "to": "#c9a227", "accent": "#ffe08a", "icon": "sun", "glyph": "\u2726"}},
     {"slug": "triple-fun", "name": "Triple Fun", "category": "Slots", "tagline": "Triple reels, triple fun", "featured": False,
      "description": "Three synced reel sets spinning together — triple the chances every spin.",
      "art": {"from": "#131342", "to": "#4646c8", "accent": "#8f8fff", "icon": "boxes", "glyph": "x3"}},
     {"slug": "poker", "name": "Poker", "category": "Cards", "tagline": "The timeless table classic", "featured": False,
-     "description": "Texas-style table poker with play chips. Blinds, raises and showdowns.",
+     "description": "Texas-style table poker with blinds, raises and showdowns.",
      "art": {"from": "#101820", "to": "#37475a", "accent": "#8fa9c4", "icon": "spade", "glyph": "10\u2660"}},
     {"slug": "teen-patti", "name": "Teen Patti", "category": "Cards", "tagline": "Three cards, boot and blind", "featured": True,
-     "description": "The beloved three-card game. Boot, blind, chaal and show — all in play chips.",
+     "description": "The three-card game with boot, blind, chaal and show actions.",
      "art": {"from": "#3a1206", "to": "#c05a12", "accent": "#ffa04d", "icon": "club", "glyph": "3\u2666"}},
     {"slug": "ice-fishing", "name": "Ice Fishing", "category": "Wheel", "tagline": "Spin the ice, reel the big catch", "featured": True,
-     "description": "A 53-segment virtual-chip prize wheel with three cinematic fish bonus games. Choose the leaves for instant chip awards, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
+     "description": "A 53-segment prize wheel with three cinematic fish bonus games. Choose the leaves for instant awards, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x.",
      "art": {"from": "#0a2a44", "to": "#4aa3d9", "accent": "#bfe6ff", "icon": "fish", "glyph": "\u2744"}},
     {"slug": "blackjack", "name": "Blackjack", "category": "Cards", "tagline": "Hit, stand, beat the dealer", "featured": True,
-     "description": "First Person Blackjack \u2014 up to 5 hands, Perfect Pairs & 21+3 side options, insurance, and blackjack awards 3:2 in virtual chips.",
+     "description": "First Person Blackjack with up to 5 hands, Perfect Pairs and 21+3 side options, insurance, and a 3:2 blackjack payout.",
      "art": {"from": "#08331a", "to": "#1d8a4f", "accent": "#ffd447", "icon": "spade", "glyph": "A\u2660"}},
     {"slug": "rummy", "name": "Rummy", "category": "Cards", "tagline": "Five seats, thirteen cards, one royal table", "featured": True,
-     "description": "Server-authoritative Indian 13-card Rummy for exactly five seats across five skill categories. Played exclusively with virtual chips.",
+     "description": "Server-authoritative 13-card Rummy for exactly five seats across five skill categories.",
      "art": {"from": "#072f25", "to": "#0b6b4f", "accent": "#e3c06e", "icon": "layers", "glyph": "13"}},
 ]
+
+# Startup updates only the exact historical seed copy. Operator-authored game
+# descriptions remain untouched, while existing databases move with the
+# customer-facing balance terminology used by the current application.
+LEGACY_GAME_DESCRIPTIONS = {
+    "aviator": ["Watch the plane climb and lock in your play chips before it flies away. The longer it flies, the higher the multiplier."],
+    "bingo": ["Mark the called numbers on your card. Lines, corners and full house all pay in play chips."],
+    "checker": ["The timeless board game reimagined. Outsmart your opponent to win play-chip pots."],
+    "fun-target": ["Pick a number from 0 to 9 and watch the wheel. Direct hits pay big in play chips."],
+    "giant-jackpot": ["A towering five-reel slot with cascading symbols and a giant progressive play-chip jackpot."],
+    "keno": [
+        "Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.",
+        "Choose up to 10 numbers from 80. The more you match, the more play chips you win.",
+    ],
+    "no-hold": ["Rapid-fire draw poker — no holds, straight deals, instant play-chip results."],
+    "super-golden-wheel": ["Spin the gleaming golden wheel across three reward tiers of play chips."],
+    "poker": ["Texas-style table poker with play chips. Blinds, raises and showdowns."],
+    "teen-patti": ["The beloved three-card game. Boot, blind, chaal and show — all in play chips."],
+    "ice-fishing": ["A 53-segment virtual-chip prize wheel with three cinematic fish bonus games. Choose the leaves for instant chip awards, or hook Lil' Blues, Big Oranges and Huge Reds for multipliers up to 5000x."],
+    "blackjack": ["First Person Blackjack — up to 5 hands, Perfect Pairs & 21+3 side options, insurance, and blackjack awards 3:2 in virtual chips."],
+    "rummy": ["Server-authoritative Indian 13-card Rummy for exactly five seats across five skill categories. Played exclusively with virtual chips."],
+}
 
 
 async def enable_all_games_for_launch():
@@ -99,7 +121,7 @@ async def enable_all_games_for_launch():
     result = await reconcile_game_availability()
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!'},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino offers account-based games with server-confirmed balances and published rules. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
     )
     await db.announcements.update_one(
         {'title': '18 games are on the way'},
@@ -122,9 +144,9 @@ async def enable_all_games_for_launch():
     return result['enabled'] + result['coming_soon']
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino offers account-based games with server-confirmed balances and published rules. Ten reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
     {"title": "Ten reviewed games are live", "body": "Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.", "pinned": False},
-    {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
+    {"title": "How wallet balances work", "body": "Deposited cash, withdrawable winnings and restricted bonus balances are shown separately in your Wallet. Payment and withdrawal status is confirmed by the server.", "pinned": False},
 ]
 
 
@@ -205,6 +227,17 @@ async def run_seed():
     # considers them, even if a later nonessential seed operation fails.
     await reconcile_game_availability()
 
+    current_games = {game['slug']: game for game in GAMES}
+    for slug, previous_descriptions in LEGACY_GAME_DESCRIPTIONS.items():
+        current = current_games[slug]
+        update = {'description': current['description']}
+        if slug == 'checker':
+            update['tagline'] = current['tagline']
+        await db.games.update_one(
+            {'slug': slug, 'description': {'$in': previous_descriptions}},
+            {'$set': update},
+        )
+
     # Upgrade the original catalogue title without overwriting an operator's
     # later custom name. The slug stays stable because live bets, history and
     # admin reporting already use it as their durable game identifier.
@@ -223,10 +256,10 @@ async def run_seed():
     await db.games.update_one(
         {
             'slug': 'keno',
-            'description': 'Choose up to 10 numbers from 80. The more you match, the more play chips you win.',
+            'description': 'Choose up to 10 numbers from 80. More matches produce a higher published payout.',
         },
         {'$set': {
-            'description': 'Choose up to 10 numbers from 36 in one synchronized live draw. The more you match, the more play chips you win.',
+            'description': 'Choose up to 10 numbers from 36 in one synchronized live draw. More matches produce a higher published payout.',
             'art.from': '#52001f',
             'art.to': '#be0045',
             'art.accent': '#ff9a1e',
@@ -257,7 +290,14 @@ async def run_seed():
     )
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': 'live games'}},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino offers account-based games with server-confirmed balances and published rules. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
+    )
+    await db.announcements.update_one(
+        {'title': 'How play chips work'},
+        {'$set': {
+            'title': 'How wallet balances work',
+            'body': 'Deposited cash, withdrawable winnings and restricted bonus balances are shown separately in your Wallet. Payment and withdrawal status is confirmed by the server.',
+        }},
     )
 
     # Indexes (idempotent)

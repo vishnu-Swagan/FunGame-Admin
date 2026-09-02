@@ -1,20 +1,23 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { LockKeyhole, Smartphone, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, errMsg } from "@/lib/api";
+import { api, errCode, errMsg } from "@/lib/api";
 import { isValidE164Phone, normalizeContactIdentifier, registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
 import { COUNTRY_OPTIONS } from "@/lib/countryOptions";
+import { useRegistrationPolicies } from "@/lib/legalPolicies";
 import { AuthShell } from "@/pages/auth/AuthShell";
 
 export default function Register() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const formRef = useRef(null);
   const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
+  const { policies, loading: policiesLoading, error: policiesError, retry: retryPolicies } = useRegistrationPolicies();
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -23,6 +26,9 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [inviteCode, setInviteCode] = useState(() => (searchParams.get("invite_code") || "").trim().toUpperCase());
+  const [inviteTermsAccepted, setInviteTermsAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
@@ -62,7 +68,10 @@ export default function Register() {
     if (manualReview && password.length < 8) errors.password = "Password must contain at least 8 characters";
     else if (manualReview && password.length > 128) errors.password = "Password must not exceed 128 characters";
     if (manualReview && password !== passwordConfirmation) errors.passwordConfirmation = "Password confirmation does not match";
-    if (!termsAccepted) errors.terms = "Please accept the account and play terms";
+    if (!termsAccepted) errors.terms = "Please accept the current Terms and Conditions";
+    if (!privacyAccepted) errors.privacy = "Please acknowledge the current Privacy Notice";
+    if (inviteCode && !/^[A-Z0-9]{8,20}$/.test(inviteCode)) errors.inviteCode = "Enter a valid 8 to 20 character invite code";
+    if (inviteCode && !inviteTermsAccepted) errors.inviteTerms = "Accept the referral terms before applying this invite code";
 
     setValidationErrors(errors);
     const firstInvalidField = Object.keys(errors)[0];
@@ -79,6 +88,9 @@ export default function Register() {
     if (capabilitiesLoading || !registrationAvailable || !selectedChannelAvailable) {
       return toast.info("Registration is temporarily unavailable for this contact method.");
     }
+    if (policiesLoading || policiesError || !policies) {
+      return toast.info("Current account policies must load before registration can continue.");
+    }
     if (!validate()) return;
     setBusy(true);
     try {
@@ -92,6 +104,10 @@ export default function Register() {
         date_of_birth: dob,
         country,
         accepted_terms: true,
+        accepted_privacy: true,
+        terms_version: policies.terms.version,
+        privacy_version: policies.privacy.version,
+        ...(inviteCode ? { invite_code: inviteCode, invite_terms_accepted: true } : {}),
         ...(manualReview ? { password, password_confirmation: passwordConfirmation } : {}),
       });
       toast.success(data?.message || (manualReview ? "Registration submitted for review" : "Verification code sent"));
@@ -109,6 +125,7 @@ export default function Register() {
         },
       });
     } catch (error) {
+      if (errCode(error) === "POLICY_VERSION_MISMATCH") retryPolicies();
       toast.error(errMsg(error));
     } finally {
       setBusy(false);
@@ -128,6 +145,20 @@ export default function Register() {
         <div className="mb-5 flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
           {manualReview ? <UserCheck className="h-4 w-4" /> : <Smartphone className="h-4 w-4" />}
           {manualReview ? "Administrator account review" : "Mobile OTP verification"}
+        </div>
+      )}
+
+      {policiesLoading && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-5 text-white/60" role="status">
+          Loading the current account policies...
+        </div>
+      )}
+      {policiesError && (
+        <div className="mb-4 rounded-xl border border-red-300/25 bg-red-400/10 px-4 py-3" role="alert">
+          <p className="text-xs leading-5 text-red-100">{policiesError}</p>
+          <button type="button" onClick={retryPolicies} className="mt-2 min-h-[44px] rounded-lg border border-red-200/25 px-3 text-xs font-bold text-red-100">
+            Retry policy check
+          </button>
         </div>
       )}
 
@@ -181,6 +212,40 @@ export default function Register() {
             </select>
           </Field>
         </div>
+        <Field label="Player invite code (optional)" htmlFor="reg-invite" error={validationErrors.inviteCode}>
+          <Input
+            id="reg-invite"
+            data-validation-field="inviteCode"
+            inputMode="text"
+            autoComplete="off"
+            minLength={8}
+            maxLength={20}
+            value={inviteCode}
+            onChange={(event) => {
+              setInviteCode(event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase());
+              clearValidationError("inviteCode");
+            }}
+            aria-invalid={Boolean(validationErrors.inviteCode)}
+            aria-describedby={validationErrors.inviteCode ? "reg-invite-error" : undefined}
+            className="h-12 rounded-xl bg-white/5 border-white/12 font-mono tracking-[0.12em] uppercase"
+          />
+        </Field>
+        {inviteCode && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5">
+            <Checkbox
+              data-validation-field="inviteTerms"
+              checked={inviteTermsAccepted}
+              onCheckedChange={(value) => { setInviteTermsAccepted(!!value); clearValidationError("inviteTerms"); }}
+              aria-invalid={Boolean(validationErrors.inviteTerms)}
+              aria-describedby={validationErrors.inviteTerms ? "reg-invite-terms-error" : undefined}
+              className="mt-0.5"
+            />
+            <span className="text-xs leading-relaxed text-white/70">
+              Apply this invite code. Referral rewards require verified tasks, may enter fraud review, and are governed by the displayed campaign terms.
+            </span>
+          </label>
+        )}
+        {validationErrors.inviteTerms && <p id="reg-invite-terms-error" className="text-xs text-red-300">{validationErrors.inviteTerms}</p>}
         {manualReview && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Create password" htmlFor="reg-password" error={validationErrors.password}>
@@ -202,10 +267,33 @@ export default function Register() {
             className="mt-0.5"
           />
           <span className="text-xs leading-relaxed text-white/70">
-            I confirm that my details are accurate, I am eligible to use the service, and I accept the account and play terms.
+            I confirm that my details are accurate, I am legally eligible to use the service, and I accept the current{" "}
+            <a href={policies?.terms.url || "/legal/terms"} target="_blank" rel="noreferrer" className="font-bold text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>
+              Terms and Conditions
+            </a>
+            {policies?.terms.version ? ` (version ${policies.terms.version})` : ""}.
           </span>
         </label>
         {validationErrors.terms && <p id="reg-terms-error" className="text-xs text-red-300">{validationErrors.terms}</p>}
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5">
+          <Checkbox
+            data-testid="register-privacy-checkbox"
+            data-validation-field="privacy"
+            checked={privacyAccepted}
+            onCheckedChange={(value) => { setPrivacyAccepted(!!value); clearValidationError("privacy"); }}
+            aria-invalid={Boolean(validationErrors.privacy)}
+            aria-describedby={validationErrors.privacy ? "reg-privacy-error" : undefined}
+            className="mt-0.5"
+          />
+          <span className="text-xs leading-relaxed text-white/70">
+            I have read the current{" "}
+            <a href={policies?.privacy.url || "/legal/privacy"} target="_blank" rel="noreferrer" className="font-bold text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>
+              Privacy Notice
+            </a>
+            {policies?.privacy.version ? ` (version ${policies.privacy.version})` : ""} and understand how account, identity, payment, and gameplay data is used.
+          </span>
+        </label>
+        {validationErrors.privacy && <p id="reg-privacy-error" className="text-xs text-red-300">{validationErrors.privacy}</p>}
         <p data-testid="register-verification-copy" className="text-[11px] text-white/45 leading-relaxed">
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
@@ -213,10 +301,10 @@ export default function Register() {
               ? "First verify the SMS code, then verify the code sent to your email. Your account activates only after both steps succeed."
               : "Your email is optional and remains unverified. You create your password only after the SMS code proves you own the mobile number."}
         </p>
-        <p className="text-[11px] text-white/45 leading-relaxed">Virtual chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.</p>
-        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
+        <p className="text-[11px] text-white/45 leading-relaxed">Real-money play is available only to eligible adults in supported territories. Deposits, wagers, withdrawals, and bonus balances are recorded in your wallet activity.</p>
+        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || policiesLoading || Boolean(policiesError) || !policies || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
           {manualReview && <LockKeyhole className="mr-2 h-4 w-4" />}
-          {capabilitiesLoading
+          {capabilitiesLoading || policiesLoading
             ? "Checking availability…"
             : busy
               ? (manualReview ? "Submitting…" : "Sending code…")

@@ -108,6 +108,8 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         self.original_live_guard = live._require_live_betting
         self.original_roulette_guard = roulette._require_roulette_betting
         self.original_ledger_write = ledger._write
+        self.original_stake_guards = list(ledger._stake_guards)
+        ledger._stake_guards.clear()
 
         live.db = database
         live.client = mock_client
@@ -134,6 +136,7 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         live._require_live_betting = self.original_live_guard
         roulette._require_roulette_betting = self.original_roulette_guard
         ledger._write = self.original_ledger_write
+        ledger._stake_guards[:] = self.original_stake_guards
 
     async def _balance(self):
         user = await database.users.find_one({"id": "player"})
@@ -213,7 +216,7 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._balance(), 60)
         self.assertEqual(await database.game_rounds.count_documents({}), 1)
         self.assertEqual(
-            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 1
+            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 3
         )
 
     async def test_live_concurrent_settlement_includes_more_than_200_bets_once(self):
@@ -244,7 +247,7 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual((history[0]["bet"], history[0]["payout"]), (2050, 4100))
         self.assertEqual(
-            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 1
+            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 205
         )
 
     async def test_roulette_place_rolls_back_then_retry_debits_exactly_once(self):
@@ -313,7 +316,7 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._balance(), 1080)
         self.assertEqual(await database.game_rounds.count_documents({}), 1)
         self.assertEqual(
-            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 1
+            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 3
         )
 
     async def test_roulette_concurrent_settlement_includes_more_than_200_bets_once(self):
@@ -345,8 +348,55 @@ class GameTransactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual((history[0]["bet"], history[0]["payout"]), (2050, 73_800))
         self.assertEqual(
-            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 1
+            await database.chip_transactions.count_documents({"kind": ledger.PAYOUT}), 205
         )
+
+    async def test_live_payout_references_only_the_winning_stake(self):
+        await database.users.update_one({"id": "player"}, {"$set": {"chip_balance": 0}})
+        await database.live_bets.insert_many([
+            {
+                "id": "live-winning-source", "user_id": "player",
+                "slug": "seven-up-down", "round_number": 41,
+                "selection": "down", "amount": 10, "status": "OPEN",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "id": "live-losing-source", "user_id": "player",
+                "slug": "seven-up-down", "round_number": 41,
+                "selection": "up", "amount": 10, "status": "OPEN",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        ])
+        await database.live_outcomes.insert_one({
+            "slug": "seven-up-down", "round_number": 41,
+            "outcome": {"dice": [1, 1], "total": 2, "winner": "down"},
+        })
+        await live._live_settle_user("player", "seven-up-down", 42, "BETTING")
+        payout = await database.chip_transactions.find_one({"kind": ledger.PAYOUT})
+        self.assertEqual(payout["source_refs"], ["live-winning-source"])
+
+    async def test_roulette_payout_references_only_the_winning_stake(self):
+        await database.users.update_one({"id": "player"}, {"$set": {"chip_balance": 0}})
+        await database.roulette_bets.insert_many([
+            {
+                "id": "roulette-winning-source", "user_id": "player",
+                "slug": "fun-roulette-bet", "round_number": 41,
+                "bet_type": "straight", "value": "7", "amount": 10,
+                "status": "OPEN", "created_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "id": "roulette-losing-source", "user_id": "player",
+                "slug": "fun-roulette-bet", "round_number": 41,
+                "bet_type": "straight", "value": "8", "amount": 10,
+                "status": "OPEN", "created_at": "2026-01-01T00:00:00Z",
+            },
+        ])
+        await database.roulette_rounds.insert_one({
+            "round_number": 41, "winning_number": "7", "color": "red",
+        })
+        await roulette._roulette_settle_user("player", 42, "BETTING")
+        payout = await database.chip_transactions.find_one({"kind": ledger.PAYOUT})
+        self.assertEqual(payout["source_refs"], ["roulette-winning-source"])
 
     async def test_outcome_creation_does_not_swallow_storage_errors(self):
         live_collection = database.live_outcomes

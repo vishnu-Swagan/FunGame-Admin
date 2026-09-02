@@ -114,7 +114,7 @@ export default function PartnerStatements() {
             <p className="text-[10px] text-white/35 mt-2">
               Commission uses the recorded net-result basis after anything carried
               forward. Negative periods reduce the next positive basis; they are not
-              charged to a player. Virtual player chips have no cash value.
+              charged to a player. Player funds and partner commission remain separate.
             </p>
           </Card>
 

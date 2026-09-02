@@ -13,7 +13,7 @@ import { isFinancialFeatureAvailable } from "@/lib/walletUtils";
 export default function BankDetailsPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const returnTo = location.state?.returnTo || "/chips/withdraw";
+  const returnTo = location.state?.returnTo || "/wallet/withdraw";
   const [methods, setMethods] = useState([]);
   const [available, setAvailable] = useState(null);
   const [form, setForm] = useState({ account_holder_name: "", bank_name: "", account_number: "", confirm_account_number: "", ifsc_code: "", payout_identifier: "" });

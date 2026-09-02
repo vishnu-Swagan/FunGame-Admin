@@ -173,7 +173,7 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
                 'user_id': user_id, 'slug': 'fun-roulette-bet',
                 'round_number': rn, 'status': 'OPEN',
             }, **kwargs).to_list(length=None)
-            total_bet, total_payout, bet_details = 0, 0, []
+            total_bet, total_payout, bet_details, settled_refs = 0, 0, [], []
             for b in bets:
                 try:
                     mult = roulette_multiplier(b['bet_type'], b['value'], winning)
@@ -190,19 +190,26 @@ async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
                 )
                 if res.modified_count == 0:
                     continue
+                settled_refs.append(b['id'])
                 total_bet += b['amount']
                 total_payout += payout
+                if payout > 0:
+                    await credit_chips(
+                        user_id, payout, f'American Roulette bet win (round {rn})',
+                        ref=f'{rn}:{b["id"]}', kind=ledger.PAYOUT,
+                        game='fun-roulette', session=session,
+                        source_refs=[b['id']], settlement_ref=str(rn),
+                    )
                 bet_details.append({
                     'bet_type': b['bet_type'], 'value': b['value'],
                     'amount': b['amount'], 'payout': payout,
                 })
             if total_bet == 0:
                 return None
-            if total_payout > 0:
-                await credit_chips(
-                    user_id, total_payout, f'American Roulette win (round {rn})',
-                    ref=str(rn), kind=ledger.PAYOUT, game='fun-roulette', session=session,
-                )
+            await ledger.record_settlement(
+                user_id, settled_refs, 'fun-roulette',
+                status='SETTLED', settlement_ref=str(rn), session=session,
+            )
             await db.game_rounds.insert_one({
                 'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': 'fun-roulette',
                 'game_name': 'American Roulette', 'bet': total_bet,
@@ -328,7 +335,7 @@ async def roulette_place_bet(body: RouletteBet, user: dict = Depends(require_act
     try:
         await run_game_transaction(client, place_bet)
     except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
+        raise HTTPException(status_code=400, detail='Your available balance is too low for this stake')
     my_bets = await db.roulette_bets.find(
         {'user_id': user['id'], 'round_number': round_number, 'status': 'OPEN'},
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},
@@ -351,6 +358,7 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
             expected_round=round_number, message='Bets are locked for this round.',
         )
         refunded = 0
+        refunded_refs = []
         for b in open_bets:
             res = await db.roulette_bets.update_one(
                 {'id': b['id'], 'status': 'OPEN'},
@@ -359,12 +367,15 @@ async def roulette_clear_bets(user: dict = Depends(require_active_player)):
             )
             if res.modified_count:
                 refunded += b['amount']
+                refunded_refs.append(b['id'])
         if refunded > 0:
             await credit_chips(
                 user['id'], refunded,
                 f'American Roulette bets refunded (round {round_number})',
                 ref=str(round_number), kind=ledger.REFUND,
                 game='fun-roulette', session=session,
+                source_refs=refunded_refs,
+                settlement_ref=str(round_number),
             )
         return refunded
 

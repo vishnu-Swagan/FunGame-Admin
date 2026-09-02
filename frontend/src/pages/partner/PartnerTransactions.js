@@ -72,7 +72,7 @@ export default function PartnerTransactions() {
       )}
 
       <p className="text-[11px] leading-relaxed text-white/40">
-        This portal does not provide a player wallet or game access. Virtual player chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.
+        This portal provides commission records only. Player funds, bonus balances, game access, and withdrawals are not available to distributor accounts.
       </p>
     </div>
   );

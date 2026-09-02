@@ -273,7 +273,7 @@ export default function TripleFun777Game({ game }) {
                 : outcome.label + (outcome.multiplier > 1 ? ` · ${outcome.multiplier}×` : "")
               : spinningPhase
               ? anticipation ? "COME ON…!" : "GOOD LUCK…"
-              : "INSERT CHIPS · ONE UNIVERSAL SPIN PER ROUND"}
+              : "PLACE A STAKE · ONE UNIVERSAL SPIN PER ROUND"}
           </p>
         </div>
         <div className="flex justify-center mt-2">

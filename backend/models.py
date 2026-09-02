@@ -40,6 +40,15 @@ class RegisterRequest(BaseModel):
     # Registration collects the full activation profile before issuing an SMS
     # challenge, so terms and eligibility cannot be deferred until after OTP.
     accepted_terms: bool = False
+    # Version fields let current clients prove exactly which immutable policy
+    # documents were shown. ``accepted_privacy=None`` and absent versions are
+    # retained temporarily for the existing single-checkbox client; the server
+    # still snapshots its own current versions for that compatibility path.
+    accepted_privacy: Optional[bool] = None
+    terms_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    privacy_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    invite_code: Optional[str] = Field(default=None, min_length=8, max_length=20)
+    invite_terms_accepted: bool = False
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     password_confirmation: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
@@ -62,6 +71,20 @@ class RegisterRequest(BaseModel):
             raise ValueError('Password and confirmation must both be supplied')
         if self.password is not None and self.password != self.password_confirmation:
             raise ValueError('Password confirmation does not match')
+        version_pattern = r'[A-Za-z0-9][A-Za-z0-9._:-]{0,63}'
+        for field_name in ('terms_version', 'privacy_version'):
+            value = getattr(self, field_name)
+            if value is not None:
+                value = value.strip()
+                if not re.fullmatch(version_pattern, value):
+                    raise ValueError(f'{field_name} has an invalid format')
+                setattr(self, field_name, value)
+        if self.invite_code:
+            self.invite_code = self.invite_code.strip().upper()
+            if not re.fullmatch(r'[A-Z0-9]{8,20}', self.invite_code):
+                raise ValueError('Invite code is invalid')
+            if self.invite_terms_accepted is not True:
+                raise ValueError('Accept the referral terms before applying an invite code')
         return self
 
     @field_validator('phone')
@@ -316,21 +339,20 @@ class PlayerAvatarSelection(BaseModel):
         return value
 
 
-# ---------- Chips / Points ----------
+# ---------- Legacy promotional balance / points ----------
 class ChipRequestCreate(BaseModel):
     amount: int = Field(gt=0, le=1_000_000)
     note: Optional[str] = Field(default=None, max_length=280)
 
 
 class SellChipsRequestCreate(BaseModel):
-    """Player asks the operator to sell chips for points (1 chip = 1 point, min 500).
-    Chips are deducted only when the admin approves the request."""
+    """Legacy promotional-balance to points request (1:1, minimum 500)."""
     amount: int = Field(ge=500, le=1_000_000)
     note: Optional[str] = Field(default=None, max_length=280)
 
 
 class ConvertRequest(BaseModel):
-    """Instant chips <-> points conversion (1 chip = 1 point, minimum 500)."""
+    """Legacy balance and points conversion (1:1, minimum 500)."""
     direction: str  # CHIPS_TO_POINTS | POINTS_TO_CHIPS
     amount: int = Field(ge=500, le=1_000_000)
 
@@ -423,8 +445,7 @@ class AdminStepUpVerify(BaseModel):
 
 
 class ReturnChipsRequestCreate(BaseModel):
-    """Player asks the operator to return chips to the admin. Chips stay in the
-    player's balance until the admin approves, then they are deducted."""
+    """Legacy request to return promotional balance to the operator."""
     amount: int = Field(ge=1, le=1_000_000)
     note: Optional[str] = Field(default=None, max_length=280)
 

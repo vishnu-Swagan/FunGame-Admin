@@ -284,15 +284,17 @@ async def check_eligibility(country, dob, cfg=None, require_dob=True):
 
 # ---------------------------------------------------------------- exclusions
 
-async def active_exclusion(user_id):
+async def active_exclusion(user_id, session=None):
     """The exclusion currently in force, if any.
 
     A permanent exclusion has no end date, so the query cannot simply compare
     against now — it has to treat a missing end as "still running", which is
     the safe direction to fail in.
     """
+    kwargs = {'session': session} if session is not None else {}
     row = await db.exclusions.find_one(
-        {'user_id': user_id, 'status': 'ACTIVE'}, {'_id': 0}, sort=[('created_at', -1)])
+        {'user_id': user_id, 'status': 'ACTIVE'}, {'_id': 0},
+        sort=[('created_at', -1)], **kwargs)
     if not row:
         return None
     ends = _parse(row.get('ends_at'))
@@ -409,8 +411,8 @@ async def admin_lift(user_id, actor, reason, session=None):
     return await db.exclusions.find_one({'id': row['id']}, {'_id': 0}, **kwargs)
 
 
-async def assert_not_excluded(user_id):
-    row = await active_exclusion(user_id)
+async def assert_not_excluded(user_id, session=None):
+    row = await active_exclusion(user_id, session=session)
     if not row:
         return
     ends = row.get('ends_at')
@@ -535,7 +537,7 @@ async def cancel_pending(user_id, kind, period):
         {'user_id': user_id, 'kind': kind, 'period': period}, {'_id': 0})
 
 
-async def _effective(row):
+async def _effective(row, session=None):
     """The limit in force, promoting a queued increase whose time has come.
 
     Promotion happens on read rather than on a schedule. A job that has to run
@@ -547,33 +549,37 @@ async def _effective(row):
         return None
     pending_at = _parse(row.get('pending_effective_from'))
     if pending_at and pending_at <= now():
+        kwargs = {'session': session} if session is not None else {}
         await db.player_limits.update_one(
             {'user_id': row['user_id'], 'kind': row['kind'], 'period': row['period']},
             {'$set': {'amount': row.get('pending_amount'),
                       'effective_from': row['pending_effective_from'],
-                      'pending_amount': None, 'pending_effective_from': None}})
+                      'pending_amount': None, 'pending_effective_from': None}},
+            **kwargs)
         row = {**row, 'amount': row.get('pending_amount'),
                'pending_amount': None, 'pending_effective_from': None}
     return row
 
 
-async def limits_for(user_id, kind=None):
+async def limits_for(user_id, kind=None, session=None):
     q = {'user_id': user_id}
     if kind:
         q['kind'] = kind
-    rows = await db.player_limits.find(q, {'_id': 0}).to_list(50)
-    return [await _effective(r) for r in rows]
+    kwargs = {'session': session} if session is not None else {}
+    rows = await db.player_limits.find(q, {'_id': 0}, **kwargs).to_list(50)
+    return [await _effective(r, session=session) for r in rows]
 
 
-async def deposits_in(user_id, period):
+async def deposits_in(user_id, period, session=None):
     since = window_start(period)
+    kwargs = {'session': session} if session is not None else {}
     rows = await db.chip_transactions.find(
         {'user_id': user_id, 'kind': ledger.DEPOSIT, 'gaming_day': {'$gte': since}},
-        {'_id': 0, 'amount': 1}).to_list(5000)
+        {'_id': 0, 'amount': 1}, **kwargs).to_list(5000)
     return sum(int(r['amount']) for r in rows)
 
 
-async def net_loss_in(user_id, period):
+async def net_loss_in(user_id, period, session=None):
     """Staked minus won, over the window.
 
     Negative when the player is ahead, and left negative rather than floored at
@@ -581,23 +587,24 @@ async def net_loss_in(user_id, period):
     would make a losing day inside a winning week count against the limit.
     """
     since = window_start(period)
+    kwargs = {'session': session} if session is not None else {}
     rows = await db.chip_transactions.find(
         {'user_id': user_id, 'gaming_day': {'$gte': since},
          'kind': {'$in': [ledger.STAKE, ledger.PAYOUT, ledger.REFUND]}},
-        {'_id': 0, 'kind': 1, 'amount': 1}).to_list(20000)
+        {'_id': 0, 'kind': 1, 'amount': 1}, **kwargs).to_list(20000)
     staked = sum(int(r['amount']) for r in rows if r['kind'] == ledger.STAKE)
     back = sum(int(r['amount']) for r in rows
                if r['kind'] in (ledger.PAYOUT, ledger.REFUND))
     return staked - back
 
 
-async def check_deposit(user_id, amount):
+async def check_deposit(user_id, amount, session=None):
     """Refuse a top-up that would breach a deposit limit."""
-    for row in await limits_for(user_id, DEPOSIT):
+    for row in await limits_for(user_id, DEPOSIT, session=session):
         cap = row.get('amount')
         if cap is None:
             continue
-        used = await deposits_in(user_id, row['period'])
+        used = await deposits_in(user_id, row['period'], session=session)
         if used + int(amount) > cap:
             left = max(0, cap - used)
             raise ComplianceBlock(
@@ -607,18 +614,18 @@ async def check_deposit(user_id, amount):
                 period=row['period'], limit=cap, used=used, remaining=left)
 
 
-async def check_stake(user_id, amount):
+async def check_stake(user_id, amount, session=None):
     """Refuse a bet that could take the player past a loss limit.
 
     The whole stake is counted as a potential loss, because it is one — a bet
     that could still be won is a bet that could still be lost, and a limit that
     only bit after the money was gone would not be a limit.
     """
-    for row in await limits_for(user_id, LOSS):
+    for row in await limits_for(user_id, LOSS, session=session):
         cap = row.get('amount')
         if cap is None:
             continue
-        lost = await net_loss_in(user_id, row['period'])
+        lost = await net_loss_in(user_id, row['period'], session=session)
         if lost + int(amount) > cap:
             left = max(0, cap - lost)
             raise ComplianceBlock(
@@ -628,15 +635,15 @@ async def check_stake(user_id, amount):
                 period=row['period'], limit=cap, used=max(0, lost), remaining=left)
 
 
-async def _stake_guard(user_id, amount):
+async def _stake_guard(user_id, amount, session=None):
     """Registered with the ledger, so every stake passes it.
 
     Hooked rather than called from the game routes because there are five of
     them and a sixth will be written; a check that has to be remembered is a
     check that will eventually be forgotten.
     """
-    await assert_not_excluded(user_id)
-    await check_stake(user_id, amount)
+    await assert_not_excluded(user_id, session=session)
+    await check_stake(user_id, amount, session=session)
 
 
 ledger.register_stake_guard(_stake_guard)

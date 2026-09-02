@@ -179,7 +179,7 @@ export default function AdminCompliance() {
                 <span className="font-mono text-xs text-white/85 flex-1 min-w-[110px]">{f.login_id}</span>
                 <span className="text-[11px] text-white/45">{f.country || "—"} · {f.country_code}</span>
                 <span className="text-[11px] text-white/45">{f.age == null ? "age ?" : `${f.age}y`}</span>
-                <span className="text-[11px] text-white/45 tabular-nums">{formatChips(f.chip_balance)} chips</span>
+                <span className="text-[11px] text-white/45 tabular-nums">Balance {formatChips(f.chip_balance)}</span>
                 <span className="flex gap-1">
                   {f.reasons.map((r) => (
                     <span key={r} title={REASONS[r] || r}

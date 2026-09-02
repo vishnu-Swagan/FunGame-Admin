@@ -426,7 +426,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
         <header className="pp-topbar">
           <button type="button" className="pp-round-button" onClick={() => navigate(`/games/${game.slug}`)} aria-label="Back to game details"><ChevronLeft /></button>
           <span className="pp-topbar-brand"><small><i />LIVE</small></span>
-          <strong>{balance == null ? "…" : formatChips(balance)} <small>CHIPS</small></strong>
+          <strong>{balance == null ? "…" : formatChips(balance)} <small>BALANCE</small></strong>
           <button type="button" className="pp-sound-button" onClick={toggleMuted} aria-label={muted ? "Turn sound on" : "Mute sound"}>{muted ? <VolumeX /> : <Volume2 />}</button>
         </header>
 
@@ -458,7 +458,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
           <div className={`pp-phase-banner is-${(phase || "loading").toLowerCase()}`}>
             {phase === "BETTING" && <b>PLEASE BET NOW</b>}
             {phase === "REVEAL" && <b>{scratched ? (outcome?.extra_pay ? "EXTRA PAY REVEALED" : "CARD REVEALED") : "SCRATCH THE COVERED CARD"}</b>}
-            {phase === "RESULT" && <b>WIN {formatChips(settlement?.payout || 0)} CHIPS <small>· {SYMBOL_MAP[outcome?.symbol]?.label || "RESULT"} {outcome?.multiplier || 8}×</small></b>}
+            {phase === "RESULT" && <b>WIN {formatChips(settlement?.payout || 0)} <small>· {SYMBOL_MAP[outcome?.symbol]?.label || "RESULT"} {outcome?.multiplier || 8}×</small></b>}
           </div>
 
           {(phase === "REVEAL" || phase === "RESULT") && (
@@ -491,7 +491,7 @@ function PappuPicturesTable({ game, live, demo = false }) {
           ))}
         </section>
 
-        <div className="pp-money"><span>Balance <b>{balance == null ? "…" : formatChips(balance)} chips</b></span><span>Your Bet <b>{formatChips(myTotal)} chips</b></span></div>
+        <div className="pp-money"><span>Balance <b>{balance == null ? "…" : formatChips(balance)}</b></span><span>Your Bet <b>{formatChips(myTotal)}</b></span></div>
 
         <footer className="pp-controls">
           <div className="pp-player"><span>🧑🏽</span><small>P***7</small></div>
@@ -506,10 +506,10 @@ function PappuPicturesTable({ game, live, demo = false }) {
                   "--fan-x": `${[-126, -82, -38, 8, 54][index]}px`,
                   "--fan-y": `${[-58, -82, -94, -82, -58][index]}px`,
                 }}
-                aria-label={`Select ${value} chip`}
+                aria-label={`Select ${value} stake`}
               ><Chip value={value} /></button>
             ))}
-            <button type="button" className="pp-chip-current" onClick={() => setChipMenu((open) => !open)} aria-label={`Current chip ${chip}`}><Chip value={chip} /></button>
+            <button type="button" className="pp-chip-current" onClick={() => setChipMenu((open) => !open)} aria-label={`Current stake ${chip}`}><Chip value={chip} /></button>
           </div>
           <button type="button" className="pp-tool" onClick={() => replay(true)} disabled={!betting || !myBets.length || busy}><b>×2</b><small>double</small></button>
           <button type="button" className="pp-tool" onClick={undoBet} disabled={!betting || !myBets.length || busy}><Undo2 /><small>undo</small></button>

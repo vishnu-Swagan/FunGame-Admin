@@ -4,11 +4,12 @@ import { ShieldCheck, Coins, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
+import LegalLinks from "@/components/LegalLinks";
 import { useAuthCapabilities } from "@/lib/authCapabilities";
 
 const BASE_FEATURES = [
   { icon: Gamepad2, title: "Premium digital games", text: "Enter the live game lobby and explore the available tables and arcade titles." },
-  { icon: Coins, title: "Virtual play chips", text: "Request play chips from an operator and follow the approval status from your profile." },
+  { icon: Coins, title: "Secure player wallet", text: "Deposit funds, review your balance, and follow payment status from your wallet." },
 ];
 
 export default function Welcome() {
@@ -32,11 +33,11 @@ export default function Welcome() {
             <BrandWordmark logoClassName="h-auto w-[min(88vw,380px)]" className="mb-5" />
             <h1 className="sr-only">CHAKRI.CASINO</h1>
             <p className="mt-3 text-base text-white/75 leading-relaxed">
-              Premium virtual-chip digital entertainment in one glowing midnight lobby.
+              Secure real-money casino entertainment in one glowing midnight lobby.
             </p>
             <Disclaimer className="mt-3" />
             <p className="mt-3 text-[11px] leading-relaxed text-white/45">
-              Chakri.Casino is a virtual-chip digital entertainment service launched by Liberty Markets Ltd, a UK software development, sales and production company.
+              Chakri.Casino provides account-based casino games, secure wallet services, and responsible-play controls for eligible adults.
             </p>
           </motion.div>
 
@@ -71,6 +72,7 @@ export default function Welcome() {
           <p className="text-center text-xs text-white/45">
             {capabilitiesLoading ? "Checking registration availability…" : channelSummary}
           </p>
+          <LegalLinks className="pt-1" />
         </div>
       </div>
     </div>

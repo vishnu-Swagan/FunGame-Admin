@@ -24,7 +24,7 @@ router = APIRouter(tags=['blackjack'])
 
 TRANSACTIONS_UNAVAILABLE = {
     'code': 'GAME_TRANSACTIONS_UNAVAILABLE',
-    'message': 'Blackjack is temporarily unavailable. No chips were moved.',
+    'message': 'Blackjack is temporarily unavailable. No balance was moved.',
 }
 _TRANSACTION_UNAVAILABLE_CODES = {20, 251, 263, 303}
 
@@ -285,12 +285,23 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
         'user_id': uid, 'id': ref, 'shoe': shoe, 'status': 'player_turn', 'active': 0,
         'dealer': [], 'hands': [], 'total_staked': stake, 'total_payout': 0,
         'insurance_offered': False, 'insurance_bet': 0, 'revision': 1,
+        'main_stake_refs': [], 'side_stake_refs': [], 'insurance_stake_refs': [],
         'created_at': _now(),
     }
-    for hb in body.hands:
+    for hand_index, hb in enumerate(body.hands):
+        main_stake_ref = f'{ref}:main:{hand_index}'
+        pp_stake_ref = f'{ref}:pp:{hand_index}' if hb.pp else None
+        t3_stake_ref = f'{ref}:t3:{hand_index}' if hb.t3 else None
+        blueprint['main_stake_refs'].append(main_stake_ref)
+        blueprint['side_stake_refs'].extend(
+            item for item in (pp_stake_ref, t3_stake_ref) if item
+        )
         blueprint['hands'].append({
             'bet': hb.bet, 'cards': [], 'done': False, 'outcome': None, 'payout': 0,
             'doubled': False, 'from_split_aces': False, 'pp': hb.pp, 't3': hb.t3,
+            'main_stake_ref': main_stake_ref,
+            'stake_refs': [main_stake_ref],
+            'pp_stake_ref': pp_stake_ref, 't3_stake_ref': t3_stake_ref,
         })
     # deal two rounds
     for h in blueprint['hands']:
@@ -303,16 +314,21 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
     # side bets settle now (using dealer up card)
     dealer_up = _tuple(blueprint['dealer'][0])
     side_payout = 0
+    side_awards = []
     for h in blueprint['hands']:
         two = [_tuple(c) for c in h['cards']]
         if h['pp'] > 0:
             m, lab = bj.eval_perfect_pairs(two)
             h['pp_mult'], h['pp_label'] = m, lab
-            side_payout += h['pp'] * (m + 1) if m > 0 else 0
+            award = h['pp'] * (m + 1) if m > 0 else 0
+            side_payout += award
+            side_awards.append((h['pp_stake_ref'], award, 'Perfect Pairs'))
         if h['t3'] > 0:
             m, lab = bj.eval_21plus3(two, dealer_up)
             h['t3_mult'], h['t3_label'] = m, lab
-            side_payout += h['t3'] * (m + 1) if m > 0 else 0
+            award = h['t3'] * (m + 1) if m > 0 else 0
+            side_payout += award
+            side_awards.append((h['t3_stake_ref'], award, '21+3'))
     blueprint['total_payout'] += side_payout
 
     # naturals: mark blackjack hands done
@@ -346,15 +362,33 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
         if existing and existing['status'] not in ('done', 'idle'):
             raise HTTPException(status_code=409, detail='Finish your current hand first')
         g = copy.deepcopy(blueprint)
-        await debit_chips(
-            uid, stake, 'Blackjack deal', ref=ref, kind=ledger.STAKE,
-            game='blackjack', session=session,
-        )
+        for hand in g['hands']:
+            await debit_chips(
+                uid, hand['bet'], 'Blackjack main hand', ref=hand['main_stake_ref'],
+                kind=ledger.STAKE, game='blackjack', session=session,
+            )
+            if hand.get('pp_stake_ref'):
+                await debit_chips(
+                    uid, hand['pp'], 'Blackjack Perfect Pairs', ref=hand['pp_stake_ref'],
+                    kind=ledger.STAKE, game='blackjack', session=session,
+                )
+            if hand.get('t3_stake_ref'):
+                await debit_chips(
+                    uid, hand['t3'], 'Blackjack 21+3', ref=hand['t3_stake_ref'],
+                    kind=ledger.STAKE, game='blackjack', session=session,
+                )
         await _save(g, session=session)
-        if side_payout > 0:
-            await credit_chips(
-                uid, side_payout, 'Blackjack side bets', ref=ref,
-                kind=ledger.PAYOUT, game='blackjack', session=session,
+        for side_ref, award, label in side_awards:
+            if award > 0:
+                await credit_chips(
+                    uid, award, f'Blackjack {label} payout', ref=f'{side_ref}:payout',
+                    kind=ledger.PAYOUT, game='blackjack', session=session,
+                    source_refs=[side_ref], settlement_ref=f'{ref}:side',
+                )
+        if g['side_stake_refs']:
+            await ledger.record_settlement(
+                uid, g['side_stake_refs'], 'blackjack', status='SETTLED',
+                settlement_ref=f'{ref}:side', session=session,
             )
         if g['status'] == 'done':
             await _finalize(g, uid, ref, session=session)
@@ -363,7 +397,7 @@ async def bj_deal(body: DealBody, user: dict = Depends(require_active_player)):
     try:
         g = await _run_transaction(deal)
     except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for these bets')
+        raise HTTPException(status_code=400, detail='Your available balance is too low for these stakes')
     bal = await _balance(uid)
     return {**_sanitize(g, bal), 'min_bet': MIN_BET}
 
@@ -384,11 +418,13 @@ async def bj_insurance(body: InsuranceBody, user: dict = Depends(require_active_
         dealer_bj = bj.is_blackjack(dealer)
         if body.take:
             ins = sum(h['bet'] for h in g['hands']) // 2
+            insurance_ref = f'{ref}:insurance:{revision}'
             await debit_chips(
-                uid, ins, 'Blackjack insurance', ref=ref, kind=ledger.STAKE,
+                uid, ins, 'Blackjack insurance', ref=insurance_ref, kind=ledger.STAKE,
                 game='blackjack', session=session,
             )
             g['insurance_bet'] = ins
+            g.setdefault('insurance_stake_refs', []).append(insurance_ref)
             g['total_staked'] += ins
             if dealer_bj:
                 g['total_payout'] += ins * 3  # 2:1
@@ -430,6 +466,7 @@ async def bj_action(body: ActionBody, user: dict = Depends(require_active_player
         h = g['hands'][i]
         cards = [_tuple(c) for c in h['cards']]
         extra_debit = 0
+        extra_stake_hand = None
 
         if act == 'hit':
             h['cards'].append(_draw(g))
@@ -446,6 +483,7 @@ async def bj_action(body: ActionBody, user: dict = Depends(require_active_player
             h['doubled'] = True
             h['cards'].append(_draw(g))
             h['done'] = True
+            extra_stake_hand = h
         else:  # split
             if len(cards) != 2 or cards[0][0] != cards[1][0] or len(g['hands']) >= 6:
                 raise HTTPException(status_code=400, detail='Cannot split this hand')
@@ -456,6 +494,7 @@ async def bj_action(body: ActionBody, user: dict = Depends(require_active_player
                 'bet': h['bet'], 'cards': [c1], 'done': False,
                 'outcome': None, 'payout': 0, 'doubled': False,
                 'from_split_aces': is_aces, 'pp': 0, 't3': 0,
+                'stake_refs': [],
             }
             h['cards'] = [c0]
             h['from_split_aces'] = is_aces
@@ -465,12 +504,16 @@ async def bj_action(body: ActionBody, user: dict = Depends(require_active_player
                 h['done'] = True
                 new_hand['done'] = True
             g['hands'].insert(i + 1, new_hand)
+            extra_stake_hand = new_hand
 
         if extra_debit > 0:
+            extra_ref = f'{ref}:{act}:{revision}:{i}'
             await debit_chips(
-                uid, extra_debit, f'Blackjack {act}', ref=ref,
+                uid, extra_debit, f'Blackjack {act}', ref=extra_ref,
                 kind=ledger.STAKE, game='blackjack', session=session,
             )
+            g.setdefault('main_stake_refs', []).append(extra_ref)
+            extra_stake_hand.setdefault('stake_refs', []).append(extra_ref)
             g['total_staked'] += extra_debit
 
         if h['done']:
@@ -504,13 +547,36 @@ async def _finalize(g, uid, ref, session):
     if claimed.modified_count == 0:
         return False
     g['finalized_at'] = finalized_at
-    main = sum(h.get('payout', 0) for h in g['hands'])
     ins = g['insurance_bet'] * 3 if (g.get('insurance_bet', 0) > 0 and bj.is_blackjack([_tuple(c) for c in g['dealer']])) else 0
-    payout = main + ins
-    if payout > 0:
+    insurance_refs = list(g.get('insurance_stake_refs') or [])
+    for hand_index, hand in enumerate(g['hands']):
+        # Component-specific refs prevent a winning bonus-funded hand from
+        # laundering through a losing cash-funded hand (and vice versa).
+        hand_refs = list(hand.get('stake_refs') or [])
+        if not hand_refs:
+            hand_refs = [ref]  # legacy pre-provenance hand, dormant integration only
+        hand_payout = int(hand.get('payout', 0))
+        if hand_payout > 0:
+            await credit_chips(
+                uid, hand_payout, f'Blackjack hand {hand_index + 1} payout',
+                ref=f'{ref}:hand:{hand_index}:payout',
+                kind=ledger.PAYOUT, game='blackjack', session=session,
+                source_refs=hand_refs, settlement_ref=ref,
+            )
+        await ledger.record_settlement(
+            uid, hand_refs, 'blackjack', status='SETTLED', settlement_ref=ref,
+            session=session,
+        )
+    if ins > 0:
         await credit_chips(
-            uid, payout, 'Blackjack payout', ref=ref, kind=ledger.PAYOUT,
-            game='blackjack', session=session,
+            uid, ins, 'Blackjack insurance payout', ref=f'{ref}:insurance-payout',
+            kind=ledger.PAYOUT, game='blackjack', session=session,
+            source_refs=insurance_refs, settlement_ref=ref,
+        )
+    if insurance_refs:
+        await ledger.record_settlement(
+            uid, insurance_refs, 'blackjack', status='SETTLED', settlement_ref=ref,
+            session=session,
         )
     game = await db.games.find_one({'slug': 'blackjack'}, **_session_kwargs(session))
     gname = game['name'] if game else 'Blackjack'

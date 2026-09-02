@@ -4,10 +4,13 @@ import Register from "./Register";
 
 const mockNavigate = jest.fn();
 const mockPost = jest.fn();
+const mockRetryPolicies = jest.fn();
 let mockCapabilities;
+let mockPolicyState;
 
 jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
+  useSearchParams: () => [new URLSearchParams()],
   Link: ({ children, to, ...props }) => <a href={to} {...props}>{children}</a>,
 }), { virtual: true });
 
@@ -19,8 +22,13 @@ jest.mock("@/lib/authCapabilities", () => ({
   }),
 }));
 
+jest.mock("@/lib/legalPolicies", () => ({
+  useRegistrationPolicies: () => mockPolicyState,
+}));
+
 jest.mock("@/lib/api", () => ({
   api: { post: (...args) => mockPost(...args) },
+  errCode: () => null,
   errMsg: (error) => error?.message || "Request failed",
 }));
 
@@ -89,6 +97,14 @@ async function clickPrimarySubmit(container) {
   });
 }
 
+async function acceptRequiredPolicies(container) {
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
+    await settle();
+  });
+}
+
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
 });
@@ -96,6 +112,16 @@ beforeAll(() => {
 beforeEach(() => {
   mockNavigate.mockReset();
   mockPost.mockReset();
+  mockRetryPolicies.mockReset();
+  mockPolicyState = {
+    policies: {
+      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
+      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
+    },
+    loading: false,
+    error: null,
+    retry: mockRetryPolicies,
+  };
   mockCapabilities = {
     registration_enabled: true,
     email_registration: true,
@@ -135,10 +161,7 @@ test("manual-review registration submits both contacts and confirmed password wi
   changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Strong-Password-9");
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    await settle();
-  });
+  await acceptRequiredPolicies(container);
   await submit(container.querySelector("form"));
 
   expect(mockPost).toHaveBeenCalledWith("/auth/register", expect.objectContaining({
@@ -150,6 +173,9 @@ test("manual-review registration submits both contacts and confirmed password wi
     date_of_birth: "1990-05-20",
     country: "IN",
     accepted_terms: true,
+    accepted_privacy: true,
+    terms_version: "account-terms-2026.09",
+    privacy_version: "privacy-2026.09",
     password: "Strong-Password-9",
     password_confirmation: "Strong-Password-9",
   }));
@@ -168,10 +194,7 @@ test("mismatched passwords are rejected before the registration API call", async
   changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Different-Password-9");
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    await settle();
-  });
+  await acceptRequiredPolicies(container);
   await submit(container.querySelector("form"));
 
   expect(mockPost).not.toHaveBeenCalled();
@@ -194,10 +217,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   change(container.querySelector("#reg-email"), "Optional@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
   changeSelect(container.querySelector("#reg-country"), "GB");
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    await settle();
-  });
+  await acceptRequiredPolicies(container);
   await submit(container.querySelector("form"));
 
   expect(mockPost.mock.calls[0][1]).not.toHaveProperty("password");
@@ -224,10 +244,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
   change(container.querySelector("#reg-email"), "Live.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
   changeSelect(container.querySelector("#reg-country"), "IN");
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    await settle();
-  });
+  await acceptRequiredPolicies(container);
   await clickPrimarySubmit(container);
 
   expect(mockPost).toHaveBeenCalledTimes(1);
@@ -240,6 +257,9 @@ test("a real submit-button click posts the live dual-verification payload", asyn
     date_of_birth: "1990-05-20",
     country: "IN",
     accepted_terms: true,
+    accepted_privacy: true,
+    terms_version: "account-terms-2026.09",
+    privacy_version: "privacy-2026.09",
   });
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
     state: expect.objectContaining({
@@ -267,10 +287,7 @@ test("an invalid required email is explained inline and focused without posting"
   change(container.querySelector("#reg-email"), "not-an-email");
   change(container.querySelector("#reg-dob"), "1990-05-20");
   changeSelect(container.querySelector("#reg-country"), "IN");
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    await settle();
-  });
+  await acceptRequiredPolicies(container);
   await clickPrimarySubmit(container);
 
   expect(mockPost).not.toHaveBeenCalled();
@@ -299,8 +316,16 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
 
   const terms = container.querySelector('[data-testid="register-terms-checkbox"]');
   expect(mockPost).not.toHaveBeenCalled();
-  expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the account and play terms");
+  expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the current Terms and Conditions");
   expect(terms.getAttribute("aria-invalid")).toBe("true");
   expect(document.activeElement).toBe(terms);
+  await act(async () => root.unmount());
+});
+
+test("privacy acknowledgement is separate and policy versions are visible", async () => {
+  const { container, root } = await renderRegister();
+  expect(container.querySelector('[data-testid="register-privacy-checkbox"]')).not.toBeNull();
+  expect(container.textContent).toContain("version account-terms-2026.09");
+  expect(container.textContent).toContain("version privacy-2026.09");
   await act(async () => root.unmount());
 });

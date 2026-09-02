@@ -1,7 +1,7 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
-import { ChevronRight, Play } from "lucide-react";
+import { ChevronRight, Play, UsersRound } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGames } from "@/lib/useGames";
 import { GameCard } from "@/components/GameCard";
@@ -10,6 +10,8 @@ import { useAuth } from "@/context/AuthContext";
 import { usePlayersOnline } from "@/lib/liveActivity";
 import { LiveActivityBar } from "@/components/play/LiveActivityBar";
 import { sfx } from "@/lib/sound";
+import { promotions } from "@/lib/promotionApi";
+import { MissionCard } from "@/components/promotions";
 
 const CATEGORY_ORDER = ["Cards", "Slots", "Wheel", "Numbers", "Dice", "Crash", "Board"];
 
@@ -88,7 +90,7 @@ function VideoHero({ navigate, userName }) {
         <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(180deg, #05070f, #0a0e1a)" }}>
           <p className="font-gaming text-[10px] tracking-[0.4em] uppercase mb-1 text-primary">◆ Welcome to the floor</p>
           <h1 className="font-tech font-black uppercase text-white leading-[0.92] tracking-tight text-[2rem]" style={{ textShadow: "0 0 30px rgba(255,199,64,0.25)" }}>
-            Virtual chips <span style={{ color: "#ffd447" }}>golden thrills</span>
+            Real play <span style={{ color: "#ffd447" }}>golden thrills</span>
           </h1>
           <div className="mt-3 flex items-center gap-2.5">
             <button
@@ -122,6 +124,15 @@ export default function Home() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { games, favorites, recent, loading, toggleFavorite } = useGames();
+  const [activeMission, setActiveMission] = useState(null);
+  const [referralSummary, setReferralSummary] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    promotions.activeMission().then((mission) => { if (active) setActiveMission(mission); }).catch(() => {});
+    promotions.referral().then((summary) => { if (active) setReferralSummary(summary); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const featured = games.filter((g) => g.featured);
   const recentGames = recent.map((slug) => games.find((g) => g.slug === slug)).filter(Boolean);
@@ -131,6 +142,10 @@ export default function Home() {
     <PageTransition className="space-y-6">
       {/* Cinematic video hero */}
       <VideoHero navigate={navigate} userName={user?.display_name || "Player"} />
+
+      {activeMission && <MissionCard mission={activeMission} onOpen={() => navigate(`/bonus-mission/${encodeURIComponent(activeMission.id)}`)} />}
+
+      {referralSummary && <button type="button" onClick={() => navigate("/referral-rewards")} className="flex min-h-20 w-full items-center gap-3 rounded-2xl border border-primary/25 bg-card/65 p-4 text-left shadow-[0_14px_40px_rgba(0,0,0,.28)]" data-testid="home-referral-rewards"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10"><UsersRound className="h-5 w-5 text-primary" /></span><span className="min-w-0 flex-1"><strong className="block text-sm">Referral rewards</strong><span className="mt-1 block text-xs leading-relaxed text-white/50">Share only when you choose and track server-verified reward tasks.</span></span><ChevronRight className="h-5 w-5 shrink-0 text-primary" /></button>}
 
       {/* Live floor ticker */}
       <LiveActivityBar slug="chakri-lobby" />

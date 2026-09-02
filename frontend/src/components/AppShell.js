@@ -11,7 +11,7 @@ const NAV = [
   { to: "/home", label: "Home", icon: Home, testId: "bottom-nav-home" },
   { to: "/games", label: "Games", icon: Gamepad2, testId: "bottom-nav-games" },
   { to: "/search", label: "Search", icon: Search, testId: "bottom-nav-search" },
-  { to: "/chips", label: "Chips", icon: Coins, testId: "bottom-nav-chips" },
+  { to: "/wallet", label: "Wallet", icon: Coins, testId: "bottom-nav-chips" },
   { to: "/profile", label: "Profile", icon: User, testId: "bottom-nav-profile" },
 ];
 
@@ -132,8 +132,8 @@ export default function AppShell() {
             <div className="flex items-center gap-2">
               <button
                 data-testid="chip-balance-amount"
-                onClick={() => navigate("/chips")}
-                aria-label={`Chip balance ${formatChips(user?.chip_balance)}`}
+                onClick={() => navigate("/wallet")}
+                aria-label={`Player balance ${formatChips(user?.chip_balance)}`}
                 className="flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/10 pl-2.5 pr-3 py-1.5 min-h-[36px] hover:bg-primary/15 transition-[background-color] duration-150"
               >
                 <Coins className="h-4 w-4 text-primary" />

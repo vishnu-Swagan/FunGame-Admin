@@ -1,12 +1,15 @@
 """Authentication routes with email/mobile identities and one-use OTPs."""
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
@@ -82,6 +85,262 @@ PHONE_OTP_ACTIVATION_MODE = 'PHONE_OTP'
 ADMIN_REVIEW_ACTIVATION_MODE = 'ADMIN_REVIEW'
 ADMIN_REVIEW_PENDING = 'ADMIN_REVIEW_PENDING'
 ADMIN_REVIEW_APPROVED = 'ADMIN_APPROVED'
+POLICY_ACCEPTANCE_SCHEMA_VERSION = 1
+POLICY_ACCEPTANCE_PURPOSE = 'ACCOUNT_REGISTRATION'
+POLICY_VERSION_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$')
+DEFAULT_TERMS_VERSION = 'legacy-account-terms-v1'
+DEFAULT_PRIVACY_VERSION = 'legacy-privacy-notice-v1'
+
+
+def _environment_flag(name: str) -> bool:
+    return (os.environ.get(name) or '').strip().lower() in {
+        '1', 'true', 'yes', 'on',
+    }
+
+
+def _policy_config_error(message: str) -> HTTPException:
+    logger.error('Legal policy configuration unavailable: %s', message)
+    return HTTPException(status_code=503, detail={
+        'code': 'POLICY_CONFIG_UNAVAILABLE',
+        'message': 'Current account policies are temporarily unavailable.',
+    })
+
+
+def _normalise_policy_url(value: str | None) -> str | None:
+    value = (value or '').strip()
+    if not value:
+        return None
+    if len(value) > 2048:
+        raise ValueError('policy URL is too long')
+    if value.startswith('/') and not value.startswith('//'):
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError('policy URL must be an internal path or an HTTPS URL')
+    return value
+
+
+def _normalise_policy_effective_at(value: str | None) -> str | None:
+    value = (value or '').strip()
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError as exc:
+        raise ValueError('policy effective timestamp is invalid') from exc
+    if parsed.tzinfo is None:
+        raise ValueError('policy effective timestamp must include a timezone')
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _normalise_policy_hash(value: str | None) -> str | None:
+    value = (value or '').strip().lower()
+    if not value:
+        return None
+    if not re.fullmatch(r'[0-9a-f]{64}', value):
+        raise ValueError('policy content hash must be SHA-256 hexadecimal')
+    return value
+
+
+def _current_policy_documents() -> dict:
+    """Return server-owned metadata for the exact documents being accepted.
+
+    Legal text and operator/licence facts deliberately do not live in defaults.
+    Operators can publish immutable documents and configure their URLs, dates
+    and content hashes without changing historical acceptance evidence.
+    """
+    terms_version = (
+        os.environ.get('CURRENT_TERMS_VERSION') or DEFAULT_TERMS_VERSION
+    ).strip()
+    privacy_version = (
+        os.environ.get('CURRENT_PRIVACY_VERSION') or DEFAULT_PRIVACY_VERSION
+    ).strip()
+    if not POLICY_VERSION_PATTERN.fullmatch(terms_version):
+        raise _policy_config_error('CURRENT_TERMS_VERSION is invalid')
+    if not POLICY_VERSION_PATTERN.fullmatch(privacy_version):
+        raise _policy_config_error('CURRENT_PRIVACY_VERSION is invalid')
+    try:
+        return {
+            'terms': {
+                'key': 'terms',
+                'title': 'Terms and Conditions',
+                'version': terms_version,
+                'effective_at': _normalise_policy_effective_at(
+                    os.environ.get('TERMS_EFFECTIVE_AT'),
+                ),
+                'url': _normalise_policy_url(os.environ.get('TERMS_PUBLIC_URL')),
+                'content_sha256': _normalise_policy_hash(
+                    os.environ.get('TERMS_CONTENT_SHA256'),
+                ),
+                'required': True,
+            },
+            'privacy': {
+                'key': 'privacy',
+                'title': 'Privacy Notice',
+                'version': privacy_version,
+                'effective_at': _normalise_policy_effective_at(
+                    os.environ.get('PRIVACY_EFFECTIVE_AT'),
+                ),
+                'url': _normalise_policy_url(os.environ.get('PRIVACY_PUBLIC_URL')),
+                'content_sha256': _normalise_policy_hash(
+                    os.environ.get('PRIVACY_CONTENT_SHA256'),
+                ),
+                'required': True,
+            },
+        }
+    except ValueError as exc:
+        raise _policy_config_error(str(exc)) from exc
+
+
+def _explicit_policy_versions_required() -> bool:
+    return _environment_flag('POLICY_EXPLICIT_VERSION_ACK_REQUIRED')
+
+
+def _require_complete_policy_publication(documents: dict) -> None:
+    """Fail closed when strict acknowledgement lacks immutable publication data."""
+    for key, document in documents.items():
+        missing = [
+            field for field in ('effective_at', 'url', 'content_sha256')
+            if not document.get(field)
+        ]
+        if missing:
+            raise _policy_config_error(
+                f'{key} publication metadata is missing {", ".join(missing)}',
+            )
+
+
+def _public_policy_metadata() -> dict:
+    documents = _current_policy_documents()
+    explicit_required = _explicit_policy_versions_required()
+    if explicit_required:
+        _require_complete_policy_publication(documents)
+    return {
+        'schema_version': POLICY_ACCEPTANCE_SCHEMA_VERSION,
+        'documents': documents,
+        'required_for_registration': ['terms', 'privacy'],
+        'acceptance': {
+            'explicit_versions_required': explicit_required,
+            # This is an intentional migration bridge, not an unversioned
+            # record: the backend snapshots its current versions either way.
+            'legacy_single_checkbox_supported': not explicit_required,
+        },
+    }
+
+
+def _registration_policy_acceptance(
+    body: RegisterRequest,
+    registration_mode: str,
+    request: Request | None = None,
+) -> dict:
+    """Validate and snapshot registration consent before any account write."""
+    if body.accepted_terms is not True:
+        raise HTTPException(status_code=422, detail={
+            'code': 'TERMS_REQUIRED',
+            'message': 'Accept the Terms and Conditions to continue.',
+        })
+
+    documents = _current_policy_documents()
+    submitted_versions = {
+        'terms': body.terms_version,
+        'privacy': body.privacy_version,
+    }
+    supplied_count = sum(value is not None for value in submitted_versions.values())
+    explicit_required = _explicit_policy_versions_required()
+    if explicit_required:
+        _require_complete_policy_publication(documents)
+    if supplied_count not in (0, len(submitted_versions)):
+        raise HTTPException(status_code=422, detail={
+            'code': 'POLICY_VERSIONS_REQUIRED',
+            'message': 'Confirm both current policy document versions.',
+        })
+    if body.accepted_privacy is False:
+        raise HTTPException(status_code=422, detail={
+            'code': 'PRIVACY_REQUIRED',
+            'message': 'Acknowledge the Privacy Notice to continue.',
+        })
+    if explicit_required and (
+        supplied_count == 0 or body.accepted_privacy is not True
+    ):
+        raise HTTPException(status_code=422, detail={
+            'code': 'POLICY_VERSIONS_REQUIRED',
+            'message': 'Confirm both current policy document versions.',
+        })
+
+    if supplied_count:
+        current_versions = {
+            key: document['version'] for key, document in documents.items()
+        }
+        if submitted_versions != current_versions:
+            raise HTTPException(status_code=409, detail={
+                'code': 'POLICY_VERSION_MISMATCH',
+                'message': 'The policies changed. Review the current versions and try again.',
+                'current_versions': current_versions,
+            })
+        if body.accepted_privacy is not True:
+            raise HTTPException(status_code=422, detail={
+                'code': 'PRIVACY_REQUIRED',
+                'message': 'Acknowledge the Privacy Notice to continue.',
+            })
+        capture_method = 'EXPLICIT_VERSIONED'
+    else:
+        capture_method = 'LEGACY_SINGLE_CHECKBOX_CURRENT_VERSION'
+
+    accepted_at = _now().isoformat()
+    request_path = '/api/auth/register'
+    request_method = 'POST'
+    if request is not None:
+        # Method and route are operational context, not browser fingerprinting.
+        request_method = str(getattr(request, 'method', None) or 'POST').upper()[:16]
+        request_url = getattr(request, 'url', None)
+        request_path = str(getattr(request_url, 'path', None) or request_path)[:256]
+    return {
+        'schema_version': POLICY_ACCEPTANCE_SCHEMA_VERSION,
+        'purpose': POLICY_ACCEPTANCE_PURPOSE,
+        'accepted_at': accepted_at,
+        'affirmations': {'terms': True, 'privacy': True},
+        'policy_versions': {
+            key: document['version'] for key, document in documents.items()
+        },
+        # Store a deep copy so subsequent environment changes cannot rewrite
+        # what this player accepted.
+        'policy_snapshot': json.loads(json.dumps(documents)),
+        'capture': {
+            'method': capture_method,
+            'registration_mode': registration_mode,
+            'request_method': request_method,
+            'request_path': request_path,
+            'request_id': str(uuid.uuid4()),
+        },
+    }
+
+
+def _policy_acceptance_record(user: dict, acceptance: dict) -> dict:
+    acceptance_id = f"registration:{user['id']}"
+    record = {
+        '_id': acceptance_id,
+        'id': acceptance_id,
+        'user_id': user['id'],
+        'jurisdiction': user.get('country_code'),
+        **json.loads(json.dumps(acceptance)),
+    }
+    hash_payload = {key: value for key, value in record.items() if key != '_id'}
+    record['evidence_sha256'] = hashlib.sha256(json.dumps(
+        hash_payload, sort_keys=True, separators=(',', ':'),
+    ).encode('utf-8')).hexdigest()
+    return record
+
+
+def _apply_policy_acceptance_to_user(user: dict, record: dict) -> None:
+    accepted_at = record['accepted_at']
+    user.update({
+        'accepted_terms': True,
+        'accepted_terms_at': accepted_at,
+        'accepted_privacy': True,
+        'accepted_privacy_at': accepted_at,
+        'accepted_policy_versions': dict(record['policy_versions']),
+        'policy_acceptance_id': record['id'],
+        'policy_acceptance_schema_version': record['schema_version'],
+    })
 
 
 def _registration_mode() -> str:
@@ -459,7 +718,22 @@ async def authentication_capabilities():
     }
 
 
-async def _register_phone_otp(body: RegisterRequest):
+@router.get('/policies/current')
+async def current_policy_metadata():
+    """Public, read-only metadata for registration policy documents.
+
+    The endpoint intentionally serves identifiers and publication metadata,
+    not editable legal text. Policy pages can therefore be published and
+    retained independently while registration records the exact version shown.
+    """
+    return _public_policy_metadata()
+
+
+async def _register_phone_otp(
+    body: RegisterRequest,
+    referral_risk_clusters: dict | None = None,
+    policy_acceptance: dict | None = None,
+):
     """Create a phone-OTP-pending self-service player.
 
     Email remains optional for the legacy phone-only rollout. When the
@@ -515,7 +789,7 @@ async def _register_phone_otp(body: RegisterRequest):
     if body.accepted_terms is not True:
         raise HTTPException(status_code=422, detail={
             'code': 'TERMS_REQUIRED',
-            'message': 'Accept the account and play terms to continue.',
+            'message': 'Accept the Terms and Conditions to continue.',
         })
     ok, code, message = await compliance.check_eligibility(
         country, body.date_of_birth, require_dob=True,
@@ -601,6 +875,9 @@ async def _register_phone_otp(body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    policy_acceptance = policy_acceptance or _registration_policy_acceptance(
+        body, PHONE_OTP_ACTIVATION_MODE,
+    )
     user = {
         'id': user_id,
         'role': 'PLAYER',
@@ -632,10 +909,10 @@ async def _register_phone_otp(body: RegisterRequest):
             'haptics_enabled': True, 'reduced_motion': False,
             'high_contrast': False,
         },
-        'accepted_terms': True,
-        'accepted_terms_at': created_at,
         'created_at': created_at,
     }
+    acceptance_record = _policy_acceptance_record(user, policy_acceptance)
+    _apply_policy_acceptance_to_user(user, acceptance_record)
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,
@@ -649,13 +926,29 @@ async def _register_phone_otp(body: RegisterRequest):
         user['email_normalized'] = email_identity.value
     else:
         user['email'] = f'phone-{user_id}@account.phone.invalid'
+    if referral_risk_clusters:
+        user['referral_risk_clusters'] = dict(referral_risk_clusters)
 
     async def create_account(session):
         kwargs = {'session': session} if session is not None else {}
         await db.users.insert_one(user, **kwargs)
+        # Insert-only evidence shares the account transaction. The deterministic
+        # _id prevents a second registration acceptance for the same account.
+        await db.policy_acceptances.insert_one(acceptance_record, **kwargs)
         await crm.attribute_user(
             user['id'], None, actor='self-registration-phone-otp', session=session,
         )
+        if body.invite_code:
+            import promotions
+            try:
+                await promotions.attach_player_referral(
+                    user['id'], body.invite_code, jurisdiction=country_code,
+                    consented_at=created_at, session=session,
+                )
+            except promotions.PromotionError as exc:
+                raise HTTPException(status_code=422, detail={
+                    'code': exc.code, 'message': exc.message,
+                }) from exc
         return await db.users.find_one({'id': user['id']}, **kwargs)
 
     try:
@@ -675,6 +968,8 @@ async def _register_phone_otp(body: RegisterRequest):
             kwargs = {'session': session} if session is not None else {}
             await db.otp_challenges.delete_many({'user_id': user['id']}, **kwargs)
             await db.player_attribution.delete_many({'user_id': user['id']}, **kwargs)
+            await db.player_referrals.delete_many({'invited_user_id': user['id']}, **kwargs)
+            await db.policy_acceptances.delete_many({'user_id': user['id']}, **kwargs)
             await db.users.delete_one({
                 'id': user['id'], 'status': 'PENDING', 'phone_verified': False,
             }, **kwargs)
@@ -691,7 +986,11 @@ async def _register_phone_otp(body: RegisterRequest):
     }
 
 
-async def _register_for_admin_review(body: RegisterRequest):
+async def _register_for_admin_review(
+    body: RegisterRequest,
+    referral_risk_clusters: dict | None = None,
+    policy_acceptance: dict | None = None,
+):
     """Create one zero-chip player application for explicit admin approval.
 
     No delivery adapter is consulted and no response claims that a code was
@@ -748,7 +1047,7 @@ async def _register_for_admin_review(body: RegisterRequest):
     if body.accepted_terms is not True:
         raise HTTPException(status_code=422, detail={
             'code': 'TERMS_REQUIRED',
-            'message': 'Accept the account and play terms to continue.',
+            'message': 'Accept the Terms and Conditions to continue.',
         })
     ok, code, message = await compliance.check_eligibility(
         country, body.date_of_birth, require_dob=True,
@@ -793,6 +1092,9 @@ async def _register_for_admin_review(body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    policy_acceptance = policy_acceptance or _registration_policy_acceptance(
+        body, ADMIN_REVIEW_ACTIVATION_MODE,
+    )
     user = {
         'id': user_id,
         'role': 'PLAYER',
@@ -829,26 +1131,40 @@ async def _register_for_admin_review(body: RegisterRequest):
             'haptics_enabled': True, 'reduced_motion': False,
             'high_contrast': False,
         },
-        'accepted_terms': True,
-        'accepted_terms_at': created_at,
         # The complete profile is the application. There is no hidden second
         # onboarding submission required before it appears in the admin queue.
         'submitted_at': created_at,
         'created_at': created_at,
     }
+    acceptance_record = _policy_acceptance_record(user, policy_acceptance)
+    _apply_policy_acceptance_to_user(user, acceptance_record)
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,
             'screened_at': created_at,
             'verify_plus_expected': False,
         }
+    if referral_risk_clusters:
+        user['referral_risk_clusters'] = dict(referral_risk_clusters)
 
     async def create_account(session):
         kwargs = {'session': session} if session is not None else {}
         await db.users.insert_one(user, **kwargs)
+        await db.policy_acceptances.insert_one(acceptance_record, **kwargs)
         await crm.attribute_user(
             user_id, None, actor='self-registration-admin-review', session=session,
         )
+        if body.invite_code:
+            import promotions
+            try:
+                await promotions.attach_player_referral(
+                    user_id, body.invite_code, jurisdiction=country_code,
+                    consented_at=created_at, session=session,
+                )
+            except promotions.PromotionError as exc:
+                raise HTTPException(status_code=422, detail={
+                    'code': exc.code, 'message': exc.message,
+                }) from exc
         return await db.users.find_one({'id': user_id}, **kwargs)
 
     try:
@@ -861,16 +1177,31 @@ async def _register_for_admin_review(body: RegisterRequest):
 
 
 @router.post('/register', status_code=status.HTTP_202_ACCEPTED)
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request = None):
+    referral_risk_clusters = None
+    if body.invite_code and request is not None:
+        import promotions
+        if promotions.feature_enabled(promotions.REFERRAL):
+            from security import _client_ip
+            referral_risk_clusters = promotions.registration_risk_clusters(
+                client_ip=_client_ip(request),
+                user_agent=request.headers.get('user-agent', ''),
+            )
     mode = _registration_mode()
+    if mode not in (ADMIN_REVIEW_ACTIVATION_MODE, PHONE_OTP_ACTIVATION_MODE):
+        raise HTTPException(status_code=503, detail={
+            'code': 'REGISTRATION_UNAVAILABLE',
+            'message': 'Registration is temporarily unavailable.',
+        })
+    policy_acceptance = _registration_policy_acceptance(body, mode, request)
     if mode == ADMIN_REVIEW_ACTIVATION_MODE:
-        return await _register_for_admin_review(body)
+        return await _register_for_admin_review(
+            body, referral_risk_clusters, policy_acceptance,
+        )
     if mode == PHONE_OTP_ACTIVATION_MODE:
-        return await _register_phone_otp(body)
-    raise HTTPException(status_code=503, detail={
-        'code': 'REGISTRATION_UNAVAILABLE',
-        'message': 'Registration is temporarily unavailable.',
-    })
+        return await _register_phone_otp(
+            body, referral_risk_clusters, policy_acceptance,
+        )
 
 
 @router.post('/signup-request')
@@ -1058,6 +1389,15 @@ async def verify_contact(body: VerifyEmailRequest):
         )
         if not updated:
             raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
+        if updated.get('status') == 'ACTIVE':
+            import promotions
+            await promotions.record_referral_event(
+                updated['id'], 'REGISTRATION_VERIFIED',
+                source_event_id=f"contact-verified:{updated['id']}",
+                occurred_at=verified_at,
+                metadata={'verification_method': updated.get('approved_by')},
+                session=session,
+            )
         return updated
 
     try:

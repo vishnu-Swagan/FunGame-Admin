@@ -11,8 +11,9 @@ import sys
 import time
 import types
 import unittest
+from dataclasses import replace
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from mongomock_motor import AsyncMongoMockClient
@@ -287,6 +288,26 @@ async def seed_cash(user_id: str, amount: int):
     )
 
 
+def strict_withdrawal_hold(
+    *, suffix: str, category: str = "AML",
+    reason_code: str = "AML_SOURCE_OF_FUNDS_REVIEW",
+    source_type: str = "AML_REVIEW",
+) -> dict:
+    return {
+        "id": f"withdrawal-hold:test-{suffix}",
+        "category": category,
+        "reason_code": reason_code,
+        "review_status": "UNDER_REVIEW",
+        "recorded_at": finance.now(),
+        "recorded_by": "compliance-admin",
+        "support_path": "/support",
+        "source": {
+            "type": source_type,
+            "id": f"compliance-case:{suffix}",
+        },
+    }
+
+
 class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         os.environ.update(TEST_PROVIDER_ENV)
@@ -313,6 +334,361 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(wallet["cash_chips"], 0)
         self.assertEqual(wallet["withdrawable_chips"], 0)
         self.assertEqual(await db.wallet_accounts.count_documents({}), 0)
+
+    async def test_withdrawal_gate_uses_only_documented_kyc_aml_fraud_sanctions_or_legal_holds(self):
+        # Product/account eligibility can stop deposits and play, but cannot be
+        # repurposed into a hold on otherwise-cleared cash.
+        for label, changes in (
+            ("inactive", {"status": "SELF_EXCLUDED"}),
+            ("contact", {"contact_verified": False, "email_verified": False}),
+            ("age", {"age_verified": False}),
+            ("country", {"country": "ZZ"}),
+            ("generic-review", {"financial_status": "REVIEW_REQUIRED"}),
+        ):
+            with self.subTest(non_hold_condition=label):
+                candidate = {**self.user, **changes}
+                allowed = await routes._require_player("withdrawals", candidate)
+                self.assertEqual(allowed["id"], self.user["id"])
+
+        no_kyc = {**self.user, "kyc_status": "UNVERIFIED"}
+        with self.assertRaises(HTTPException) as kyc_block:
+            await routes._require_player("withdrawals", no_kyc)
+        self.assertEqual(kyc_block.exception.detail["code"], "KYC_WITHDRAWAL_HOLD")
+        self.assertEqual(kyc_block.exception.detail["hold_category"], "KYC")
+        self.assertEqual(kyc_block.exception.detail["hold_reason_code"], "KYC_NOT_VERIFIED")
+        self.assertEqual(kyc_block.exception.detail["support_path"], "/support")
+
+        for category in ("KYC", "AML", "FRAUD", "SANCTIONS", "LEGAL"):
+            with self.subTest(documented_hold_category=category):
+                candidate = {
+                    **self.user,
+                    "withdrawal_hold": {
+                        "id": f"withdrawal-hold:test-{category.lower()}",
+                        "category": category,
+                        "reason_code": f"{category}_CASE_REVIEW",
+                        "review_status": "UNDER_REVIEW",
+                        "recorded_at": finance.now(),
+                        "recorded_by": "compliance-admin",
+                        "support_path": "/support",
+                        "source": {
+                            "type": "ADMIN_COMPLIANCE_CASE",
+                            "id": f"compliance-case:{category.lower()}-001",
+                        },
+                    },
+                }
+                with self.assertRaises(HTTPException) as held:
+                    await routes._require_player("withdrawals", candidate)
+                expected_code = (
+                    "KYC_WITHDRAWAL_HOLD" if category == "KYC"
+                    else "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD"
+                )
+                self.assertEqual(held.exception.detail["code"], expected_code)
+                self.assertEqual(held.exception.detail["hold_category"], category)
+                self.assertEqual(
+                    held.exception.detail["hold_reason_code"],
+                    f"{category}_CASE_REVIEW",
+                )
+
+        # Missing evidence is an operator reconciliation issue, not permission
+        # to invent a generic FINANCIAL_REVIEW hold against the player.
+        malformed = {
+            **self.user,
+            "financial_status": "FROZEN",
+            "withdrawal_hold": {
+                "category": "UNSUPPORTED",
+                "reason_code": "GENERIC_REVIEW",
+                "review_status": "UNDER_REVIEW",
+            },
+        }
+        self.assertEqual(
+            (await routes._require_player("withdrawals", malformed))["id"],
+            self.user["id"],
+        )
+
+    async def test_wallet_withdrawal_eligibility_uses_the_same_documented_hold_projection(self):
+        await seed_cash("player-1", 100)
+        generic_review = {**self.user, "financial_status": "REVIEW_REQUIRED"}
+        available = await routes.payment_wallet(user=generic_review)
+        self.assertEqual(available["wallet"]["withdrawable_chips"], 100)
+        self.assertTrue(available["wallet"]["withdrawal_eligibility"]["eligible"])
+        self.assertEqual(available["wallet"]["withdrawal_eligibility"]["reason_codes"], [])
+
+        documented = {
+            **self.user,
+            "withdrawal_hold": {
+                "id": "withdrawal-hold:test-aml-wallet",
+                "category": "AML",
+                "reason_code": "AML_SOURCE_OF_FUNDS_REVIEW",
+                "review_status": "ACTIVE",
+                "recorded_at": finance.now(),
+                "recorded_by": "aml-admin",
+                "support_path": "/support",
+                "source": {
+                    "type": "AML_REVIEW",
+                    "id": "aml-review:wallet-001",
+                },
+            },
+        }
+        blocked = await routes.payment_wallet(user=documented)
+        eligibility = blocked["wallet"]["withdrawal_eligibility"]
+        self.assertFalse(eligibility["eligible"])
+        self.assertEqual(eligibility["reason_codes"], ["AML_SOURCE_OF_FUNDS_REVIEW"])
+        self.assertEqual(eligibility["hold"]["category"], "AML")
+        self.assertEqual(eligibility["support_path"], "/support")
+        self.assertEqual(blocked["wallet"]["restricted_bonus_chips"], 1000)
+
+    async def test_provider_terminal_identity_conflict_blocks_then_audited_clearance_restores_withdrawal(self):
+        await seed_cash("player-1", 2_000)
+        method = await finance.create_payout_method(
+            "player-1", account_holder_name="Test Player", bank_name="Test Bank",
+            account_number="123456789012", ifsc_code="ABCD0123456",
+        )
+        withdrawal = await finance.create_withdrawal(
+            "player-1", 1_000, method["id"],
+            "withdraw-before-provider-identity-conflict", self.provider,
+        )
+        order, _ = await finance.create_deposit(
+            "player-1", 10_000, "deposit-terminal-identity-conflict", self.provider,
+        )
+        paid, raw = signed_event(self.provider, {
+            "id": "evt-terminal-identity-original", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10_000,
+            "currency": "INR", "provider_reference": "payment-identity-original",
+        })
+        await finance.process_provider_event(self.provider, paid, raw)
+        wallet_before_conflict = await finance.wallet_public("player-1")
+        operations_before_conflict = await db.wallet_operations.count_documents({})
+        conflict, conflict_raw = signed_event(self.provider, {
+            "id": "evt-terminal-identity-conflict", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10_000,
+            "currency": "INR", "provider_reference": "payment-identity-conflicting",
+        })
+        with self.assertRaises(finance.FinancialError) as identity_conflict:
+            await finance.process_provider_event(self.provider, conflict, conflict_raw)
+        self.assertEqual(identity_conflict.exception.code, "DEPOSIT_TERMINAL_CONFLICT")
+
+        user = await db.users.find_one({"id": "player-1"}, {"_id": 0})
+        hold, reconciliation = finance.documented_withdrawal_hold_projection(user)
+        self.assertIsNone(reconciliation)
+        self.assertEqual(hold["reason_code"], "DEPOSIT_TERMINAL_CONFLICT")
+        self.assertEqual(hold["source"]["type"], "PROVIDER_TERMINAL_CONFLICT")
+        stored_withdrawal = await db.withdrawal_requests.find_one(
+            {"id": withdrawal["id"]}, {"_id": 0},
+        )
+        self.assertEqual(stored_withdrawal["status"], "PAUSED_FOR_HOLD")
+        wallet_during_hold = await finance.wallet_public("player-1")
+        self.assertEqual(wallet_during_hold["held_chips"], 1_000)
+        self.assertEqual(wallet_during_hold, wallet_before_conflict)
+        self.assertEqual(
+            await db.wallet_operations.count_documents({}),
+            operations_before_conflict,
+        )
+        with self.assertRaises(HTTPException) as route_blocked:
+            await routes._require_player("withdrawals", user)
+        self.assertEqual(
+            route_blocked.exception.detail["code"],
+            "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD",
+        )
+        with self.assertRaises(finance.FinancialError) as approval_blocked:
+            await finance.approve_withdrawal(withdrawal["id"], "payments-admin")
+        self.assertEqual(
+            approval_blocked.exception.code,
+            "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD",
+        )
+
+        cleared = await finance.clear_documented_withdrawal_hold(
+            "player-1", hold_id=hold["id"], actor="compliance-admin",
+            reason="Provider evidence was independently reconciled and cleared",
+        )
+        self.assertEqual(cleared["resumed_withdrawal_ids"], [withdrawal["id"]])
+        resumed = await db.withdrawal_requests.find_one(
+            {"id": withdrawal["id"]}, {"_id": 0},
+        )
+        self.assertEqual(resumed["status"], "PENDING_ADMIN")
+        allowed_user = await db.users.find_one({"id": "player-1"}, {"_id": 0})
+        self.assertEqual(
+            (await routes._require_player("withdrawals", allowed_user))["id"],
+            "player-1",
+        )
+        approved = await finance.approve_withdrawal(withdrawal["id"], "payments-admin")
+        self.assertEqual(approved["status"], "APPROVED")
+
+        # Simulate a hold committing after approval but before the operator
+        # crosses the provider boundary. The submission seam must revalidate.
+        submit_race_hold = strict_withdrawal_hold(
+            suffix="manual-submit-race", category="LEGAL",
+            reason_code="LEGAL_PAYOUT_REVIEW", source_type="LEGAL_ORDER",
+        )
+        await db.users.update_one(
+            {"id": "player-1"}, {"$set": {"withdrawal_hold": submit_race_hold}},
+        )
+        with self.assertRaises(finance.FinancialError) as submit_blocked:
+            await finance.mark_withdrawal_submitted(
+                withdrawal["id"], "payments-admin", "must-not-cross-provider-boundary",
+            )
+        self.assertEqual(
+            submit_blocked.exception.code,
+            "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD",
+        )
+        unchanged = await db.withdrawal_requests.find_one(
+            {"id": withdrawal["id"]}, {"_id": 0},
+        )
+        self.assertEqual(unchanged["status"], "APPROVED")
+        self.assertIsNone(unchanged.get("provider_payout_id"))
+        self.assertEqual(await db.financial_audit.count_documents({
+            "action": "WITHDRAWAL_HOLD_SET",
+        }), 1)
+        self.assertEqual(await db.financial_audit.count_documents({
+            "action": "WITHDRAWAL_HOLD_CLEARED",
+        }), 1)
+
+    async def test_generic_deposit_limit_review_never_creates_withdrawal_hold(self):
+        order, _ = await finance.create_deposit(
+            "player-1", 10_000, "deposit-before-late-limit-review", self.provider,
+        )
+        await db.player_limits.insert_one({
+            "user_id": "player-1", "kind": "DEPOSIT", "period": "DAY", "amount": 50,
+        })
+        await db.deposit_orders.update_one(
+            {"id": order["id"]}, {"$set": {"limit_reservation_status": "RELEASED"}},
+        )
+        paid, raw = signed_event(self.provider, {
+            "id": "evt-generic-limit-review", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10_000,
+            "currency": "INR", "provider_reference": "generic-limit-payment",
+        })
+        await finance.process_provider_event(self.provider, paid, raw)
+        user = await db.users.find_one({"id": "player-1"}, {"_id": 0})
+        self.assertEqual(user["financial_status"], "REVIEW_REQUIRED")
+        self.assertNotIn("withdrawal_hold", user)
+        self.assertIsNone(finance.documented_withdrawal_hold_projection(user)[0])
+        self.assertEqual(
+            (await routes._require_player("withdrawals", user))["id"], "player-1",
+        )
+
+    async def test_hold_set_and_clear_preserve_unrelated_financial_status(self):
+        await db.users.update_one(
+            {"id": "player-1"}, {"$set": {"financial_status": "FROZEN"}},
+        )
+        result = await finance.set_documented_withdrawal_hold(
+            "player-1", category="AML", reason_code="AML_SOURCE_OF_FUNDS_REVIEW",
+            review_status="UNDER_REVIEW", support_path="/support",
+            source_type="AML_REVIEW", source_id="aml-case:status-preservation",
+            actor="compliance-admin", reason="Review requested by the AML case owner",
+        )
+        self.assertEqual(
+            (await db.users.find_one({"id": "player-1"}))["financial_status"],
+            "FROZEN",
+        )
+        await finance.clear_documented_withdrawal_hold(
+            "player-1", hold_id=result["hold"]["id"], actor="compliance-admin",
+            reason="AML case was independently resolved",
+        )
+        self.assertEqual(
+            (await db.users.find_one({"id": "player-1"}))["financial_status"],
+            "FROZEN",
+        )
+
+    async def test_withdrawal_authorization_and_eligibility_writers_share_one_lock(self):
+        await finance.assert_withdrawal_not_held("player-1")
+        first = await db.financial_player_locks.find_one({
+            "_id": "withdrawal-eligibility:player-1",
+        })
+        self.assertEqual(first["serial"], 1)
+
+        await finance.review_player_kyc(
+            "player-1", "REJECTED", "kyc-admin",
+            "Identity evidence requires a fresh review",
+        )
+        hold = await finance.set_documented_withdrawal_hold(
+            "player-1", category="AML", reason_code="AML_SOURCE_OF_FUNDS_REVIEW",
+            review_status="UNDER_REVIEW", support_path="/support",
+            source_type="AML_REVIEW", source_id="aml-case:shared-lock",
+            actor="compliance-admin", reason="AML evidence requires review",
+        )
+        await finance.clear_documented_withdrawal_hold(
+            "player-1", hold_id=hold["hold"]["id"], actor="compliance-admin",
+            reason="AML evidence was independently cleared",
+        )
+        final = await db.financial_player_locks.find_one({
+            "_id": "withdrawal-eligibility:player-1",
+        })
+        self.assertEqual(final["serial"], 4)
+
+    async def test_withdrawal_holds_require_audited_clearance_not_silent_expiry(self):
+        with self.assertRaises(finance.FinancialError) as expiry:
+            await finance.set_documented_withdrawal_hold(
+                "player-1", category="LEGAL", reason_code="LEGAL_ORDER_REVIEW",
+                review_status="UNDER_REVIEW", support_path="/support",
+                source_type="LEGAL_ORDER", source_id="legal-order:expiry-rejected",
+                actor="compliance-admin", reason="A legal order requires review",
+                expires_at=finance.now() + timedelta(hours=1),
+            )
+        self.assertEqual(expiry.exception.code, "INVALID_WITHDRAWAL_HOLD")
+        user = await db.users.find_one({"id": "player-1"}, {"_id": 0})
+        self.assertNotIn("withdrawal_hold", user)
+        self.assertEqual(await db.withdrawal_holds.count_documents({}), 0)
+
+    async def test_unverified_kyc_does_not_hide_persisted_hold_from_admin_clearance(self):
+        await db.users.update_one(
+            {"id": "player-1"}, {"$set": {"kyc_status": "UNVERIFIED"}},
+        )
+        result = await finance.set_documented_withdrawal_hold(
+            "player-1", category="LEGAL", reason_code="LEGAL_ORDER_REVIEW",
+            review_status="UNDER_REVIEW", support_path="/support",
+            source_type="LEGAL_ORDER", source_id="legal-order:unverified-kyc",
+            actor="compliance-admin", reason="Court-order evidence requires review",
+        )
+        summary = await finance.get_documented_withdrawal_hold("player-1")
+        self.assertEqual(summary["active_hold"]["id"], result["hold"]["id"])
+        self.assertEqual(summary["eligibility_hold"]["reason_code"], "KYC_NOT_VERIFIED")
+        cleared = await finance.clear_documented_withdrawal_hold(
+            "player-1", hold_id=result["hold"]["id"], actor="compliance-admin",
+            reason="Legal case was resolved; KYC remains independently required",
+        )
+        self.assertFalse(cleared["duplicate"])
+        after = await finance.get_documented_withdrawal_hold("player-1")
+        self.assertIsNone(after["active_hold"])
+        self.assertEqual(after["eligibility_hold"]["reason_code"], "KYC_NOT_VERIFIED")
+
+    async def test_automatic_submission_revalidates_hold_after_claim_before_provider_call(self):
+        await seed_cash("player-1", 1_000)
+        await db.users.update_one(
+            {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
+        )
+        method = await finance.create_payout_method(
+            "player-1", account_holder_name="Test Player", bank_name="Test Bank",
+            account_number="123456789012", ifsc_code="ABCD0123456",
+        )
+        await finance.set_withdrawal_mode(
+            "AUTOMATIC", "super-admin", "Enable certified provider flow", self.provider,
+        )
+        withdrawal = await finance.create_withdrawal(
+            "player-1", 1_000, method["id"],
+            "withdraw-hold-after-automatic-claim", self.provider,
+        )
+        claimed = await finance.claim_automatic_withdrawal(withdrawal["id"])
+        self.assertEqual(claimed["status"], "SUBMITTING")
+        await db.users.update_one(
+            {"id": "player-1"}, {"$set": {"withdrawal_hold": strict_withdrawal_hold(
+                suffix="automatic-authorization-race", category="SANCTIONS",
+                reason_code="SANCTIONS_SCREENING_REVIEW",
+                source_type="SANCTIONS_REVIEW",
+            )}},
+        )
+        with self.assertRaises(finance.FinancialError) as blocked:
+            await finance._authorize_automatic_submission(withdrawal["id"])
+        self.assertEqual(
+            blocked.exception.code,
+            "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD",
+        )
+        stored = await db.withdrawal_requests.find_one(
+            {"id": withdrawal["id"]}, {"_id": 0},
+        )
+        self.assertEqual(stored["status"], "SUBMITTING")
+        self.assertIsNone(stored.get("submission_authorized_at"))
+        self.assertIsNone(stored.get("provider_payout_id"))
+        self.assertEqual(self.provider.submit_calls, 0)
 
     async def test_deposit_retries_provider_gap_and_webhook_credits_exactly_once(self):
         self.provider.deposit_failures = 1
@@ -354,6 +730,64 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["status"], "CREDITED")
         failed_event = await db.provider_webhook_events.find_one({"event_id": mismatch.event_id})
         self.assertEqual(failed_event["status"], "REVIEW_REQUIRED")
+
+    async def test_verified_deposit_persists_only_privacy_safe_payment_cluster(self):
+        order, _ = await finance.create_deposit(
+            "player-1", 10000, "deposit-payment-risk-cluster", self.provider,
+        )
+        event, raw = signed_event(self.provider, {
+            "id": "evt-payment-risk-cluster", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10000,
+            "currency": "INR", "provider_reference": "provider-payment-risk-cluster",
+        })
+        raw_provider_token = "provider-instrument-fingerprint-0001"
+        event = replace(event, data={"payment_instrument_fingerprint": raw_provider_token})
+        with patch.dict(os.environ, {
+            "REFERRAL_RISK_PEPPER": "test-only-referral-risk-pepper-32-bytes-minimum",
+        }):
+            credited = await finance.process_provider_event(self.provider, event, raw)
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await db.deposit_orders.find_one({"id": order["id"]}, {"_id": 0})
+        self.assertRegex(stored["payment_instrument_cluster"], r"^rr1:[0-9a-f]{64}$")
+        self.assertNotIn(raw_provider_token, str(stored))
+
+    async def test_referral_processing_failure_never_rolls_back_verified_deposit(self):
+        import promotions
+
+        order, _ = await finance.create_deposit(
+            "player-1", 10000, "deposit-referral-outbox", self.provider,
+        )
+        event, raw = signed_event(self.provider, {
+            "id": "evt-deposit-referral-outbox", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10000,
+            "currency": "INR", "provider_reference": "provider-referral-outbox",
+        })
+        with patch.object(promotions, "feature_enabled", return_value=True):
+            credited = await finance.process_provider_event(self.provider, event, raw)
+
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await db.deposit_orders.find_one({"id": order["id"]})
+        self.assertEqual(stored["status"], "CREDITED")
+        wallet = await finance.wallet_public("player-1")
+        self.assertEqual(wallet["cash_chips"], 100)
+        outbox = await db.financial_outbox.find_one({
+            "kind": "PROMOTION_REFERRAL_EVENT",
+        })
+        self.assertIsNotNone(outbox)
+
+        failure = promotions.PromotionError(
+            "PROMOTION_STORAGE_UNAVAILABLE", "injected promotion failure", 503,
+        )
+        with patch.object(
+            promotions, "record_referral_event",
+            new=AsyncMock(side_effect=failure),
+        ):
+            processed = await finance.process_outbox_batch(self.provider)
+        self.assertEqual(processed["retry_scheduled"], 1)
+        stored_after = await db.deposit_orders.find_one({"id": order["id"]})
+        self.assertEqual(stored_after["status"], "CREDITED")
+        wallet_after = await finance.wallet_public("player-1")
+        self.assertEqual(wallet_after["cash_chips"], 100)
 
     async def test_retryable_and_stale_webhook_can_be_reprocessed_hash_safely(self):
         order, _ = await finance.create_deposit(

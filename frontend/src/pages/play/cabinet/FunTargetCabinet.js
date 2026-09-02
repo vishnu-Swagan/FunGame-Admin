@@ -53,7 +53,7 @@ export default function FunTargetCabinet({ game }) {
     if (phase === "REVEAL") return "Bet Time Over.";
     if (phase === "RESULT" && outcome) {
       const won = result && result.payout > 0;
-      return `Landed on ${outcome.result}. ${won ? `You won ${formatChips(result.payout)}` : "For amusement only, no cash value."}`;
+      return `Landed on ${outcome.result}. ${won ? `You won ${formatChips(result.payout)}` : "No winnings this round."}`;
     }
     if (!myTotal) return `Please Bet to Start Game. Minimum Bet = ${formatChips(minBet)}`;
     return `Total bet ${formatChips(myTotal)} — pays ${pays}x on the exact number.`;

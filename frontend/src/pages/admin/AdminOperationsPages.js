@@ -105,7 +105,7 @@ export function AdminPaymentGateways() {
       <PageHeader
         context="Provider boundary"
         title="Payment gateways"
-        description="Connection readiness and isolation controls for external payment providers. Gameplay remains virtual-chip based."
+        description="Connection readiness and isolation controls for external payment providers and source-aware player balances."
         loading={loading}
         onRefresh={load}
       />
@@ -120,7 +120,7 @@ export function AdminPaymentGateways() {
       {loading ? <LoadingBlock /> : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard icon={Gamepad2} label="Gameplay economy" value="Virtual chips" note="The game ledger remains the source of truth for player balances." tone="Active" />
+            <SummaryCard icon={Gamepad2} label="Gameplay economy" value="Source-aware balances" note="The game ledger remains the source of truth for player balances." tone="Active" />
             <SummaryCard icon={CreditCard} label="Provider adapter" value={providerState} note="External provider actions stay isolated from gameplay." />
             <SummaryCard icon={LockKeyhole} label="Automatic actions" value={features.automatic_withdrawals ? "Configured" : "Locked"} note="No automatic provider action can run without server readiness." />
             <SummaryCard icon={ServerCog} label="Configuration schema" value={`v${financial.schema_version || settings?.mode_version || 1}`} note={`Last control update: ${when(settings?.updated_at)}`} tone="Configured" />
@@ -133,7 +133,7 @@ export function AdminPaymentGateways() {
             <div className="crm-panel-body compact-list">
               <div className="compact-row"><span className="transaction-glyph"><Network size={15} /></span><span className="compact-main"><strong>Provider connection</strong><small>Adapter and production readiness</small></span><StatusPill>{providerState}</StatusPill></div>
               <div className="compact-row"><span className="transaction-glyph"><ShieldCheck size={15} /></span><span className="compact-main"><strong>Secret handling</strong><small>Keys and callback verification never render in the browser</small></span><StatusPill>Configured</StatusPill></div>
-              <div className="compact-row"><span className="transaction-glyph"><Database size={15} /></span><span className="compact-main"><strong>Gameplay ledger isolation</strong><small>Virtual-chip balances do not depend on a provider response</small></span><StatusPill>Active</StatusPill></div>
+              <div className="compact-row"><span className="transaction-glyph"><Database size={15} /></span><span className="compact-main"><strong>Gameplay ledger isolation</strong><small>A provider response alone cannot change a player balance</small></span><StatusPill>Active</StatusPill></div>
             </div>
           </section>
         </>
@@ -204,7 +204,7 @@ export function AdminMonitoring() {
               <div className="crm-panel-body compact-list">
                 <div className="compact-row"><span className="transaction-glyph"><Users size={15} /></span><span className="compact-main"><strong>Registered players</strong><small>{Number(stats?.active_users || 0)} active accounts</small></span><strong>{Number(stats?.total_users || 0)}</strong></div>
                 <div className="compact-row"><span className="transaction-glyph"><Gamepad2 size={15} /></span><span className="compact-main"><strong>Game catalog</strong><small>Enabled titles available to approved players</small></span><strong>{Number(stats?.enabled_games || 0)}/{Number(stats?.total_games || 0)}</strong></div>
-                <div className="compact-row"><span className="transaction-glyph"><ScrollText size={15} /></span><span className="compact-main"><strong>Operator queue</strong><small>Pending chip decisions</small></span><strong>{Number(stats?.pending_chip_requests || 0)}</strong></div>
+                <div className="compact-row"><span className="transaction-glyph"><ScrollText size={15} /></span><span className="compact-main"><strong>Operator queue</strong><small>Pending bonus-balance decisions</small></span><strong>{Number(stats?.pending_chip_requests || 0)}</strong></div>
               </div>
             </section>
 

@@ -24,7 +24,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pymongo import ReturnDocument
@@ -43,7 +43,7 @@ from payment_providers import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 CURRENCY = "INR"
 MANUAL = "MANUAL"
 AUTOMATIC = "AUTOMATIC"
@@ -70,17 +70,40 @@ WITHDRAWAL_PROVIDER_PENDING = frozenset({
 })
 WITHDRAWAL_TERMINAL = frozenset({"PAID", "REJECTED", "FAILED", "CANCELLED"})
 
+# A withdrawal restriction is valid only when it carries this complete,
+# allowlisted evidence. Generic account/payment review flags are deliberately
+# not part of this model and therefore cannot become an invented cash hold.
+WITHDRAWAL_HOLD_CATEGORIES = frozenset({"KYC", "AML", "FRAUD", "SANCTIONS", "LEGAL"})
+WITHDRAWAL_HOLD_ACTIVE_STATUSES = frozenset({
+    "ACTIVE", "HELD", "PENDING", "REVIEW_REQUIRED", "UNDER_REVIEW",
+})
+WITHDRAWAL_HOLD_CLOSED_STATUSES = frozenset({
+    "CLEARED", "CLOSED", "EXPIRED", "RELEASED", "RESOLVED",
+})
+WITHDRAWAL_HOLD_SUPPORT_PATHS = frozenset({"/support", "/responsible-play"})
+WITHDRAWAL_HOLD_SOURCE_TYPES = frozenset({
+    "ADMIN_COMPLIANCE_CASE", "KYC_REVIEW", "AML_REVIEW", "FRAUD_REVIEW",
+    "SANCTIONS_REVIEW", "LEGAL_ORDER", "PROVIDER_TERMINAL_CONFLICT",
+    "PROVIDER_REFUND_IDENTITY_CONFLICT",
+})
+WITHDRAWAL_HOLD_REASON_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
+WITHDRAWAL_HOLD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{2,159}$")
+
 _READY = False
 _READINESS_ERRORS: list[str] = ["Financial core has not been prepared"]
 _TEST_DEPOSIT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class FinancialError(RuntimeError):
-    def __init__(self, code: str, message: str, status_code: int = 400):
+    def __init__(
+        self, code: str, message: str, status_code: int = 400,
+        *, details: Optional[Mapping[str, Any]] = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.details = dict(details or {})
 
 
 class _WalletInitializationRace(RuntimeError):
@@ -513,6 +536,141 @@ def _parse_optional_datetime(value: Any) -> Optional[datetime]:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _persisted_withdrawal_hold_projection(
+    user: Mapping[str, Any],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Validate only persisted hold evidence, independent of KYC eligibility."""
+    raw = user.get("withdrawal_hold")
+    if not isinstance(raw, Mapping):
+        reconciliation = (
+            "RESTRICTED_FINANCIAL_STATUS_WITHOUT_DOCUMENTED_WITHDRAWAL_HOLD"
+            if str(user.get("financial_status") or "").upper()
+            in {"BLOCKED", "FROZEN", "REVIEW_REQUIRED"}
+            else None
+        )
+        return None, reconciliation
+
+    hold_id = str(raw.get("id") or "").strip()
+    category = str(raw.get("category") or raw.get("hold_type") or "").strip().upper()
+    reason_code = str(raw.get("reason_code") or "").strip().upper()
+    review_status = str(raw.get("review_status") or raw.get("status") or "").strip().upper()
+    recorded_at = _parse_optional_datetime(raw.get("recorded_at") or raw.get("created_at"))
+    recorded_by = str(
+        raw.get("recorded_by") or raw.get("created_by") or raw.get("actor") or ""
+    ).strip()
+    support_path = str(raw.get("support_path") or "").strip()
+    source = raw.get("source")
+    source_type = (
+        str(source.get("type") or "").strip().upper()
+        if isinstance(source, Mapping) else ""
+    )
+    source_id = (
+        str(source.get("id") or "").strip()
+        if isinstance(source, Mapping) else ""
+    )
+
+    if review_status in WITHDRAWAL_HOLD_CLOSED_STATUSES:
+        return None, None
+
+    valid = (
+        bool(WITHDRAWAL_HOLD_TOKEN_RE.fullmatch(hold_id))
+        and category in WITHDRAWAL_HOLD_CATEGORIES
+        and bool(WITHDRAWAL_HOLD_REASON_RE.fullmatch(reason_code))
+        and review_status in WITHDRAWAL_HOLD_ACTIVE_STATUSES
+        and recorded_at is not None
+        and bool(recorded_by)
+        and len(recorded_by) <= 160
+        and support_path in WITHDRAWAL_HOLD_SUPPORT_PATHS
+        and source_type in WITHDRAWAL_HOLD_SOURCE_TYPES
+        and bool(WITHDRAWAL_HOLD_TOKEN_RE.fullmatch(source_id))
+    )
+    if not valid:
+        return None, "MALFORMED_DOCUMENTED_WITHDRAWAL_HOLD"
+
+    return {
+        "code": (
+            "KYC_WITHDRAWAL_HOLD"
+            if category == "KYC" else "LEGAL_OR_COMPLIANCE_WITHDRAWAL_HOLD"
+        ),
+        "id": hold_id,
+        "category": category,
+        "reason_code": reason_code,
+        "review_status": review_status,
+        "recorded_at": recorded_at,
+        "support_path": support_path,
+        "source": {"type": source_type, "id": source_id},
+        "message": "Withdrawal is paused for a documented compliance review.",
+    }, None
+
+
+def documented_withdrawal_hold_projection(
+    user: Mapping[str, Any],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Return the canonical authorization hold and reconciliation signal.
+
+    KYC is an implicit prerequisite at the authorization boundary, while
+    persisted hold validation remains separately usable by set/clear/history.
+    """
+    persisted, reconciliation = _persisted_withdrawal_hold_projection(user)
+    kyc_status = str(user.get("kyc_status") or "NOT_STARTED").strip().upper()
+    if kyc_status != "VERIFIED":
+        return {
+            "code": "KYC_WITHDRAWAL_HOLD",
+            "id": None,
+            "category": "KYC",
+            "reason_code": "KYC_NOT_VERIFIED",
+            "review_status": kyc_status,
+            "recorded_at": None,
+            "support_path": "/support",
+            "message": "Identity verification is required before withdrawal.",
+        }, reconciliation
+    return persisted, reconciliation
+
+
+def _withdrawal_hold_error(hold: Mapping[str, Any]) -> FinancialError:
+    return FinancialError(
+        str(hold["code"]), str(hold["message"]), 403,
+        details={
+            "hold_id": hold.get("id"),
+            "hold_category": hold.get("category"),
+            "hold_reason_code": hold.get("reason_code"),
+            "review_status": hold.get("review_status"),
+            "support_path": hold.get("support_path"),
+            **({"recorded_at": hold["recorded_at"]} if hold.get("recorded_at") else {}),
+        },
+    )
+
+
+async def assert_withdrawal_not_held(user_id: str, *, session=None) -> dict[str, Any]:
+    """Fail closed on one canonical documented hold at a mutation boundary."""
+    await _touch_withdrawal_eligibility_lock(user_id, session=session)
+    user = await db.users.find_one(
+        {"id": str(user_id)}, {"_id": 0}, **_session_kwargs(session),
+    )
+    if not user:
+        raise FinancialError("USER_NOT_FOUND", "Player account was not found.", 404)
+    hold, _reconciliation = documented_withdrawal_hold_projection(user)
+    if hold:
+        raise _withdrawal_hold_error(hold)
+    return user
+
+
+async def _touch_withdrawal_eligibility_lock(user_id: str, session=None) -> None:
+    """Serialize withdrawal authorization with every KYC/hold mutation.
+
+    Mongo transactions use snapshot isolation, so merely reading ``users``
+    does not conflict with a concurrent eligibility update. Every authorization
+    boundary and every writer touches this purpose-specific document first;
+    an optimistic write conflict then retries the losing transaction from a
+    fresh snapshot before any provider authorization can escape.
+    """
+    await db.financial_player_locks.update_one(
+        {"_id": f"withdrawal-eligibility:{user_id}"},
+        {"$inc": {"serial": 1}, "$set": {"updated_at": now()}},
+        upsert=True, **_session_kwargs(session),
+    )
+
+
 async def _touch_deposit_limit_lock(user_id: str, session=None) -> None:
     """Serialize reservation and settlement decisions for one player.
 
@@ -598,6 +756,23 @@ def _deposit_limit_error(violation: Mapping[str, Any]) -> FinancialError:
 async def ensure_financial_indexes() -> None:
     """Create required financial indexes; any failure is fatal to readiness."""
     await db.wallet_accounts.create_index("user_id", unique=True, name="wallet_account_user_unique")
+    await db.wallet_bonus_lots.create_index("id", unique=True, name="wallet_bonus_lot_id_unique")
+    await db.wallet_bonus_lots.create_index(
+        "source_key", unique=True, name="wallet_bonus_lot_source_unique",
+    )
+    await db.wallet_bonus_lots.create_index(
+        [("user_id", 1), ("remaining_chips", 1), ("spend_priority", 1),
+         ("expires_at", 1), ("created_at", 1)],
+        name="wallet_bonus_lot_spend_order",
+    )
+    await db.wallet_source_consumptions.create_index(
+        "stake_transaction_id", unique=True,
+        name="wallet_source_consumption_stake_unique",
+    )
+    await db.wallet_source_consumptions.create_index(
+        [("credited_user_id", 1), ("created_at", -1)],
+        name="wallet_source_consumption_user_created",
+    )
     await db.wallet_operations.create_index(
         [("user_id", 1), ("idempotency_key", 1)], unique=True,
         name="wallet_operation_idempotency_unique",
@@ -634,6 +809,13 @@ async def ensure_financial_indexes() -> None:
     await db.withdrawal_requests.create_index(
         [("provider", 1), ("withdrawal_mode", 1), ("status", 1), ("next_reconcile_at", 1)],
         name="withdrawal_reconciliation_due",
+    )
+    await db.withdrawal_holds.create_index(
+        "id", unique=True, name="withdrawal_hold_id_unique",
+    )
+    await db.withdrawal_holds.create_index(
+        [("user_id", 1), ("status", 1), ("recorded_at", -1)],
+        name="withdrawal_hold_user_status",
     )
     await db.deposit_orders.create_index(
         [("provider", 1), ("provider_reference", 1)], unique=True,
@@ -688,6 +870,14 @@ async def ensure_financial_indexes() -> None:
 
 _REQUIRED_INDEXES = {
     "wallet_accounts": {"wallet_account_user_unique"},
+    "wallet_bonus_lots": {
+        "wallet_bonus_lot_id_unique", "wallet_bonus_lot_source_unique",
+        "wallet_bonus_lot_spend_order",
+    },
+    "wallet_source_consumptions": {
+        "wallet_source_consumption_stake_unique",
+        "wallet_source_consumption_user_created",
+    },
     "wallet_operations": {
         "wallet_operation_idempotency_unique", "wallet_operation_source_unique",
     },
@@ -702,6 +892,9 @@ _REQUIRED_INDEXES = {
     "withdrawal_requests": {
         "withdrawal_user_idempotency_unique", "withdrawal_provider_payout_unique",
         "withdrawal_provider_reference_unique", "withdrawal_reconciliation_due",
+    },
+    "withdrawal_holds": {
+        "withdrawal_hold_id_unique", "withdrawal_hold_user_status",
     },
     "payout_methods": {"payout_method_user_fingerprint_unique"},
     "provider_webhook_events": {"webhook_provider_event_unique"},
@@ -925,10 +1118,206 @@ async def ensure_payment_settings(session=None) -> dict[str, Any]:
     return await db.payment_settings.find_one({"key": "main"}, {"_id": 0}, **kwargs)
 
 
+def _bonus_lot_id(source_key: str) -> str:
+    digest = hashlib.sha256(str(source_key).encode("utf-8")).hexdigest()[:40]
+    return f"bonus-lot:{digest}"
+
+
+async def _bonus_lot_rows(user_id: str, session=None) -> list[dict[str, Any]]:
+    kwargs = _session_kwargs(session)
+    return await db.wallet_bonus_lots.find(
+        {"user_id": user_id, "remaining_chips": {"$gt": 0}}, {"_id": 0},
+        **kwargs,
+    ).sort([
+        ("spend_priority", 1), ("expires_at", 1), ("created_at", 1), ("id", 1),
+    ]).to_list(length=None)
+
+
+async def _ensure_bonus_lot_coverage(
+    user_id: str, account: Mapping[str, Any], session=None,
+) -> None:
+    """Perform schema-v3 migration once, then fail closed on every later gap."""
+    expected = max(0, int(account.get("available_bonus_chips", 0)))
+    rows = await _bonus_lot_rows(user_id, session=session)
+    covered = sum(int(row.get("remaining_chips", 0)) for row in rows)
+    migrated = int(account.get("bonus_lot_schema_version", 0)) == 1
+    if migrated:
+        if covered != expected:
+            raise FinancialError(
+                "BONUS_LOT_RECONCILIATION_REQUIRED",
+                "Restricted bonus provenance does not match the wallet balance.",
+                503,
+            )
+        return
+    if covered > expected:
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus provenance exceeds the wallet balance.",
+            503,
+        )
+    missing = expected - covered
+    kwargs = _session_kwargs(session)
+    source_key = f"legacy-bonus-coverage:{user_id}"
+    if missing:
+        existing = await db.wallet_bonus_lots.find_one(
+            {"source_key": source_key}, {"_id": 0}, **kwargs,
+        )
+        if existing:
+            # An interrupted/non-transactional migration is never guessed at.
+            # The normal production path is one Mongo transaction, so seeing a
+            # partial deterministic lot means manual reconciliation is needed.
+            raise FinancialError(
+                "BONUS_LOT_RECONCILIATION_REQUIRED",
+                "A previous restricted bonus migration is incomplete.",
+                503,
+            )
+        await db.wallet_bonus_lots.insert_one({
+            "id": _bonus_lot_id(source_key), "source_key": source_key,
+            "user_id": user_id, "source_type": "LEGACY_NONWITHDRAWABLE",
+            "source_id": user_id, "original_chips": missing,
+            "remaining_chips": missing, "status": "ACTIVE",
+            "restriction_reason": "Legacy promotional balance is restricted and not withdrawable.",
+            "spend_priority": 1, "expires_at": None,
+            "created_at": now(), "updated_at": now(),
+        }, **kwargs)
+
+    migration_key = f"bonus-lot-schema-v3:{user_id}"
+    migration_id = _bonus_lot_id(migration_key).replace("bonus-lot:", "bonus-migration:")
+    migrated_at = now()
+    await db.wallet_operations.update_one(
+        {"source_key": migration_key},
+        {"$setOnInsert": {
+            "id": migration_id, "user_id": user_id,
+            "kind": "BONUS_LOT_SCHEMA_MIGRATION", "source_key": migration_key,
+            "idempotency_key": migration_key,
+            "request_hash": _canonical_hash({
+                "user_id": user_id, "wallet_bonus_chips": expected,
+                "preexisting_lot_chips": covered, "migrated_chips": missing,
+            }),
+            "status": "COMMITTED",
+            "result": {"bonus_chips": expected, "migrated_chips": missing},
+            "created_at": migrated_at,
+        }},
+        upsert=True, **kwargs,
+    )
+    marker = await db.wallet_accounts.update_one(
+        {
+            "user_id": user_id, "available_bonus_chips": expected,
+            "bonus_lot_schema_version": {"$ne": 1},
+        },
+        {"$set": {
+            "bonus_lot_schema_version": 1,
+            "bonus_lot_migrated_at": migrated_at,
+            "updated_at": migrated_at,
+        }},
+        **kwargs,
+    )
+    if marker.modified_count != 1:
+        raise FinancialError(
+            "BONUS_LOT_CONCURRENT_CHANGE",
+            "Restricted bonus migration changed concurrently; retry the transaction.",
+            409,
+        )
+
+
+async def allocate_bonus_lots(
+    user_id: str, chips: int, *, session=None,
+) -> list[dict[str, Any]]:
+    """Plan BONUS_FIRST debits in deterministic expiry/creation order."""
+    amount = int(chips)
+    if amount < 0:
+        raise FinancialError("INVALID_BONUS_LOT_AMOUNT", "Bonus lot amount is invalid.")
+    if amount == 0:
+        return []
+    account = await _ensure_wallet_account(user_id, session=session)
+    rows = await _bonus_lot_rows(user_id, session=session)
+    remaining = amount
+    allocations: list[dict[str, Any]] = []
+    for row in rows:
+        take = min(remaining, int(row.get("remaining_chips", 0)))
+        if take <= 0:
+            continue
+        allocations.append({
+            "lot_id": row["id"], "chips": take,
+            "source_type": row.get("source_type"), "source_id": row.get("source_id"),
+            "mission_id": row.get("mission_id"), "campaign_id": row.get("campaign_id"),
+            "campaign_version": row.get("campaign_version"),
+            "referral_claim_id": row.get("referral_claim_id"),
+            "terms_version": row.get("terms_version"),
+            "restriction_reason": row.get("restriction_reason"),
+            "expires_at": row.get("expires_at"),
+            "spend_priority": int(row.get("spend_priority", 1)),
+        })
+        remaining -= take
+        if remaining == 0:
+            break
+    if remaining:
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus provenance does not cover the requested stake.",
+            503,
+        )
+    if sum(item["chips"] for item in allocations) != amount:
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus allocation is incomplete.",
+            503,
+        )
+    return allocations
+
+
+async def bonus_lots_public(user_id: str, *, session=None) -> list[dict[str, Any]]:
+    """Expose player-safe provenance without mutating legacy wallet state."""
+    account = await db.wallet_accounts.find_one(
+        {"user_id": user_id}, {"_id": 0}, **_session_kwargs(session),
+    )
+    rows = await _bonus_lot_rows(user_id, session=session)
+    expected = max(0, int((account or {}).get("available_bonus_chips", 0)))
+    covered = sum(int(row.get("remaining_chips", 0)) for row in rows)
+    migrated = int((account or {}).get("bonus_lot_schema_version", 0)) == 1
+    if migrated and covered != expected:
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus provenance does not match the wallet balance.",
+            503,
+        )
+    if not migrated and covered > expected:
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus provenance exceeds the wallet balance.",
+            503,
+        )
+    public = [{
+        "id": row.get("id"), "remaining_chips": int(row.get("remaining_chips", 0)),
+        "source_type": row.get("source_type"), "source_id": row.get("source_id"),
+        "mission_id": row.get("mission_id"), "campaign_id": row.get("campaign_id"),
+        "campaign_version": row.get("campaign_version"),
+        "referral_claim_id": row.get("referral_claim_id"),
+        "terms_version": row.get("terms_version"),
+        "restriction_reason": row.get("restriction_reason"),
+        "expires_at": row.get("expires_at"),
+    } for row in rows]
+    missing = expected - covered
+    if not migrated and missing:
+        # Read-only projection for a v2 wallet. The first financial mutation
+        # performs and audits the schema-v3 migration in its Mongo transaction.
+        public.append({
+            "id": None, "remaining_chips": missing,
+            "source_type": "LEGACY_NONWITHDRAWABLE_PENDING_MIGRATION",
+            "source_id": user_id, "mission_id": None, "campaign_id": None,
+            "campaign_version": None, "referral_claim_id": None,
+            "terms_version": None,
+            "restriction_reason": "Legacy promotional balance is restricted and not withdrawable.",
+            "expires_at": None,
+        })
+    return public
+
+
 async def _ensure_wallet_account(user_id: str, session=None) -> dict[str, Any]:
     kwargs = _session_kwargs(session)
     existing = await db.wallet_accounts.find_one({"user_id": user_id}, {"_id": 0}, **kwargs)
     if existing:
+        await _ensure_bonus_lot_coverage(user_id, existing, session=session)
         return existing
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "chip_balance": 1}, **kwargs)
     if not user:
@@ -942,6 +1331,8 @@ async def _ensure_wallet_account(user_id: str, session=None) -> dict[str, Any]:
         "available_bonus_chips": legacy,
         "held_cash_chips": 0,
         "version": 1,
+        "bonus_lot_schema_version": 1,
+        "bonus_lot_migrated_at": now(),
         "legacy_nonwithdrawable_snapshot": legacy,
         "created_at": now(),
         "updated_at": now(),
@@ -960,7 +1351,9 @@ async def _ensure_wallet_account(user_id: str, session=None) -> dict[str, Any]:
                 "WALLET_INITIALIZATION_BUSY", "Wallet is being initialized; retry safely.", 409,
             ) from exc
     if stored.get("id") != candidate_id:
-        return {key: value for key, value in stored.items() if key != "_id"}
+        clean_stored = {key: value for key, value in stored.items() if key != "_id"}
+        await _ensure_bonus_lot_coverage(user_id, clean_stored, session=session)
+        return clean_stored
 
     operation_id = str(uuid.uuid4())
     source_key = f"legacy-bonus-snapshot:{user_id}"
@@ -984,6 +1377,16 @@ async def _ensure_wallet_account(user_id: str, session=None) -> dict[str, Any]:
                 "balance_after": None, "created_at": now(),
             },
         ], **kwargs)
+        source_key = f"legacy-bonus-coverage:{user_id}"
+        await db.wallet_bonus_lots.insert_one({
+            "id": _bonus_lot_id(source_key), "source_key": source_key,
+            "user_id": user_id, "source_type": "LEGACY_NONWITHDRAWABLE",
+            "source_id": user_id, "original_chips": legacy,
+            "remaining_chips": legacy, "status": "ACTIVE",
+            "restriction_reason": "Legacy promotional balance is restricted and not withdrawable.",
+            "spend_priority": 1, "expires_at": None,
+            "created_at": now(), "updated_at": now(),
+        }, **kwargs)
     return account
 
 
@@ -1023,6 +1426,66 @@ async def wallet_public(user_id: str) -> dict[str, int]:
     }
 
 
+async def withdrawal_exceeded_error(
+    user_id: str, requested_chips: int, *, session=None,
+) -> FinancialError:
+    """Build the structured, cash-safe insufficient-withdrawable response."""
+    kwargs = _session_kwargs(session)
+    account = await db.wallet_accounts.find_one(
+        {"user_id": user_id}, {"_id": 0}, **kwargs,
+    )
+    if account:
+        withdrawable = max(0, int(account.get("available_cash_chips", 0)))
+        restricted = max(0, int(account.get("available_bonus_chips", 0)))
+    else:
+        withdrawable = 0
+        user = await db.users.find_one(
+            {"id": user_id}, {"_id": 0, "chip_balance": 1}, **kwargs,
+        ) or {}
+        restricted = max(0, int(user.get("chip_balance", 0)))
+    bonus_sources = await bonus_lots_public(user_id, session=session)
+    controlling_ids = sorted({
+        str(source["mission_id"]) for source in bonus_sources if source.get("mission_id")
+    })
+    controlling_missions = []
+    if controlling_ids:
+        missions = await db.wager_missions.find(
+            {"user_id": user_id, "id": {"$in": controlling_ids}}, {"_id": 0}, **kwargs,
+        ).to_list(length=None)
+        for mission in sorted(missions, key=lambda item: str(item.get("id"))):
+            controlling_missions.append({
+                "id": mission.get("id"), "status": mission.get("status"),
+                "campaign_id": mission.get("campaign_id"),
+                "campaign_version": mission.get("campaign_version"),
+                "progress_percent": max(0, min(100, int(mission.get("progress_percent", 0)))),
+                "remaining_chips": max(0, int(mission.get("remaining_chips", 0))),
+                "deadline_at": mission.get("deadline_at"),
+                "forfeit_allowed": bool(mission.get("forfeit_allowed", False)),
+            })
+    # Backward-compatible singular field, now sourced from the bonus lot rather
+    # than an unrelated earliest active mission. Multiple origins remain
+    # explicit in restricted_bonus_sources/controlling_missions.
+    mission_summary = controlling_missions[0] if len(controlling_missions) == 1 else None
+    explanation = (
+        "Your cleared cash remains withdrawable. This request is higher than "
+        "the cleared cash balance and includes restricted bonus chips, which "
+        "cannot be withdrawn as cash."
+    )
+    return FinancialError(
+        "WITHDRAWABLE_CASH_EXCEEDED", explanation, 409,
+        details={
+            "requested_chips": int(requested_chips),
+            "withdrawable_chips": withdrawable,
+            "restricted_bonus_chips": restricted,
+            "active_mission": mission_summary,
+            "controlling_missions": controlling_missions,
+            "restricted_bonus_sources": bonus_sources,
+            "explanation": explanation,
+            "support_path": "/support",
+        },
+    )
+
+
 async def _find_operation(user_id: str, idempotency_key: str, source_key: str, session=None):
     kwargs = _session_kwargs(session)
     return await db.wallet_operations.find_one({
@@ -1033,10 +1496,119 @@ async def _find_operation(user_id: str, idempotency_key: str, source_key: str, s
     }, {"_id": 0}, **kwargs)
 
 
+_BONUS_LOT_PROVENANCE_FIELDS = (
+    "source_type", "source_id", "parent_lot_id", "mission_id", "campaign_id",
+    "campaign_version", "referral_claim_id", "terms_version",
+    "restriction_reason", "expires_at", "spend_priority",
+)
+
+
+def _normalize_bonus_lot_changes(
+    changes: Optional[Iterable[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for raw in changes or []:
+        lot_id = str(raw.get("lot_id") or "").strip()
+        delta = int(raw.get("delta_chips", 0))
+        if not lot_id or not delta:
+            raise FinancialError(
+                "INVALID_BONUS_LOT_CHANGE", "Restricted bonus lot change is invalid.",
+            )
+        item: dict[str, Any] = {
+            "lot_id": lot_id, "delta_chips": delta,
+            "create": bool(raw.get("create", False)),
+        }
+        if raw.get("source_key"):
+            item["source_key"] = str(raw["source_key"])
+        for field in _BONUS_LOT_PROVENANCE_FIELDS:
+            value = raw.get(field)
+            if value is not None:
+                item[field] = value
+        normalized.append(item)
+    return sorted(normalized, key=lambda item: (item["lot_id"], item["delta_chips"]))
+
+
+async def _apply_bonus_lot_changes(
+    user_id: str, changes: list[dict[str, Any]], *, operation_source_key: str,
+    expected_balance: int, session,
+) -> None:
+    kwargs = _session_kwargs(session)
+    for change in changes:
+        lot_id = change["lot_id"]
+        delta = int(change["delta_chips"])
+        if change.get("create"):
+            if delta <= 0:
+                raise FinancialError(
+                    "INVALID_BONUS_LOT_CHANGE", "A new restricted bonus lot must be positive.",
+                )
+            source_key = str(
+                change.get("source_key") or f"{operation_source_key}:bonus-lot:{lot_id}"
+            )
+            doc = {
+                "id": lot_id, "source_key": source_key, "user_id": user_id,
+                "source_type": str(change.get("source_type") or "RESTRICTED_BONUS"),
+                "source_id": change.get("source_id"),
+                "original_chips": delta, "remaining_chips": delta,
+                "status": "ACTIVE", "spend_priority": int(change.get("spend_priority", 1)),
+                "expires_at": change.get("expires_at"),
+                "restriction_reason": change.get("restriction_reason") or
+                    "This promotional balance is not withdrawable as cash.",
+                "created_at": now(), "updated_at": now(),
+            }
+            for field in _BONUS_LOT_PROVENANCE_FIELDS:
+                if field in change and field not in doc:
+                    doc[field] = change[field]
+            await db.wallet_bonus_lots.insert_one(doc, **kwargs)
+            continue
+
+        current = await db.wallet_bonus_lots.find_one(
+            {"id": lot_id, "user_id": user_id}, {"_id": 0}, **kwargs,
+        )
+        if not current:
+            raise FinancialError(
+                "BONUS_LOT_NOT_FOUND", "Restricted bonus provenance could not be resolved.", 409,
+            )
+        before = int(current.get("remaining_chips", 0))
+        after = before + delta
+        original = int(current.get("original_chips", 0))
+        if after < 0 or after > original:
+            raise FinancialError(
+                "BONUS_LOT_SOURCE_MISMATCH",
+                "Restricted bonus movement does not match its original grant.",
+                409,
+            )
+        updated = await db.wallet_bonus_lots.update_one(
+            {"id": lot_id, "user_id": user_id, "remaining_chips": before},
+            {"$set": {
+                "remaining_chips": after,
+                "status": "SPENT" if after == 0 else "ACTIVE",
+                "updated_at": now(),
+            }},
+            **kwargs,
+        )
+        if updated.modified_count != 1:
+            raise FinancialError(
+                "BONUS_LOT_CONCURRENT_CHANGE",
+                "Restricted bonus allocation changed; retry the transaction.",
+                409,
+            )
+
+    rows = await _bonus_lot_rows(user_id, session=session)
+    actual_balance = sum(int(row.get("remaining_chips", 0)) for row in rows)
+    if actual_balance != int(expected_balance):
+        raise FinancialError(
+            "BONUS_LOT_RECONCILIATION_REQUIRED",
+            "Restricted bonus lots do not reconcile with the wallet balance.",
+            503,
+        )
+
+
 async def apply_wallet_movement(
     *, user_id: str, kind: str, source_key: str, idempotency_key: str,
     deltas: Mapping[str, int], mirror_user_delta: int,
-    metadata: Optional[Mapping[str, Any]] = None, session=None,
+    metadata: Optional[Mapping[str, Any]] = None,
+    bonus_lot_changes: Optional[Iterable[Mapping[str, Any]]] = None,
+    session=None,
 ) -> dict[str, Any]:
     """Apply one balanced wallet movement exactly once."""
     idem = validate_idempotency_key(idempotency_key)
@@ -1044,9 +1616,40 @@ async def apply_wallet_movement(
     allowed = {"available_cash_chips", "available_bonus_chips", "held_cash_chips"}
     if not clean_deltas or set(clean_deltas) - allowed:
         raise FinancialError("INVALID_WALLET_MOVEMENT", "Wallet movement is invalid.")
+    lot_changes = _normalize_bonus_lot_changes(bonus_lot_changes)
+    bonus_delta = int(clean_deltas.get("available_bonus_chips", 0))
+    if bonus_delta > 0 and not lot_changes:
+        lot_source_id = (
+            (metadata or {}).get("mission_id")
+            or (metadata or {}).get("referral_claim_id")
+            or (metadata or {}).get("claim_id")
+            or source_key
+        )
+        lot_changes = [{
+            "lot_id": _bonus_lot_id(source_key), "delta_chips": bonus_delta,
+            "create": True, "source_key": f"bonus-grant:{source_key}",
+            "source_type": str((metadata or {}).get("bonus_source_type") or kind),
+            "source_id": str(lot_source_id),
+            "mission_id": (metadata or {}).get("mission_id"),
+            "campaign_id": (metadata or {}).get("campaign_id"),
+            "campaign_version": (metadata or {}).get("campaign_version"),
+            "referral_claim_id": (metadata or {}).get("referral_claim_id"),
+            "terms_version": (metadata or {}).get("terms_version"),
+            "expires_at": (metadata or {}).get("expires_at"),
+            "spend_priority": 0 if (metadata or {}).get("expires_at") else 1,
+            "restriction_reason": (metadata or {}).get("restriction_reason") or
+                "This promotional balance is not withdrawable as cash.",
+        }]
+    if sum(int(item["delta_chips"]) for item in lot_changes) != bonus_delta:
+        raise FinancialError(
+            "BONUS_LOT_SOURCE_MISMATCH",
+            "Restricted bonus lot changes must equal the wallet bonus movement.",
+            409,
+        )
     payload = {
         "kind": kind, "source_key": source_key, "deltas": clean_deltas,
         "mirror_user_delta": int(mirror_user_delta), "metadata": dict(metadata or {}),
+        "bonus_lot_changes": lot_changes,
     }
     request_hash = _canonical_hash(payload)
 
@@ -1076,6 +1679,13 @@ async def apply_wallet_movement(
         )
         if not updated:
             raise FinancialError("INSUFFICIENT_WITHDRAWABLE_CHIPS", "Not enough withdrawable chips.", 409)
+
+        if lot_changes:
+            await _apply_bonus_lot_changes(
+                user_id, lot_changes, operation_source_key=source_key,
+                expected_balance=int(updated.get("available_bonus_chips", 0)),
+                session=tx_session,
+            )
 
         if mirror_user_delta:
             user_query: dict[str, Any] = {"id": user_id}
@@ -1272,6 +1882,8 @@ def deposit_dto(doc: Mapping[str, Any]) -> dict[str, Any]:
         "amount_paise": int(doc.get("amount_paise", 0)), "currency": CURRENCY,
         "chips": int(doc.get("chips", 0)), "rate": doc.get("rate_snapshot"),
         "provider": doc.get("provider"),
+        "mission_id": doc.get("promotion_mission_id"),
+        "promotion_activation_status": doc.get("promotion_activation_status"),
         "created_at": doc.get("created_at"), "updated_at": doc.get("updated_at"),
     }
 
@@ -1289,7 +1901,7 @@ async def _ensure_deposit_checkout(
     if order.get("provider_order_id") and order.get("checkout_url"):
         return dict(order), str(order["checkout_url"])
     return_url = os.environ.get(
-        "PAYMENT_RETURN_URL", "http://localhost:3000/chips/deposit/return",
+        "PAYMENT_RETURN_URL", "http://localhost:3000/wallet/deposit/return",
     )
     try:
         if order.get("provider_order_id"):
@@ -1345,14 +1957,20 @@ async def _ensure_deposit_checkout(
 
 async def create_deposit(
     user_id: str, amount_paise: int, idempotency_key: str, provider: PaymentProvider,
+    promotion_consent_id: Optional[str] = None,
 ) -> tuple[dict[str, Any], str]:
     idem = validate_idempotency_key(idempotency_key)
     amount = int(amount_paise)
+    consent_id = str(promotion_consent_id or "").strip() or None
     existing = await db.deposit_orders.find_one(
         {"user_id": user_id, "idempotency_key": idem}, {"_id": 0},
     )
     if existing:
-        if int(existing.get("amount_paise", -1)) != amount or existing.get("currency") != CURRENCY:
+        if (
+            int(existing.get("amount_paise", -1)) != amount
+            or existing.get("currency") != CURRENCY
+            or existing.get("promotion_consent_id") != consent_id
+        ):
             raise FinancialError("IDEMPOTENCY_CONFLICT", "Idempotency key belongs to another deposit.", 409)
         return await _ensure_deposit_checkout(existing, provider)
 
@@ -1367,7 +1985,10 @@ async def create_deposit(
         )
     rate = conversion_snapshot()
     chips = paise_to_chips(amount, rate)
-    request_hash = _canonical_hash({"amount_paise": amount, "currency": CURRENCY, "rate": rate})
+    request_hash = _canonical_hash({
+        "amount_paise": amount, "currency": CURRENCY, "rate": rate,
+        "promotion_consent_id": consent_id,
+    })
 
     deposit_id = str(uuid.uuid4())
     doc = {
@@ -1376,6 +1997,8 @@ async def create_deposit(
         "chips": chips, "rate_snapshot": rate, "provider": provider.name,
         "provider_order_id": None, "provider_reference": None,
         "checkout_url": None, "status": "CREATED", "wallet_operation_id": None,
+        "promotion_consent_id": consent_id, "promotion_mission_id": None,
+        "promotion_activation_status": "PENDING" if consent_id else "NOT_SELECTED",
         "limit_reservation_status": "HELD",
         "reservation_gaming_day": ledger.gaming_day(),
         "created_at": now(), "updated_at": now(),
@@ -1390,6 +2013,7 @@ async def create_deposit(
             if (
                 int(duplicate.get("amount_paise", -1)) != amount
                 or duplicate.get("currency") != CURRENCY
+                or duplicate.get("promotion_consent_id") != consent_id
             ):
                 raise FinancialError(
                     "IDEMPOTENCY_CONFLICT", "Idempotency key belongs to another deposit.", 409,
@@ -1421,6 +2045,7 @@ async def create_deposit(
         if not existing or (
             int(existing.get("amount_paise", -1)) != amount
             or existing.get("currency") != CURRENCY
+            or existing.get("promotion_consent_id") != consent_id
         ):
             raise FinancialError("IDEMPOTENCY_CONFLICT", "Deposit request already exists.", 409)
         return await _ensure_deposit_checkout(existing, provider)
@@ -1452,17 +2077,27 @@ async def _credit_deposit(
                     **kwargs,
                 )
             return {"_error_code": "PAYMENT_MISMATCH"}
+        payment_instrument_cluster = None
+        provider_payment_token = str(
+            (event.data or {}).get("payment_instrument_fingerprint") or ""
+        ).strip()
+        if re.fullmatch(r"[A-Za-z0-9._:=+/\-]{16,512}", provider_payment_token):
+            try:
+                import promotions
+                if promotions._referral_risk_pepper_configured():
+                    payment_instrument_cluster = promotions.privacy_safe_risk_cluster(
+                        "payment_instrument", provider_payment_token,
+                    )
+            except promotions.PromotionError:
+                # Promotion evidence must never hold a verified cash deposit.
+                payment_instrument_cluster = None
         if current.get("status") == "CREDITED":
             if current.get("provider_reference") != payment_reference:
-                await db.users.update_one(
-                    {"id": current["user_id"]},
-                    {"$set": {"financial_status": "REVIEW_REQUIRED"}}, **kwargs,
-                )
-                await financial_audit(
-                    actor, "DEPOSIT_TERMINAL_CONFLICT", "DEPOSIT", str(current["id"]),
+                await _flag_documented_provider_identity_hold(
+                    str(current["user_id"]), "DEPOSIT_TERMINAL_CONFLICT",
+                    "DEPOSIT", str(current["id"]),
                     reason="Provider payment reference changed after credit",
                     session=session,
-                    audit_id=f"deposit:{current['id']}:terminal-conflict",
                 )
                 return {"_error_code": "DEPOSIT_TERMINAL_CONFLICT"}
             return {"deposit_id": current["id"], "status": "CREDITED", "duplicate": True}
@@ -1496,6 +2131,44 @@ async def _credit_deposit(
             metadata={"deposit_id": current["id"], "amount_paise": current["amount_paise"]},
             session=session,
         )
+        mission = None
+        promotion_error_code = None
+        if current.get("promotion_consent_id"):
+            # Local import avoids a module cycle: promotions depends on the
+            # wallet primitives in this module. Invalid or expired consent must
+            # never hold a verified cash deposit hostage.
+            import promotions
+            try:
+                mission = await promotions.activate_deposit_mission(
+                    current, session=session,
+                )
+            except promotions.PromotionError as exc:
+                promotion_error_code = exc.code
+        prior_credited_deposits = await db.deposit_orders.count_documents(
+            {"user_id": current["user_id"], "status": "CREDITED"}, **kwargs,
+        )
+        if prior_credited_deposits == 0:
+            import promotions
+            if promotions.feature_enabled(promotions.REFERRAL):
+                # A promotion collection failure must never roll back cleared
+                # cash. Persist intent in the financial outbox inside the cash
+                # transaction; promotion processing is retried independently.
+                await _enqueue(
+                    "PROMOTION_REFERRAL_EVENT", str(current["id"]),
+                    f"promotion-referral:first-deposit:{current['id']}",
+                    {
+                        "invited_user_id": current["user_id"],
+                        "event_type": "FIRST_DEPOSIT_VERIFIED",
+                        "source_event_id": f"verified-deposit:{current['id']}",
+                        "occurred_at": now().isoformat(),
+                        "metadata": {
+                            "deposit_id": current["id"],
+                            "chips": int(current["chips"]),
+                            "amount_paise": int(current["amount_paise"]),
+                        },
+                    },
+                    session=session,
+                )
         user = await db.users.find_one(
             {"id": current["user_id"]}, {"_id": 0, "chip_balance": 1}, **kwargs,
         )
@@ -1519,6 +2192,16 @@ async def _credit_deposit(
                 "wallet_operation_id": movement["operation_id"], "paid_at": now(),
                 "credited_at": now(), "updated_at": now(),
                 "limit_reservation_status": "CONSUMED",
+                "promotion_mission_id": (mission or {}).get("id"),
+                "promotion_activation_status": (
+                    "ACTIVATED" if mission else
+                    "SKIPPED_INVALID_OR_UNAVAILABLE" if promotion_error_code else
+                    "NOT_ACTIVATED"
+                ),
+                # Only a purpose-separated HMAC is retained; the provider's
+                # payment evidence token is never persisted.
+                "payment_instrument_cluster": payment_instrument_cluster,
+                "promotion_activation_error_code": promotion_error_code,
                 "limit_exception_review": bool(limit_violations),
                 "next_reconcile_at": now() + timedelta(
                     seconds=_runtime_config_int(
@@ -1540,10 +2223,17 @@ async def _credit_deposit(
                 "chips": int(current["chips"]),
                 "wallet_operation_id": movement["operation_id"],
                 "limit_exception_review": bool(limit_violations),
+                "promotion_mission_id": (mission or {}).get("id"),
+                "promotion_activation_status": (
+                    "ACTIVATED" if mission else
+                    "SKIPPED_INVALID_OR_UNAVAILABLE" if promotion_error_code else
+                    "NOT_ACTIVATED"
+                ),
             },
             session=session, audit_id=f"deposit:{current['id']}:credited",
         )
         return {"deposit_id": current["id"], "status": "CREDITED",
+                "mission_id": (mission or {}).get("id"),
                 "duplicate": movement["duplicate"]}
     try:
         result = await _run_transaction(work)
@@ -1561,6 +2251,12 @@ async def _credit_deposit(
             await db.users.update_one(
                 {"id": order["user_id"]},
                 {"$set": {"financial_status": "REVIEW_REQUIRED"}}, **kwargs,
+            )
+            await _flag_documented_provider_identity_hold(
+                str(order["user_id"]), "PROVIDER_REFERENCE_CONFLICT",
+                "DEPOSIT", str(order["id"]),
+                "Provider payment reference is already bound to another deposit",
+                session=session,
             )
         await _run_transaction(require_reference_review)
         raise FinancialError(
@@ -1640,6 +2336,9 @@ async def create_withdrawal(
             "WITHDRAWAL_LIMIT",
             f"Withdrawal must be at least {minimum_label}.",
         )
+    public_wallet = await wallet_public(user_id)
+    if chips > int(public_wallet.get("withdrawable_chips", 0)):
+        raise await withdrawal_exceeded_error(user_id, chips)
     request_hash = _canonical_hash({
         "amount_chips": chips, "amount_paise": amount_paise,
         "payout_method_id": payout_method_id, "rate": rate,
@@ -1658,6 +2357,7 @@ async def create_withdrawal(
             ):
                 raise FinancialError("IDEMPOTENCY_CONFLICT", "Withdrawal request conflicts.", 409)
             return duplicate
+        await assert_withdrawal_not_held(user_id, session=session)
         # This write serializes creation against soft-deactivation. A plain
         # pre-transaction read could snapshot an account after deactivation had
         # already won the race.
@@ -1699,15 +2399,20 @@ async def create_withdrawal(
             "created_at": now(), "updated_at": now(),
         }
         await db.withdrawal_requests.insert_one(doc, **kwargs)
-        held = await apply_wallet_movement(
-            user_id=user_id, kind="WITHDRAWAL_HOLD",
-            source_key=f"withdrawal-hold:{withdrawal_id}",
-            idempotency_key=f"withdrawal-hold:{withdrawal_id}",
-            deltas={"available_cash_chips": -chips, "held_cash_chips": chips},
-            mirror_user_delta=-chips,
-            metadata={"withdrawal_id": withdrawal_id, "amount_paise": amount_paise},
-            session=session,
-        )
+        try:
+            held = await apply_wallet_movement(
+                user_id=user_id, kind="WITHDRAWAL_HOLD",
+                source_key=f"withdrawal-hold:{withdrawal_id}",
+                idempotency_key=f"withdrawal-hold:{withdrawal_id}",
+                deltas={"available_cash_chips": -chips, "held_cash_chips": chips},
+                mirror_user_delta=-chips,
+                metadata={"withdrawal_id": withdrawal_id, "amount_paise": amount_paise},
+                session=session,
+            )
+        except FinancialError as exc:
+            if exc.code == "INSUFFICIENT_WITHDRAWABLE_CHIPS":
+                raise await withdrawal_exceeded_error(user_id, chips, session=session)
+            raise
         await db.withdrawal_requests.update_one(
             {"id": withdrawal_id, "status": "REQUESTED"},
             {"$set": {"status": status, "hold_operation_id": held["operation_id"], "updated_at": now()}},
@@ -1813,6 +2518,7 @@ async def approve_withdrawal(withdrawal_id: str, actor: str, note: Optional[str]
         row = await db.withdrawal_requests.find_one({"id": withdrawal_id}, {"_id": 0}, **kwargs)
         if not row:
             raise FinancialError("WITHDRAWAL_NOT_FOUND", "Withdrawal was not found.", 404)
+        await assert_withdrawal_not_held(str(row["user_id"]), session=session)
         if row.get("status") == "APPROVED":
             return row
         if row.get("status") != "PENDING_ADMIN":
@@ -1825,8 +2531,19 @@ async def approve_withdrawal(withdrawal_id: str, actor: str, note: Optional[str]
         # Routing is frozen with the request.  A MANUAL request never becomes
         # an API payout merely because the global switch changed afterwards.
         if row.get("withdrawal_mode") == AUTOMATIC and env_true("AUTO_WITHDRAWALS_ENABLED"):
-            await _enqueue("SUBMIT_PAYOUT", withdrawal_id, f"submit-payout:{withdrawal_id}",
-                           {"withdrawal_id": withdrawal_id}, session=session)
+            outbox = await _enqueue(
+                "SUBMIT_PAYOUT", withdrawal_id, f"submit-payout:{withdrawal_id}",
+                {"withdrawal_id": withdrawal_id}, session=session,
+            )
+            # Clearance returns hold-paused requests to human approval. Only a
+            # fresh approval may reactivate their pre-existing payout intent.
+            await db.financial_outbox.update_one(
+                {"id": outbox["id"], "status": "PAUSED"},
+                {"$set": {
+                    "status": "PENDING", "last_error_code": None,
+                    "next_attempt_at": now(), "updated_at": now(),
+                }}, **kwargs,
+            )
         await financial_audit(
             actor, "WITHDRAWAL_APPROVED", "WITHDRAWAL", withdrawal_id,
             reason=note, metadata={"from_status": "PENDING_ADMIN", "to_status": "APPROVED"},
@@ -1853,6 +2570,7 @@ async def mark_withdrawal_submitted(
             raise FinancialError("WITHDRAWAL_NOT_FOUND", "Withdrawal was not found.", 404)
         if row.get("status") == "SUBMITTED_TO_PROVIDER" and row.get("provider_reference") == reference:
             return row
+        await assert_withdrawal_not_held(str(row["user_id"]), session=session)
         if row.get("status") != "APPROVED":
             raise FinancialError("INVALID_WITHDRAWAL_STATE", "Withdrawal must be approved first.", 409)
         if row.get("withdrawal_mode") != MANUAL:
@@ -2062,6 +2780,7 @@ async def set_withdrawal_mode(
 
 async def review_player_kyc(
     user_id: str, status: str, actor: str, reason: str,
+    *, identity_evidence_token: Optional[str] = None,
 ) -> dict[str, Any]:
     """Record an explicit human KYC decision; contact OTP never calls this."""
     decision = str(status or "").strip().upper()
@@ -2070,24 +2789,50 @@ async def review_player_kyc(
         raise FinancialError("INVALID_KYC_STATUS", "KYC status must be VERIFIED or REJECTED.")
     if len(rationale) < 5:
         raise FinancialError("REASON_REQUIRED", "A clear KYC review reason is required.")
+    kyc_identity_cluster = None
+    if decision == "VERIFIED" and identity_evidence_token:
+        token = str(identity_evidence_token).strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:=+/\-]{16,512}", token):
+            raise FinancialError(
+                "INVALID_KYC_EVIDENCE_TOKEN",
+                "The KYC provider evidence token is invalid.",
+            )
+        # The raw provider token is intentionally never persisted or audited.
+        # Referral readiness requires its own purpose-separated pepper; KYC
+        # remains operational while that dormant feature is disabled.
+        try:
+            import promotions
+            if promotions._referral_risk_pepper_configured():
+                kyc_identity_cluster = promotions.privacy_safe_risk_cluster(
+                    "kyc_identity", token,
+                )
+        except promotions.PromotionError:
+            kyc_identity_cluster = None
 
     async def work(session):
         kwargs = _session_kwargs(session)
+        await _touch_withdrawal_eligibility_lock(user_id, session=session)
         user = await db.users.find_one(
             {"id": user_id, "role": "PLAYER"}, {"_id": 0}, **kwargs,
         )
         if not user:
             raise FinancialError("USER_NOT_FOUND", "Player account was not found.", 404)
         previous = str(user.get("kyc_status") or "UNVERIFIED").upper()
-        if previous == decision:
+        if previous == decision and (
+            not kyc_identity_cluster
+            or user.get("kyc_identity_cluster") == kyc_identity_cluster
+        ):
             return user
         reviewed_at = now()
+        updates = {
+            "kyc_status": decision, "kyc_reviewed_at": reviewed_at,
+            "kyc_reviewed_by": actor, "kyc_review_reason": rationale,
+        }
+        if kyc_identity_cluster:
+            updates["kyc_identity_cluster"] = kyc_identity_cluster
         updated = await db.users.find_one_and_update(
             {"id": user_id, "role": "PLAYER"},
-            {"$set": {
-                "kyc_status": decision, "kyc_reviewed_at": reviewed_at,
-                "kyc_reviewed_by": actor, "kyc_review_reason": rationale,
-            }}, return_document=ReturnDocument.AFTER, **kwargs,
+            {"$set": updates}, return_document=ReturnDocument.AFTER, **kwargs,
         )
         await financial_audit(
             actor, f"KYC_{decision}", "PLAYER", user_id, reason=rationale,
@@ -2104,6 +2849,17 @@ async def claim_automatic_withdrawal(withdrawal_id: str) -> dict[str, Any]:
 
     async def work(session):
         kwargs = _session_kwargs(session)
+        current = await db.withdrawal_requests.find_one(
+            {"id": withdrawal_id}, {"_id": 0}, **kwargs,
+        )
+        if not current:
+            raise FinancialError("WITHDRAWAL_NOT_FOUND", "Withdrawal was not found.", 404)
+        if current.get("status") in WITHDRAWAL_PROVIDER_PENDING and (
+            current.get("provider_payout_id")
+            or current.get("submission_authorized_at")
+        ):
+            return current
+        await assert_withdrawal_not_held(str(current["user_id"]), session=session)
         settings = await ensure_payment_settings(session=session)
         if settings.get("withdrawal_mode") != AUTOMATIC:
             raise FinancialError("AUTO_WITHDRAWALS_PAUSED", "Automatic withdrawals are paused.", 409)
@@ -2153,6 +2909,12 @@ async def _authorize_automatic_submission(withdrawal_id: str) -> bool:
     """
     async def work(session):
         kwargs = _session_kwargs(session)
+        row = await db.withdrawal_requests.find_one(
+            {"id": withdrawal_id}, {"_id": 0}, **kwargs,
+        )
+        if not row:
+            raise FinancialError("WITHDRAWAL_NOT_FOUND", "Withdrawal was not found.", 404)
+        await assert_withdrawal_not_held(str(row["user_id"]), session=session)
         settings = await ensure_payment_settings(session=session)
         if settings.get("withdrawal_mode") != AUTOMATIC:
             await db.withdrawal_requests.update_one(
@@ -2295,17 +3057,28 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
     return await db.withdrawal_requests.find_one({"id": withdrawal_id}, {"_id": 0})
 
 
-async def process_outbox_batch(provider: PaymentProvider, limit: int = 20) -> dict[str, int]:
+async def process_outbox_batch(
+    provider: PaymentProvider, limit: int = 20, *, include_payouts: bool = True,
+) -> dict[str, int]:
+    """Drain financial intents while independently gating payout submission.
+
+    Referral events are cash-path-safe, retryable derived work and must keep
+    draining when automatic withdrawals are disabled.  SUBMIT_PAYOUT remains
+    eligible only when the caller has observed the automatic-withdrawal gate.
+    """
     processed = paused = review = retry_scheduled = 0
     for _ in range(max(1, min(int(limit), 100))):
         claim_time = now()
         claim_id = str(uuid.uuid4())
         lease = claim_time + timedelta(minutes=2)
-        row = await db.financial_outbox.find_one_and_update(
-            {"$or": [
+        eligible_query: dict[str, Any] = {"$or": [
                 {"status": {"$in": ["PENDING", "RETRY"]}, "next_attempt_at": {"$lte": claim_time}},
                 {"status": "PROCESSING", "lease_until": {"$lte": claim_time}},
-            ]},
+            ]}
+        if not include_payouts:
+            eligible_query["kind"] = "PROMOTION_REFERRAL_EVENT"
+        row = await db.financial_outbox.find_one_and_update(
+            eligible_query,
             {"$set": {
                 "status": "PROCESSING", "claim_id": claim_id,
                 "lease_until": lease, "updated_at": claim_time,
@@ -2319,9 +3092,26 @@ async def process_outbox_batch(provider: PaymentProvider, limit: int = 20) -> di
             "id": row["id"], "status": "PROCESSING", "claim_id": claim_id,
         }
         try:
-            if row["kind"] != "SUBMIT_PAYOUT":
+            if row["kind"] == "SUBMIT_PAYOUT":
+                await submit_automatic_withdrawal(row["aggregate_id"], provider)
+            elif row["kind"] == "PROMOTION_REFERRAL_EVENT":
+                import promotions
+                payload = dict(row.get("payload") or {})
+                try:
+                    await promotions.record_referral_event(
+                        payload["invited_user_id"], payload["event_type"],
+                        source_event_id=payload["source_event_id"],
+                        occurred_at=payload.get("occurred_at"),
+                        metadata=payload.get("metadata") or {},
+                    )
+                except Exception as exc:  # promotion errors stay off the cash path
+                    raise FinancialError(
+                        "PROMOTION_REFERRAL_EVENT_FAILED",
+                        "Referral reward processing will be retried.",
+                        503,
+                    ) from exc
+            else:
                 raise FinancialError("UNKNOWN_OUTBOX_EVENT", "Unknown financial outbox event.", 409)
-            await submit_automatic_withdrawal(row["aggregate_id"], provider)
             completed = await db.financial_outbox.update_one(
                 ownership,
                 {"$set": {
@@ -2334,7 +3124,10 @@ async def process_outbox_batch(provider: PaymentProvider, limit: int = 20) -> di
         except FinancialError as exc:
             if exc.code == "AUTO_WITHDRAWALS_PAUSED":
                 status = "PAUSED"
-            elif exc.code in {"PAYOUT_SUBMISSION_UNKNOWN", "PAYOUT_PREPARATION_FAILED"} and int(
+            elif exc.code in {
+                "PAYOUT_SUBMISSION_UNKNOWN", "PAYOUT_PREPARATION_FAILED",
+                "PROMOTION_REFERRAL_EVENT_FAILED",
+            } and int(
                 row.get("attempts", 0)
             ) < 8:
                 status = "RETRY"
@@ -2495,9 +3288,28 @@ async def _refund_deposit(
                 session=session,
                 audit_id=f"deposit:{current['id']}:refund-reference-conflict",
             )
+            await _flag_documented_provider_identity_hold(
+                str(current["user_id"]), "REFUND_REFERENCE_CONFLICT",
+                "DEPOSIT", str(current["id"]),
+                "Provider refund reference is already bound to another deposit",
+                session=session,
+            )
+            if str(conflicting["user_id"]) != str(current["user_id"]):
+                await _flag_documented_provider_identity_hold(
+                    str(conflicting["user_id"]), "REFUND_REFERENCE_CONFLICT",
+                    "DEPOSIT", str(conflicting["id"]),
+                    "Provider refund reference was reused for another deposit",
+                    session=session,
+                )
             return {"_error_code": "REFUND_REFERENCE_CONFLICT"}
         if current.get("status") == "REFUNDED":
             if current.get("refund_provider_reference") != refund_reference:
+                await _flag_documented_provider_identity_hold(
+                    str(current["user_id"]), "DEPOSIT_TERMINAL_CONFLICT",
+                    "DEPOSIT", str(current["id"]),
+                    "Provider refund identity changed after terminal refund",
+                    session=session,
+                )
                 return {"_error_code": "DEPOSIT_TERMINAL_CONFLICT"}
             return {"deposit_id": current["id"], "status": "REFUNDED", "duplicate": True}
         await _touch_deposit_limit_lock(current["user_id"], session=session)
@@ -2560,11 +3372,11 @@ async def _refund_deposit(
         }, {"_id": 0, "id": 1, "user_id": 1})
         if not conflicting:
             raise
-        await _flag_financial_review(
+        await _flag_documented_provider_identity_hold(
             str(order["user_id"]), "REFUND_REFERENCE_CONFLICT", "DEPOSIT", str(order["id"]),
             "Provider refund reference is already bound to another deposit",
         )
-        await _flag_financial_review(
+        await _flag_documented_provider_identity_hold(
             str(conflicting["user_id"]), "REFUND_REFERENCE_CONFLICT", "DEPOSIT",
             str(conflicting["id"]),
             "Provider refund reference was reused for another deposit",
@@ -2725,7 +3537,7 @@ async def reconcile_deposit(
         )
     if provider_status in {"FAILED", "EXPIRED"}:
         if order.get("status") == "CREDITED":
-            await _flag_financial_review(
+            await _flag_documented_provider_identity_hold(
                 order["user_id"], "DEPOSIT_TERMINAL_CONFLICT", "DEPOSIT", deposit_id,
                 f"Provider reported {provider_status.lower()} after deposit credit",
             )
@@ -2737,7 +3549,7 @@ async def reconcile_deposit(
         return {"deposit_id": deposit_id, "status": stored.get("status", provider_status)}
     elif provider_status in _DEPOSIT_WAITING:
         if order.get("status") == "CREDITED":
-            await _flag_financial_review(
+            await _flag_documented_provider_identity_hold(
                 order["user_id"], "DEPOSIT_TERMINAL_CONFLICT", "DEPOSIT", deposit_id,
                 f"Provider regressed credited deposit to {provider_status.lower()}",
             )
@@ -2791,7 +3603,7 @@ async def reconcile_withdrawal(
             "PAYOUT_STATUS_UNAVAILABLE", "Payout status could not be checked.", 503,
         ) from exc
     if not _payout_status_is_bound(authoritative, withdrawal):
-        await _flag_financial_review(
+        await _flag_documented_provider_identity_hold(
             withdrawal["user_id"], "PAYOUT_BINDING_MISMATCH", "WITHDRAWAL", withdrawal_id,
             "Provider payout details do not bind to the original withdrawal instruction",
         )
@@ -2951,19 +3763,354 @@ async def reconcile_financial_records(
     }
 
 
+async def set_documented_withdrawal_hold(
+    user_id: str, *, category: str, reason_code: str, review_status: str,
+    support_path: str, source_type: str, source_id: str, actor: str, reason: str,
+    expires_at: Any = None, preserve_existing: bool = False,
+    trigger_action: Optional[str] = None, trigger_target_type: str = "PLAYER",
+    trigger_target_id: Optional[str] = None, session=None,
+) -> dict[str, Any]:
+    """Persist one strict, auditable cash-withdrawal hold transactionally.
+
+    Recording the hold also pauses every payout that has not crossed the
+    provider boundary without moving any balance. Clearance returns those
+    requests to human approval. Submitted/in-flight payouts are never guessed
+    closed, and the hold mutation cannot partially release wallet funds.
+    """
+    normalized_category = str(category or "").strip().upper()
+    normalized_reason = str(reason_code or "").strip().upper()
+    normalized_status = str(review_status or "").strip().upper()
+    normalized_support = str(support_path or "").strip()
+    normalized_source_type = str(source_type or "").strip().upper()
+    normalized_source_id = str(source_id or "").strip()
+    normalized_actor = str(actor or "").strip()
+    rationale = str(reason or "").strip()
+    if expires_at is not None:
+        raise FinancialError(
+            "INVALID_WITHDRAWAL_HOLD",
+            "Automatic withdrawal-hold expiry is not supported; an audited manual clearance is required.",
+        )
+    if normalized_category not in WITHDRAWAL_HOLD_CATEGORIES:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold category is invalid.")
+    if not WITHDRAWAL_HOLD_REASON_RE.fullmatch(normalized_reason):
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold reason code is invalid.")
+    if normalized_status not in WITHDRAWAL_HOLD_ACTIVE_STATUSES:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold review status is invalid.")
+    if normalized_support not in WITHDRAWAL_HOLD_SUPPORT_PATHS:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold support path is invalid.")
+    if normalized_source_type not in WITHDRAWAL_HOLD_SOURCE_TYPES:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold source type is invalid.")
+    if not WITHDRAWAL_HOLD_TOKEN_RE.fullmatch(normalized_source_id):
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold source identifier is invalid.")
+    if not normalized_actor or len(normalized_actor) > 160:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold actor is invalid.")
+    if not 5 <= len(rationale) <= 500:
+        raise FinancialError("REASON_REQUIRED", "A clear withdrawal hold reason is required.")
+
+    fingerprint = ":".join((
+        str(user_id), normalized_source_type, normalized_source_id, normalized_reason,
+    ))
+    hold_id = "withdrawal-hold:" + hashlib.sha256(
+        fingerprint.encode("utf-8"),
+    ).hexdigest()[:40]
+
+    async def work(tx_session):
+        kwargs = _session_kwargs(tx_session)
+        await _touch_withdrawal_eligibility_lock(user_id, session=tx_session)
+        user = await db.users.find_one({"id": str(user_id)}, {"_id": 0}, **kwargs)
+        if not user:
+            raise FinancialError("USER_NOT_FOUND", "Player account was not found.", 404)
+        current, reconciliation = _persisted_withdrawal_hold_projection(user)
+        if current:
+            if current.get("id") == hold_id:
+                return {
+                    "hold": current, "duplicate": True,
+                    "cancelled_withdrawal_ids": [], "paused_withdrawal_ids": [],
+                }
+            if not preserve_existing:
+                raise FinancialError(
+                    "WITHDRAWAL_HOLD_ALREADY_ACTIVE",
+                    "A documented withdrawal hold is already active.", 409,
+                    details={"hold_id": current.get("id")},
+                )
+            await financial_audit(
+                normalized_actor, "WITHDRAWAL_HOLD_TRIGGER_OBSERVED", "PLAYER", str(user_id),
+                reason=rationale,
+                metadata={
+                    "active_hold_id": current.get("id"),
+                    "trigger_action": trigger_action,
+                    "source": {
+                        "type": normalized_source_type, "id": normalized_source_id,
+                    },
+                }, session=tx_session,
+                audit_id=f"withdrawal-hold:{hold_id}:trigger-observed",
+            )
+            return {
+                "hold": current, "duplicate": True,
+                "existing_hold_preserved": True,
+                "cancelled_withdrawal_ids": [], "paused_withdrawal_ids": [],
+            }
+
+        recorded_at = now()
+        public_hold = {
+            "id": hold_id, "category": normalized_category,
+            "reason_code": normalized_reason, "review_status": normalized_status,
+            "recorded_at": recorded_at, "recorded_by": normalized_actor,
+            "support_path": normalized_support,
+            "source": {"type": normalized_source_type, "id": normalized_source_id},
+        }
+        record = {
+            **public_hold, "user_id": str(user_id), "status": "ACTIVE",
+            "reason": rationale, "created_at": recorded_at,
+        }
+        try:
+            await db.withdrawal_holds.insert_one(record, **kwargs)
+        except DuplicateKeyError:
+            duplicate = await db.withdrawal_holds.find_one(
+                {"id": hold_id}, {"_id": 0}, **kwargs,
+            )
+            if not duplicate or duplicate.get("user_id") != str(user_id):
+                raise
+        await db.users.update_one(
+            {"id": str(user_id)},
+            {"$set": {"withdrawal_hold": public_hold}}, **kwargs,
+        )
+
+        cancellable = await db.withdrawal_requests.find({
+            "user_id": str(user_id),
+            "$or": [
+                {"status": {"$in": list(WITHDRAWAL_PRE_SUBMISSION)}},
+                {
+                    "status": "SUBMITTING", "provider_payout_id": None,
+                    "submission_authorized_at": {"$exists": False},
+                },
+            ],
+        }, {"_id": 0}, **kwargs).to_list(length=None)
+        cancelled_ids: list[str] = []
+        paused_ids: list[str] = []
+        for withdrawal in cancellable:
+            paused = await db.withdrawal_requests.update_one(
+                {
+                    "id": withdrawal["id"], "status": withdrawal["status"],
+                    "provider_payout_id": None,
+                },
+                {"$set": {
+                    "status": "PAUSED_FOR_HOLD",
+                    "status_before_withdrawal_hold": withdrawal["status"],
+                    "withdrawal_hold_id": hold_id,
+                    "updated_at": now(),
+                }}, **kwargs,
+            )
+            if paused.modified_count:
+                paused_ids.append(str(withdrawal["id"]))
+        if cancelled_ids or paused_ids:
+            await db.financial_outbox.update_many(
+                {
+                    "kind": "SUBMIT_PAYOUT",
+                    "aggregate_id": {"$in": cancelled_ids + paused_ids},
+                    "status": {"$in": ["PENDING", "RETRY", "PROCESSING", "PAUSED"]},
+                },
+                {"$set": {
+                    "status": "PAUSED", "last_error_code": normalized_reason,
+                    "claim_id": None, "lease_until": None, "updated_at": now(),
+                }}, **kwargs,
+            )
+
+        await financial_audit(
+            normalized_actor, "WITHDRAWAL_HOLD_SET", "PLAYER", str(user_id),
+            reason=rationale,
+            metadata={
+                "hold_id": hold_id, "category": normalized_category,
+                "reason_code": normalized_reason, "review_status": normalized_status,
+                "support_path": normalized_support,
+                "source": {"type": normalized_source_type, "id": normalized_source_id},
+                "prior_evidence_reconciliation": reconciliation,
+                "cancelled_withdrawal_ids": cancelled_ids,
+                "paused_withdrawal_ids": paused_ids,
+            }, session=tx_session, audit_id=f"withdrawal-hold:{hold_id}:set",
+        )
+        if trigger_action:
+            await financial_audit(
+                normalized_actor, str(trigger_action), str(trigger_target_type),
+                str(trigger_target_id or user_id), reason=rationale,
+                metadata={"withdrawal_hold_id": hold_id}, session=tx_session,
+                audit_id=f"withdrawal-hold:{hold_id}:trigger",
+            )
+        projected, invalid = _persisted_withdrawal_hold_projection({
+            **user, "kyc_status": user.get("kyc_status"),
+            "withdrawal_hold": public_hold,
+        })
+        if not projected or invalid:
+            raise FinancialError(
+                "WITHDRAWAL_HOLD_WRITE_INVALID",
+                "Withdrawal hold evidence failed canonical validation.", 503,
+            )
+        return {
+            "hold": projected, "duplicate": False,
+            "cancelled_withdrawal_ids": cancelled_ids,
+            "paused_withdrawal_ids": paused_ids,
+        }
+
+    if session is not None:
+        return await work(session)
+    return await _run_transaction(work)
+
+
+async def clear_documented_withdrawal_hold(
+    user_id: str, *, hold_id: str, actor: str, reason: str, session=None,
+) -> dict[str, Any]:
+    """Close exactly one active hold; never infer clearance from account flags."""
+    normalized_hold_id = str(hold_id or "").strip()
+    normalized_actor = str(actor or "").strip()
+    rationale = str(reason or "").strip()
+    if not WITHDRAWAL_HOLD_TOKEN_RE.fullmatch(normalized_hold_id):
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold identifier is invalid.")
+    if not normalized_actor or len(normalized_actor) > 160:
+        raise FinancialError("INVALID_WITHDRAWAL_HOLD", "Withdrawal hold actor is invalid.")
+    if not 5 <= len(rationale) <= 500:
+        raise FinancialError("REASON_REQUIRED", "A clear hold-release reason is required.")
+
+    async def work(tx_session):
+        kwargs = _session_kwargs(tx_session)
+        await _touch_withdrawal_eligibility_lock(user_id, session=tx_session)
+        user = await db.users.find_one({"id": str(user_id)}, {"_id": 0}, **kwargs)
+        if not user:
+            raise FinancialError("USER_NOT_FOUND", "Player account was not found.", 404)
+        current, reconciliation = _persisted_withdrawal_hold_projection(user)
+        raw = user.get("withdrawal_hold") if isinstance(user.get("withdrawal_hold"), Mapping) else {}
+        if not current:
+            if raw.get("id") == normalized_hold_id and str(
+                raw.get("review_status") or ""
+            ).upper() in WITHDRAWAL_HOLD_CLOSED_STATUSES:
+                return {"hold": dict(raw), "duplicate": True}
+            if reconciliation:
+                raise FinancialError(
+                    "WITHDRAWAL_HOLD_EVIDENCE_INVALID",
+                    "Withdrawal hold evidence requires reconciliation.", 409,
+                )
+            raise FinancialError("WITHDRAWAL_HOLD_NOT_FOUND", "No active hold was found.", 404)
+        if current.get("id") != normalized_hold_id:
+            raise FinancialError(
+                "WITHDRAWAL_HOLD_CHANGED", "The active withdrawal hold has changed.", 409,
+            )
+        cleared_at = now()
+        cleared_hold = {
+            **dict(raw), "review_status": "CLEARED",
+            "cleared_at": cleared_at, "cleared_by": normalized_actor,
+            "clear_reason": rationale,
+        }
+        updated = await db.users.update_one(
+            {"id": str(user_id), "withdrawal_hold.id": normalized_hold_id},
+            {"$set": {"withdrawal_hold": cleared_hold}}, **kwargs,
+        )
+        if not updated.modified_count:
+            raise FinancialError(
+                "WITHDRAWAL_HOLD_CHANGED", "The active withdrawal hold has changed.", 409,
+            )
+        await db.withdrawal_holds.update_one(
+            {"id": normalized_hold_id, "user_id": str(user_id), "status": "ACTIVE"},
+            {"$set": {
+                "status": "CLEARED", "review_status": "CLEARED",
+                "cleared_at": cleared_at, "cleared_by": normalized_actor,
+                "clear_reason": rationale, "updated_at": cleared_at,
+            }}, **kwargs,
+        )
+        paused_rows = await db.withdrawal_requests.find(
+            {
+                "user_id": str(user_id), "status": "PAUSED_FOR_HOLD",
+                "withdrawal_hold_id": normalized_hold_id,
+            }, {"_id": 0, "id": 1}, **kwargs,
+        ).to_list(length=None)
+        resumed_ids = [str(row["id"]) for row in paused_rows]
+        if resumed_ids:
+            await db.withdrawal_requests.update_many(
+                {
+                    "id": {"$in": resumed_ids}, "status": "PAUSED_FOR_HOLD",
+                    "withdrawal_hold_id": normalized_hold_id,
+                },
+                {
+                    "$set": {"status": "PENDING_ADMIN", "updated_at": cleared_at},
+                    "$unset": {
+                        "withdrawal_hold_id": "",
+                        "status_before_withdrawal_hold": "",
+                    },
+                }, **kwargs,
+            )
+        await financial_audit(
+            normalized_actor, "WITHDRAWAL_HOLD_CLEARED", "PLAYER", str(user_id),
+            reason=rationale,
+            metadata={
+                "hold_id": normalized_hold_id, "category": current.get("category"),
+                "reason_code": current.get("reason_code"),
+                "resumed_withdrawal_ids": resumed_ids,
+            }, session=tx_session,
+            audit_id=f"withdrawal-hold:{normalized_hold_id}:cleared",
+        )
+        return {
+            "hold": cleared_hold, "duplicate": False,
+            "resumed_withdrawal_ids": resumed_ids,
+        }
+
+    if session is not None:
+        return await work(session)
+    return await _run_transaction(work)
+
+
+async def get_documented_withdrawal_hold(user_id: str) -> dict[str, Any]:
+    user = await db.users.find_one({"id": str(user_id)}, {"_id": 0})
+    if not user:
+        raise FinancialError("USER_NOT_FOUND", "Player account was not found.", 404)
+    active, reconciliation = _persisted_withdrawal_hold_projection(user)
+    eligibility_hold, _ = documented_withdrawal_hold_projection(user)
+    history = await db.withdrawal_holds.find(
+        {"user_id": str(user_id)}, {"_id": 0, "reason": 0},
+    ).sort("recorded_at", -1).to_list(length=100)
+    return {
+        "active_hold": active, "eligibility_hold": eligibility_hold,
+        "reconciliation": reconciliation, "history": history,
+    }
+
+
 async def _flag_financial_review(
     user_id: str, action: str, target_type: str, target_id: str, reason: str,
+    *, session=None,
 ) -> None:
-    async def work(session):
-        kwargs = _session_kwargs(session)
+    """Record a generic review without inventing a cleared-cash hold."""
+    async def work(tx_session):
+        kwargs = _session_kwargs(tx_session)
         await db.users.update_one(
             {"id": user_id}, {"$set": {"financial_status": "REVIEW_REQUIRED"}}, **kwargs,
         )
         await financial_audit(
             "provider-webhook", action, target_type, target_id, reason=reason,
-            session=session, audit_id=f"review:{target_type.lower()}:{target_id}:{action.lower()}",
+            session=tx_session,
+            audit_id=f"review:{target_type.lower()}:{target_id}:{action.lower()}",
         )
-    await _run_transaction(work)
+    if session is not None:
+        await work(session)
+    else:
+        await _run_transaction(work)
+
+
+async def _flag_documented_provider_identity_hold(
+    user_id: str, action: str, target_type: str, target_id: str, reason: str,
+    *, session=None,
+) -> None:
+    """Create a strict hold only for a classified provider identity anomaly."""
+    source_type = (
+        "PROVIDER_REFUND_IDENTITY_CONFLICT"
+        if "REFUND" in str(action).upper()
+        else "PROVIDER_TERMINAL_CONFLICT"
+    )
+    await set_documented_withdrawal_hold(
+        str(user_id), category="FRAUD", reason_code=str(action).upper(),
+        review_status="UNDER_REVIEW", support_path="/support",
+        source_type=source_type,
+        source_id=f"{str(target_type).upper()}:{str(target_id)}",
+        actor="provider-webhook", reason=reason, preserve_existing=True,
+        trigger_action=action, trigger_target_type=target_type,
+        trigger_target_id=target_id, session=session,
+    )
 
 
 async def process_provider_event(provider: PaymentProvider, event: ProviderEvent, raw_body: bytes) -> dict[str, Any]:
@@ -3082,7 +4229,7 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
                 result = {"status": (current or {}).get("status", "PROCESSING")}
             elif event.event_type == "withdrawal.paid":
                 if withdrawal.get("status") in {"FAILED", "CANCELLED", "REJECTED"}:
-                    await _flag_financial_review(
+                    await _flag_documented_provider_identity_hold(
                         withdrawal["user_id"], "PAYOUT_TERMINAL_CONFLICT",
                         "WITHDRAWAL", withdrawal["id"],
                         f"Provider reported paid after {withdrawal['status']}",
@@ -3096,7 +4243,7 @@ async def process_provider_event(provider: PaymentProvider, event: ProviderEvent
                 result = {"status": paid["status"]}
             else:
                 if withdrawal.get("status") == "PAID":
-                    await _flag_financial_review(
+                    await _flag_documented_provider_identity_hold(
                         withdrawal["user_id"], "PAYOUT_TERMINAL_CONFLICT",
                         "WITHDRAWAL", withdrawal["id"],
                         "Provider reported failed after paid",

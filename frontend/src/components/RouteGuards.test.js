@@ -59,6 +59,15 @@ test("only an explicit SUPER_ADMIN can access payment settings", () => {
   expect(hasPermission({ role: "ADMIN", status: "ACTIVE", permissions: [ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE] }, ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE)).toBe(false);
 });
 
+test("promotion permissions remain independently scoped and fail closed", () => {
+  const viewer = { role: "ADMIN", status: "ACTIVE", admin_permissions: [ADMIN_PERMISSIONS.PROMOTIONS_VIEW] };
+  expect(hasPermission(viewer, ADMIN_PERMISSIONS.PROMOTIONS_VIEW)).toBe(true);
+  expect(hasPermission(viewer, ADMIN_PERMISSIONS.PROMOTIONS_MANAGE)).toBe(false);
+  expect(hasPermission(viewer, ADMIN_PERMISSIONS.PROMOTIONS_ACTIVATE)).toBe(false);
+  expect(hasPermission(viewer, ADMIN_PERMISSIONS.PROMOTION_AUDIT_VIEW)).toBe(false);
+  expect(hasPermission({ role: "ADMIN", status: "ACTIVE", admin_role: "SUPER_ADMIN" }, ADMIN_PERMISSIONS.PROMOTIONS_ACTIVATE)).toBe(true);
+});
+
 test("inactive administrators cannot enter privileged routes", () => {
   expect(isActiveAdmin({ role: "ADMIN", status: "ACTIVE" })).toBe(true);
   expect(isActiveAdmin({ role: "ADMIN", status: "SUSPENDED" })).toBe(false);

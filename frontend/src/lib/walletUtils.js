@@ -22,12 +22,24 @@ export function rupeesToPaise(raw) {
 export function normalizeWallet(payload, fallbackAvailable = 0) {
   const source = payload?.wallet || payload || {};
   const available = source.available_chips ?? source.available ?? source.chip_balance ?? source.balance ?? fallbackAvailable;
+  const explicitCash = source.cash_chips ?? source.cash;
+  const explicitBonus = source.bonus_chips ?? source.promotional_chips ?? source.bonus;
+  const nonCashBalance = explicitCash == null
+    ? (Number(available) || Number(explicitBonus) || 0)
+    : (Number(explicitBonus) || 0);
   return {
     available_chips: Number(available) || 0,
-    cash_chips: Number(source.cash_chips ?? source.cash ?? available) || 0,
-    bonus_chips: Number(source.bonus_chips ?? source.promotional_chips ?? source.bonus ?? 0) || 0,
+    // Unknown legacy chips are playable but never presented as cleared cash.
+    // Withdrawal eligibility must always arrive as an explicit server field.
+    cash_chips: Number(explicitCash ?? 0) || 0,
+    bonus_chips: nonCashBalance,
+    restricted_bonus_chips: Number(source.restricted_bonus_chips ?? source.restricted_bonus ?? nonCashBalance) || 0,
     held_chips: Number(source.held_chips ?? source.held ?? 0) || 0,
-    withdrawable_chips: Number(source.withdrawable_chips ?? source.withdrawable ?? source.cash_chips ?? available) || 0,
+    held_withdrawal_chips: Number(source.held_withdrawal_chips ?? source.withdrawal_hold_chips ?? 0) || 0,
+    withdrawable_chips: Number(source.withdrawable_chips ?? source.withdrawable ?? 0) || 0,
+    pending_reward_chips: Number(source.pending_reward_chips ?? source.pending_reward ?? 0) || 0,
+    active_mission: source.active_mission || payload?.active_mission || null,
+    withdrawal_eligibility: source.withdrawal_eligibility || payload?.withdrawal_eligibility || null,
   };
 }
 

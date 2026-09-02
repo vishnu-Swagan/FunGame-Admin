@@ -57,7 +57,7 @@ export default function ResponsiblePlay() {
 
   const save = async (kind, period, raw) => {
     const amount = raw === "" || raw === null ? null : parseInt(raw, 10);
-    if (amount !== null && (isNaN(amount) || amount < 0)) return toast.error("Enter a number of chips");
+    if (amount !== null && (isNaN(amount) || amount < 0)) return toast.error("Enter a non-negative limit");
     setBusy(true);
     try {
       const { data } = await api.post("/responsible/limits", { kind, period, amount });
@@ -78,7 +78,7 @@ export default function ResponsiblePlay() {
     if (!window.confirm(
       `Close your account to play for ${label}?\n\n` +
       `You will be signed out. It cannot be ended early — that is what makes it ` +
-      `a break. Your chips stay where they are.`)) return;
+      `a break. Your wallet funds stay where they are.`)) return;
     try {
       const { data } = await api.post("/responsible/exclusion", { kind: "BREAK", days });
       toast.success(data.message);
@@ -135,7 +135,7 @@ export default function ResponsiblePlay() {
 
         <LimitBlock
           title="Play-result limits"
-          hint="Chips played minus chips returned. A round that would take you past the limit is refused."
+          hint="Settled stakes minus player returns. A round that would take you past the limit is refused."
           kind="LOSS"
           usageKey="lost"
           data={data}
@@ -150,7 +150,7 @@ export default function ResponsiblePlay() {
             <Clock className="h-4 w-4 text-white/45" /> Take a break
           </h2>
           <p className="text-[11px] text-white/45 mt-1">
-            Closes your account to play for a fixed period. Your chips stay where
+            Closes your account to play for a fixed period. Your wallet funds stay where
             they are, and it cannot be ended early.
           </p>
           <div className="grid grid-cols-2 gap-2 mt-3">

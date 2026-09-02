@@ -198,8 +198,8 @@ function LevelCard({ category, balance, busy, joinFailure, preview, featured, fe
       <div className="rpl-level-content">
         <div className="rpl-entry-medallion" aria-hidden="true"><i /><span><small>ENTRY</small><b>{formatChips(category.entryChips)}</b></span></div>
         <dl>
-          <div><dt>ENTRY</dt><dd>{formatChips(category.entryChips)} <small>chips</small></dd></div>
-          <div><dt>POINT VALUE</dt><dd>{formatChips(category.pointsValue)} <small>chips</small></dd></div>
+          <div><dt>ENTRY STAKE</dt><dd>{formatChips(category.entryChips)}</dd></div>
+          <div><dt>POINT VALUE</dt><dd>{formatChips(category.pointsValue)}</dd></div>
           <div><dt>TURN</dt><dd>{category.turnDurationSeconds}<small>s</small></dd></div>
         </dl>
       </div>
@@ -234,7 +234,7 @@ function LevelCard({ category, balance, busy, joinFailure, preview, featured, fe
             : !balanceKnown
               ? "Balance unavailable · Practice remains available"
               : !enough
-                ? `Live requires ${formatChips(liveRequiredChips)} chips · Practice remains available`
+                ? `Live requires a ${formatChips(liveRequiredChips)} balance · Practice remains available`
                 : "Live entry available")}
       </small>
     </article>
@@ -264,8 +264,8 @@ export function CategoryLobby({
       <header className="rpl-header">
         <button type="button" className="rpl-back" onClick={onExit} aria-label="Back to Rummy details"><ArrowLeft /></button>
         <BrandWordmark className="rpl-brand" logoClassName="rpl-brand-lockup" />
-        <div className="rpl-balance" aria-label={`${balance == null ? "Balance unavailable" : `${formatChips(balance)} chips`}`}>
-          <Coins aria-hidden="true" /><span><small>BALANCE</small><b>{balance == null ? "—" : formatChips(balance)}</b></span><em>CHIPS</em>
+        <div className="rpl-balance" aria-label={`${balance == null ? "Balance unavailable" : `${formatChips(balance)} balance`}`}>
+          <Coins aria-hidden="true" /><span><small>BALANCE</small><b>{balance == null ? "—" : formatChips(balance)}</b></span><em>FUNDS</em>
         </div>
       </header>
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
@@ -27,8 +28,11 @@ router = APIRouter(tags=["payments"])
 admin_router = APIRouter(prefix="/admin", tags=["admin-payments"])
 
 
+logger = logging.getLogger(__name__)
+
 class DepositCreate(BaseModel):
     amount_paise: int = Field(ge=1, le=finance.DEPOSIT_REQUEST_MAX_PAISE)
+    promotion_consent_id: Optional[str] = Field(default=None, min_length=8, max_length=80)
 
 
 class BankDetailsCreate(BaseModel):
@@ -68,12 +72,33 @@ class WithdrawalModeUpdate(BaseModel):
 class KycReview(BaseModel):
     status: str
     reason: str = Field(min_length=5, max_length=500)
+    identity_evidence_token: Optional[str] = Field(
+        default=None, min_length=16, max_length=512,
+        pattern=r"^[A-Za-z0-9._:=+/\-]+$",
+    )
+
+
+class WithdrawalHoldSet(BaseModel):
+    category: str = Field(min_length=3, max_length=16)
+    reason_code: str = Field(min_length=3, max_length=64)
+    review_status: str = Field(default="UNDER_REVIEW", min_length=3, max_length=32)
+    support_path: str = Field(default="/support", min_length=2, max_length=64)
+    source_type: str = Field(default="ADMIN_COMPLIANCE_CASE", min_length=3, max_length=64)
+    source_id: str = Field(min_length=3, max_length=160)
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class WithdrawalHoldClear(BaseModel):
+    hold_id: str = Field(min_length=3, max_length=160)
+    reason: str = Field(min_length=5, max_length=500)
 
 
 def _financial_http(exc: finance.FinancialError):
+    detail = {"code": exc.code, "message": exc.message}
+    detail.update(exc.details)
     raise HTTPException(
         status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
+        detail=detail,
     ) from exc
 
 
@@ -95,12 +120,46 @@ def _country_allowlist() -> set[str]:
     }
 
 
+def _withdrawal_hold_projection(user: Mapping[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Compatibility wrapper over the financial domain's canonical validator."""
+    return finance.documented_withdrawal_hold_projection(user)
+
+
+def _report_withdrawal_hold_reconciliation(user: Mapping[str, Any], reason: Optional[str]) -> None:
+    if not reason:
+        return
+    logger.error(
+        "WITHDRAWAL HOLD EVIDENCE REQUIRES RECONCILIATION: user_id=%s reason=%s",
+        str(user.get("id") or "unknown"), reason,
+    )
+
+
 async def _require_player(feature: str, user: dict) -> dict:
     try:
         finance.require_financial_feature(feature)
     except finance.FinancialError as exc:
         _financial_http(exc)
-    if user.get("role") != "PLAYER" or user.get("status") != "ACTIVE":
+    if user.get("role") != "PLAYER":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "PLAYER_REQUIRED", "message": "Player account required."},
+        )
+    if feature == "withdrawals":
+        hold, reconciliation = _withdrawal_hold_projection(user)
+        _report_withdrawal_hold_reconciliation(user, reconciliation)
+        if hold:
+            raise HTTPException(status_code=403, detail={
+                "code": hold["code"],
+                "message": hold["message"],
+                "hold_category": hold["category"],
+                "hold_reason_code": hold["reason_code"],
+                "review_status": hold["review_status"],
+                "support_path": hold["support_path"],
+                **({"recorded_at": hold["recorded_at"]} if hold.get("recorded_at") else {}),
+            })
+        return user
+
+    if user.get("status") != "ACTIVE":
         raise HTTPException(
             status_code=403,
             detail={"code": "FINANCIAL_ACCOUNT_NOT_ACTIVE", "message": "An active player account is required."},
@@ -122,7 +181,10 @@ async def _require_player(feature: str, user: dict) -> dict:
     if str(user.get("kyc_status", "")).upper() != "VERIFIED":
         raise HTTPException(
             status_code=403,
-            detail={"code": "KYC_REQUIRED", "message": "Identity verification is required."},
+            detail={
+                "code": "KYC_REQUIRED",
+                "message": "Identity verification is required.",
+            },
         )
     if user.get("financial_status") in {"BLOCKED", "FROZEN", "REVIEW_REQUIRED"}:
         raise HTTPException(
@@ -136,10 +198,9 @@ async def _require_player(feature: str, user: dict) -> dict:
             status_code=403,
             detail={"code": "FINANCIAL_MARKET_BLOCKED", "message": "Financial services are unavailable in your registered country."},
         )
-    if feature == "deposits":
-        # Self-exclusion and the central compliance gate must apply before a
-        # player can add value.  Withdrawals deliberately remain accessible.
-        await compliance.assert_playable(user)
+    # Self-exclusion and the central compliance gate apply before a player can
+    # add value. Withdrawals returned above and remain available independently.
+    await compliance.assert_playable(user)
     return user
 
 
@@ -232,6 +293,7 @@ payments_reconcile_and_pay = _admin_dependency(
 )
 kyc_view = _admin_dependency("KYC_VIEW")
 kyc_review = _admin_dependency("KYC_REVIEW", step_up=True)
+withdrawal_holds_manage = _admin_dependency("WITHDRAWAL_HOLDS_MANAGE", step_up=True)
 
 
 async def _financial_rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
@@ -276,8 +338,41 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         # invalid value or internal configuration diagnostics to the player.
         money_config = None
     config_ready = money_config is not None
+    wallet = await finance.wallet_public(user["id"])
+    try:
+        import promotions
+        promotion_projection = await promotions.wallet_promotion_projection(user["id"])
+    except Exception:
+        # A promotion read must never make the cash wallet unavailable. The
+        # optional fields fail closed to zero/no mission and can be retried.
+        promotion_projection = {
+            "restricted_bonus_chips": int(wallet.get("bonus_chips", 0)),
+            "pending_reward_chips": 0, "active_mission": None,
+        }
+    # The financial wallet owns the complete restricted-bonus balance. The
+    # promotion projection supplies mission context and pending rewards, but it
+    # must never replace the wallet total with only campaign-attributed lots.
+    promotion_projection["restricted_bonus_chips"] = int(wallet.get("bonus_chips", 0))
+    hold, reconciliation = _withdrawal_hold_projection(user)
+    _report_withdrawal_hold_reconciliation(user, reconciliation)
+    eligibility_reasons = [hold["reason_code"]] if hold else []
+    if int(wallet.get("withdrawable_chips", 0)) <= 0:
+        eligibility_reasons.append("NO_WITHDRAWABLE_CASH")
+    wallet.update({
+        **promotion_projection,
+        "held_withdrawal_chips": int(wallet.get("held_chips", 0)),
+        "withdrawal_eligibility": {
+            "eligible": not eligibility_reasons,
+            "reason_codes": eligibility_reasons,
+            "hold": hold,
+            "support_path": (
+                hold["support_path"] if hold else
+                "/support" if eligibility_reasons else None
+            ),
+        },
+    })
     return {
-        "wallet": await finance.wallet_public(user["id"]),
+        "wallet": wallet,
         "money_config": money_config,
         "financial": {
             "ready": bool(internal["ready"] and config_ready),
@@ -303,6 +398,7 @@ async def create_deposit(
         await _financial_rate_limit(user["id"], "deposit-create", 10, 900)
         deposit, checkout_url = await finance.create_deposit(
             user["id"], body.amount_paise, idempotency_key, _provider(),
+            promotion_consent_id=body.promotion_consent_id,
         )
         return {"deposit": finance.deposit_dto(deposit), "checkout_url": checkout_url}
     except finance.FinancialError as exc:
@@ -562,11 +658,55 @@ async def admin_review_kyc(
     try:
         user = await finance.review_player_kyc(
             user_id, body.status, admin["id"], body.reason,
+            identity_evidence_token=body.identity_evidence_token,
         )
         return {
             "message": "KYC review recorded.",
             "player": {"id": user["id"], "kyc_status": user.get("kyc_status")},
         }
+    except finance.FinancialError as exc:
+        _financial_http(exc)
+
+
+@admin_router.get("/payments/withdrawal-holds/{user_id}")
+async def admin_get_withdrawal_holds(
+    user_id: str, admin: dict = Depends(payments_view),
+):
+    try:
+        return await finance.get_documented_withdrawal_hold(user_id)
+    except finance.FinancialError as exc:
+        _financial_http(exc)
+
+
+@admin_router.post("/payments/withdrawal-holds/{user_id}")
+async def admin_set_withdrawal_hold(
+    user_id: str, body: WithdrawalHoldSet,
+    admin: dict = Depends(withdrawal_holds_manage),
+):
+    try:
+        finance.require_financial_core()
+        result = await finance.set_documented_withdrawal_hold(
+            user_id, category=body.category, reason_code=body.reason_code,
+            review_status=body.review_status, support_path=body.support_path,
+            source_type=body.source_type, source_id=body.source_id,
+            actor=admin["id"], reason=body.reason,
+        )
+        return {"message": "Documented withdrawal hold recorded.", **result}
+    except finance.FinancialError as exc:
+        _financial_http(exc)
+
+
+@admin_router.post("/payments/withdrawal-holds/{user_id}/clear")
+async def admin_clear_withdrawal_hold(
+    user_id: str, body: WithdrawalHoldClear,
+    admin: dict = Depends(withdrawal_holds_manage),
+):
+    try:
+        finance.require_financial_core()
+        result = await finance.clear_documented_withdrawal_hold(
+            user_id, hold_id=body.hold_id, actor=admin["id"], reason=body.reason,
+        )
+        return {"message": "Documented withdrawal hold cleared.", **result}
     except finance.FinancialError as exc:
         _financial_http(exc)
 

@@ -123,6 +123,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
             {
                 "status": "ok", "gameplay_ready": True,
                 "crm_ready": True, "financial_ready": True,
+                "promotion_core_ready": False,
             },
         )
         self.assertTrue(server._GAMEPLAY_READY)

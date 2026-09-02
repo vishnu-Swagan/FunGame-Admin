@@ -71,7 +71,7 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test("game profile exposes Buy Chips and bank-account entry points", async () => {
+test("game profile exposes wallet and bank-account entry points", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -82,7 +82,7 @@ test("game profile exposes Buy Chips and bank-account entry points", async () =>
   expect(container.querySelector('[data-testid="profile-link-settings"]')?.textContent).toMatch(/Account settings/i);
 
   await act(async () => container.querySelector('[data-testid="profile-link-buy-chips"]').click());
-  expect(mockNavigate).toHaveBeenCalledWith("/chips");
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet");
   await act(async () => container.querySelector('[data-testid="profile-link-bank-account"]').click());
   expect(mockNavigate).toHaveBeenCalledWith("/profile/bank-details");
   await act(async () => root.unmount());

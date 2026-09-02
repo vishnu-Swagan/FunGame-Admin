@@ -918,7 +918,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         <div className={`rummy-live-pill ${state.walletNeutral ? "is-bot-table" : ""}`}><i />{
           state.mode === "BOT_TABLE" ? "PRACTICE TABLE · FREE" : state.mode === "PRACTICE" ? "PRACTICE MODE" : "LIVE MODE"
         }</div>
-        <div className="rummy-balance"><Coins /><b>{formatChips(state.balance)}</b><span>chips</span></div>
+        <div className="rummy-balance"><Coins /><b>{formatChips(state.balance)}</b><span>balance</span></div>
         <div className="rummy-table-utilities">
           <button type="button" className={socialOpen ? "is-active" : ""} onClick={() => setSocialOpen((current) => !current)} aria-label={socialOpen ? "Close Rummy table conversation" : "Open Rummy table conversation"} aria-expanded={socialOpen}><RoyalGlyph name="chat" /><span>TABLE</span>{chatMessages.length > 0 && <i>{Math.min(9, chatMessages.length)}</i>}</button>
           <button type="button" onClick={toggleMuted} aria-label={muted ? "Turn Rummy sound on" : "Mute Rummy sound"}>{muted ? <VolumeX /> : <Volume2 />}</button>
@@ -930,7 +930,7 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
           <div className="rummy-matchmaking-orbit" aria-hidden><span /><span /><span /><span /><span /></div>
           <span>LIVE TABLE MATCHMAKING</span>
           <h1>{status}</h1>
-          <p>Your {formatChips(state.category?.entryChips)}-chip seat is reserved. Leaving before the deal restores the exact reserved stake.</p>
+          <p>Your {formatChips(state.category?.entryChips)} entry stake is reserved. Leaving before the deal restores the exact reserved stake.</p>
           <NextTableSchedule source={state} />
           {state.fallbackStartsIn != null && (
             <p className="rummy-fallback-note" data-testid="rummy-fallback-countdown">
@@ -976,8 +976,8 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
             />
             <div className="rummy-table-hud" aria-label="Current Rummy hand information">
               <div><span>TABLE</span><b>{state.category?.id || "—"}</b></div>
-              <div><span>POINT VALUE</span><b>{formatChips(state.category?.pointsValue)} chips</b></div>
-              <div><span>ENTRY</span><b>{formatChips(state.category?.entryChips)} chips</b></div>
+              <div><span>POINT VALUE</span><b>{formatChips(state.category?.pointsValue)}</b></div>
+              <div><span>ENTRY STAKE</span><b>{formatChips(state.category?.entryChips)}</b></div>
               <div><span>HAND POINTS</span><b>{privateState?.points ?? "—"}</b></div>
               <div className="is-drop"><span>DROP NOW</span><b>{privateState?.dropPenaltyPoints == null ? "—" : `${privateState.dropPenaltyPoints} pts`}</b></div>
             </div>
@@ -1120,7 +1120,7 @@ class RummyTableBoundary extends Component {
         <section>
           <span>TABLE RECOVERY</span>
           <h1>The room did not finish loading.</h1>
-          <p>Your chips are safe. Return to the lobby and reconnect to a fresh authoritative table.</p>
+          <p>Your balance is safe. Return to the lobby and reconnect to a fresh authoritative table.</p>
           <button type="button" onClick={this.props.onExit}><ArrowLeft /> RETURN TO RUMMY LOBBY</button>
         </section>
       </main>
@@ -1470,10 +1470,10 @@ export default function RummyGame({ game }) {
         setReconnecting(true);
         toast.error(
           restoredBeforeRetry
-            ? "Your current table was restored, but leaving was not confirmed. It remains open here so your seat and chips stay protected; try again when the connection is stable."
+            ? "Your current table was restored, but leaving was not confirmed. It remains open here so your seat and balance stay protected; try again when the connection is stable."
             : failure?.code === "RUMMY_MODE_SWITCH_BLOCKED"
             ? "Your current table is still active. Resume it here, then leave before changing mode."
-            : "The server did not confirm that you left. Your current table remains open here so your seat and chips stay protected. Try again when the connection is stable.",
+            : "The server did not confirm that you left. Your current table remains open here so your seat and balance stay protected. Try again when the connection is stable.",
         );
         return;
       }

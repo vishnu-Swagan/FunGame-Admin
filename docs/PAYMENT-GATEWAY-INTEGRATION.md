@@ -147,7 +147,7 @@ the original withdrawal ID, idempotency key, amount, currency, and beneficiary.
 Replace `{provider}` with the adapter's configured, lowercase route name.
 
 - Server webhook: `https://api.chakri.casino/api/payments/webhooks/{provider}`
-- Browser return: `https://chakri.casino/chips/deposit/return`
+- Browser return: `https://chakri.casino/wallet/deposit/return`
 - Admin CRM: `https://crm.chakri.casino/admin/payments`
 
 These URLs describe the current single-provider V1 flow only. Do not give the

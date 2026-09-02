@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
+  Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,11 +51,12 @@ export function Profile() {
   const filteredAvatars = useMemo(() => filterCartoonAvatars(avatarSearch), [avatarSearch]);
 
   const links = [
-    { icon: HandCoins, label: "Buy chips", to: "/chips", testId: "profile-link-buy-chips" },
+    { icon: HandCoins, label: "Wallet and deposits", to: "/wallet", testId: "profile-link-buy-chips" },
     { icon: Landmark, label: "Bank account", to: "/profile/bank-details", testId: "profile-link-bank-account" },
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },
     { icon: HeartPulse, label: "Responsible play", to: "/responsible-play", testId: "profile-link-responsible" },
+    { icon: FileText, label: "Terms, privacy and policies", to: "/legal/terms", testId: "profile-link-policies" },
     { icon: SettingsIcon, label: "Account settings", to: "/settings", testId: "profile-link-settings" },
     { icon: Megaphone, label: "Announcements", to: "/announcements", testId: "profile-link-announcements" },
     { icon: Bell, label: "Notifications", to: "/notifications", testId: "profile-link-notifications" },
@@ -232,7 +233,7 @@ export function Profile() {
         </div>
         <div className="mt-4">
           <div className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
-            <p className="text-xs text-white/55">Play chips</p>
+            <p className="text-xs text-white/55">Player balance</p>
             <p className="tabular-nums font-bold text-primary" data-testid="profile-chip-balance">{formatChips(user?.chip_balance)}</p>
           </div>
         </div>
@@ -262,7 +263,7 @@ export function Profile() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold">Game profile</p>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-white/45">Choose a royal 3D avatar or upload your own image. Your account, contact and chip details stay unchanged.</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-white/45">Choose a royal 3D avatar or upload your own image. Your account, contact, and balance details stay unchanged.</p>
             </div>
           </div>
 
@@ -384,7 +385,7 @@ export function Profile() {
               {uploading ? "Uploading…" : saving ? "Saving…" : "Save profile"}
             </Button>
           </div>
-          <p className="text-[11px] leading-relaxed text-white/40">Email, mobile number, country, verification status and chip balances are managed separately and remain read-only here.</p>
+          <p className="text-[11px] leading-relaxed text-white/40">Email, mobile number, country, verification status, and wallet balances are managed separately and remain read-only here.</p>
         </form>
       )}
 
@@ -595,7 +596,7 @@ export function Settings() {
       </div>
       <div className="rounded-2xl bg-card/55 border border-white/10 p-4">
         <p className="text-sm font-semibold">About</p>
-        <p className="text-xs text-white/55 mt-1">Chakri.Casino v{APP_VERSION} — games, a secure chips wallet and account-level responsible-play controls.</p>
+        <p className="text-xs text-white/55 mt-1">Chakri.Casino v{APP_VERSION} · games, a secure wallet, and account-level responsible-play controls.</p>
       </div>
       <Disclaimer />
     </PageTransition>

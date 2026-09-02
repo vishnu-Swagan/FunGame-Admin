@@ -10,6 +10,7 @@
     position: absolute;
     inset: 0;
     isolation: isolate;
+    container-type: size;
     width: 100%;
     height: auto;
     overflow: hidden;
@@ -22,14 +23,8 @@
       position: absolute;
       inset: 0;
       z-index: 2;
-      background-image:
-        radial-gradient(circle at 52% 52%, rgba(12, 96, 145, 0.28), transparent 31%),
-        repeating-conic-gradient(
-          from 0deg at 0% 100%,
-          rgba(255, 255, 255, 0.055) 0deg 7deg,
-          rgba(255, 255, 255, 0) 7deg 15deg
-        );
-      opacity: 0.72;
+      background: radial-gradient(circle at 52% 52%, rgba(12, 96, 145, 0.2), transparent 32%);
+      opacity: 0.56;
       pointer-events: none;
     }
 
@@ -67,6 +62,92 @@
 
 }
 
+.flight-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  contain: paint;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.flight-rays {
+  position: absolute;
+  inset: -28%;
+  width: 156%;
+  height: 156%;
+  opacity: 0.58;
+  overflow: hidden;
+}
+
+.flight-rays-rotor {
+  fill: rgba(255, 255, 255, 0.045);
+  transform: rotate(0deg);
+  transform-box: view-box;
+  transform-origin: 32px 124px;
+  animation: flightRaysRotate 70s linear infinite;
+  will-change: transform;
+}
+
+.flight-glow {
+  position: absolute;
+  top: 48%;
+  left: 52%;
+  width: 76%;
+  aspect-ratio: 1.35;
+  opacity: 0.46;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  transition:
+    opacity 260ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 260ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.flight-glow-core {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(66, 166, 222, 0.25) 0%,
+    rgba(25, 112, 166, 0.16) 26%,
+    rgba(9, 49, 82, 0.07) 48%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.8;
+  transform: scale(0.98);
+  transform-origin: 50% 50%;
+}
+
+.space-box.phase-playing .flight-glow {
+  opacity: 1;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  will-change: transform, opacity;
+}
+
+.space-box.phase-playing .flight-glow-core,
+.space-box.phase-gameend .flight-glow-core {
+  animation: flightGlowBreath 7.2s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate;
+  will-change: transform, opacity;
+}
+
+.space-box.phase-gameend .flight-glow {
+  opacity: 0;
+  transform: translate3d(-50%, -50%, 0) scale(1.02);
+  will-change: transform, opacity;
+}
+
+.space-box.github-visual-ready .flight-atmosphere {
+  opacity: 0.68;
+}
+
+.space-box[data-motion-paused="true"] .flight-rays-rotor,
+.space-box[data-motion-paused="true"] .flight-glow,
+.space-box[data-motion-paused="true"] .flight-glow-core,
+.space-box[data-motion-paused="true"] .plane-propeller {
+  animation-play-state: paused !important;
+}
+
 .github-unity-stage {
   position: absolute !important;
   inset: 0;
@@ -93,10 +174,10 @@
 .fallback-flight-visual {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 6;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 180ms ease;
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
   pointer-events: none;
 }
 
@@ -270,24 +351,49 @@
 
 .plane {
   position: absolute;
-  left: 4.5%;
-  bottom: 7.5%;
+  left: 4%;
+  bottom: 4%;
   z-index: 7;
   width: clamp(116px, 18.5%, 220px);
   height: auto;
   opacity: 0;
   transform-origin: 10% 52%;
-  transition: opacity 180ms ease, left 80ms linear, bottom 80ms linear, transform 80ms linear;
-  filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 7px rgba(237, 23, 66, 0.26));
+  transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 80ms linear;
   pointer-events: none;
 
   &.visible {
     opacity: 1;
   }
 
-  &.crashed {
-    animation: aviatorEscape 460ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
+  &.crashed .plane-exit-motion {
+    animation: aviatorEscape 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   }
+}
+
+.plane-exit-motion {
+  width: 100%;
+  filter: drop-shadow(0 9px 11px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 7px rgba(237, 23, 66, 0.26));
+  transform: translate3d(0, 0, 0);
+  transform-origin: 10% 52%;
+}
+
+.plane-craft {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.plane-propeller {
+  transform-box: view-box;
+  transform-origin: 244px 62px;
+  filter: blur(0.35px);
+}
+
+.plane.is-flying .plane-propeller:not([data-motion-driver="waapi"]),
+.plane.is-ended .plane-propeller:not([data-motion-driver="waapi"]) {
+  animation: propellerFlight 110ms linear infinite;
+  will-change: transform;
 }
 
 .multiplier,
@@ -421,20 +527,48 @@
   }
 }
 
+@keyframes flightRaysRotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes flightGlowBreath {
+  from {
+    opacity: 0.72;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 0.88;
+    transform: scale(1.035);
+  }
+}
+
+@keyframes propellerFlight {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes aviatorEscape {
   0% {
     opacity: 1;
-    transform: translate(-2%, 55%) translate3d(0, 0, 0) rotate(-7.5deg) scale(1);
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
   }
 
   16% {
     opacity: 1;
-    transform: translate(-2%, 55%) translate3d(58px, -22px, 0) rotate(-8deg) scale(0.99);
+    transform: translate3d(58px, -22px, 0) rotate(-0.5deg) scale(0.99);
   }
 
   100% {
     opacity: 0;
-    transform: translate(-2%, 55%) translate3d(58vw, -42vh, 0) rotate(-10deg) scale(0.76);
+    transform: translate3d(58vw, -42vh, 0) rotate(-2.5deg) scale(0.76);
   }
 }
 
@@ -511,6 +645,37 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .flight-rays-rotor,
+  .flight-glow,
+  .flight-glow-core,
+  .plane-propeller {
+    animation: none !important;
+    will-change: auto;
+  }
+
+  .flight-rays-rotor {
+    transform: rotate(0deg);
+  }
+
+  .flight-glow {
+    opacity: 1;
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+
+  .space-box.phase-gameend .flight-glow {
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+
+  .flight-glow-core {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
+  .plane.crashed .plane-exit-motion {
+    animation: none;
+    opacity: 0;
+  }
+
   .round-state .state-dot,
   .flight-curve .curve-line,
   .plane,

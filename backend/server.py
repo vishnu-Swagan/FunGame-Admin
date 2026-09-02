@@ -1,6 +1,6 @@
 """Chakri.Casino API.
 
-The deployed default remains play-chip-only. Financial routes are present but
+Financial activation remains explicit and fail-closed. Financial routes are present but
 fail closed behind explicit readiness flags, reviewed source accounting, a
 transaction-capable database, and an installed real payment-provider adapter.
 """
@@ -37,7 +37,10 @@ import routes_migration_export
 import routes_game_settlement
 import routes_payments
 import routes_payment_hub
+import routes_promotions
 import financial_wallet
+import game_wallet
+import promotions
 from payment_hub import service as payment_hub_service
 from payment_providers import load_payment_provider
 from transactions import run_game_transaction
@@ -47,6 +50,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Registration is harmless while certification/runtime flags are false. The
+# adapter itself fails closed and never mutates a wallet in the current build.
+game_wallet.install()
+promotions.install_ledger_observer()
 
 
 _WORKER_ID = f'{os.getpid()}-{uuid.uuid4().hex[:6]}'
@@ -97,10 +105,12 @@ async def _financial_worker():
                 )
                 if leader:
                     provider = load_payment_provider()
-                    if status['features']['automatic_withdrawals']:
-                        outbox = await financial_wallet.process_outbox_batch(provider, limit=10)
-                        if any(outbox.values()):
-                            logger.info('financial outbox result: %s', outbox)
+                    outbox = await financial_wallet.process_outbox_batch(
+                        provider, limit=10,
+                        include_payouts=status['features']['automatic_withdrawals'],
+                    )
+                    if any(outbox.values()):
+                        logger.info('financial outbox result: %s', outbox)
                     current = time.monotonic()
                     if current - last_reconciliation >= 60:
                         result = await financial_wallet.reconcile_financial_records(
@@ -264,7 +274,6 @@ async def lifespan(app: FastAPI):
     # They contain configuration and operational evidence only; wallet posting
     # remains in the established financial core.
     await step('indexes:payment_hub', payment_hub_service.ensure_indexes())
-
     # Payment indexes and transaction support are a hard readiness gate for
     # money routes.  Unlike ordinary bootstrap steps this failure is retained
     # by the financial module and makes /health return 503 whenever a payment
@@ -272,6 +281,12 @@ async def lifespan(app: FastAPI):
     financial = await financial_wallet.prepare_financial_core()
     if financial_wallet.financial_flags_requested() and not financial['ready']:
         logger.error('financial core requested but not ready: %s', financial['errors'])
+    # Promotion readiness is retained by the module just like the financial
+    # core latch. A swallowed bootstrap/index error must never leave campaign
+    # mutations available merely because environment flags were later toggled.
+    promotion_core = await promotions.prepare_promotion_core()
+    if not promotion_core['ready']:
+        logger.error('promotion core not ready: %s', promotion_core['errors'])
     # This is deliberately the final catalogue mutation at startup. Static API
     # gates still fail closed if reconciliation itself cannot reach Mongo.
     await step('games:reviewed-availability', reconcile_game_availability())
@@ -306,7 +321,9 @@ async def root():
     from game_engines import KENO_DRAW, KENO_POOL, ROULETTE_POCKETS
     return {
         'message': 'Chakri.Casino API',
-        'disclaimer': 'PLAY CHIPS ONLY',
+        # Keep the public response key for existing health/build consumers;
+        # only its presentation copy is made product-neutral.
+        'disclaimer': 'Service availability depends on account and jurisdiction.',
         'build': {
             'roulette_pockets': len(ROULETTE_POCKETS),
             # Public release fingerprint only. The private Keno price profile
@@ -364,11 +381,26 @@ async def health():
             status_code=503,
             detail={'code': 'FINANCIAL_NOT_READY', 'message': 'Financial services are not ready.'},
         )
+    wager_promotion = promotions.feature_status(promotions.WAGER)
+    referral_promotion = promotions.feature_status(promotions.REFERRAL)
+    requested_promotions = [
+        status for status in (wager_promotion, referral_promotion)
+        if status['requirements']['feature_enabled']
+    ]
+    if any(not status['enabled'] for status in requested_promotions):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'code': 'PROMOTIONS_NOT_READY',
+                'message': 'Requested promotion services are not ready.',
+            },
+        )
     return {
         'status': 'ok',
         'gameplay_ready': True,
         'crm_ready': True,
         'financial_ready': bool(financial['ready']),
+        'promotion_core_ready': bool(promotions.promotion_core_status()['ready']),
     }
 
 
@@ -391,6 +423,8 @@ api_router.include_router(routes_payments.router)
 api_router.include_router(routes_payments.admin_router)
 api_router.include_router(routes_payment_hub.router)
 api_router.include_router(routes_payment_hub.admin_router)
+api_router.include_router(routes_promotions.router)
+api_router.include_router(routes_promotions.admin_router)
 app.include_router(api_router)
 
 # --- Security middleware ---

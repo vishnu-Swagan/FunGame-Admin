@@ -89,8 +89,48 @@ services:
         value: "false"
       - key: FINANCIAL_GAME_WALLET_INTEGRATED
         value: "false"
+      - key: REGULATORY_APPROVED
+        value: "false"
+      - key: WAGER_MISSIONS_ENABLED
+        value: "false"
+      - key: REFERRAL_REWARDS_ENABLED
+        value: "false"
+      - key: PROMOTIONS_GAME_WALLET_INTEGRATED
+        value: "false"
+      - key: WAGER_SETTLEMENT_FINALITY_CERTIFIED
+        value: "false"
+      - key: WAGER_SETTLEMENT_FINALITY_POLICY_VERSION
+        value: ""
+      - key: WAGER_SETTLEMENT_FINALITY_CERTIFIED_POLICY_VERSION
+        value: ""
+      - key: RANDOMIZED_REWARDS_LEGAL_APPROVED
+        value: "false"
+      - key: PROMOTIONS_PUBLIC_APP_ORIGIN
+        value: "https://chakri.casino"
+      - key: REFERRAL_RISK_PEPPER
+        sync: false
       - key: LEGACY_CHIP_REQUESTS_ENABLED
         value: "false"
+      # Versioned registration policy evidence. Public facts and hashes are
+      # supplied in Render without being invented or copied from another site.
+      - key: CURRENT_TERMS_VERSION
+        sync: false
+      - key: CURRENT_PRIVACY_VERSION
+        sync: false
+      - key: TERMS_PUBLIC_URL
+        sync: false
+      - key: PRIVACY_PUBLIC_URL
+        sync: false
+      - key: TERMS_EFFECTIVE_AT
+        sync: false
+      - key: PRIVACY_EFFECTIVE_AT
+        sync: false
+      - key: TERMS_CONTENT_SHA256
+        sync: false
+      - key: PRIVACY_CONTENT_SHA256
+        sync: false
+      - key: POLICY_EXPLICIT_VERSION_ACK_REQUIRED
+        sync: false
       - key: PAYMENTS_V2_ENABLED
         value: "false"
       - key: PAYMENT_GATEWAY_ADMIN_ENABLED
@@ -110,7 +150,7 @@ services:
       - key: PAYMENT_PROVIDER_CONFIG_JSON
         sync: false          # approved endpoint and field mappings; never embed credential values
       - key: PAYMENT_RETURN_URL
-        value: https://chakri.casino/chips/deposit/return
+        value: https://chakri.casino/wallet/deposit/return
       - key: CHIPS_PER_INR
         sync: false          # operator-reviewed integer conversion rate
       - key: MIN_DEPOSIT_PAISE
@@ -163,6 +203,40 @@ services:
         value: https://api.chakri.casino
       - key: REACT_APP_LEGACY_CHIP_REQUESTS_ENABLED
         value: "false"
+      - key: REACT_APP_LEGAL_POLICY_STATUS
+        sync: false
+      - key: REACT_APP_LEGAL_POLICY_VERSION
+        sync: false
+      - key: REACT_APP_TERMS_VERSION
+        sync: false
+      - key: REACT_APP_PRIVACY_VERSION
+        sync: false
+      - key: REACT_APP_LEGAL_POLICY_EFFECTIVE_DATE
+        sync: false
+      - key: REACT_APP_OPERATOR_LEGAL_NAME
+        sync: false
+      - key: REACT_APP_OPERATOR_COMPANY_NUMBER
+        sync: false
+      - key: REACT_APP_OPERATOR_REGISTERED_OFFICE
+        sync: false
+      - key: REACT_APP_OPERATOR_REGULATOR_NAME
+        sync: false
+      - key: REACT_APP_OPERATOR_LICENCE_NUMBER
+        sync: false
+      - key: REACT_APP_OPERATOR_LICENCE_URL
+        sync: false
+      - key: REACT_APP_OPERATOR_SUPPORT_EMAIL
+        sync: false
+      - key: REACT_APP_OPERATOR_PRIVACY_EMAIL
+        sync: false
+      - key: REACT_APP_OPERATOR_COMPLAINTS_EMAIL
+        sync: false
+      - key: REACT_APP_OPERATOR_ADR_NAME
+        sync: false
+      - key: REACT_APP_OPERATOR_ADR_URL
+        sync: false
+      - key: REACT_APP_OPERATOR_GOVERNING_LAW
+        sync: false
       - key: GENERATE_SOURCEMAP
         value: "false"
     routes:

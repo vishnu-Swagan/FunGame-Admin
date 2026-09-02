@@ -702,14 +702,23 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
             }) from exc
         if not updated:
             raise HTTPException(status_code=409, detail='Account state changed; retry approval')
+        if manual_review_registration:
+            import promotions
+            await promotions.record_referral_event(
+                user_id, 'REGISTRATION_VERIFIED',
+                source_event_id=f'admin-registration-review:{user_id}',
+                occurred_at=approved_at,
+                metadata={'verification_method': 'ADMIN_REVIEW'},
+                session=session,
+            )
         if not was_approved_before:
             await _credit_chips(
-                user_id, WELCOME_BONUS, 'Welcome play chips — approval bonus',
+                user_id, WELCOME_BONUS, 'Welcome promotional balance from account approval',
                 ref=f'account-approval:{user_id}', session=session,
             )
             await _notify(
                 user_id, 'Account approved!',
-                f'Welcome to Chakri.Casino! Your account is approved and {WELCOME_BONUS} welcome play chips were added.',
+                f'Welcome to Chakri.Casino. Your account is approved and a {WELCOME_BONUS} promotional balance was added.',
                 'APPROVAL', session=session,
             )
         else:
@@ -864,7 +873,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
             if body.starting_chips > 0:
                 await _credit_chips(
                     user['id'], body.starting_chips,
-                    'Welcome play chips — account provisioned by admin',
+                    'Welcome promotional balance from account provisioning',
                     session=session,
                 )
         except (DuplicateKeyError, ValueError) as exc:
@@ -973,7 +982,7 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
             if body.starting_chips > 0:
                 await _credit_chips(
                     user['id'], body.starting_chips,
-                    'Welcome play chips — account provisioned by admin',
+                    'Welcome promotional balance from account provisioning',
                     session=session,
                 )
             await _notify(
@@ -1095,7 +1104,7 @@ async def _settle_chip_request(request_id: str, note: str | None,
     if req_type not in {'BUY', 'SELL', 'RETURN'}:
         raise HTTPException(status_code=409, detail={
             'code': 'INVALID_CHIP_REQUEST_TYPE',
-            'message': 'This chip request has an invalid type and cannot be settled.',
+            'message': 'This legacy balance request has an invalid type and cannot be settled.',
         })
     player = await db.users.find_one(
         {'id': req['user_id'], 'role': 'PLAYER'}, {'_id': 1}, **kwargs,
@@ -1109,14 +1118,14 @@ async def _settle_chip_request(request_id: str, note: str | None,
         try:
             chip_balance = await debit_chips(
                 req['user_id'], req['amount'],
-                f"Sold {req['amount']} chips for points (1:1) — approved by operator",
+                f"Converted {req['amount']} promotional balance units to points (1:1), approved by operator",
                 ref=request_id, kind=ledger.WITHDRAWAL, session=session,
             )
         except InsufficientChips as exc:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    'Player no longer has enough chips to cover this sale. '
+                    'Player no longer has enough promotional balance to cover this conversion. '
                     'Ask them to top up or deny the request.'
                 ),
             ) from exc
@@ -1136,17 +1145,17 @@ async def _settle_chip_request(request_id: str, note: str | None,
             'id': str(uuid.uuid4()), 'user_id': req['user_id'],
             'type': 'CREDIT', 'amount': req['amount'],
             'balance_after': points_balance,
-            'note': f"Sold {req['amount']} chips for points (1:1) — approved by operator",
+            'note': f"Converted {req['amount']} promotional balance units to points (1:1), approved by operator",
             'ref': request_id, 'created_at': _now(),
         }, **kwargs)
         await _notify(
-            req['user_id'], 'Sell request approved!',
-            f"Your request to sell {req['amount']} chips was approved. "
+            req['user_id'], 'Legacy conversion approved',
+            f"Your request to convert {req['amount']} promotional balance units was approved. "
             f"{req['amount']} points credited (new points balance: {points_balance}).",
             'POINTS', session=session,
         )
         response = {
-            'message': 'Sell request approved — chips deducted and points credited',
+            'message': 'Legacy conversion approved. Promotional balance was reduced and points were credited.',
             'chip_balance': chip_balance,
             'points_balance': points_balance,
         }
@@ -1154,25 +1163,25 @@ async def _settle_chip_request(request_id: str, note: str | None,
         try:
             chip_balance = await debit_chips(
                 req['user_id'], req['amount'],
-                f"Returned {req['amount']} chips to operator — approved",
+                f"Returned {req['amount']} promotional balance units to operator, approved",
                 ref=request_id, session=session,
             )
         except InsufficientChips as exc:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    'Player no longer has enough chips to cover this return. '
+                    'Player no longer has enough promotional balance to cover this return. '
                     'Ask them to adjust or deny the request.'
                 ),
             ) from exc
         await _notify(
             req['user_id'], 'Return approved',
-            f"Your request to return {req['amount']} chips was approved. "
-            f"{req['amount']} chips were returned to the operator. New balance: {chip_balance}.",
+            f"Your request to return {req['amount']} promotional balance units was approved. "
+            f"New promotional balance: {chip_balance}.",
             'CHIPS', session=session,
         )
         response = {
-            'message': 'Return approved — chips deducted from the player',
+            'message': 'Legacy return approved. The player promotional balance was reduced.',
             'chip_balance': chip_balance,
         }
     else:
@@ -1185,17 +1194,17 @@ async def _settle_chip_request(request_id: str, note: str | None,
             )) from exc
         balance = await ledger.credit_chips(
             req['user_id'], req['amount'],
-            f"Chip request approved ({req['amount']} chips)",
+            f"Legacy balance request approved ({req['amount']} balance units)",
             ref=request_id, kind=ledger.DEPOSIT, session=session,
         )
         await _notify(
-            req['user_id'], 'Chips added!',
-            f"Your request for {req['amount']} play chips was approved. "
+            req['user_id'], 'Promotional balance updated',
+            f"Your request for a {req['amount']} promotional balance was approved. "
             f"New balance: {balance}.",
             'CHIPS', session=session,
         )
         response = {
-            'message': 'Request approved and chips credited',
+            'message': 'Legacy request approved and promotional balance credited',
             'balance_after': balance,
         }
 
@@ -1210,7 +1219,7 @@ async def _settle_chip_request(request_id: str, note: str | None,
     if result.modified_count != 1:
         raise HTTPException(status_code=409, detail={
             'code': 'REQUEST_STATE_CHANGED',
-            'message': 'The chip request was resolved concurrently. Refresh and try again.',
+            'message': 'The legacy balance request was resolved concurrently. Refresh and try again.',
         })
     await _release_pending_chip_request_slot(req, session=session)
     return response
@@ -1243,21 +1252,21 @@ async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None
         if req.get('type') == 'SELL':
             title = 'Sell request update'
             message = (
-                f"Your request to sell {req['amount']} chips was denied. "
-                f"Your chips were not deducted. Note: {note}"
+                f"Your request to convert {req['amount']} promotional balance units was denied. "
+                f"Your promotional balance was not changed. Note: {note}"
             )
             notification_type = 'POINTS'
         elif req.get('type') == 'RETURN':
             title = 'Return request update'
             message = (
-                f"Your request to return {req['amount']} chips was denied. "
-                f"Your chips were not deducted. Note: {note}"
+                f"Your request to return {req['amount']} promotional balance units was denied. "
+                f"Your promotional balance was not changed. Note: {note}"
             )
             notification_type = 'CHIPS'
         else:
-            title = 'Chip request update'
+            title = 'Legacy balance request update'
             message = (
-                f"Your request for {req['amount']} play chips was denied. "
+                f"Your request for a {req['amount']} promotional balance was denied. "
                 f"Note: {note}"
             )
             notification_type = 'CHIPS'
@@ -1275,7 +1284,7 @@ async def deny_chip_request(request_id: str, body: AdminChipRequestAction = None
         if result.modified_count != 1:
             raise HTTPException(status_code=409, detail={
                 'code': 'REQUEST_STATE_CHANGED',
-                'message': 'The chip request was resolved concurrently. Refresh and try again.',
+                'message': 'The legacy balance request was resolved concurrently. Refresh and try again.',
             })
         await _release_pending_chip_request_slot(req, session=session)
         return {'message': 'Request denied'}

@@ -75,6 +75,7 @@ agenthub/agents/youtube/db
 
 # Build caches
 .cache/
+.remotion/
 
 memory/test_credentials.md
 
@@ -82,6 +83,7 @@ memory/test_credentials.md
 android-sdk/frontend/node_modules/.cache/default-development/3.pack
 .env
 .env.*
+!frontend/.env.example
 *.env
 credentials.json
 *.key

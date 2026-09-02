@@ -1146,11 +1146,13 @@ async def _retire_wallet_neutral_membership_for_live(
     category = await _room_category(room, session)
     legacy_refund = _seat_wallet_stake_chips(seat)
     if legacy_refund:
+        stake_ref = seat.get('stake_ref') or room['id']
         await credit_chips(
             seat["user_id"], legacy_refund,
             "Rummy wallet-neutral table reservation restored before Live join",
-            ref=f"{seat.get('stake_ref') or room['id']}:wallet-neutral-switch-refund",
+            ref=f"{stake_ref}:wallet-neutral-switch-refund",
             kind=ledger.REFUND, game="rummy", session=session,
+            source_refs=[stake_ref], settlement_ref=room.get('round_id') or room['id'],
         )
 
     points = int(
@@ -1351,10 +1353,13 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
                 if released.deleted_count != 1:
                     _fail(409, "RUMMY_SEAT_INACTIVE", "The previous Rummy seat could not be released.")
                 if refund_amount:
+                    stake_ref = existing_seat.get('stake_ref') or existing_room['id']
                     await credit_chips(
                         user["id"], refund_amount, "Rummy mode changed during matchmaking",
-                        ref=f"{existing_seat.get('stake_ref') or existing_room['id']}:refund",
+                        ref=f"{stake_ref}:refund",
                         kind=ledger.REFUND, game="rummy", session=session,
+                        source_refs=[stake_ref],
+                        settlement_ref=existing_room.get('round_id') or existing_room['id'],
                     )
                 existing_room.update({
                     "seat_count": max(0, int(existing_room.get("seat_count", 1)) - 1),
@@ -1536,6 +1541,7 @@ async def _activate_scheduled_room(room_id: str) -> bool:
                     seat["user_id"], refund,
                     "Rummy live matchmaking moved to a wallet-neutral practice table",
                     ref=refund_ref, kind=ledger.REFUND, game="rummy", session=session,
+                    source_refs=[stake_ref], settlement_ref=room.get('round_id') or room_id,
                 )
                 refunded_total += refund
                 zeroed = await db.rummy_seats.update_one(
@@ -1693,11 +1699,13 @@ async def _cancel_room(room: dict, reason: str, session):
     for seat in seats:
         refund = _seat_wallet_stake_chips(seat)
         if refund:
+            stake_ref = seat.get('stake_ref') or room.get('round_id') or room['id']
             await credit_chips(
                 seat["user_id"], refund,
                 f"Rummy round cancelled: {reason}",
-                ref=f"{seat.get('stake_ref') or room.get('round_id') or room['id']}:refund",
+                ref=f"{stake_ref}:refund",
                 kind=ledger.REFUND, game="rummy", session=session,
+                source_refs=[stake_ref], settlement_ref=room.get('round_id') or room['id'],
             )
     await db.rummy_seats.update_many(
         {"room_id": room["id"]},
@@ -1734,9 +1742,27 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
     pot = amounts["pot"]
     winner_payout = amounts["humanPayout"]
     if winner_payout:
+        pot_source_refs = [
+            seat.get("stake_ref") or f"rummy-seat:{room['id']}:{seat['user_id']}"
+            for seat in seats
+            if not seat.get("is_bot") and _seat_wallet_stake_chips(seat) > 0
+        ]
         await credit_chips(
             winner_user_id, winner_payout, f"Rummy {category['id']} round win",
             ref=room["round_id"], kind=ledger.PAYOUT, game="rummy", session=session,
+            source_refs=pot_source_refs, settlement_ref=room["round_id"],
+        )
+    for seat in seats:
+        # Practice/bot seats never debit the authoritative wallet, so there is
+        # no wager to settle.  Emitting a settlement for those synthetic refs
+        # would create false promotion evidence and makes the ledger observer
+        # reach outside the room transaction used by focused tests.
+        if seat.get("is_bot") or _seat_wallet_stake_chips(seat) <= 0:
+            continue
+        stake_ref = seat.get("stake_ref") or f"rummy-seat:{room['id']}:{seat['user_id']}"
+        await ledger.record_settlement(
+            seat["user_id"], [stake_ref], "rummy", status="SETTLED",
+            settlement_ref=room["round_id"], session=session,
         )
 
     arrangements = await asyncio.gather(*[
@@ -2585,10 +2611,12 @@ async def rummy_action(room_id: str, body: RummyAction, user: dict = Depends(req
             if claimed.deleted_count != 1:
                 _fail(409, "RUMMY_SEAT_INACTIVE", "This Rummy seat is no longer active.")
             if refund_amount:
+                stake_ref = seat.get('stake_ref') or room_id
                 await credit_chips(
                     user["id"], refund_amount, "Rummy matchmaking cancelled",
-                    ref=f"{seat.get('stake_ref') or room_id}:refund",
+                    ref=f"{stake_ref}:refund",
                     kind=ledger.REFUND, game="rummy", session=session,
+                    source_refs=[stake_ref], settlement_ref=room.get('round_id') or room_id,
                 )
             room.update({
                 "seat_count": max(0, int(room.get("seat_count", 1)) - 1),

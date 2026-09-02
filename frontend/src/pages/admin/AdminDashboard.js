@@ -85,11 +85,11 @@ export default function AdminDashboard() {
       { label: "Active players", value: number(data.active_users), note: "Approved accounts", to: "/Admin/users?status=ACTIVE" },
       { label: "Pending review", value: number(data.pending_users), note: "Manual approval queue", to: "/Admin/users?status=PENDING", trend: true },
       ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Chip requests", value: number(data.pending_chip_requests), note: "Awaiting operator action", to: "/Admin/chip-requests", trend: true },
+        { label: "Bonus requests", value: number(data.pending_chip_requests), note: "Awaiting operator action", to: "/Admin/chip-requests", trend: true },
       ] : []),
       { label: "Live games", value: `${number(data.enabled_games)}/${number(data.total_games)}`, note: "Catalog availability", to: "/Admin/games" },
       ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Virtual chips", value: formatChips(number(data.held_chips)), note: "No cash value", to: "/Admin/chip-requests" },
+        { label: "Promotional balance", value: formatChips(number(data.held_chips)), note: "Separate from cash funds", to: "/Admin/chip-requests" },
       ] : []),
     ];
   }, [stats]);
@@ -99,7 +99,7 @@ export default function AdminDashboard() {
     const items = [
       { label: "Player approvals", count: number(data.pending_users), oldest: "Manual review required", to: "/Admin/users?status=PENDING", severity: "critical" },
       ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Chip requests", count: number(data.pending_chip_requests), oldest: "Operator decision required", to: "/Admin/chip-requests", severity: "warning" },
+        { label: "Bonus requests", count: number(data.pending_chip_requests), oldest: "Operator decision required", to: "/Admin/chip-requests", severity: "warning" },
       ] : []),
     ];
     return items.filter((item) => item.count > 0);
@@ -140,7 +140,7 @@ export default function AdminDashboard() {
         <div className="crm-page-header-copy">
           <span className="crm-page-context">Platform operations</span>
           <h1>Operations overview</h1>
-          <p>Player activity, virtual-chip controls, distributor attribution, and queues requiring attention.</p>
+          <p>Player activity, wallet controls, distributor attribution, and queues requiring attention.</p>
         </div>
         <div className="crm-page-actions">
           <span className="source-badge">
@@ -243,10 +243,10 @@ export default function AdminDashboard() {
 
       <div className="dashboard-bottom-grid">
         {LEGACY_CHIP_REQUESTS_ENABLED && (
-          <Panel title="Virtual-chip controls" action={<TextLink onClick={() => navigate("/Admin/chip-requests")}>View requests</TextLink>}>
+          <Panel title="Legacy bonus controls" action={<TextLink onClick={() => navigate("/Admin/chip-requests")}>View requests</TextLink>}>
             <div className="compact-list">
-              <div className="compact-row"><span className="transaction-glyph">R</span><span className="compact-main"><strong>Pending chip requests</strong><small>Manual operator review</small></span><strong>{number(stats?.pending_chip_requests)}</strong></div>
-              <div className="compact-row"><span className="transaction-glyph">C</span><span className="compact-main"><strong>Virtual chips</strong><small>No purchase, cash-out, transfer, or redemption</small></span><strong>{formatChips(number(stats?.held_chips))}</strong></div>
+              <div className="compact-row"><span className="transaction-glyph">R</span><span className="compact-main"><strong>Pending bonus requests</strong><small>Manual operator review</small></span><strong>{number(stats?.pending_chip_requests)}</strong></div>
+              <div className="compact-row"><span className="transaction-glyph">C</span><span className="compact-main"><strong>Promotional balance</strong><small>Tracked separately from deposited cash</small></span><strong>{formatChips(number(stats?.held_chips))}</strong></div>
               <div className="compact-row"><span className="transaction-glyph">18</span><span className="compact-main"><strong>Age gate</strong><small>Adults only · play responsibly</small></span><strong>On</strong></div>
             </div>
           </Panel>
