@@ -149,6 +149,24 @@ async def main():
           auth_utils.require_recent_admin_step_up, wrong_session_admin,
       ), 'ADMIN_STEP_UP_REQUIRED'))
 
+    otp_down_admin = {
+        'id': 'admin-otp-down', 'role': 'ADMIN', 'status': 'ACTIVE',
+        'phone': '+919111111111', 'phone_normalized': '+919111111111',
+        'phone_verified': True, 'active_session_id': 'otp-down-session',
+        'password_hash': auth_utils.hash_password('ADMIN-PASSWORD-12'),
+    }
+    await database.users.insert_one(dict(otp_down_admin))
+    with patch.object(routes_admin, 'delivery_adapter_ready', return_value=False):
+        otp_down = await routes_admin.start_admin_step_up(
+            AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), otp_down_admin,
+        )
+    otp_down_row = await database.users.find_one({'id': 'admin-otp-down'})
+    T('CRM KYC step-up completes on password when OTP delivery is unavailable',
+      otp_down.get('password_only') is True and otp_down.get('verified') is True)
+    T('password-only step-up records the MFA window for KYC',
+      otp_down_row.get('mfa_enabled') is True
+      and otp_down_row.get('admin_step_up_session_id') == 'otp-down-session')
+
     created = await routes_admin.create_distributor(DistributorCreate(
         name='Northern Network', code='NRTH1', rate_bps=2500,
         email='north@example.com', phone='+441234567890',
