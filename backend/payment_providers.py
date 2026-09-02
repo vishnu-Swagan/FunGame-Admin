@@ -853,20 +853,21 @@ class ConfiguredRestPaymentProvider:
 
 
 class SgPay24PaymentProvider:
-    """Deposit-only SgPay24 adapter for hosted UPI chip purchases.
+    """SgPay24 hosted UPI deposits plus Admin-approved player payouts.
 
     SgPay24 does not document a webhook signature.  ``verify_webhook`` therefore
     validates only the notification shape and marks it as untrusted.  Callers
     must perform ``get_payment_status`` with the server-held API token before a
-    notification can change an order or credit chips.
+    notification can change an order or credit chips. Player cash-out is
+    Admin-approved then submitted through ``submit_payout``.
     """
 
     name = "sgpay24"
     capabilities = ProviderCapabilities(
         deposit_idempotency=True,
         payment_status_lookup=True,
-        payout_idempotency=False,
-        payout_status_lookup=False,
+        payout_idempotency=True,
+        payout_status_lookup=True,
         payout_cancellation=False,
         refunds=False,
     )
@@ -877,6 +878,8 @@ class SgPay24PaymentProvider:
     _port = 443
     _create_path = "/api/createPayingRequest"
     _status_path = "/api/check-status"
+    _payout_path = "/api/createPayoutRequest"
+    _payout_status_path = "/api/check-payout-status"
 
     def __init__(self, environ: Mapping[str, str]):
         self._env = dict(environ)
@@ -1025,7 +1028,11 @@ class SgPay24PaymentProvider:
         return list(dict.fromkeys(addresses))
 
     async def _request_json(self, path: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        if path not in {self._create_path, self._status_path}:
+        allowed = {self._create_path, self._status_path, self._payout_path, self._payout_status_path}
+        extra = str(self._env.get("SGPAY24_PAYOUT_PATH") or "").strip()
+        if extra.startswith("/api/") and len(extra) < 80 and ".." not in extra:
+            allowed.add(extra)
+        if path not in allowed:
             raise ProviderConfigurationError("SgPay24 endpoint is not approved")
         body = json.dumps(dict(payload), separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         timeout = self._timeout
@@ -1144,17 +1151,87 @@ class SgPay24PaymentProvider:
         reference = utr or (f"sgpay24:{order_id}:failed" if status == "FAILED" else None)
         return DepositStatus(status, amount_paise, "INR", reference)
 
-    async def create_beneficiary(self, **_kwargs) -> Beneficiary:
-        raise ProviderRequestError("SgPay24 payouts are not enabled")
+    def _payout_endpoint(self) -> str:
+        extra = str(self._env.get("SGPAY24_PAYOUT_PATH") or "").strip()
+        if extra.startswith("/api/") and len(extra) < 80 and ".." not in extra:
+            return extra
+        return self._payout_path
 
-    async def submit_payout(self, **_kwargs) -> PayoutSubmission:
-        raise ProviderRequestError("SgPay24 payouts are not enabled")
+    async def create_beneficiary(self, **kwargs) -> Beneficiary:
+        method_id = str(kwargs.get("payout_method_id") or kwargs.get("provider_beneficiary_id") or "local")
+        return Beneficiary(provider_beneficiary_id=method_id, status="CREATED")
 
-    async def get_payout_status(self, _provider_payout_id: str) -> PayoutStatus:
-        raise ProviderRequestError("SgPay24 payouts are not enabled")
+    async def submit_payout(self, **kwargs) -> PayoutSubmission:
+        currency = str(kwargs.get("currency") or "INR").upper()
+        if currency != "INR":
+            raise ProviderRequestError("SgPay24 supports INR payouts only")
+        amount_paise = int(kwargs.get("amount_paise") or 0)
+        if amount_paise <= 0:
+            raise ProviderRequestError("Payout amount is invalid")
+        withdrawal_id = str(kwargs.get("withdrawal_id") or "")
+        order_id = self._order_id(withdrawal_id or kwargs.get("idempotency_key") or "payout")
+        account_number = str(kwargs.get("account_number") or "").strip()
+        ifsc = str(kwargs.get("ifsc_code") or "").strip()
+        upi = str(kwargs.get("payout_identifier") or "").strip()
+        if not account_number and not upi:
+            raise ProviderRequestError("Payout needs a bank account or UPI id")
+        payload = {
+            "merchant_id": self._merchant_id,
+            "order_id": order_id,
+            "amount": self._amount_in_rupees(amount_paise),
+            "name": str(kwargs.get("account_holder_name") or "Player")[:80],
+            "account_number": account_number,
+            "ifsc": ifsc,
+            "ifsc_code": ifsc,
+            "upi_id": upi,
+            "phone": str(kwargs.get("phone") or "9999999999")[:15],
+            "api_token": self._api_token,
+            "remark": f"Chakri payout {order_id[:24]}",
+        }
+        response = await self._request_json(self._payout_endpoint(), payload)
+        data = response.get("data") if isinstance(response.get("data"), Mapping) else response
+        if not isinstance(data, Mapping):
+            data = response
+        provider_id = str(
+            data.get("payout_id") or data.get("transaction_id") or data.get("order_id") or order_id
+        )
+        status_raw = str(data.get("status") or response.get("status") or "PROCESSING").upper()
+        if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED"}:
+            mapped = "PAID"
+        elif status_raw in {"FAILED", "REJECTED", "CANCELLED"}:
+            mapped = "FAILED"
+        else:
+            mapped = "PROCESSING"
+        return PayoutSubmission(provider_payout_id=provider_id, status=mapped)
+
+    async def get_payout_status(self, provider_payout_id: str) -> PayoutStatus:
+        order_id = self._order_id(provider_payout_id)
+        response = await self._request_json(self._payout_status_path, {
+            "merchant_id": self._merchant_id,
+            "order_id": order_id,
+            "api_token": self._api_token,
+        })
+        status_raw = str(response.get("status") or "").upper()
+        if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED"}:
+            mapped = "PAID"
+        elif status_raw in {"FAILED", "REJECTED", "CANCELLED"}:
+            mapped = "FAILED"
+        else:
+            mapped = "PROCESSING"
+        amount_value = response.get("amount")
+        amount_paise = self._amount_to_paise(amount_value) if amount_value is not None else None
+        return PayoutStatus(
+            status=mapped,
+            amount_paise=amount_paise,
+            currency="INR",
+            withdrawal_id=None,
+            idempotency_key=None,
+            provider_beneficiary_id=None,
+            provider_reference=str(response.get("utr") or order_id),
+        )
 
     async def cancel_payout(self, _provider_payout_id: str) -> str:
-        raise ProviderRequestError("SgPay24 payouts are not enabled")
+        raise ProviderRequestError("SgPay24 payout cancellation is not available")
 
     async def refund_payment(self, _provider_order_id: str, _amount_paise: int) -> str:
         raise ProviderRequestError("SgPay24 refunds are not enabled")

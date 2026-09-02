@@ -8,6 +8,7 @@ Wallet credit or debit happens only when an administrator approves.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import urllib.parse
@@ -187,6 +188,9 @@ def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
         "created_at": row.get("created_at"),
         "resolved_at": row.get("resolved_at"),
         "resolved_by": row.get("resolved_by"),
+        "payout_status": row.get("payout_status"),
+        "payout_ref": row.get("payout_ref"),
+        "payout_error": row.get("payout_error"),
     }
 
 
@@ -267,6 +271,10 @@ def as_admin_withdrawal(row: Mapping[str, Any]) -> dict[str, Any]:
         "user_email": dto["user_email"],
         "admin_note": dto["admin_note"],
         "note": dto["note"],
+        "payout_status": dto.get("payout_status"),
+        "payout_ref": dto.get("payout_ref"),
+        "payout_error": dto.get("payout_error"),
+        "provider_reference": dto.get("payout_ref") or row.get("provider_reference"),
     }
 
 
@@ -339,6 +347,8 @@ async def create_request(
                 "code": "OPERATOR_BALANCE_INSUFFICIENT",
                 "message": "You do not have enough chips for this withdrawal.",
             })
+        import wager
+        await wager.require_clear_for_withdrawal(user["id"])
     row = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -889,6 +899,10 @@ async def settle_hosted_deposit(
             "Verified UPI chip purchase",
             ref=f"upi-chip:{request_id}", kind=ledger.DEPOSIT, session=session,
         )
+        import wager
+        await wager.open_deposit_bucket(
+            current["user_id"], int(current["chips"]), request_id, session=session,
+        )
         await db[COLLECTION].update_one(
             {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
             {"$set": {
@@ -903,13 +917,29 @@ async def settle_hosted_deposit(
         return {"id": request_id, "status": "CREDITED", "duplicate": False}
 
     try:
-        return await _run_hosted_transaction(work)
+        result = await _run_hosted_transaction(work)
     except DuplicateKeyError:
         await db[COLLECTION].update_one(
             {"id": request_id, "source": UPI_SOURCE, "status": {"$ne": "CREDITED"}},
             {"$set": {"status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR", "updated_at": utcnow()}},
         )
         return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+    if result.get("status") == "CREDITED" and not result.get("duplicate"):
+        try:
+            import free_cash
+            row = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0, "user_id": 1})
+            if row:
+                await free_cash.on_friend_deposit(row["user_id"], request_id)
+        except Exception:
+            logging.getLogger("operator_rail").exception("free-cash deposit reward failed for %s", request_id)
+        try:
+            import wager
+            overlay = await wager.overlay_for_deposit(result.get("user_id") or (await db[COLLECTION].find_one({"id": request_id}) or {}).get("user_id"), request_id)
+            result["overlay"] = overlay
+            result["promo"] = await wager.public_state((await db[COLLECTION].find_one({"id": request_id}) or {}).get("user_id"))
+        except Exception:
+            logging.getLogger("operator_rail").exception("promo overlay failed for %s", request_id)
+    return result
 
 
 async def reconcile_hosted_deposit(
@@ -1147,6 +1177,8 @@ async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve:
                 ref=f"operator-deposit:{claimed['id']}",
                 kind=ledger.DEPOSIT,
             )
+            import wager
+            await wager.open_deposit_bucket(claimed["user_id"], int(claimed["chips"]), claimed["id"])
         if approve and claimed.get("kind") == "WITHDRAWAL":
             await ledger.debit_chips(
                 claimed["user_id"], int(claimed["chips"]),
@@ -1175,5 +1207,19 @@ async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve:
     )
     if updated:
         updated.pop("_id", None)
-        return request_dto(updated)
-    return request_dto({**claimed, "status": status})
+    else:
+        updated = {**claimed, "status": status}
+    if approve and claimed.get("kind") == "WITHDRAWAL":
+        try:
+            import sgpay_payout
+            await sgpay_payout.send_operator_payout(updated, actor=str(admin.get("id") or "admin"))
+            refreshed = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0})
+            if refreshed:
+                updated = refreshed
+        except HTTPException:
+            refreshed = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0})
+            if refreshed:
+                updated = refreshed
+        except Exception:
+            logging.getLogger("operator_rail").exception("SgPay payout failed for %s", request_id)
+    return request_dto(updated)

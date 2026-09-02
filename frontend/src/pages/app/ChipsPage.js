@@ -173,21 +173,21 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   );
   const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
   const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
-  const providerReadinessCopy = hostedUpiBuyAvailable && hostedWithdrawAvailable
+  const providerReadinessCopy = hostedUpiBuyAvailable && operatorWithdrawAvailable
+    ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are submitted for Admin review. After approval, SgPay pays your saved bank or UPI."
+    : hostedUpiBuyAvailable && hostedWithdrawAvailable
     ? "Buy Chips securely with UPI through SgPay hosted checkout. Withdrawals use the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-    : hostedUpiBuyAvailable && operatorWithdrawAvailable
-      ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are submitted for Admin review."
-      : hostedUpiBuyAvailable
-        ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are not active yet."
-        : hostedBuyAvailable && hostedWithdrawAvailable
-          ? "Chip purchases and withdrawals are completed by the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-          : hostedBuyAvailable
-            ? "Chip purchases are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
-            : hostedWithdrawAvailable
-              ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
-              : operatorBuyAvailable || operatorWithdrawAvailable
-                ? "Buy Chips and withdrawals are submitted for Admin review. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
-                : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
+    : hostedUpiBuyAvailable
+      ? "Buy Chips securely with UPI through SgPay hosted checkout. Chips are credited only after server verification; returning from checkout never changes your balance by itself. Withdrawals are not active yet."
+      : hostedBuyAvailable && hostedWithdrawAvailable
+        ? "Chip purchases and withdrawals are completed by the approved provider selected by the secure server. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
+        : hostedBuyAvailable
+          ? "Chip purchases are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Chips are credited only after server verification; returning from checkout never changes your balance by itself."
+          : hostedWithdrawAvailable
+            ? "Withdrawals are completed by the approved provider selected by the secure server. Buy Chips is not active yet."
+            : operatorBuyAvailable || operatorWithdrawAvailable
+              ? "Buy Chips and withdrawals are submitted for Admin review. After approval, SgPay pays your saved bank or UPI. Your wallet updates after an administrator approves the request. Hosted checkout stays off until the certified payment provider is ready."
+              : "Payment services are not active yet. Buy Chips and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
@@ -269,7 +269,9 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
     setBusy("withdraw");
     try {
-      if (hostedWithdrawAvailable) {
+      if (operatorWithdrawAvailable) {
+        await payments.createOperatorWithdrawal(withdrawChips, bankAccountId);
+      } else if (hostedWithdrawAvailable) {
         const key = financialIntentKey("withdrawal", user?.id, `amount_chips=${withdrawChips}&bank=${bankAccountId}`);
         await payments.createWithdrawal(withdrawChips, bankAccountId, key);
         clearFinancialIntent("withdrawal", user?.id, key);
@@ -318,7 +320,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="withdraw" className="mt-4">
           <form onSubmit={withdraw} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="withdrawal-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>. Admin approves, then SgPay pays your saved method.</p></div></div>
+            {wallet.wager_remaining_chips > 0 && <AvailabilityNotice text={`Wager ₹${((wallet.wager_remaining_chips || 0) / (config.chipsPerInr || 1)).toLocaleString("en-IN")} more from deposits before you can request a withdrawal.`} />}
             {!loading && (!withdrawalFeatureAvailable || !withdrawalConfigured) && <AvailabilityNotice text={withdrawalFeatureAvailable ? "Withdrawal limits are not yet available from the secure server." : "Withdrawals are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_WITHDRAW_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setWithdrawAmount(String(value))} disabled={!withdrawalFeatureAvailable || !withdrawalConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${withdrawAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="withdrawal-amount" aria-label="Withdrawal amount in INR" type="text" inputMode="decimal" value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} disabled={!withdrawalFeatureAvailable || !withdrawalConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />

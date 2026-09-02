@@ -134,7 +134,9 @@ export function AdminWithdrawals() {
     setActing(key);
     try {
       const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
-      if (operator) {
+      if (operator && action === "retry-payout") {
+        await adminPayments.retryOperatorPayout(item.id);
+      } else if (operator) {
         await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
       } else {
         const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
@@ -169,6 +171,10 @@ export function AdminWithdrawals() {
           <PaymentStatus status={internalStatus} />
         </div>
         {item.provider_reference && <div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Provider reference</p><p className="mt-0.5 break-all font-mono text-xs text-white/70">{item.provider_reference}</p></div>}
+        {operator && item.payout_status && <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/8 px-3 py-2 text-[11px] text-emerald-100">SgPay payout: {item.payout_status}{item.payout_error ? ` · ${item.payout_error}` : ""}</p>}
+        {operator && String(item.internal_status || "").toUpperCase() === "APPROVED" && String(item.payout_status || "").toUpperCase() !== "PAID" && canReviewOperator && (
+          <Button type="button" size="sm" className="mt-3 h-10 rounded-xl" onClick={() => act(item, "retry-payout")} disabled={Boolean(acting)}>Retry SgPay payout</Button>
+        )}
         {automatic && <p className="mt-3 rounded-lg border border-sky-400/20 bg-sky-400/8 px-3 py-2 text-[11px] text-sky-200">Automatic route · provider/outbox events control submission and settlement.</p>}
         {permittedActions.length > 0 && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={permittedActions.some(([action]) => action === "reject") ? "Reason (required to reject)" : "Provider/payment reference"} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" />{permittedActions.map(([action, label]) => <Button key={action} type="button" size="sm" variant={action === "reject" ? "destructive" : "default"} onClick={() => act(item, action)} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:${action}` ? "Working…" : label}</Button>)}</div>}
       </article>;

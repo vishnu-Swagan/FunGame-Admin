@@ -358,9 +358,21 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         money_config = None
     config_ready = money_config is not None
     operator = operator_rail.operator_status()
+    promo = None
+    free_cash_state = None
+    try:
+        import wager as _promo_wager
+        import free_cash as _promo_free
+        promo = await _promo_wager.public_state(user["id"])
+        free_cash_state = await _promo_free.public_state(user["id"])
+    except Exception:
+        promo = None
+        free_cash_state = None
     return {
         "wallet": await finance.wallet_public(user["id"]),
         "money_config": money_config,
+        "promo": promo,
+        "free_cash": free_cash_state,
         "financial": {
             "ready": bool(internal["ready"] and config_ready),
             "features": (
@@ -919,6 +931,26 @@ async def admin_reject_operator_request(
         "request": row,
         "deposit": operator_rail.as_admin_deposit(row) if row.get("kind") == "DEPOSIT" else None,
         "withdrawal": operator_rail.as_admin_withdrawal(row) if row.get("kind") == "WITHDRAWAL" else None,
+    }
+
+
+@admin_router.post("/payments/operator-requests/{request_id}/retry-payout")
+async def admin_retry_operator_payout(
+    request_id: str, admin: dict = Depends(payments_view),
+):
+    from db import db
+    row = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    if not row or row.get("kind") != "WITHDRAWAL":
+        raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
+    if str(row.get("status") or "").upper() != "APPROVED":
+        raise HTTPException(status_code=409, detail={"code": "PAYOUT_NOT_APPROVED", "message": "Approve the withdrawal before sending it to SgPay."})
+    import sgpay_payout
+    result = await sgpay_payout.send_operator_payout(row, actor=str(admin.get("id") or "admin"), retry=True)
+    refreshed = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    return {
+        "message": "Payout retried.",
+        "payout": result,
+        "withdrawal": operator_rail.as_admin_withdrawal(refreshed or row),
     }
 
 

@@ -1024,22 +1024,36 @@ async def wallet_public(user_id: str) -> dict[str, int]:
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "chip_balance": 1}) or {}
     if not account:
         legacy = max(0, int(user.get("chip_balance", 0)))
+        remaining = 0
+        try:
+            import wager as _promo_wager
+            remaining = await _promo_wager.remaining_deposit_wager(user_id)
+        except Exception:
+            remaining = 0
         return {
             "available_chips": legacy,
             "cash_chips": 0,
             "bonus_chips": legacy,
             "held_chips": 0,
             "withdrawable_chips": 0,
+            "wager_remaining_chips": remaining,
         }
     cash = int(account.get("available_cash_chips", 0))
     bonus = int(account.get("available_bonus_chips", 0))
     held = int(account.get("held_cash_chips", 0))
+    remaining = 0
+    try:
+        import wager as _promo_wager
+        remaining = await _promo_wager.remaining_deposit_wager(user_id)
+    except Exception:
+        remaining = 0
     return {
         "available_chips": int(user.get("chip_balance", cash + bonus)),
         "cash_chips": cash,
         "bonus_chips": bonus,
         "held_chips": held,
-        "withdrawable_chips": cash,
+        "withdrawable_chips": 0 if remaining > 0 else cash,
+        "wager_remaining_chips": remaining,
     }
 
 
@@ -1563,8 +1577,13 @@ async def _credit_deposit(
             },
             session=session, audit_id=f"deposit:{current['id']}:credited",
         )
+        if not movement.get("duplicate"):
+            import wager as _promo_wager
+            await _promo_wager.open_deposit_bucket(
+                current["user_id"], int(current["chips"]), current["id"], session=session,
+            )
         return {"deposit_id": current["id"], "status": "CREDITED",
-                "duplicate": movement["duplicate"]}
+                "duplicate": movement["duplicate"], "user_id": current["user_id"]}
     try:
         result = await _run_transaction(work)
     except DuplicateKeyError as exc:
@@ -1628,6 +1647,8 @@ async def create_withdrawal(
 ) -> dict[str, Any]:
     idem = validate_idempotency_key(idempotency_key)
     chips = int(amount_chips)
+    import wager as _promo_wager
+    await _promo_wager.require_clear_for_withdrawal(user_id)
     existing = await db.withdrawal_requests.find_one(
         {"user_id": user_id, "idempotency_key": idem}, {"_id": 0},
     )

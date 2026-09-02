@@ -1,8 +1,9 @@
 # SgPay24 hosted UPI runbook
 
-This is a deposit-only hosted checkout for buying chips. It does not enable the
-financial-wallet or payout system. Keep all of these source-controlled flags
-`false`:
+Hosted UPI buys chips. Player cash-out is **operator rail**: the player requests
+a withdrawal, Chakri Admin approves it, then SgPay24 pays the saved bank/UPI
+method. Do **not** turn on the financial-wallet flags below; they are a separate
+system. Keep them `false`:
 
 > **Two deposit rails, one provider.** SgPay24 UPI credits chips through the
 > **hosted-UPI rail** (`operator_rail`), gated only by `UPI_CHIP_PURCHASES_ENABLED`
@@ -18,7 +19,7 @@ financial-wallet or payout system. Keep all of these source-controlled flags
 - `REAL_MONEY_ENABLED`
 - `DEPOSITS_ENABLED`
 - `WITHDRAWALS_ENABLED`
-- `AUTO_WITHDRAWALS_ENABLED`
+- `AUTO_WITHDRAWALS_ENABLED`  (financial-wallet auto send; unused)
 - `FINANCIAL_GAME_WALLET_INTEGRATED`
 - `PAYMENTS_V2_ENABLED`
 - `PAYMENT_LIVE_MODE_ALLOWED`

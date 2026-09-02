@@ -1543,6 +1543,12 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
                 user['id'], current.get('referral_code'),
                 actor=admin['id'], session=session,
             )
+            user['referral_code'] = current.get('referral_code')
+            try:
+                import free_cash
+                await free_cash.on_player_registered(user, current.get('device_id'))
+            except Exception:
+                pass
             if body.starting_chips > 0:
                 await _credit_chips(
                     user['id'], body.starting_chips,
