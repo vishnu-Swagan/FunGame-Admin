@@ -880,6 +880,11 @@ class SgPay24PaymentProvider:
     _status_path = "/api/check-status"
     _payout_path = "/api/createPayoutRequest"
     _payout_status_path = "/api/check-payout-status"
+    _v1_payout_host = "api.sgpay24.in"
+    _v1_payout_path = "/v1/payout"
+    _PAID_STATUS_NAMES = frozenset({"complete", "completed", "success", "paid"})
+    _FAILED_STATUS_NAMES = frozenset({"failed", "cancelled", "canceled", "expired"})
+    _PENDING_STATUS_NAMES = frozenset({"pending", "processing"})
 
     def __init__(self, environ: Mapping[str, str]):
         self._env = dict(environ)
@@ -928,29 +933,38 @@ class SgPay24PaymentProvider:
         whole, fraction = divmod(amount_paise, 100)
         return whole if fraction == 0 else float(f"{whole}.{fraction:02d}")
 
-    @staticmethod
-    def _status(payload: Mapping[str, Any]) -> str:
-        raw_type = str(payload.get("type", "")).strip().lower()
-        if raw_type == "unauthorized":
-            raise ProviderRequestError("Provider authentication was rejected")
-        raw_status = payload.get("status")
+    @classmethod
+    def _status_code(cls, raw_status: Any) -> int:
         if isinstance(raw_status, bool):
             raise ProviderRequestError("Provider returned an invalid payment status")
         if isinstance(raw_status, int):
-            status_code = raw_status
-        elif isinstance(raw_status, str) and raw_status in {"0", "1", "2"}:
-            status_code = int(raw_status)
-        else:
-            # ``type`` describes request success in SgPay24 responses; it is
-            # never sufficient evidence that the underlying payment succeeded.
-            raise ProviderRequestError("Provider omitted the numeric payment status")
+            if raw_status in {0, 1, 2}:
+                return raw_status
+            raise ProviderRequestError("Provider returned an unsupported payment status")
+        if isinstance(raw_status, str):
+            token = raw_status.strip()
+            if token in {"0", "1", "2"}:
+                return int(token)
+            key = token.lower()
+            if key in cls._PAID_STATUS_NAMES:
+                return 1
+            if key in cls._FAILED_STATUS_NAMES:
+                return 2
+            if key in cls._PENDING_STATUS_NAMES:
+                return 0
+        raise ProviderRequestError("Provider omitted the numeric payment status")
+
+    @classmethod
+    def _status(cls, payload: Mapping[str, Any]) -> str:
+        raw_type = str(payload.get("type", "")).strip().lower()
+        if raw_type == "unauthorized":
+            raise ProviderRequestError("Provider authentication was rejected")
+        status_code = cls._status_code(payload.get("status"))
         if status_code == 1:
             return "PAID"
         if status_code == 2:
             return "FAILED"
-        if status_code == 0:
-            return "PENDING"
-        raise ProviderRequestError("Provider returned an unsupported payment status")
+        return "PENDING"
 
     @staticmethod
     def _order_id(value: Any) -> str:
@@ -1184,6 +1198,75 @@ class SgPay24PaymentProvider:
             return extra
         return self._payout_path
 
+    def _payout_api_kind(self) -> str:
+        """Default stays the live collection host. api.sgpay24.in is opt-in only."""
+        raw = str(self._env.get("SGPAY24_PAYOUT_API") or "").strip().lower()
+        if raw in {"", "root", "root.sgpay24.com", "createpayoutrequest"}:
+            return "root"
+        if raw in {"v1", "api.sgpay24.in", "https://api.sgpay24.in/v1/payout"}:
+            return "v1"
+        raise ProviderConfigurationError("SGPAY24_PAYOUT_API is not an approved payout API")
+
+    async def _submit_payout_v1(self, payload: Mapping[str, Any], *, amount_paise: int) -> Mapping[str, Any]:
+        """Bearer JSON payout used only when SGPAY24_PAYOUT_API selects v1.
+
+        The merchant runbook does not name api.sgpay24.in for this account, so
+        production must keep the default root.sgpay24.com createPayoutRequest.
+        """
+        body = {
+            "amount": self._amount_in_rupees(amount_paise),
+            "currency": "INR",
+            "account_number": payload.get("account_number") or "",
+            "ifsc_code": payload.get("ifsc_code") or payload.get("ifsc") or "",
+            "beneficiary_name": payload.get("beneficiary_name") or payload.get("name") or "",
+            "mode": payload.get("mode") or "IMPS",
+            "reference_id": payload.get("reference_id") or payload.get("order_id") or "",
+        }
+        if payload.get("upi_id") and not body["account_number"]:
+            body["upi_id"] = payload["upi_id"]
+            body["mode"] = "UPI"
+        timeout = self._timeout
+        encoded = json.dumps(body, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_token}",
+        }
+
+        def send() -> Mapping[str, Any]:
+            try:
+                rows = socket.getaddrinfo(self._v1_payout_host, 443, type=socket.SOCK_STREAM)
+            except socket.gaierror as exc:
+                raise ProviderRequestError("Provider host could not be resolved") from exc
+            addresses = [str(row[4][0]) for row in rows]
+            if not addresses or any(not _public_ip(address) for address in addresses):
+                raise ProviderConfigurationError("Provider host resolved to a non-public address")
+            connection = _PinnedHTTPSConnection(addresses[0], self._v1_payout_host, 443, timeout=timeout)
+            try:
+                connection.request("POST", self._v1_payout_path, body=encoded, headers=headers)
+                response = connection.getresponse()
+                raw = response.read(1024 * 1024 + 1)
+                if 300 <= response.status < 400:
+                    raise ProviderRequestError("Provider redirect was rejected")
+                if response.status >= 400:
+                    raise ProviderRequestError(self._provider_error_message(response.status, raw))
+                parsed = json.loads(raw or b"{}")
+                if not isinstance(parsed, Mapping):
+                    raise ProviderRequestError("Provider response must be an object")
+                return parsed
+            finally:
+                connection.close()
+
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(send), timeout=timeout + 1)
+        except ProviderRequestError:
+            raise
+        except (
+            OSError, ssl.SSLError, http.client.HTTPException, urllib.error.URLError,
+            asyncio.TimeoutError, json.JSONDecodeError,
+        ) as exc:
+            raise ProviderRequestError("Provider request failed") from exc
+
     async def create_beneficiary(self, **kwargs) -> Beneficiary:
         method_id = str(kwargs.get("payout_method_id") or kwargs.get("provider_beneficiary_id") or "local")
         return Beneficiary(provider_beneficiary_id=method_id, status="CREATED")
@@ -1230,9 +1313,18 @@ class SgPay24PaymentProvider:
         bank_name = str(kwargs.get("bank_name") or "").strip()
         if bank_name:
             payload["bank_name"] = bank_name
-        # SgPay24 createPayoutRequest ignores JSON bodies ("All fields are required")
-        # and only reads query-string fields, same host as hosted UPI deposits.
-        response = await self._request_json(self._payout_endpoint(), payload, as_query=True)
+        # Aliases from the marketing v1/payout contract. Extra query fields are
+        # ignored by a healthy parser; they may unblock a Node destructure 500.
+        payload["beneficiary_name"] = payload["name"]
+        payload["reference_id"] = order_id
+        payload["currency"] = "INR"
+        payload["mode"] = "UPI" if upi and not account_number else "IMPS"
+        if self._payout_api_kind() == "v1":
+            response = await self._submit_payout_v1(payload, amount_paise=amount_paise)
+        else:
+            # Live collections use root.sgpay24.com. createPayoutRequest ignores
+            # JSON bodies ("All fields are required") and only reads query fields.
+            response = await self._request_json(self._payout_endpoint(), payload, as_query=True)
         data = response.get("data") if isinstance(response.get("data"), Mapping) else response
         if not isinstance(data, Mapping):
             data = response
@@ -1255,13 +1347,17 @@ class SgPay24PaymentProvider:
             "order_id": order_id,
             "api_token": self._api_token,
         })
-        status_raw = str(response.get("status") or "").upper()
-        if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED"}:
-            mapped = "PAID"
-        elif status_raw in {"FAILED", "REJECTED", "CANCELLED"}:
-            mapped = "FAILED"
-        else:
-            mapped = "PROCESSING"
+        try:
+            code = self._status_code(response.get("status"))
+            mapped = {1: "PAID", 2: "FAILED", 0: "PROCESSING"}[code]
+        except ProviderRequestError:
+            status_raw = str(response.get("status") or "").upper()
+            if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE"}:
+                mapped = "PAID"
+            elif status_raw in {"FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED"}:
+                mapped = "FAILED"
+            else:
+                mapped = "PROCESSING"
         amount_value = response.get("amount")
         amount_paise = self._amount_to_paise(amount_value) if amount_value is not None else None
         return PayoutStatus(
@@ -1291,27 +1387,39 @@ class SgPay24PaymentProvider:
         if not isinstance(payload, Mapping):
             raise WebhookVerificationError("Webhook body must be an object")
         try:
-            order_id = self._order_id(payload.get("order_id"))
-            amount_paise = self._amount_to_paise(payload.get("amount"))
+            order_id = self._order_id(
+                payload.get("order_id") or payload.get("payout_id") or payload.get("reference_id"),
+            )
+            amount_value = payload.get("amount")
+            amount_paise = 0 if amount_value is None else self._amount_to_paise(amount_value)
             raw_status = payload.get("status")
-            if isinstance(raw_status, bool):
-                raise ValueError("boolean status")
-            if isinstance(raw_status, int):
-                status_code = raw_status
-            elif isinstance(raw_status, str) and raw_status in {"0", "1", "2"}:
-                status_code = int(raw_status)
-            else:
-                raise ValueError("non-numeric status")
+            if raw_status is None:
+                raw_status = payload.get("type")
+            status_code = self._status_code(raw_status)
         except (ProviderRequestError, TypeError, ValueError) as exc:
             raise WebhookVerificationError("Webhook payment fields are invalid") from exc
         transaction_id = payload.get("transaction_id")
-        if isinstance(transaction_id, bool) or not isinstance(transaction_id, int) or transaction_id <= 0:
-            raise WebhookVerificationError("Webhook transaction reference is invalid")
+        payout_like = bool(
+            payload.get("payout_id")
+            or str(payload.get("event") or payload.get("event_type") or payload.get("kind") or "").lower()
+            in {"payout", "withdrawal", "payout.paid", "payout.failed", "payout.processing"}
+            or str(payload.get("type") or "").lower() in {"payout", "withdrawal"}
+        )
+        if not payout_like:
+            if isinstance(transaction_id, bool) or not isinstance(transaction_id, int) or transaction_id <= 0:
+                raise WebhookVerificationError("Webhook transaction reference is invalid")
+        elif isinstance(transaction_id, bool) or (
+            transaction_id is not None and (not isinstance(transaction_id, int) or transaction_id <= 0)
+        ):
+            transaction_id = None
         if status_code not in {0, 1, 2}:
             raise WebhookVerificationError("Webhook status is invalid")
         utr = str(payload.get("utr") or "").strip()
-        event_type = "deposit.failed" if status_code == 2 else "deposit.paid"
-        notice_key = f"{order_id}:{transaction_id}:{status_code}:{utr}"
+        if payout_like:
+            event_type = "payout.failed" if status_code == 2 else "payout.paid"
+        else:
+            event_type = "deposit.failed" if status_code == 2 else "deposit.paid"
+        notice_key = f"{order_id}:{transaction_id}:{status_code}:{utr}:{event_type}"
         return ProviderEvent(
             event_id=f"sgpay24-notice:{hashlib.sha256(notice_key.encode()).hexdigest()[:40]}",
             event_type=event_type,
@@ -1323,6 +1431,7 @@ class SgPay24PaymentProvider:
             data={
                 "requires_authenticated_status_lookup": True,
                 "transaction_id": transaction_id,
+                "notice_kind": "payout" if payout_like else "collection",
             },
         )
 
