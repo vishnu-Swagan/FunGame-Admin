@@ -2,15 +2,22 @@ import { useNavigate } from "react-router-dom";
 import { ArrowRight, Heart } from "lucide-react";
 import { GameArt } from "@/components/GameArt";
 import { GameStatusBadge } from "@/components/common";
+import { useAuth } from "@/context/AuthContext";
+import { guestPlayAuthPath } from "@/lib/frontDoor";
 import { gameStatusLabel, isGameEnabled, isReviewedGame } from "@/lib/gameAvailability";
 
 export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const wide = size === "rail";
   const enabled = isGameEnabled(game);
   const displayStatus = isReviewedGame(game) ? (game.status || "COMING_SOON") : "COMING_SOON";
 
   const openGame = () => {
+    if (!user) {
+      navigate(guestPlayAuthPath());
+      return;
+    }
     if (enabled) navigate(`/games/${game.slug}/play`);
     else navigate(`/games/${game.slug}`);
   };

@@ -5,10 +5,15 @@ import path from "path";
 import { GameCard } from "./GameCard";
 
 const mockNavigate = jest.fn();
+let mockUser = { role: "PLAYER", status: "ACTIVE" };
 
 jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
 }), { virtual: true });
+
+jest.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: mockUser, loading: false }),
+}));
 
 jest.mock("@/components/GameArt", () => ({
   GameArt: ({ game }) => <div data-testid="game-art">{game.slug}</div>,
@@ -20,6 +25,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockNavigate.mockReset();
+  mockUser = { role: "PLAYER", status: "ACTIVE" };
 });
 
 function renderCard(game, extra = {}) {
@@ -82,6 +88,19 @@ test("favorite toggle does not launch play", () => {
   act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   expect(onToggleFavorite).toHaveBeenCalledWith("aviator");
   expect(mockNavigate).not.toHaveBeenCalled();
+
+  unmount();
+});
+
+test("signed-out play clicks open the unified login page instead of launching a table", () => {
+  mockUser = null;
+  const { container, unmount } = renderCard(liveAviator);
+  const card = container.querySelector('[data-testid="game-card"]');
+
+  expect(container.querySelector('[data-testid="game-card-play-cta"]')).not.toBeNull();
+  act(() => card.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(mockNavigate).toHaveBeenCalledWith("/?auth=login");
+  expect(mockNavigate).not.toHaveBeenCalledWith("/games/aviator/play");
 
   unmount();
 });

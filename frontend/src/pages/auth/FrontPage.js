@@ -176,6 +176,23 @@ function LoggedOutFront({ panel, registrationSubmitted, onSwitchPanel }) {
         <div className="space-y-3 pt-8">
           {showHero && (
             <>
+              <div className="flex items-center gap-2.5">
+                <Button
+                  data-testid="welcome-play-now-button"
+                  onClick={() => onSwitchPanel(AUTH_PANELS.LOGIN)}
+                  className="flex-1 h-12 rounded-xl text-base font-bold hover:brightness-110 active:scale-[0.98] transition-[filter,transform] duration-150"
+                >
+                  Play now
+                </Button>
+                <Button
+                  data-testid="welcome-all-games-button"
+                  variant="outline"
+                  onClick={() => onSwitchPanel(AUTH_PANELS.LOGIN)}
+                  className="flex-1 h-12 rounded-xl text-base font-bold border-white/25 bg-white/5 text-white hover:bg-white/12 hover:text-white active:scale-[0.98] transition-[background-color,transform] duration-150"
+                >
+                  All games
+                </Button>
+              </div>
               <Button
                 data-testid="welcome-register-button"
                 onClick={() => onSwitchPanel(AUTH_PANELS.REGISTER)}
