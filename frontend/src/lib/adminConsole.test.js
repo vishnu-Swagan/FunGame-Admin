@@ -1,9 +1,12 @@
 import {
   ADMIN_LOGIN_PATH,
+  ADMIN_LOGIN_LEGACY_PATH,
+  ADMIN_LOGOUT_PATH,
   ADMIN_ROOT_PATH,
   CANONICAL_ADMIN_ORIGIN,
   DISTRIBUTOR_LOGIN_PATH,
   DISTRIBUTOR_ROOT_PATH,
+  adminLoginPathForConsole,
   apiAlternatesForRuntime,
   apiOriginForRuntime,
   canonicalAdminPathForBrowserPath,
@@ -27,16 +30,22 @@ const browserLocation = (overrides = {}) => ({
 
 test("browser portal routes use the canonical branded entries", () => {
   expect(ADMIN_ROOT_PATH).toBe("/Admin");
-  expect(ADMIN_LOGIN_PATH).toBe("/Admin/login");
+  expect(ADMIN_LOGIN_PATH).toBe("/Admin");
+  expect(ADMIN_LOGOUT_PATH).toBe("/Admin");
+  expect(ADMIN_LOGIN_LEGACY_PATH).toBe("/Admin/login");
+  expect(adminLoginPathForConsole(true)).toBe("/Admin");
+  expect(adminLoginPathForConsole(false)).toBe("/Admin");
   expect(DISTRIBUTOR_ROOT_PATH).toBe("/distributor");
   expect(DISTRIBUTOR_LOGIN_PATH).toBe("/distributor/login");
-  expect(loginPathForBrowserPath("/Admin/distributors", false)).toBe("/Admin/login");
-  expect(loginPathForBrowserPath("/admin/distributors", false)).toBe("/Admin/login");
-  expect(loginPathForBrowserPath("/gk-admin-portal/security", false)).toBe("/Admin/login");
+  expect(loginPathForBrowserPath("/Admin/distributors", false)).toBe("/Admin");
+  expect(loginPathForBrowserPath("/Admin/distributors", true)).toBe("/Admin");
+  expect(loginPathForBrowserPath("/admin/distributors", false)).toBe("/Admin");
+  expect(loginPathForBrowserPath("/gk-admin-portal/security", false)).toBe("/Admin");
   expect(loginPathForBrowserPath("/distributor/reports", false)).toBe("/distributor/login");
   expect(loginPathForBrowserPath("/partner/reports", false)).toBe("/distributor/login");
   expect(loginPathForBrowserPath("/Administrator", false)).toBe("/?auth=login");
   expect(loginPathForBrowserPath("/home", false)).toBe("/?auth=login");
+  expect(loginPathForBrowserPath("/home", true)).toBe("/Admin");
 });
 
 describe("canonical admin browser navigation", () => {
@@ -44,7 +53,7 @@ describe("canonical admin browser navigation", () => {
     expect(CANONICAL_ADMIN_ORIGIN).toBe("https://chakri.casino");
     expect(canonicalAdminPathForBrowserPath("/Admin/distributors")).toBe("/Admin/distributors");
     expect(canonicalAdminPathForBrowserPath("/admin/distributors")).toBe("/Admin/distributors");
-    expect(canonicalAdminPathForBrowserPath("/gk-admin-portal")).toBe("/Admin/login");
+    expect(canonicalAdminPathForBrowserPath("/gk-admin-portal")).toBe("/Admin");
     expect(canonicalAdminPathForBrowserPath("/gk-admin-portal/users")).toBe("/Admin/users");
     expect(canonicalAdminPathForBrowserPath("/Administrator")).toBeNull();
     expect(canonicalAdminPathForBrowserPath("/admin-tools")).toBeNull();
@@ -65,17 +74,21 @@ describe("canonical admin browser navigation", () => {
     }))).toBe("https://chakri.casino/Admin/security?event=latest#audit");
   });
 
-  it("closes dedicated CRM root and fallback entries without taking distributor routes", () => {
+  it("sends the retired CRM host to the live chakri.casino/Admin front door", () => {
     expect(canonicalAdminUrlForLocation(browserLocation({
       hostname: "crm.chakri.casino",
       pathname: "/",
       search: "?source=bookmark",
       hash: "#sign-in",
-    }))).toBe("https://chakri.casino/Admin/login?source=bookmark#sign-in");
+    }))).toBe("https://chakri.casino/Admin?source=bookmark#sign-in");
+    expect(canonicalAdminUrlForLocation(browserLocation({
+      hostname: "crm.chakri.casino",
+      pathname: "/Admin/dashboard",
+    }))).toBe("https://chakri.casino/Admin/dashboard");
     expect(canonicalAdminUrlForLocation(browserLocation({
       hostname: "crm.chakri.casino",
       pathname: "/old-console-bookmark",
-    }))).toBe("https://chakri.casino/Admin/login");
+    }))).toBe("https://chakri.casino/Admin");
     expect(canonicalAdminUrlForLocation(browserLocation({
       hostname: "crm.chakri.casino",
       pathname: "/distributor/login",
@@ -93,8 +106,9 @@ describe("canonical admin browser navigation", () => {
     "www.mydgp.casino",
     "chakri-casino.onrender.com",
   ])("redirects an enumerated legacy public host: %s", (hostname) => {
+    // Legacy /Admin/login bookmarks collapse onto the /Admin front door.
     expect(canonicalAdminUrlForLocation(browserLocation({ hostname })))
-      .toBe("https://chakri.casino/Admin/login");
+      .toBe("https://chakri.casino/Admin");
   });
 
   it("canonicalizes legacy paths and insecure apex admin navigation", () => {
@@ -107,6 +121,10 @@ describe("canonical admin browser navigation", () => {
       pathname: "/Admin/users",
       protocol: "http:",
     }))).toBe("https://chakri.casino/Admin/users");
+    expect(canonicalAdminUrlForLocation(browserLocation({
+      hostname: "chakri.casino",
+      pathname: "/Admin/login",
+    }))).toBe("https://chakri.casino/Admin");
   });
 
   it("does not redirect canonical, preview, player or distributor navigation", () => {
@@ -127,7 +145,7 @@ describe("canonical admin browser navigation", () => {
   it("uses a history-replacing navigation only when a redirect is required", () => {
     const replace = jest.fn();
     expect(enforceCanonicalAdminBrowserLocation(browserLocation({ replace }))).toBe(true);
-    expect(replace).toHaveBeenCalledWith("https://chakri.casino/Admin/login");
+    expect(replace).toHaveBeenCalledWith("https://chakri.casino/Admin");
 
     replace.mockClear();
     expect(enforceCanonicalAdminBrowserLocation(browserLocation({

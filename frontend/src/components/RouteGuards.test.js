@@ -83,7 +83,7 @@ test("inactive administrators cannot enter privileged routes", () => {
   expect(hasPermission({ role: "ADMIN", status: "SUSPENDED", admin_role: "SUPER_ADMIN" }, ADMIN_PERMISSIONS.PAYMENTS_VIEW)).toBe(false);
 });
 
-test("a signed-out same-origin /Admin visit opens the dedicated admin login", async () => {
+test("a signed-out same-origin /Admin visit opens the admin login front door", async () => {
   useAuth.mockReturnValue({ user: null, loading: false });
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -93,7 +93,7 @@ test("a signed-out same-origin /Admin visit opens the dedicated admin login", as
   });
 
   expect(container.querySelector("[data-navigate-to]")?.getAttribute("data-navigate-to"))
-    .toBe("/Admin/login");
+    .toBe("/Admin");
   expect(container.textContent).not.toContain("/welcome");
   await act(async () => root.unmount());
 });

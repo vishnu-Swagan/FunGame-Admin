@@ -4,9 +4,9 @@ import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
-import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
+import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_LEGACY_PATH } from "@/lib/adminConsole";
 import { LEGACY_CHIP_REQUESTS_ENABLED } from "@/lib/featureFlags";
-import { ADMIN_PERMISSIONS, PortalPublicOnly, PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner, RequirePermission } from "@/components/RouteGuards";
+import { ADMIN_PERMISSIONS, PortalPublicOnly, PublicOnly, RequireAuth, RequireActive, RequirePartner, RequirePermission } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
 
@@ -14,6 +14,7 @@ import AppShell from "@/components/AppShell";
 import FrontPage from "@/pages/auth/FrontPage";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import AdminLogin from "@/pages/auth/AdminLogin";
+import AdminFrontPage from "@/pages/auth/AdminFrontPage";
 
 // Onboarding
 import OnboardingProfile from "@/pages/onboarding/OnboardingProfile";
@@ -46,7 +47,6 @@ import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScree
 import AccountClosed from "@/pages/system/AccountClosed";
 
 // Admin
-import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
@@ -130,10 +130,11 @@ function AdminConsoleApp() {
       <AuthProvider>
         <Toaster position="top-center" theme="dark" richColors closeButton />
         <Routes>
-          <Route path={ADMIN_LOGIN_PATH} caseSensitive element={<PortalPublicOnly role="ADMIN"><AdminLogin role="ADMIN" /></PortalPublicOnly>} />
+          <Route path="/" element={<Navigate to="/Admin" replace />} />
+          <Route path={ADMIN_LOGIN_LEGACY_PATH} caseSensitive element={<Navigate to="/Admin" replace />} />
           <Route path="/distributor/login" caseSensitive element={<PortalPublicOnly role="DISTRIBUTOR"><AdminLogin role="DISTRIBUTOR" /></PortalPublicOnly>} />
           <Route path="/distributor/change-password" caseSensitive element={<RequirePartner allowPasswordChange><PartnerPasswordChange /></RequirePartner>} />
-          <Route path="/Admin" caseSensitive element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+          <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
@@ -180,8 +181,8 @@ function AdminConsoleApp() {
           </Route>
           <Route path="/admin" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
           <Route path="/admin/*" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
-          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
+          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
+          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
           <Route path="/partner" caseSensitive element={<LegacyPathRedirect from="/partner" to="/distributor" />} />
           <Route path="/partner/*" caseSensitive element={<LegacyPathRedirect from="/partner" to="/distributor" />} />
           <Route path="*" element={<Navigate to="/Admin/dashboard" replace />} />
@@ -216,10 +217,10 @@ function PlayerApp() {
           <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
           {/* Canonical, same-origin operator entries. Player login never stores
               an admin or distributor token. */}
-          <Route path={ADMIN_LOGIN_PATH} caseSensitive element={<PortalPublicOnly role="ADMIN"><AdminLogin role="ADMIN" /></PortalPublicOnly>} />
+          <Route path={ADMIN_LOGIN_LEGACY_PATH} caseSensitive element={<Navigate to="/Admin" replace />} />
           <Route path="/distributor/login" caseSensitive element={<PortalPublicOnly role="DISTRIBUTOR"><AdminLogin role="DISTRIBUTOR" /></PortalPublicOnly>} />
           <Route path="/distributor/change-password" caseSensitive element={<RequirePartner allowPasswordChange><PartnerPasswordChange /></RequirePartner>} />
-          <Route path="/Admin" caseSensitive element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+          <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
@@ -255,8 +256,8 @@ function PlayerApp() {
           </Route>
           <Route path="/admin" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
           <Route path="/admin/*" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
-          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
+          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
+          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
           <Route path="/forgot-password" element={<FrontDoorRedirect auth="forgot" />} />
 
           {/* Public company / legal pages (readable without an account). */}
