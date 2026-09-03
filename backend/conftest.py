@@ -9,7 +9,6 @@ assertion and exit status.
 
 
 collect_ignore = [
-    "test_chicken_road_rounds.py",
     "test_commission.py",
     "test_compliance.py",
     "test_crm.py",
