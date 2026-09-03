@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { setHaptics, setMuted } from "@/lib/sound";
 import { toast } from "sonner";
 import {
-  Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
+  Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, History, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
   Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle,
   Smartphone,
@@ -58,6 +58,7 @@ export function Profile() {
 
   const links = [
     { icon: HandCoins, label: "Buy chips", to: "/chips", testId: "profile-link-buy-chips" },
+    { icon: History, label: "History", to: "/chips/activity", testId: "profile-link-history" },
     { icon: Landmark, label: "Bank account", to: "/profile/bank-details", testId: "profile-link-bank-account" },
     { icon: MessagesSquare, label: "Support & messages", to: "/support", testId: "profile-link-support" },
     { icon: Shield, label: "Security", to: "/security", testId: "profile-link-security" },

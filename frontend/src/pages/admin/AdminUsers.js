@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { UserCheck, UserX, Ban, RotateCcw, Search, Trash2, Users } from "lucide-react";
+import { UserCheck, UserX, Ban, RotateCcw, Search, Trash2, Users, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,7 @@ import { PageTransition, UserStatusBadge, EmptyState, formatChips, timeAgo, Avat
 const FILTERS = ["PENDING", "ACTIVE", "SUSPENDED", "REJECTED", "ALL"];
 
 export default function AdminUsers() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initial = searchParams.get("status") || "PENDING";
   const [filter, setFilter] = useState(FILTERS.includes(initial) ? initial : "PENDING");
@@ -223,6 +224,15 @@ export default function AdminUsers() {
                   <TableCell className="text-xs text-white/50">{timeAgo(u.created_at)}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-testid="admin-user-history-button"
+                        className="h-8 rounded-lg text-xs font-bold"
+                        onClick={() => navigate(`/Admin/play-history?user=${encodeURIComponent(u.id)}`)}
+                      >
+                        <History className="h-3.5 w-3.5 mr-1" /> History
+                      </Button>
                       {(u.status === "PENDING" || u.status === "REJECTED" || u.status === "SUSPENDED") && (
                         <Button
                           data-testid="admin-approve-user-button"
