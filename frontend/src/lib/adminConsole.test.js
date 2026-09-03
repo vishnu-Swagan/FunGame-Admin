@@ -148,11 +148,19 @@ describe("canonical admin browser navigation", () => {
     expect(replace).toHaveBeenCalledWith("https://chakri.casino/Admin");
 
     replace.mockClear();
+    // /Admin is the live front door; legacy /Admin/login still redirects.
     expect(enforceCanonicalAdminBrowserLocation(browserLocation({
       hostname: "chakri.casino",
+      pathname: "/Admin",
       replace,
     }))).toBe(false);
     expect(replace).not.toHaveBeenCalled();
+    expect(enforceCanonicalAdminBrowserLocation(browserLocation({
+      hostname: "chakri.casino",
+      pathname: "/Admin/login",
+      replace,
+    }))).toBe(true);
+    expect(replace).toHaveBeenCalledWith("https://chakri.casino/Admin");
   });
 });
 
