@@ -46,7 +46,7 @@ PROVIDER_ENV = {
     "SGPAY24_TIMEOUT_SECONDS": "7",
     "PAYMENT_RETURN_URL": "https://play.example.com/chips/deposit/return",
     "UPI_CHIPS_PER_INR": "1",
-    "UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000",
+    "UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000",  # ignored; buy cap is hardcoded ₹2L
 }
 
 
@@ -79,31 +79,47 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                     provider(overrides)
                 self.assertIn(field, str(caught.exception))
 
-    def test_hosted_rail_requires_explicit_rate_and_daily_limit(self):
+    def test_hosted_rail_requires_explicit_rate_and_hardcodes_daily_limit(self):
         valid = {**PROVIDER_ENV, "UPI_CHIP_PURCHASES_ENABLED": "true"}
         self.assertEqual(operator_rail.hosted_upi_chips_per_inr(valid), 1)
         self.assertEqual(
-            operator_rail.hosted_upi_daily_limit_paise(valid), 10_000_000,
+            operator_rail.hosted_upi_daily_limit_paise(valid), 20_000_000,
         )
+        self.assertEqual(
+            operator_rail.hosted_upi_daily_limit_paise({"UPI_MAX_DAILY_DEPOSIT_PAISE": "50000"}),
+            20_000_000,
+        )
+        self.assertEqual(operator_rail.hosted_upi_daily_limit_paise({}), 20_000_000)
+        limits = operator_rail.operator_status()["limits"]
+        self.assertEqual(limits["max_deposit_paise"], 20_000_000)
+        self.assertEqual(limits["max_daily_deposit_paise"], 20_000_000)
+        self.assertEqual(limits["min_deposit_paise"], 10_000)
 
         invalid_cases = (
             ("UPI_CHIPS_PER_INR", None),
             ("UPI_CHIPS_PER_INR", "0"),
             ("UPI_CHIPS_PER_INR", "1.5"),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", None),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "9999"),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "not-an-int"),
         )
         for field, value in invalid_cases:
             with self.subTest(field=field, value=value):
                 environ = dict(valid)
                 if value is None:
-                    environ.pop(field)
+                    environ.pop(field, None)
                 else:
                     environ[field] = value
                 with self.assertRaises(ProviderConfigurationError) as caught:
                     operator_rail.hosted_upi_provider(environ)
                 self.assertIn(field, str(caught.exception))
+
+        # A missing or lower env daily cap must not fail provider boot or keep 1L.
+        for value in (None, "10000000", "not-an-int"):
+            environ = dict(valid)
+            if value is None:
+                environ.pop("UPI_MAX_DAILY_DEPOSIT_PAISE", None)
+            else:
+                environ["UPI_MAX_DAILY_DEPOSIT_PAISE"] = value
+            loaded = operator_rail.hosted_upi_provider(environ)
+            self.assertEqual(loaded.name, "sgpay24")
 
     async def test_create_payload_uses_merchant_token_and_validates_checkout(self):
         gateway = provider()
@@ -633,10 +649,10 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         ):
             results = await asyncio.gather(
                 operator_rail.create_hosted_deposit(
-                    self.user, 50_000, "daily-cap-concurrent-a", self.gateway,
+                    self.user, 20_000_000, "daily-cap-concurrent-a", self.gateway,
                 ),
                 operator_rail.create_hosted_deposit(
-                    self.user, 50_000, "daily-cap-concurrent-b", self.gateway,
+                    self.user, 20_000_000, "daily-cap-concurrent-b", self.gateway,
                 ),
                 return_exceptions=True,
             )
@@ -650,36 +666,96 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
             await self.db[operator_rail.COLLECTION].count_documents({}), 1,
         )
         stored = await self.db[operator_rail.COLLECTION].find_one({})
-        self.assertEqual(stored["reservation_gaming_day"], operator_rail.ledger.gaming_day())
+        self.assertEqual(stored["reservation_gaming_day"], operator_rail.buy_chips_ist_day())
         self.assertEqual(
             await self.db[operator_rail.DAILY_GUARD_COLLECTION].count_documents({}), 1,
         )
 
-    async def test_concurrent_hosted_purchases_honor_player_day_limit(self):
+    async def test_player_limits_deposit_rows_do_not_block_hosted_buy(self):
         await self.db.player_limits.insert_one({
             "user_id": self.user["id"],
             "kind": operator_rail.finance.compliance.DEPOSIT,
             "period": "DAY",
             "amount": 500,
         })
-        results = await asyncio.gather(
-            operator_rail.create_hosted_deposit(
-                self.user, 50_000, "player-limit-concurrent-a", self.gateway,
-            ),
-            operator_rail.create_hosted_deposit(
-                self.user, 50_000, "player-limit-concurrent-b", self.gateway,
-            ),
-            return_exceptions=True,
+        first, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "player-limit-a", self.gateway,
+        )
+        second, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "player-limit-b", self.gateway,
+        )
+        self.assertEqual(first["amount_paise"], 50_000)
+        self.assertEqual(second["amount_paise"], 50_000)
+        self.assertEqual(
+            await self.db[operator_rail.COLLECTION].count_documents({}), 2,
         )
 
-        successes = [item for item in results if not isinstance(item, Exception)]
-        failures = [item for item in results if isinstance(item, HTTPException)]
-        self.assertEqual((len(successes), len(failures)), (1, 1))
-        self.assertEqual(failures[0].status_code, 403)
-        self.assertEqual(failures[0].detail["code"], "DEPOSIT_LIMIT")
-        self.assertEqual(
-            await self.db[operator_rail.COLLECTION].count_documents({}), 1,
+    async def test_two_lakh_exact_buy_allowed_and_overflow_rejected(self):
+        exact, _ = await operator_rail.create_hosted_deposit(
+            self.user, 20_000_000, "exact-two-lakh", self.gateway,
         )
+        self.assertEqual(exact["amount_paise"], 20_000_000)
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 10_000, "after-exact-two-lakh", self.gateway,
+            )
+        self.assertEqual(overflow.exception.status_code, 409)
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+
+    async def test_two_lakh_minus_one_hundred_plus_two_hundred_is_rejected(self):
+        first, _ = await operator_rail.create_hosted_deposit(
+            self.user, 19_990_000, "two-lakh-minus-100", self.gateway,
+        )
+        self.assertEqual(first["amount_paise"], 19_990_000)
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000, "plus-200", self.gateway,
+            )
+        self.assertEqual(overflow.exception.status_code, 409)
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+        leftover, _ = await operator_rail.create_hosted_deposit(
+            self.user, 10_000, "remaining-one-hundred", self.gateway,
+        )
+        self.assertEqual(leftover["amount_paise"], 10_000)
+
+    async def test_daily_buy_cap_uses_asia_kolkata_calendar_day_not_london(self):
+        late_ist = datetime(2026, 9, 3, 18, 29, tzinfo=timezone.utc)
+        next_ist = datetime(2026, 9, 3, 18, 30, tzinfo=timezone.utc)
+        with patch.object(operator_rail, "utcnow", return_value=late_ist):
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000_000, "ist-day-full", self.gateway,
+            )
+            with self.assertRaises(HTTPException) as same_day:
+                await operator_rail.create_hosted_deposit(
+                    self.user, 10_000, "ist-day-over", self.gateway,
+                )
+            self.assertEqual(same_day.exception.detail["code"], "UPI_DAILY_LIMIT")
+        with patch.object(operator_rail, "utcnow", return_value=next_ist):
+            nxt, _ = await operator_rail.create_hosted_deposit(
+                self.user, 20_000_000, "next-ist-day", self.gateway,
+            )
+        self.assertEqual(nxt["amount_paise"], 20_000_000)
+        self.assertEqual(nxt["reservation_gaming_day"], "2026-09-04")
+
+    async def test_admin_review_and_hosted_upi_share_one_ist_daily_cap(self):
+        admin = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=19_990_000,
+        )
+        self.assertEqual(admin["source"], "ADMIN_REVIEW")
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000, "shared-cap-over", self.gateway,
+            )
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+
+    async def test_lower_env_cannot_keep_one_lakh_transaction_cap(self):
+        with patch.dict(
+            os.environ, {"UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000"}, clear=False,
+        ):
+            purchase, _ = await operator_rail.create_hosted_deposit(
+                self.user, 15_000_000, "above-old-one-lakh", self.gateway,
+            )
+        self.assertEqual(purchase["amount_paise"], 15_000_000)
 
     async def test_terminal_idempotency_reuse_never_returns_checkout_redirect(self):
         purchase, checkout_url = await operator_rail.create_hosted_deposit(

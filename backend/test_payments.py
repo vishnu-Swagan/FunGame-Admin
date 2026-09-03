@@ -1067,24 +1067,24 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         wallet = await finance.wallet_public("player-1")
         self.assertEqual((wallet["cash_chips"], wallet["held_chips"]), (0, 1000))
 
-    async def test_pending_deposits_reserve_limits_atomically_and_release_on_failure(self):
+    async def test_player_limits_deposit_rows_do_not_block_chip_purchases(self):
         await db.player_limits.insert_one({
             "user_id": "player-1", "kind": "DEPOSIT", "period": "DAY", "amount": 150,
         })
-        results = await asyncio.gather(
-            finance.create_deposit(
-                "player-1", 10000, "deposit-limit-reserve-a", self.provider,
-            ),
-            finance.create_deposit(
-                "player-1", 10000, "deposit-limit-reserve-b", self.provider,
-            ),
-            return_exceptions=True,
+        first, _ = await finance.create_deposit(
+            "player-1", 10000, "deposit-limit-reserve-a", self.provider,
         )
-        successes = [row for row in results if not isinstance(row, Exception)]
-        failures = [row for row in results if isinstance(row, finance.FinancialError)]
-        self.assertEqual((len(successes), len(failures)), (1, 1))
-        self.assertEqual(failures[0].code, "DEPOSIT_LIMIT")
-        held = await db.deposit_orders.find_one({"limit_reservation_status": "HELD"})
+        second, _ = await finance.create_deposit(
+            "player-1", 10000, "deposit-limit-reserve-b", self.provider,
+        )
+        self.assertEqual(first["limit_reservation_status"], "HELD")
+        self.assertEqual(second["limit_reservation_status"], "HELD")
+        self.assertEqual(await db.deposit_orders.count_documents({}), 2)
+
+    async def test_pending_deposits_release_reservation_on_failure(self):
+        held, _ = await finance.create_deposit(
+            "player-1", 10000, "deposit-limit-reserve-a", self.provider,
+        )
         failed, raw = signed_event(self.provider, {
             "id": "evt-reservation-release", "type": "deposit.failed",
             "object_id": held["provider_order_id"], "amount_paise": 10000,
@@ -1659,6 +1659,9 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response["financial"]["operator"]["enabled"])
         self.assertEqual(response["financial"]["operator"]["rail"], "ADMIN_REVIEW")
         self.assertEqual(response["financial"]["operator"]["limits"]["min_deposit_paise"], 10_000)
+        self.assertEqual(response["financial"]["operator"]["limits"]["max_deposit_paise"], 20_000_000)
+        self.assertEqual(response["financial"]["operator"]["limits"]["max_daily_deposit_paise"], 20_000_000)
+        self.assertEqual(response["financial"]["operator"]["limits"]["remaining_daily_deposit_paise"], 20_000_000)
 
     async def test_operator_buy_and_withdraw_sync_to_admin_and_move_chips_on_approve(self):
         buy = await routes.create_operator_deposit(
