@@ -414,6 +414,76 @@ async def main():
     assert dual_row['username_key'] == 'dual.player.edited'
     assert 'requested_username' not in dual_row
 
+    # Leftover per-user email_verification_required must not block SMS
+    # activation or later login.
+    leftover_phone = '+919876543214'
+    leftover_challenge = await routes_auth.register(registration(
+        identifier=leftover_phone, phone=leftover_phone,
+        email='leftover.dual@example.com', username='Leftover.Dual',
+    ))
+    leftover_row = await database.users.find_one({'phone_normalized': leftover_phone})
+    await database.users.update_one(
+        {'id': leftover_row['id']},
+        {'$set': {'email_verification_required': True}},
+    )
+    leftover_verify = await routes_auth.verify_contact(VerifyEmailRequest(
+        channel='PHONE', identifier=leftover_phone, phone=leftover_phone,
+        username='Leftover.Dual',
+        code=leftover_challenge['dev_code'], password='Leftover-Verified-9',
+    ))
+    assert leftover_verify['access_token']
+    assert 'next_verification' not in leftover_verify
+    leftover_row = await database.users.find_one({'phone_normalized': leftover_phone})
+    assert leftover_row['status'] == 'ACTIVE'
+    assert leftover_row['phone_verified'] is True
+    assert leftover_row['email_verified'] is False
+    assert leftover_row['contact_verified'] is True
+    assert leftover_row['email_verification_required'] is False
+    leftover_login = await routes_auth.login(LoginRequest(
+        identifier=leftover_phone, phone=leftover_phone,
+        password='Leftover-Verified-9',
+    ))
+    assert leftover_login['access_token']
+    assert leftover_login['user']['status'] == 'ACTIVE'
+
+    # Already-phone-verified PHONE_VERIFIED_EMAIL_PENDING leftovers are
+    # repaired to ACTIVE on login without an email OTP.
+    stuck_phone = '+919876543215'
+    await database.users.insert_one({
+        'id': 'stuck-dual-pending',
+        'role': 'PLAYER',
+        'status': 'PENDING',
+        'registration_source': 'SELF_SERVICE',
+        'activation_mode': routes_auth.PHONE_OTP_ACTIVATION_MODE,
+        'primary_identity': stuck_phone,
+        'primary_identity_channel': 'PHONE',
+        'contact_verification_status': 'PHONE_VERIFIED_EMAIL_PENDING',
+        'contact_verified': False,
+        'phone_verified': True,
+        'email_verified': False,
+        'email_verification_required': True,
+        'phone': stuck_phone,
+        'phone_normalized': stuck_phone,
+        'email': 'stuck.dual@example.com',
+        'email_normalized': 'stuck.dual@example.com',
+        'password_hash': auth_utils.hash_password('Stuck-Verified-9'),
+        'accepted_terms': True,
+        'username': 'Stuck.Dual',
+        'username_key': 'stuck.dual',
+    })
+    stuck_login = await routes_auth.login(LoginRequest(
+        identifier=stuck_phone, phone=stuck_phone,
+        password='Stuck-Verified-9',
+    ))
+    assert stuck_login['access_token']
+    assert stuck_login['user']['status'] == 'ACTIVE'
+    stuck_row = await database.users.find_one({'id': 'stuck-dual-pending'})
+    assert stuck_row['status'] == 'ACTIVE'
+    assert stuck_row['contact_verified'] is True
+    assert stuck_row['phone_verified'] is True
+    assert stuck_row['email_verified'] is False
+    assert stuck_row['email_verification_required'] is False
+
     print('Phone OTP registration: all focused checks passed')
 
 

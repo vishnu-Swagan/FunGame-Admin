@@ -85,9 +85,21 @@ export default function VerifyEmail() {
       if (data?.next_verification) {
         const next = data.next_verification;
         const nextChannel = normalizeContactChannel(next.channel || "EMAIL", secondaryIdentifier);
+        if (nextChannel === "EMAIL") {
+          // Phone SMS is the only activation proof. Ignore leftover email OTP steps.
+          if (data.access_token) {
+            login(data.access_token, data.user);
+            toast.success(data.message || "Mobile verified");
+            navigate(routeForUser(data.user), { replace: true });
+          } else {
+            toast.success(data.message || "Mobile verified. You can now log in.");
+            navigate("/login", { replace: true });
+          }
+          return;
+        }
         const nextIdentifier = secondaryIdentifier || next.identifier || "";
         if (!nextIdentifier) {
-          toast.info("Mobile verified. Sign in again to continue email verification.");
+          toast.success("Mobile verified. You can now log in.");
           navigate("/login", { replace: true });
           return;
         }
@@ -97,7 +109,7 @@ export default function VerifyEmail() {
         setDestinationMasked(next.destination_masked || next.destination || "");
         setResendIn(Number(next.resend_after_seconds || next.resend_in || DEFAULT_RESEND_SECONDS));
         setCode("");
-        toast.success(data.message || "Mobile verified. Check your email for the next code.");
+        toast.success(data.message || "Mobile verified");
         return;
       }
       if (data.access_token) {

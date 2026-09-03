@@ -111,6 +111,15 @@ export function verificationChannelState(capabilities, channel, issuedChallenge 
 
 export function loginVerificationRecovery(capabilities, detailChannel, identifier) {
   const channel = normalizeContactChannel(detailChannel, identifier);
+  // PHONE_OTP signup/login never uses email OTP, even if leftover CONTACT_NOT_VERIFIED
+  // details still name the email channel.
+  if (
+    channel === "EMAIL"
+    && capabilities?.registration_mode !== "ADMIN_REVIEW"
+    && capabilities?.email_verification_required !== true
+  ) {
+    return null;
+  }
   if (!contactVerificationChannelAvailable(capabilities, channel)) return null;
   const contact = normalizeContactIdentifier(channel, identifier);
   return {

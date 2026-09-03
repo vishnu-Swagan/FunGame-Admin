@@ -67,6 +67,10 @@ export default function Login() {
           );
           const requestedChannel = normalizeContactChannel(detail?.channel, identifier);
           if (!recovery) {
+            if (requestedChannel === "EMAIL" && latestCapabilities.email_verification_required !== true) {
+              toast.info("Email verification is not required. Sign in with your mobile number or Login ID.");
+              return;
+            }
             toast.info(`Verification by ${requestedChannel === "PHONE" ? "mobile" : "email"} is temporarily unavailable. Contact an administrator.`);
             return;
           }
