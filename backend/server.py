@@ -30,7 +30,6 @@ import routes_distributor
 import routes_compliance
 import routes_games
 import routes_live
-import routes_chicken_road
 import routes_blackjack
 import routes_rummy
 import routes_security
@@ -75,18 +74,15 @@ async def _hold_keepalive_lock():
 
 
 async def _aviator_keepalive():
-    """Keep the universal crash-table round machines ticking 24/7 (leader only).
+    """Keep the universal Aviator crash-table round machine ticking 24/7 (leader only).
 
-    One leader lock drives both crash tables (Aviator and Chicken Road) so their
-    DB-chained rounds keep advancing between requests without two competing
-    keepalive tasks."""
+    DB-chained rounds keep advancing between requests without every worker
+    competing on the same tick."""
     from routes_live import advance_aviator
-    from routes_chicken_road import advance_chicken_road
     while True:
         try:
             if await _hold_keepalive_lock():
                 await advance_aviator()
-                await advance_chicken_road()
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -178,16 +174,6 @@ async def _core_indexes():
         partialFilterExpression={'active': True},
         name='aviator_one_active_bet_per_panel',
     )
-    await db.chicken_road_rounds.create_index('round_number', unique=True)
-    await db.chicken_road_bets.create_index([('round_number', 1), ('status', 1)])
-    await db.chicken_road_bets.create_index([('user_id', 1), ('round_number', 1)])
-    await db.chicken_road_bets.create_index(
-        [('user_id', 1), ('round_number', 1), ('panel', 1)],
-        unique=True,
-        partialFilterExpression={'active': True},
-        name='chicken_road_one_active_bet_per_panel',
-    )
-
 
 async def _prepare_gameplay_core():
     """Verify the indexes and Mongo transactions required by chip gameplay.
@@ -422,7 +408,6 @@ async def health():
 
 api_router.include_router(routes_auth.router)
 api_router.include_router(routes_live.router)
-api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_rummy.router)

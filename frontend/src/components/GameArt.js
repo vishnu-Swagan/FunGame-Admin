@@ -14,7 +14,6 @@ const ICONS = {
 // Unique silhouette language per game (original CSS compositions)
 const PATTERNS = {
   aviator: "arcs",
-  "chicken-road": "lanes",
   "seven-up-down": "dots",
   "andar-bahar": "cardfan",
   bingo: "grid",

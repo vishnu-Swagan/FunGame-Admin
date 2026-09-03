@@ -242,7 +242,6 @@ def paytable_for(slug, picks=None):
 # than one global pair. A table whose rail offered a chip this map refuses would
 # be advertising a bet the server rejects.
 TABLE_LIMITS = {
-    "chicken-road": (10, 10000),
     "seven-up-down": (10, 200),
     "fun-target": (1, 5000),
     "andar-bahar": (20, 1000),
