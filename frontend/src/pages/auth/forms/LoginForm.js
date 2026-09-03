@@ -77,7 +77,8 @@ export default function LoginForm({
             detail?.channel,
             detail?.identifier || identifier,
           );
-          const requestedChannel = normalizeContactChannel(detail?.channel, identifier);
+          const requestedChannel = recovery?.channel
+            || normalizeContactChannel(detail?.channel, detail?.identifier || identifier);
           if (!recovery) {
             if (requestedChannel === "EMAIL" && latestCapabilities.email_verification_required !== true) {
               toast.info("Email verification is not required. Sign in with your mobile number or Login ID.");

@@ -161,6 +161,14 @@ test("login recovery only builds a resend request for a ready channel", () => {
       phone: "+919876543210",
     },
   });
+  expect(loginVerificationRecovery(
+    phoneReadyEmailOptional,
+    "EMAIL",
+    "+91 98765-43210",
+  )).toMatchObject({
+    channel: "PHONE",
+    contact: "+919876543210",
+  });
 });
 
 test("login IDs derived from E.164 phones match the backend rule", () => {

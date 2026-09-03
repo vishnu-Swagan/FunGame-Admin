@@ -110,7 +110,11 @@ export function verificationChannelState(capabilities, channel, issuedChallenge 
 }
 
 export function loginVerificationRecovery(capabilities, detailChannel, identifier) {
-  const channel = normalizeContactChannel(detailChannel, identifier);
+  // A leftover EMAIL channel must not hide a stored mobile number. Existing
+  // players typically type a Login ID; the server now returns the E.164 phone.
+  const channel = isValidE164Phone(identifier)
+    ? "PHONE"
+    : normalizeContactChannel(detailChannel, identifier);
   // PHONE_OTP signup/login never uses email OTP, even if leftover CONTACT_NOT_VERIFIED
   // details still name the email channel.
   if (

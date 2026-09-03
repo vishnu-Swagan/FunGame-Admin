@@ -369,6 +369,94 @@ def _identity_is_verified(user: dict, identity: Identity) -> bool:
     return bool(user.get(identity.verified_field))
 
 
+def _stored_sms_identity(user: dict | None, primary: Identity | None = None) -> Identity | None:
+    """Return the mobile number a login-recovery OTP can actually be sent to."""
+    if not user:
+        return None
+    for candidate in (
+        user.get('phone_normalized'),
+        user.get('phone'),
+        primary.value if primary and primary.channel == 'SMS' else None,
+    ):
+        if not candidate:
+            continue
+        try:
+            identity = normalize_identity(candidate)
+        except ValueError:
+            continue
+        if identity.channel == 'SMS':
+            return identity
+    return None
+
+
+def _login_verification_contact(
+    user: dict | None, primary: Identity | None,
+) -> tuple[str, str | None]:
+    """Public channel plus deliverable destination after a correct password.
+
+    Existing players usually sign in with a Login ID. The 403 must name the
+    stored mobile number so the client does not resend to the typed username.
+    """
+    sms = _stored_sms_identity(user, primary)
+    if sms:
+        return 'PHONE', sms.value
+    if primary and primary.channel == 'EMAIL':
+        return 'EMAIL', primary.value
+    if user:
+        for candidate in (user.get('email_normalized'), user.get('email')):
+            if not candidate:
+                continue
+            try:
+                identity = normalize_identity(candidate)
+            except ValueError:
+                continue
+            if identity.channel == 'EMAIL':
+                return 'EMAIL', identity.value
+    return ('PHONE' if primary and primary.channel == 'SMS' else 'EMAIL', None)
+
+
+def _contact_not_verified_detail(user: dict | None, primary: Identity | None) -> dict:
+    channel, destination = _login_verification_contact(user, primary)
+    detail = {
+        'code': 'CONTACT_NOT_VERIFIED',
+        'message': 'Verify your contact method before logging in.',
+        'channel': channel,
+    }
+    if destination:
+        detail['identifier'] = destination
+    login_id = (user or {}).get('username') or (user or {}).get('requested_username') or ''
+    if login_id:
+        detail['login_id'] = login_id
+    return detail
+
+
+async def _find_player_by_login_id(ident: str):
+    raw = (ident or '').strip()
+    if not raw or '@' in raw or raw.startswith('+'):
+        return None
+    return await db.users.find_one({
+        'role': 'PLAYER',
+        '$or': [
+            {'username_key': raw.casefold()},
+            {'username': {'$regex': f'^{re.escape(raw)}$', '$options': 'i'}},
+        ],
+    })
+
+
+async def _resend_identity(body) -> Identity:
+    """Accept a Login ID by resolving it to the stored mobile number."""
+    try:
+        return _request_identity(body)
+    except HTTPException as exc:
+        if exc.status_code != 422:
+            raise
+        player = await _find_player_by_login_id(_request_value(body))
+        sms = _stored_sms_identity(player)
+        if sms is None:
+            raise
+        return sms
+
+
 def _self_service_needs_profile(user: dict) -> bool:
     """Repair the pre-profile state without reopening submitted applications."""
     return bool(
@@ -1245,7 +1333,7 @@ async def verify_contact(body: VerifyEmailRequest):
 @router.post('/resend-verification', status_code=status.HTTP_202_ACCEPTED)
 @router.post('/resend-otp', status_code=status.HTTP_202_ACCEPTED)
 async def resend_verification(body: ResendVerificationRequest):
-    identity = _request_identity(body)
+    identity = await _resend_identity(body)
     try:
         await consume_persistent_limit(
             'otp_issue:VERIFY_CONTACT', f'{identity.channel}:{identity.value}',
@@ -1416,8 +1504,6 @@ async def login(body: LoginRequest):
             except ValueError:
                 primary = None
         player_contact_verified = bool(primary and _identity_is_verified(user, primary))
-        # Email OTP is never a login gate for PHONE_OTP players.
-        email_followup_required = False
         # In the temporary ADMIN_REVIEW mode an explicit operator decision,
         # not an OTP, is the activation gate. Contact flags deliberately stay
         # false so the UI and future verification migration remain truthful.
@@ -1431,22 +1517,13 @@ async def login(body: LoginRequest):
             player_contact_verified = True
             legacy_operator_repair = True
         if not player_contact_verified:
-            channel = (
-                'EMAIL' if email_followup_required
-                else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
+            # A correct password has already been proved. Always return the
+            # deliverable contact (mobile first) so Login ID / email logins
+            # can request the SMS that actually belongs to this account.
+            raise HTTPException(
+                status_code=403,
+                detail=_contact_not_verified_detail(user, primary),
             )
-            detail = {
-                'code': 'CONTACT_NOT_VERIFIED',
-                'message': 'Verify your contact method before logging in.',
-                'channel': channel,
-            }
-            # A correct password has already been proved. Supplying the stored
-            # follow-up email lets the client recover an interrupted second
-            # verification step without exposing it to unauthenticated probes.
-            if email_followup_required:
-                detail['identifier'] = user.get('email_normalized') or user.get('email')
-                detail['login_id'] = user.get('requested_username') or ''
-            raise HTTPException(status_code=403, detail=detail)
 
     telesign_sign_in = None
     if user.get('role') == 'PLAYER':
@@ -1533,6 +1610,7 @@ async def login(body: LoginRequest):
             'admin_step_up_password_verified_at': '',
             'admin_step_up_session_id': '',
         })
+    authenticated_user = user
     user = await db.users.find_one_and_update(
         login_query,
         {'$set': login_updates, '$unset': login_unsets},
@@ -1545,19 +1623,10 @@ async def login(body: LoginRequest):
                 'message': 'Your account is not currently approved for login.',
             })
         if legacy_operator_repair or phone_self_service:
-            dual_pending = False
-            detail = {
-                'code': 'CONTACT_NOT_VERIFIED',
-                'message': 'Verify your contact method before logging in.',
-                'channel': (
-                    'EMAIL' if dual_pending
-                    else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
-                ),
-            }
-            if dual_pending:
-                detail['identifier'] = user.get('email_normalized') or user.get('email')
-                detail['login_id'] = user.get('requested_username') or ''
-            raise HTTPException(status_code=403, detail=detail)
+            raise HTTPException(
+                status_code=403,
+                detail=_contact_not_verified_detail(authenticated_user, primary),
+            )
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':
         current_dist = await db.distributors.find_one({
