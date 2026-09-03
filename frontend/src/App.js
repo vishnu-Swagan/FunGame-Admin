@@ -37,6 +37,7 @@ import BankDetailsPage from "@/pages/app/wallet/BankDetailsPage";
 import DepositReturn from "@/pages/app/wallet/DepositReturn";
 import Support from "@/pages/app/Support";
 import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
+import { LegalRouterPage } from "@/pages/legal/LegalPages";
 import GamePlay from "@/pages/play/GamePlay";
 import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
@@ -239,6 +240,15 @@ function PlayerApp() {
           <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
           <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
           <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
+
+          {/* Public company / legal pages (readable without an account). */}
+          <Route path="/about" element={<LegalRouterPage />} />
+          <Route path="/terms" element={<LegalRouterPage />} />
+          <Route path="/privacy" element={<LegalRouterPage />} />
+          <Route path="/cookies" element={<LegalRouterPage />} />
+          <Route path="/contact" element={<LegalRouterPage />} />
+          <Route path="/fair-play" element={<LegalRouterPage />} />
+          <Route path="/responsible-gaming" element={<LegalRouterPage />} />
 
           {/* Onboarding */}
           <Route path="/onboarding/profile" element={<OnboardingRoute><OnboardingProfile /></OnboardingRoute>} />
