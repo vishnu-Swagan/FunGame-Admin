@@ -28,14 +28,14 @@ export function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" state={{ from: location }} replace />;
+  if (!user) return <Navigate to="/" state={{ from: location }} replace />;
   return children;
 }
 
 export function RequireActive({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" replace />;
+  if (!user) return <Navigate to="/" replace />;
   if (user.role !== "PLAYER" || user.status !== "ACTIVE") return <Navigate to={routeForUser(user)} replace />;
   return children;
 }

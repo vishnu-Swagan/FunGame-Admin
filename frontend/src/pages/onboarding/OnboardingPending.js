@@ -21,7 +21,7 @@ export default function OnboardingPending() {
       setUser(data.user);
       if (data.status === "ACTIVE") {
         toast.success("You are approved! Welcome to Chakri.Casino.");
-        navigate("/home", { replace: true });
+        navigate("/", { replace: true });
       } else if (manual) {
         toast.info("Still under review — check back soon.");
       }
@@ -98,7 +98,7 @@ export default function OnboardingPending() {
               variant="ghost"
               onClick={() => {
                 logout();
-                navigate("/welcome");
+                navigate("/");
               }}
               className="w-full h-11 rounded-xl text-white/60 hover:text-white"
             >

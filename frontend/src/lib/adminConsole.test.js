@@ -35,8 +35,8 @@ test("browser portal routes use the canonical branded entries", () => {
   expect(loginPathForBrowserPath("/gk-admin-portal/security", false)).toBe("/Admin/login");
   expect(loginPathForBrowserPath("/distributor/reports", false)).toBe("/distributor/login");
   expect(loginPathForBrowserPath("/partner/reports", false)).toBe("/distributor/login");
-  expect(loginPathForBrowserPath("/Administrator", false)).toBe("/login");
-  expect(loginPathForBrowserPath("/home", false)).toBe("/login");
+  expect(loginPathForBrowserPath("/Administrator", false)).toBe("/?auth=login");
+  expect(loginPathForBrowserPath("/home", false)).toBe("/?auth=login");
 });
 
 describe("canonical admin browser navigation", () => {

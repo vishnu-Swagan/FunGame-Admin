@@ -158,9 +158,7 @@ test("manual-review registration submits both contacts and confirmed password wi
     password: "Strong-Password-9",
     password_confirmation: "Strong-Password-9",
   }));
-  expect(mockNavigate).toHaveBeenCalledWith("/login", {
-    state: { registrationSubmitted: true },
-  });
+  expect(mockNavigate).toHaveBeenCalledWith("/?auth=login&registered=1");
   await act(async () => root.unmount());
 });
 

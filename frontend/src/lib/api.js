@@ -98,7 +98,7 @@ function failover() {
   return failoverInFlight;
 }
 
-const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH, DISTRIBUTOR_LOGIN_PATH];
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH, DISTRIBUTOR_LOGIN_PATH]; // legacy auth paths still public while they redirect to `/`
 
 function attachAccessToken(config) {
   const token = localStorage.getItem("fg_token");
@@ -217,7 +217,7 @@ export async function downloadCsv(path, fallbackName) {
 }
 
 export function routeForUser(user) {
-  if (!user) return "/welcome";
+  if (!user) return "/";
   if (user.role === "ADMIN") return "/Admin/dashboard";
   // A partner has no onboarding and no wallet — the account is provisioned
   // complete, so the status ladder below does not apply to them.
@@ -237,8 +237,8 @@ export function routeForUser(user) {
     case "SUSPENDED":
       return "/onboarding/pending";
     case "ACTIVE":
-      return "/home";
+      return "/";
     default:
-      return "/welcome";
+      return "/";
   }
 }

@@ -123,7 +123,7 @@ export function loginPathForBrowserPath(pathname, isAdminConsole = IS_ADMIN_CONS
   const path = String(pathname || "");
   if (canonicalAdminPathForBrowserPath(path)) return ADMIN_LOGIN_PATH;
   if (isDistributorBrowserPath(path)) return DISTRIBUTOR_LOGIN_PATH;
-  return isAdminConsole ? ADMIN_LOGIN_PATH : "/login";
+  return isAdminConsole ? ADMIN_LOGIN_PATH : "/?auth=login";
 }
 
 // A newly opened console has no remembered failover host. Route it to the

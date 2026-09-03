@@ -124,6 +124,6 @@ test("password reset reuses the same phone vs email split", async () => {
     new_password: "New-Password-9",
   });
   expect(mockPost.mock.calls[1][1]).not.toHaveProperty("email");
-  expect(mockNavigate).toHaveBeenCalledWith("/login");
+  expect(mockNavigate).toHaveBeenCalledWith("/?auth=login");
   await act(async () => root.unmount());
 });

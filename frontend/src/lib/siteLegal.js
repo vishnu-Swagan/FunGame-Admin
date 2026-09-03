@@ -21,14 +21,14 @@ export function footerNav(signedIn) {
   return {
     Play: signedIn
       ? [
-          { to: "/home", label: "Home" },
+          { to: "/", label: "Home" },
           { to: "/games", label: "Games" },
           { to: "/chips", label: "Chips" },
           { to: "/chips/activity", label: "History" },
           { to: "/support", label: "Support" },
         ]
       : [
-          { to: "/welcome", label: "Welcome" },
+          { to: "/", label: "Welcome" },
           { to: "/register", label: "Create account" },
           { to: "/login", label: "Log in" },
           { to: "/about", label: "About" },
