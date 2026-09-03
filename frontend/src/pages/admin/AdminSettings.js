@@ -134,10 +134,16 @@ export default function AdminSettings() {
           ))}
         </div>
         {telesign?.usage && (
-          <div className="grid grid-cols-3 gap-2 border-t border-white/8 pt-3 text-center">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 border-t border-white/8 pt-3 text-center">
             <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.screened_players}</p><p className="text-[10px] text-white/45">Screened players</p></div>
             <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.flagged_players}</p><p className="text-[10px] text-white/45">Risk flags</p></div>
             <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.sms_verify_challenges}</p><p className="text-[10px] text-white/45">Verification activity</p></div>
+            {telesign.usage.sms_verify_failed != null && (
+              <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.sms_verify_failed}</p><p className="text-[10px] text-white/45">Failed sends</p></div>
+            )}
+            {telesign.usage.sms_verify_accepted != null && (
+              <div><p className="text-lg font-extrabold tabular-nums">{telesign.usage.sms_verify_accepted}</p><p className="text-[10px] text-white/45">Accepted sends</p></div>
+            )}
           </div>
         )}
         <p className="text-[11px] leading-relaxed text-white/45">

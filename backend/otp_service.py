@@ -573,11 +573,16 @@ class TelesignSmsAdapter:
             }
         except telesign_service.TelesignServiceError as exc:
             # Metadata only: the code, key and recipient never enter logs.
+            classified = telesign_service.classify_sms_verify_error(exc)
             logger.error(
-                'Telesign OTP delivery failed: reason=%s metadata=%s',
-                exc.reason, exc.metadata,
+                'Telesign OTP delivery failed: reason=%s classified=%s metadata=%s',
+                exc.reason, classified, exc.metadata,
             )
-            return {'sent': False, 'provider': 'telesign', 'error': exc.reason}
+            return {
+                'sent': False,
+                'provider': 'telesign',
+                'error': classified,
+            }
 
 
 class TelesignVerifyAdapter:
@@ -632,14 +637,15 @@ class TelesignVerifyAdapter:
                     identity.value, code, purpose,
                 )
             except telesign_service.TelesignServiceError as exc:
+                classified = telesign_service.classify_sms_verify_error(exc)
                 logger.error(
-                    'Telesign SMS Verify fallback failed: reason=%s metadata=%s',
-                    exc.reason, exc.metadata,
+                    'Telesign SMS Verify fallback failed: reason=%s classified=%s metadata=%s',
+                    exc.reason, classified, exc.metadata,
                 )
                 return {
                     'sent': False,
                     'provider': 'telesign',
-                    'error': exc.reason,
+                    'error': classified,
                 }
             return {
                 'sent': True,
@@ -864,6 +870,14 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
             status_code=429, retry_after=OTP_RESEND_COOLDOWN_SECONDS,
         ) from exc
 
+    logger.info(
+        'OTP send starting: purpose=%s channel=%s adapter_setting=%s',
+        purpose,
+        identity.channel,
+        (
+            'OTP_EMAIL_ADAPTER' if identity.channel == 'EMAIL' else 'OTP_SMS_ADAPTER'
+        ),
+    )
     try:
         delivery = await delivery_adapter(identity.channel).send(identity, code, purpose)
         if (
@@ -893,12 +907,21 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         logger.error('OTP delivery adapter failed: %s', type(exc).__name__)
         delivery = {'sent': False, 'provider': 'unknown', 'error': type(exc).__name__}
     if not delivery.get('sent'):
+        delivery_error = str(delivery.get('error') or 'not_sent')[:80]
+        logger.error(
+            'OTP delivery failed: provider=%s error=%s purpose=%s channel=%s',
+            delivery.get('provider', 'unknown'),
+            delivery_error,
+            purpose,
+            identity.channel,
+        )
         await database.otp_challenges.update_one(
             {'id': challenge_id, 'active': True},
             {'$set': {
                 'active': False,
                 'status': 'DELIVERY_FAILED',
                 'delivery_provider': delivery.get('provider', 'unknown'),
+                'delivery_error': delivery_error,
                 'updated_at': _now(),
             }},
         )
@@ -922,6 +945,13 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
     await database.otp_challenges.update_one(
         {'id': challenge_id, 'active': True},
         {'$set': delivery_fields},
+    )
+    logger.info(
+        'OTP send accepted: purpose=%s channel=%s provider=%s status_code=%s',
+        purpose,
+        identity.channel,
+        delivery_provider,
+        initial_status_code if type(initial_status_code) is int else 'none',
     )
     public_channel = 'PHONE' if identity.channel == 'SMS' else 'EMAIL'
     destination = masked_destination(identity)
