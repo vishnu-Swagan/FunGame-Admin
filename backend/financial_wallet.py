@@ -2281,9 +2281,11 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
         )
         raise FinancialError("BANK_DETAILS_NOT_FOUND", "Bank details are unavailable.", 409)
     beneficiary_id = method.get("provider_beneficiary_id")
+    details: dict[str, str] = {}
     try:
-        if not beneficiary_id:
+        if not beneficiary_id or getattr(provider, "name", "") == "sgpay24":
             details = decrypt_payout_details(method)
+        if not beneficiary_id:
             beneficiary = await provider.create_beneficiary(
                 bank_details=details, idempotency_key=f"beneficiary:{method['id']}",
             )
@@ -2312,11 +2314,28 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
             "AUTO_WITHDRAWALS_PAUSED", "Automatic withdrawals are paused.", 409,
         )
     try:
-        submitted = await provider.submit_payout(
-            withdrawal_id=withdrawal_id, provider_beneficiary_id=beneficiary_id,
-            amount_paise=int(row["amount_paise"]), currency=CURRENCY,
-            idempotency_key=f"withdrawal:{withdrawal_id}",
-        )
+        payout_kwargs = {
+            "withdrawal_id": withdrawal_id,
+            "provider_beneficiary_id": beneficiary_id,
+            "amount_paise": int(row["amount_paise"]),
+            "currency": CURRENCY,
+            "idempotency_key": f"withdrawal:{withdrawal_id}",
+        }
+        if getattr(provider, "name", "") == "sgpay24":
+            user = await db.users.find_one({"id": row["user_id"]}, {
+                "_id": 0, "email": 1, "email_normalized": 1,
+                "phone": 1, "phone_normalized": 1,
+            }) or {}
+            payout_kwargs.update(
+                account_holder_name=details.get("account_holder_name") or "",
+                account_number=details.get("account_number") or "",
+                ifsc_code=details.get("ifsc_code") or "",
+                payout_identifier=details.get("payout_identifier") or "",
+                bank_name=details.get("bank_name") or "",
+                phone=str(user.get("phone_normalized") or user.get("phone") or ""),
+                email=str(user.get("email_normalized") or user.get("email") or ""),
+            )
+        submitted = await provider.submit_payout(**payout_kwargs)
     except Exception as exc:  # noqa: BLE001 - unknown outcome must never release funds
         await db.withdrawal_requests.update_one(
             {"id": withdrawal_id, "status": {"$in": ["SUBMITTING", "SUBMISSION_UNKNOWN"]}},

@@ -103,6 +103,7 @@ class WagerPromoTests(unittest.IsolatedAsyncioTestCase):
             account_holder_name="Test Player",
             account_number="12345678901",
             ifsc_code="HDFC0000001",
+            bank_name="HDFC Bank",
             payout_identifier="",
             phone="+919876543210",
             email="player@example.com",
@@ -113,9 +114,16 @@ class WagerPromoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(called.kwargs.get("as_query"), True)
         sent = called.args[1]
         self.assertNotIn("upi_id", sent)
+        self.assertNotIn("callback_url", sent)
+        self.assertNotIn("notify_url", sent)
         self.assertEqual(sent["phone"], "9876543210")
         self.assertEqual(sent["email"], "player@example.com")
-        self.assertEqual(sent["account_number"], "12345678901")
+        self.assertEqual(sent["mid"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
+        self.assertEqual(sent["account"], "12345678901")
+        self.assertEqual(sent["ifsc_no"], "HDFC0000001")
+        self.assertEqual(sent["bank_name"], "HDFC Bank")
+        self.assertEqual(sent["benifeciryname"], "Test Player")
+        self.assertEqual(sent["redirect_url"], PROVIDER_ENV["PAYMENT_RETURN_URL"])
 
 
 if __name__ == "__main__":
