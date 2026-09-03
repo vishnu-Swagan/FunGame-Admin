@@ -73,6 +73,18 @@ test("logged-out frontpage exposes login register and forgot without leaving /",
   expect(container.querySelector('[data-testid="frontpage"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="welcome-login-button"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="welcome-register-button"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="welcome-play-now-button"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="welcome-all-games-button"]')).not.toBeNull();
+
+  await act(async () => {
+    container.querySelector('[data-testid="welcome-play-now-button"]').click();
+  });
+  expect(mockNavigate).toHaveBeenCalledWith({ pathname: "/", search: "?auth=login" }, { replace: true });
+
+  await act(async () => {
+    container.querySelector('[data-testid="welcome-all-games-button"]').click();
+  });
+  expect(mockNavigate).toHaveBeenCalledWith({ pathname: "/", search: "?auth=login" }, { replace: true });
 
   await act(async () => {
     container.querySelector('[data-testid="welcome-login-button"]').click();

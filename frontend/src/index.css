@@ -394,6 +394,46 @@ summary:focus-visible {
     display: none;
 }
 
+/* Lobby game-card PLAY NOW CTA — gold pill with a looping nudge. */
+@keyframes fg-play-now-nudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(3px); }
+}
+.fg-play-now-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+    margin-top: 0.5rem;
+    padding: 0.32rem 0.55rem 0.32rem 0.62rem;
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-family: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+    animation: fg-play-now-nudge 1.7s ease-in-out infinite;
+}
+.fg-play-now-cta b {
+    font-weight: 800;
+    font-style: normal;
+}
+.fg-play-now-cta__arrow {
+    width: 0.85em;
+    height: 0.85em;
+    flex: 0 0 auto;
+    stroke-width: 3;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fg-play-now-cta {
+        animation: none;
+    }
+}
+
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;

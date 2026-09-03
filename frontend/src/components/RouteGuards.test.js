@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { ADMIN_PERMISSIONS, hasPermission, isActiveAdmin } from "../lib/adminPermissions";
 import { useAuth } from "@/context/AuthContext";
-import { RequireAdmin } from "./RouteGuards";
+import { RequireActive, RequireAdmin } from "./RouteGuards";
 
 jest.mock("@/context/AuthContext", () => ({ useAuth: jest.fn() }));
 jest.mock("react-router-dom", () => ({
@@ -95,5 +95,20 @@ test("a signed-out same-origin /Admin visit opens the admin login front door", a
   expect(container.querySelector("[data-navigate-to]")?.getAttribute("data-navigate-to"))
     .toBe("/Admin");
   expect(container.textContent).not.toContain("/welcome");
+  await act(async () => root.unmount());
+});
+
+test("a signed-out play route opens the unified login page", async () => {
+  useAuth.mockReturnValue({ user: null, loading: false });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(<RequireActive><span>private play</span></RequireActive>);
+  });
+
+  expect(container.querySelector("[data-navigate-to]")?.getAttribute("data-navigate-to"))
+    .toBe("/?auth=login");
+  expect(container.textContent).not.toContain("private play");
   await act(async () => root.unmount());
 });
