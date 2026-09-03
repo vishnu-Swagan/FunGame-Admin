@@ -102,20 +102,20 @@ async def enable_all_games_for_launch():
     result = await reconcile_game_availability()
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!'},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. 11 reviewed games are approved and the rest of the catalogue is coming soon.'}},
     )
     await db.announcements.update_one(
         {'title': '18 games are on the way'},
         {'$set': {
-            'title': 'Ten reviewed games are live',
-            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': '11 reviewed games are approved',
+            'body': 'The reviewed set contains 11 games. Operators may keep any game visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'Ten reviewed games are live',
-            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': '11 reviewed games are approved',
+            'body': 'The reviewed set contains 11 games. Operators may keep any game visible as Coming Soon.',
         }},
     )
     logger.info(
@@ -125,8 +125,8 @@ async def enable_all_games_for_launch():
     return result['enabled'] + result['coming_soon']
 
 ANNOUNCEMENTS = [
-    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.", "pinned": True},
-    {"title": "Ten reviewed games are live", "body": "Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.", "pinned": False},
+    {"title": "Welcome to Chakri.Casino!", "body": "Chakri.Casino is a play-chip-only amusement platform. 11 reviewed games are approved and the rest of the catalogue is coming soon.", "pinned": True},
+    {"title": "11 reviewed games are approved", "body": "The reviewed set contains 11 games. Operators may keep any game visible as Coming Soon.", "pinned": False},
     {"title": "How play chips work", "body": "Play chips cannot be purchased, redeemed or transferred. Request chips from your Chips wallet and an operator will review your request.", "pinned": False},
 ]
 
@@ -254,13 +254,13 @@ async def run_seed():
     await db.announcements.update_one(
         {'title': 'All 20 games are live'},
         {'$set': {
-            'title': 'Ten reviewed games are live',
-            'body': 'Ten reviewed games are available now. Every other catalogue game remains visible as Coming Soon.',
+            'title': '11 reviewed games are approved',
+            'body': 'The reviewed set contains 11 games. Operators may keep any game visible as Coming Soon.',
         }},
     )
     await db.announcements.update_one(
         {'title': 'Welcome to Chakri.Casino!', 'body': {'$regex': 'live games'}},
-        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. Ten reviewed games are live and the rest of the catalogue is coming soon.'}},
+        {'$set': {'body': 'Chakri.Casino is a play-chip-only amusement platform. 11 reviewed games are approved and the rest of the catalogue is coming soon.'}},
     )
 
     # Indexes (idempotent)

@@ -309,7 +309,7 @@ async def lifespan(app: FastAPI):
     keepalive = asyncio.create_task(_aviator_keepalive())
     financial_worker = asyncio.create_task(_financial_worker())
     logger.info(
-        'Chakri.Casino ready - ten reviewed games available; '
+        'Chakri.Casino ready - 11 reviewed games approved; '
         'remaining catalogue coming soon'
     )
     yield
@@ -318,7 +318,13 @@ async def lifespan(app: FastAPI):
     client.close()
 
 
-app = FastAPI(title='Chakri.Casino API', version='1.0.0', lifespan=lifespan)
+_PRODUCTION = (os.environ.get('APP_ENV') or '').strip().lower() == 'production'
+app = FastAPI(
+    title='Chakri.Casino API', version='1.0.0', lifespan=lifespan,
+    docs_url=None if _PRODUCTION else '/docs',
+    redoc_url=None if _PRODUCTION else '/redoc',
+    openapi_url=None if _PRODUCTION else '/openapi.json',
+)
 
 api_router = APIRouter(prefix='/api')
 

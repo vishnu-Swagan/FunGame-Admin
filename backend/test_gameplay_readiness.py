@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import sys
 import unittest
@@ -22,6 +23,26 @@ import server  # noqa: E402
 
 
 class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
+    def test_api_docs_are_disabled_only_in_production(self):
+        original = os.environ.get("APP_ENV")
+        try:
+            os.environ["APP_ENV"] = "production"
+            importlib.reload(server)
+            self.assertIsNone(server.app.docs_url)
+            self.assertIsNone(server.app.redoc_url)
+            self.assertIsNone(server.app.openapi_url)
+            os.environ["APP_ENV"] = "test"
+            importlib.reload(server)
+            self.assertEqual(server.app.docs_url, "/docs")
+            self.assertEqual(server.app.redoc_url, "/redoc")
+            self.assertEqual(server.app.openapi_url, "/openapi.json")
+        finally:
+            if original is None:
+                os.environ.pop("APP_ENV", None)
+            else:
+                os.environ["APP_ENV"] = original
+            importlib.reload(server)
+
     async def asyncSetUp(self):
         self.original_ready = server._GAMEPLAY_READY
         self.original_lock = server._GAMEPLAY_READINESS_LOCK
