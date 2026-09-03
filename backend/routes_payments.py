@@ -24,6 +24,7 @@ from payment_providers import (
     ProviderEvent,
     ProviderRequestError,
     WebhookVerificationError,
+    datetime_to_iso_utc,
     load_payment_provider,
 )
 
@@ -657,7 +658,7 @@ async def provider_webhook(provider_name: str, request: Request):
             amount_paise=authoritative.amount_paise,
             currency=authoritative.currency,
             provider_reference=authoritative.provider_reference,
-            occurred_at=None,
+            occurred_at=datetime_to_iso_utc(getattr(authoritative, "occurred_at", None)),
             data={"authenticated_status_lookup": True},
         )
     try:

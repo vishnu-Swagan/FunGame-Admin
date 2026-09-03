@@ -10,7 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
-import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
+import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, paymentDisplayAt, rupeesToPaise } from "@/lib/walletUtils";
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 
 const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
@@ -208,7 +208,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const activity = useMemo(() => [
     ...deposits.map((item) => ({ item, kind: "deposit" })),
     ...withdrawals.map((item) => ({ item, kind: "withdrawal" })),
-  ].sort((left, right) => new Date(right.item.created_at || 0) - new Date(left.item.created_at || 0)), [deposits, withdrawals]);
+  ].sort((left, right) => new Date(paymentDisplayAt(right.item) || 0) - new Date(paymentDisplayAt(left.item) || 0)), [deposits, withdrawals]);
 
   const changeTab = (next) => {
     setTab(next);

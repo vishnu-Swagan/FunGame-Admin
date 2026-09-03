@@ -1,5 +1,10 @@
 export const TERMINAL_DEPOSIT_STATUSES = new Set(["CREDITED", "FAILED", "EXPIRED", "REFUNDED", "RECONCILIATION_REQUIRED"]);
 
+const TERMINAL_PAYMENT_STATUSES = new Set([
+  "CREDITED", "PAID", "FAILED", "EXPIRED", "REFUNDED", "REJECTED",
+  "CANCELLED", "APPROVED", "RECONCILIATION_REQUIRED",
+]);
+
 export function formatInrPaise(paise) {
   const value = Number.isFinite(Number(paise)) ? Number(paise) : 0;
   return new Intl.NumberFormat("en-IN", {
@@ -66,4 +71,35 @@ export function userWithdrawalStatus(status) {
   if (value === "FAILED") return "Failed";
   if (value === "CANCELLED") return "Cancelled";
   return value.replaceAll("_", " ");
+}
+
+/**
+ * Timestamp shown for a payment row. Completed payments prefer the SgPay
+ * capture clock (provider_occurred_at / paid_at / occurred_at), then
+ * resolved_at. Pending rows keep checkout created_at.
+ */
+export function paymentDisplayAt(item) {
+  if (!item || typeof item !== "object") return null;
+  const status = String(item.status || item.internal_status || "").toUpperCase();
+  const provider = item.provider_occurred_at || null;
+  const resolved = item.resolved_at || item.credited_at || null;
+  const displayed = item.paid_at || item.occurred_at || null;
+  const created = item.created_at || null;
+  if (TERMINAL_PAYMENT_STATUSES.has(status)) {
+    return provider || resolved || displayed || created;
+  }
+  return created || provider || resolved || displayed;
+}
+
+/** Format a payment instant in Asia/Kolkata with an explicit IST label. */
+export function formatPaymentTime(value) {
+  if (value == null || value === "") return "—";
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  const formatted = parsed.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  return /IST/i.test(formatted) ? formatted : `${formatted} IST`;
 }

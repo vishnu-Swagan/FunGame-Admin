@@ -30,7 +30,9 @@ from payment_providers import (
     PaymentProvider,
     ProviderConfigurationError,
     ProviderRequestError,
+    datetime_to_iso_utc,
     load_payment_provider,
+    parse_provider_datetime,
 )
 
 
@@ -60,6 +62,51 @@ OPERATOR_LIMITS = {
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_utc(value) -> datetime | None:
+    """Coerce stored or provider timestamps to aware UTC. Naive values are UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return parse_provider_datetime(value)
+
+
+def isoformat_utc(value) -> str | None:
+    dt = as_utc(value)
+    return datetime_to_iso_utc(dt) if dt is not None else None
+
+
+_TERMINAL_PAYMENT_STATUSES = {
+    "CREDITED", "PAID", "FAILED", "EXPIRED", "REFUNDED", "REJECTED",
+    "CANCELLED", "APPROVED", "RECONCILIATION_REQUIRED",
+}
+
+
+def payment_display_at(row: Mapping[str, Any]) -> datetime | None:
+    """Capture time when known; checkout created_at only for pending rows."""
+    status = str(row.get("status") or row.get("internal_status") or "").upper()
+    provider = as_utc(row.get("provider_occurred_at"))
+    resolved = as_utc(row.get("resolved_at") or row.get("paid_at") or row.get("credited_at"))
+    created = as_utc(row.get("created_at"))
+    if status in _TERMINAL_PAYMENT_STATUSES:
+        return provider or resolved or created
+    return created or provider or resolved
+
+
+def provider_occurred_update(
+    authoritative: DepositStatus, existing: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist the provider capture time once; never overwrite with reconcile time."""
+    occurred = as_utc(getattr(authoritative, "occurred_at", None))
+    if occurred is None:
+        return {}
+    if as_utc((existing or {}).get("provider_occurred_at")) is not None:
+        return {}
+    return {"provider_occurred_at": occurred}
 
 
 def _env_true(name: str, environ: Mapping[str, str] | None = None) -> bool:
@@ -227,8 +274,11 @@ def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
             and str(row.get("status") or "").upper() in {"CREATED", "PENDING"}
         ),
         "utr_submitted": bool(row.get("utr_claim")) or bool(row.get("utr_submitted")),
-        "created_at": row.get("created_at"),
-        "resolved_at": row.get("resolved_at"),
+        "created_at": isoformat_utc(row.get("created_at")),
+        "resolved_at": isoformat_utc(row.get("resolved_at")),
+        "provider_occurred_at": isoformat_utc(row.get("provider_occurred_at")),
+        "paid_at": isoformat_utc(payment_display_at(row)),
+        "occurred_at": isoformat_utc(payment_display_at(row)),
         "resolved_by": row.get("resolved_by"),
         "payout_status": row.get("payout_status"),
         "payout_ref": row.get("payout_ref"),
@@ -244,12 +294,11 @@ def _chips_for_paise(amount_paise: int) -> int:
 
 
 def _created_sort_key(row: Mapping[str, Any]) -> float:
-    value = row.get("created_at")
+    value = payment_display_at(row)
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
         return value.timestamp()
-    return 0.0
+    parsed = as_utc(row.get("created_at"))
+    return parsed.timestamp() if parsed else 0.0
 
 
 def sort_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -269,6 +318,10 @@ def as_player_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         "utr_submitted": dto["utr_submitted"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
+        "resolved_at": dto["resolved_at"],
+        "provider_occurred_at": dto["provider_occurred_at"],
+        "paid_at": dto["paid_at"],
+        "occurred_at": dto["occurred_at"],
     }
 
 
@@ -289,6 +342,10 @@ def as_player_withdrawal(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": dto["source"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
+        "resolved_at": dto["resolved_at"],
+        "provider_occurred_at": dto["provider_occurred_at"],
+        "paid_at": dto["paid_at"],
+        "occurred_at": dto["occurred_at"],
     }
 
 
@@ -821,9 +878,13 @@ async def settle_hosted_deposit(
         )
         return {"id": request_id, "status": "PENDING"}
     if status in {"FAILED", "EXPIRED"}:
+        current = await db[COLLECTION].find_one({"id": request_id, "source": UPI_SOURCE})
         await db[COLLECTION].update_one(
             {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
-            {"$set": {"status": status, "resolved_at": utcnow(), "updated_at": utcnow()}},
+            {"$set": {
+                "status": status, "resolved_at": utcnow(), "updated_at": utcnow(),
+                **provider_occurred_update(authoritative, current),
+            }},
         )
         return {"id": request_id, "status": status}
     if status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
@@ -860,7 +921,10 @@ async def settle_hosted_deposit(
         ):
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE},
-                {"$set": {"status": "RECONCILIATION_REQUIRED", "updated_at": utcnow()}},
+                {"$set": {
+                    "status": "RECONCILIATION_REQUIRED", "updated_at": utcnow(),
+                    **provider_occurred_update(authoritative, current),
+                }},
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
@@ -892,7 +956,11 @@ async def settle_hosted_deposit(
         if duplicate_reference:
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE},
-                {"$set": {"status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR", "updated_at": utcnow()}},
+                {"$set": {
+                    "status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR",
+                    "updated_at": utcnow(),
+                    **provider_occurred_update(authoritative, current),
+                }},
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
@@ -916,6 +984,7 @@ async def settle_hosted_deposit(
                         "last_error": f"ELIGIBILITY_{(exc.detail or {}).get('code', 'BLOCKED')}",
                         "resolved_at": utcnow(),
                         "updated_at": utcnow(),
+                        **provider_occurred_update(authoritative, current),
                     }},
                     **kwargs,
                 )
@@ -949,6 +1018,7 @@ async def settle_hosted_deposit(
                 "resolved_at": utcnow(),
                 "resolved_by": actor,
                 "updated_at": utcnow(),
+                **provider_occurred_update(authoritative, current),
             }},
             **kwargs,
         )
@@ -1078,6 +1148,7 @@ async def settle_admin_review_deposit(
             "resolved_by": actor,
             "last_error": None,
             "updated_at": utcnow(),
+            **provider_occurred_update(authoritative, current),
         }},
         return_document=ReturnDocument.AFTER,
     )

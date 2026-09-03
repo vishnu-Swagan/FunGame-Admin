@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Optional, Protocol
 
@@ -58,6 +59,116 @@ class DepositSession:
     status: str = "PENDING"
 
 
+# Naive SgPay timestamps are treated as India Standard Time (no DST).
+IST = timezone(timedelta(hours=5, minutes=30))
+
+# Capture-like keys first. created_at is last so checkout-start is never
+# preferred over an explicit paid/updated/date field when both exist.
+_PROVIDER_OCCURRED_KEYS = (
+    "paid_at",
+    "captured_at",
+    "completed_at",
+    "settled_at",
+    "txn_date",
+    "transaction_date",
+    "payment_date",
+    "txn_time",
+    "date",
+    "datetime",
+    "timestamp",
+    "occurred_at",
+    "updated_at",
+    "created_at",
+)
+
+
+def parse_provider_datetime(value: Any) -> Optional[datetime]:
+    """Parse a provider timestamp and return timezone-aware UTC.
+
+    Timezone-aware values keep their offset. Naive wall-clock values from
+    Indian gateways are treated as Asia/Kolkata. Unparseable input is None.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    dt: Optional[datetime] = None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, (int, float)):
+        stamp = float(value)
+        if stamp > 1e12:
+            stamp /= 1000.0
+        if not 1e9 <= stamp < 1e11:
+            return None
+        dt = datetime.fromtimestamp(stamp, tz=timezone.utc)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d{10,13}", text):
+            return parse_provider_datetime(int(text))
+        normalized = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except ValueError:
+            dt = None
+            for fmt in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S.%f",
+                "%d-%m-%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S",
+                "%Y/%m/%d %H:%M:%S",
+                "%d-%m-%Y %H:%M",
+                "%Y-%m-%d",
+            ):
+                try:
+                    dt = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    continue
+            if dt is None:
+                return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(timezone.utc)
+
+
+def datetime_to_iso_utc(value: Any) -> Optional[str]:
+    """Serialize a datetime (or parseable string) as ISO-8601 UTC with Z."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    else:
+        dt = parse_provider_datetime(value)
+    if dt is None:
+        return None
+    text = dt.isoformat(timespec="milliseconds")
+    if text.endswith("+00:00"):
+        text = text[:-6] + "Z"
+    return text
+
+
+def extract_provider_occurred_at(*payloads: Any) -> Optional[datetime]:
+    """Return the first parseable capture timestamp from an allowlist of keys."""
+    for payload in payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        sources = [payload]
+        nested = payload.get("data")
+        if isinstance(nested, Mapping):
+            sources.append(nested)
+        for source in sources:
+            for key in _PROVIDER_OCCURRED_KEYS:
+                if key not in source:
+                    continue
+                parsed = parse_provider_datetime(source.get(key))
+                if parsed is not None:
+                    return parsed
+    return None
+
+
 @dataclass(frozen=True)
 class DepositStatus:
     """Authoritative provider view used for server-side reconciliation.
@@ -71,6 +182,7 @@ class DepositStatus:
     amount_paise: Optional[int]
     currency: Optional[str]
     provider_reference: Optional[str]
+    occurred_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +208,7 @@ class PayoutStatus:
     idempotency_key: Optional[str]
     provider_beneficiary_id: Optional[str]
     provider_reference: Optional[str]
+    occurred_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -745,6 +858,7 @@ class ConfiguredRestPaymentProvider:
             self._authoritative_amount(self._field("get_payment_status", response, "amount_paise")),
             self._authoritative_currency(self._field("get_payment_status", response, "currency")),
             str(self._field("get_payment_status", response, "provider_reference")),
+            extract_provider_occurred_at(response),
         )
 
     async def create_beneficiary(self, *, bank_details: Mapping[str, str], idempotency_key: str) -> Beneficiary:
@@ -778,6 +892,7 @@ class ConfiguredRestPaymentProvider:
             str(self._field(operation, response, "idempotency_key")),
             str(self._field(operation, response, "provider_beneficiary_id")),
             str(self._field(operation, response, "provider_reference")),
+            extract_provider_occurred_at(response),
         )
 
     async def cancel_payout(self, provider_payout_id: str) -> str:
@@ -1190,7 +1305,10 @@ class SgPay24PaymentProvider:
         if status == "PAID" and not re.fullmatch(r"[A-Za-z0-9_-]{4,80}", utr):
             raise ProviderRequestError("Provider success status omitted a valid UTR")
         reference = utr or (f"sgpay24:{order_id}:failed" if status == "FAILED" else None)
-        return DepositStatus(status, amount_paise, "INR", reference)
+        return DepositStatus(
+            status, amount_paise, "INR", reference,
+            extract_provider_occurred_at(response),
+        )
 
     def _payout_endpoint(self) -> str:
         extra = str(self._env.get("SGPAY24_PAYOUT_PATH") or "").strip()
@@ -1368,6 +1486,7 @@ class SgPay24PaymentProvider:
             idempotency_key=None,
             provider_beneficiary_id=None,
             provider_reference=str(response.get("utr") or order_id),
+            occurred_at=extract_provider_occurred_at(response),
         )
 
     async def cancel_payout(self, _provider_payout_id: str) -> str:
@@ -1420,6 +1539,7 @@ class SgPay24PaymentProvider:
         else:
             event_type = "deposit.failed" if status_code == 2 else "deposit.paid"
         notice_key = f"{order_id}:{transaction_id}:{status_code}:{utr}:{event_type}"
+        occurred = extract_provider_occurred_at(payload)
         return ProviderEvent(
             event_id=f"sgpay24-notice:{hashlib.sha256(notice_key.encode()).hexdigest()[:40]}",
             event_type=event_type,
@@ -1427,7 +1547,7 @@ class SgPay24PaymentProvider:
             amount_paise=amount_paise,
             currency="INR",
             provider_reference=utr or None,
-            occurred_at=None,
+            occurred_at=datetime_to_iso_utc(occurred),
             data={
                 "requires_authenticated_status_lookup": True,
                 "transaction_id": transaction_id,

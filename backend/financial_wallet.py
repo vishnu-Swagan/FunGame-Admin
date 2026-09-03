@@ -39,7 +39,9 @@ from payment_providers import (
     PayoutStatus,
     ProviderConfigurationError,
     ProviderEvent,
+    datetime_to_iso_utc,
     load_payment_provider,
+    parse_provider_datetime,
 )
 
 
@@ -1339,13 +1341,44 @@ async def deactivate_payout_method(user_id: str, method_id: str) -> dict[str, An
     return await _run_transaction(work)
 
 
+_TERMINAL_PAYMENT_STATUSES = {
+    "CREDITED", "PAID", "FAILED", "EXPIRED", "REFUNDED", "REJECTED",
+    "CANCELLED", "APPROVED", "RECONCILIATION_REQUIRED",
+}
+
+
+def _iso_payment_time(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return datetime_to_iso_utc(dt)
+    return datetime_to_iso_utc(parse_provider_datetime(value) or value)
+
+
+def _payment_display_at(doc: Mapping[str, Any]) -> Any:
+    status = str(doc.get("status") or doc.get("internal_status") or "").upper()
+    provider = doc.get("provider_occurred_at")
+    resolved = doc.get("resolved_at") or doc.get("paid_at") or doc.get("credited_at")
+    created = doc.get("created_at")
+    if status in _TERMINAL_PAYMENT_STATUSES:
+        return provider or resolved or created
+    return created or provider or resolved
+
+
 def deposit_dto(doc: Mapping[str, Any]) -> dict[str, Any]:
+    display = _payment_display_at(doc)
     return {
         "id": doc.get("id"), "status": doc.get("status"),
         "amount_paise": int(doc.get("amount_paise", 0)), "currency": CURRENCY,
         "chips": int(doc.get("chips", 0)), "rate": doc.get("rate_snapshot"),
         "provider": doc.get("provider"),
-        "created_at": doc.get("created_at"), "updated_at": doc.get("updated_at"),
+        "created_at": _iso_payment_time(doc.get("created_at")),
+        "updated_at": _iso_payment_time(doc.get("updated_at")),
+        "resolved_at": _iso_payment_time(doc.get("resolved_at") or doc.get("credited_at")),
+        "provider_occurred_at": _iso_payment_time(doc.get("provider_occurred_at")),
+        "paid_at": _iso_payment_time(display),
+        "occurred_at": _iso_payment_time(display),
     }
 
 
@@ -1589,8 +1622,12 @@ async def _credit_deposit(
             {"id": current["id"], "status": {"$ne": "CREDITED"}},
             {"$set": {
                 "status": "CREDITED", "provider_reference": payment_reference,
-                "wallet_operation_id": movement["operation_id"], "paid_at": now(),
+                "wallet_operation_id": movement["operation_id"],
+                "paid_at": parse_provider_datetime(event.occurred_at) or now(),
                 "credited_at": now(), "updated_at": now(),
+                **({} if current.get("provider_occurred_at") or not event.occurred_at else {
+                    "provider_occurred_at": parse_provider_datetime(event.occurred_at) or event.occurred_at,
+                }),
                 "limit_reservation_status": "CONSUMED",
                 "limit_exception_review": bool(limit_violations),
                 "next_reconcile_at": now() + timedelta(
@@ -1661,12 +1698,18 @@ async def _credit_deposit(
 def withdrawal_dto(doc: Mapping[str, Any], admin: bool = False) -> dict[str, Any]:
     internal = str(doc.get("status", "REQUESTED"))
     display = internal if internal in WITHDRAWAL_TERMINAL else "PENDING"
+    shown = _payment_display_at({**doc, "status": internal})
     result = {
         "id": doc.get("id"), "status": display,
         "amount_chips": int(doc.get("amount_chips", 0)),
         "amount_paise": int(doc.get("amount_paise", 0)), "currency": CURRENCY,
         "bank_detail": doc.get("bank_detail_snapshot"),
-        "created_at": doc.get("created_at"), "updated_at": doc.get("updated_at"),
+        "created_at": _iso_payment_time(doc.get("created_at")),
+        "updated_at": _iso_payment_time(doc.get("updated_at")),
+        "resolved_at": _iso_payment_time(doc.get("resolved_at") or doc.get("paid_at")),
+        "provider_occurred_at": _iso_payment_time(doc.get("provider_occurred_at")),
+        "paid_at": _iso_payment_time(shown),
+        "occurred_at": _iso_payment_time(shown),
     }
     if admin:
         result.update({
@@ -2781,7 +2824,7 @@ async def reconcile_deposit(
             object_id=str(order["provider_order_id"]),
             amount_paise=authoritative.amount_paise, currency=authoritative.currency,
             provider_reference=authoritative.provider_reference,
-            occurred_at=None, data={},
+            occurred_at=datetime_to_iso_utc(getattr(authoritative, "occurred_at", None)), data={},
         )
         result = await _credit_deposit(order, event, actor=actor)
         if order.get("status") == "CREDITED":
