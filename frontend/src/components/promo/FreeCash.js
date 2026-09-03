@@ -8,8 +8,37 @@ import coinsImg from "@/assets/promo/free-cash-coins.webp";
 import fabImg from "@/assets/promo/free-cash-fab.webp";
 import "./freeCashArt.css";
 
+const RENDER_PROMO = "https://fungame-web.onrender.com/promo";
+
 function formatInr(paise) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 }).format((Number(paise) || 0) / 100);
+}
+
+function onChakriCasino() {
+  try {
+    return /(?:^|\.)chakri\.casino$/.test(window.location.hostname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function promoSrc(imported, filename) {
+  if (onChakriCasino()) return `${RENDER_PROMO}/${filename}`;
+  return imported;
+}
+
+function PromoImg({ imported, file, alt = "", ...props }) {
+  const fallback = `${RENDER_PROMO}/${file}`;
+  return (
+    <img
+      alt={alt}
+      {...props}
+      src={promoSrc(imported, file)}
+      onError={(event) => {
+        if (event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+      }}
+    />
+  );
 }
 
 export function ChestArt({ size = "hero" }) {
@@ -22,14 +51,14 @@ export function ChestArt({ size = "hero" }) {
   return (
     <div className="relative flex h-44 w-52 items-center justify-center" aria-hidden>
       <div className="pointer-events-none absolute left-1/2 top-8 h-28 w-28 -translate-x-1/2 rounded-full bg-amber-400/20 blur-3xl" />
-      <img
-        src={coinsImg}
-        alt=""
+      <PromoImg
+        imported={coinsImg}
+        file="free-cash-coins.png"
         className="chakri-coin-glow pointer-events-none absolute left-1/2 top-16 w-44 max-w-none"
       />
-      <img
-        src={chestImg}
-        alt=""
+      <PromoImg
+        imported={chestImg}
+        file="free-cash-chest.png"
         className="chakri-chest-bob relative z-10 h-40 w-40 object-contain drop-shadow-[0_12px_28px_rgba(16,185,129,0.55)]"
       />
     </div>
