@@ -45,6 +45,7 @@ jest.mock("@/lib/financialIntent", () => ({
 
 jest.mock("@/lib/api", () => ({
   errMsg: (error, fallback) => error?.message || fallback || "Request failed",
+  errCode: (error) => error?.code || error?.response?.data?.detail?.code || null,
 }));
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }), { virtual: true });
@@ -305,7 +306,8 @@ const OPERATOR_WALLET = {
       limits: {
         chips_per_inr: 1,
         min_deposit_paise: 10000,
-        max_deposit_paise: 10000000,
+        max_deposit_paise: 20000000,
+        max_daily_deposit_paise: 20000000,
         min_withdrawal_paise: 100000,
         min_withdrawal_chips: 1000,
         max_withdrawal_chips: 1000000,
@@ -383,6 +385,8 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
     minWithdrawalPaise: 100000,
   });
   expect(container.textContent).toContain("submitted for Admin review");
+  expect(container.textContent).toContain("Daily buy limit");
+  expect(container.textContent).toMatch(/2,00,000|200,000/);
   expect(container.textContent).not.toContain("Payment services are not active yet");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit buy request");

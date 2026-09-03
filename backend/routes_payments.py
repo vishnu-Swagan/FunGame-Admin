@@ -359,6 +359,19 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         money_config = None
     config_ready = money_config is not None
     operator = operator_rail.operator_status()
+    try:
+        used_daily = await operator_rail.used_buy_paise_today(user["id"])
+        daily_cap = int(operator["limits"]["max_daily_deposit_paise"])
+        operator = {
+            **operator,
+            "limits": {
+                **operator["limits"],
+                "used_daily_deposit_paise": used_daily,
+                "remaining_daily_deposit_paise": max(0, daily_cap - used_daily),
+            },
+        }
+    except Exception:
+        pass
     promo = None
     free_cash_state = None
     try:

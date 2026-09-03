@@ -104,7 +104,7 @@ services:
       - key: UPI_CHIPS_PER_INR
         sync: false          # required reviewed integer rate; each hosted order snapshots it
       - key: UPI_MAX_DAILY_DEPOSIT_PAISE
-        sync: false          # per-player cap; use 50000 (INR 500) for the one-payment canary
+        sync: false          # ignored; code hardcodes ₹2,00,000 per IST day for every player
       - key: PAYMENT_CREDENTIALS_MASTER_KEY
         sync: false          # AES-GCM key; configure in Render secrets only
       - key: PAYMENT_WEBHOOK_PUBLIC_BASE_URL

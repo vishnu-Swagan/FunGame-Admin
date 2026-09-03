@@ -588,62 +588,13 @@ async def _deposit_limit_violations(
     user_id: str, additional_chips: int, *, exclude_deposit_id: Optional[str] = None,
     session=None,
 ) -> list[dict[str, int | str]]:
-    """Evaluate credited plus reserved deposits against every active limit."""
-    kwargs = _session_kwargs(session)
-    limits = await db.player_limits.find(
-        {"user_id": user_id, "kind": compliance.DEPOSIT}, {"_id": 0}, **kwargs,
-    ).to_list(20)
-    violations: list[dict[str, int | str]] = []
-    checked_at = now()
-    for row in limits:
-        period = str(row.get("period") or "")
-        if period not in compliance.PERIODS:
-            # Corrupt/unknown compliance configuration must fail closed.
-            violations.append({
-                "period": period or "UNKNOWN", "limit": 0,
-                "used": 0, "reserved": 0, "remaining": 0,
-            })
-            continue
-        effective_at = _parse_optional_datetime(row.get("pending_effective_from"))
-        cap = row.get("pending_amount") if effective_at and effective_at <= checked_at else row.get("amount")
-        if cap is None:
-            continue
-        cap = int(cap)
-        since = compliance.window_start(period, checked_at)
-        credited = await _sum_chips(db.chip_transactions, [
-            {"$match": {
-                "user_id": user_id, "kind": ledger.DEPOSIT,
-                "gaming_day": {"$gte": since},
-            }},
-            {"$group": {"_id": None, "chips": {"$sum": "$amount"}}},
-        ], session=session)
-        held_query: dict[str, Any] = {
-            "user_id": user_id, "limit_reservation_status": "HELD",
-            "reservation_gaming_day": {"$gte": since},
-        }
-        if exclude_deposit_id:
-            held_query["id"] = {"$ne": exclude_deposit_id}
-        reserved = await _sum_chips(db.deposit_orders, [
-            {"$match": held_query},
-            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
-        ], session=session)
-        hosted_reserved = await _sum_chips(db.operator_payment_requests, [
-            {"$match": {
-                "user_id": user_id,
-                "source": "SGPAY24_UPI",
-                "status": {"$in": ["CREATED", "PENDING", "RECONCILIATION_REQUIRED"]},
-                "reservation_gaming_day": {"$gte": since},
-            }},
-            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
-        ], session=session)
-        reserved += hosted_reserved
-        proposed = credited + reserved + int(additional_chips)
-        if proposed > cap:
-            violations.append({
-                "period": period, "limit": cap, "used": credited,
-                "reserved": reserved, "remaining": max(0, cap - credited - reserved),
-            })
-    return violations
+    """Extra player_limits deposit amount caps no longer block chip purchases.
+
+    Responsible Play self-exclusion and take-a-break still run through
+    compliance.assert_playable. Callers may still invoke this helper; it
+    never refuses a buy.
+    """
+    return []
 
 
 def _deposit_limit_error(violation: Mapping[str, Any]) -> FinancialError:

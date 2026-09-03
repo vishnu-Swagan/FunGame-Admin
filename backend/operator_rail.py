@@ -14,6 +14,7 @@ import re
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Mapping
 
 from fastapi import HTTPException
@@ -53,11 +54,24 @@ _TEST_HOSTED_LOCKS: dict[str, asyncio.Lock] = {}
 OPERATOR_LIMITS = {
     "chips_per_inr": 1,
     "min_deposit_paise": 10_000,
-    "max_deposit_paise": 10_000_000,
+    "max_deposit_paise": 20_000_000,
     "min_withdrawal_paise": 100_000,
     "min_withdrawal_chips": 1_000,
     "max_withdrawal_chips": 1_000_000,
 }
+
+# Single per-player buy cap: ₹2,00,000 chips per Asia/Kolkata calendar day.
+# Pin IST here — do not reuse ledger.gaming_day / SETTLEMENT_TZ (London default).
+BUY_CHIPS_TZ = ZoneInfo("Asia/Kolkata")
+BUY_DAILY_LIMIT_PAISE = 20_000_000
+_BUY_CAP_STATUSES = (
+    "CREATED",
+    "PENDING",
+    "PROCESSING",
+    "CREDITED",
+    "APPROVED",
+    "RECONCILIATION_REQUIRED",
+)
 
 
 def utcnow() -> datetime:
@@ -133,17 +147,48 @@ def hosted_upi_chips_per_inr(environ: Mapping[str, str] | None = None) -> int:
 
 
 def hosted_upi_daily_limit_paise(environ: Mapping[str, str] | None = None) -> int:
-    env = os.environ if environ is None else environ
-    raw = env.get("UPI_MAX_DAILY_DEPOSIT_PAISE")
-    if raw is None or str(raw).strip() == "":
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be explicitly configured")
-    try:
-        limit = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be an integer") from exc
-    if not OPERATOR_LIMITS["min_deposit_paise"] <= limit <= 100_000_000:
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE is outside the allowed range")
-    return limit
+    """₹2,00,000 per IST day for every player.
+
+    Ignore UPI_MAX_DAILY_DEPOSIT_PAISE so a lower Render env cannot keep a 1L cap.
+    """
+    return BUY_DAILY_LIMIT_PAISE
+
+
+def buy_chips_ist_day(when: datetime | None = None) -> str:
+    dt = as_utc(when) if when is not None else utcnow()
+    return dt.astimezone(BUY_CHIPS_TZ).date().isoformat()
+
+
+def buy_chips_day_bounds_utc(when: datetime | None = None) -> tuple[datetime, datetime]:
+    """Asia/Kolkata midnight-to-midnight as UTC instants for the daily buy cap."""
+    dt = as_utc(when) if when is not None else utcnow()
+    local = dt.astimezone(BUY_CHIPS_TZ)
+    start_local = datetime(local.year, local.month, local.day, tzinfo=BUY_CHIPS_TZ)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def _daily_buy_limit_error() -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "UPI_DAILY_LIMIT",
+        "message": "Daily limit reached. You can buy up to ₹2,00,000 chips per day.",
+    })
+
+
+async def used_buy_paise_today(user_id: str, *, session=None) -> int:
+    """Paise already counting toward today's IST buy cap across UPI and admin-review."""
+    kwargs = {"session": session} if session is not None else {}
+    day_start, day_end = buy_chips_day_bounds_utc()
+    totals = await db[COLLECTION].aggregate([
+        {"$match": {
+            "user_id": user_id,
+            "kind": "DEPOSIT",
+            "status": {"$in": list(_BUY_CAP_STATUSES)},
+            "created_at": {"$gte": day_start, "$lt": day_end},
+        }},
+        {"$group": {"_id": None, "amount_paise": {"$sum": "$amount_paise"}}},
+    ], **kwargs).to_list(1)
+    return int((totals[0] if totals else {}).get("amount_paise", 0))
 
 
 def hosted_upi_provider(
@@ -245,9 +290,7 @@ def operator_status() -> dict[str, Any]:
             "chips_per_inr": (
                 hosted_upi_chips_per_inr() if hosted_ready else OPERATOR_LIMITS["chips_per_inr"]
             ),
-            "max_daily_deposit_paise": (
-                hosted_upi_daily_limit_paise() if hosted_ready else None
-            ),
+            "max_daily_deposit_paise": hosted_upi_daily_limit_paise(),
         },
     }
 
@@ -453,6 +496,10 @@ async def create_request(
             })
         import wager
         await wager.require_clear_for_withdrawal(user["id"])
+    if kind == "DEPOSIT":
+        used_paise = await used_buy_paise_today(user["id"])
+        if used_paise + paise > hosted_upi_daily_limit_paise():
+            raise _daily_buy_limit_error()
     row = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -748,8 +795,7 @@ async def create_hosted_deposit(
                 "message": "This purchase key belongs to another amount.",
             })
         return await _ensure_hosted_checkout(existing, gateway)
-    gaming_day = ledger.gaming_day()
-    day_start, day_end = ledger.day_bounds_utc(gaming_day)
+    gaming_day = buy_chips_ist_day()
     row = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -793,19 +839,6 @@ async def create_hosted_deposit(
                     "message": "This purchase key belongs to another request.",
                 })
             return duplicate
-        await finance._touch_deposit_limit_lock(user["id"], session=session)
-        violations = await finance._deposit_limit_violations(
-            user["id"], chips, session=session,
-        )
-        if violations:
-            violation = violations[0]
-            raise HTTPException(status_code=403, detail={
-                "code": "DEPOSIT_LIMIT",
-                "message": (
-                    f"This would take you past your {str(violation.get('period') or 'deposit').lower()} "
-                    f"deposit limit. You have {int(violation.get('remaining', 0)):,} chips left in this period."
-                ),
-            })
         pending_count = await db[COLLECTION].count_documents({
             "user_id": user["id"], "source": UPI_SOURCE,
             "status": {"$in": ["CREATED", "PENDING"]},
@@ -815,20 +848,9 @@ async def create_hosted_deposit(
                 "code": "UPI_PENDING_LIMIT",
                 "message": "Complete or wait for an existing UPI purchase before starting another.",
             })
-        totals = await db[COLLECTION].aggregate([
-            {"$match": {
-                "user_id": user["id"], "source": UPI_SOURCE,
-                "status": {"$in": ["CREATED", "PENDING", "CREDITED", "RECONCILIATION_REQUIRED"]},
-                "created_at": {"$gte": day_start, "$lt": day_end},
-            }},
-            {"$group": {"_id": None, "amount_paise": {"$sum": "$amount_paise"}}},
-        ], **kwargs).to_list(1)
-        used_paise = int((totals[0] if totals else {}).get("amount_paise", 0))
+        used_paise = await used_buy_paise_today(user["id"], session=session)
         if used_paise + paise > hosted_upi_daily_limit_paise():
-            raise HTTPException(status_code=409, detail={
-                "code": "UPI_DAILY_LIMIT",
-                "message": "This purchase would exceed the daily UPI purchase limit.",
-            })
+            raise _daily_buy_limit_error()
         await db[COLLECTION].insert_one(dict(row), **kwargs)
         return row
 

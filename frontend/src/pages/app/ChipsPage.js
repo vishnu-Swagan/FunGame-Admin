@@ -7,14 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageTransition, EmptyState, formatChips } from "@/components/common";
 import { useAuth } from "@/context/AuthContext";
-import { errMsg } from "@/lib/api";
+import { errCode, errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, paymentDisplayAt, rupeesToPaise } from "@/lib/walletUtils";
 import { PaymentRow, PlayRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 import { isPlayTransaction, playSummary } from "@/lib/historyUtils";
 
-const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
+const QUICK_BUY_AMOUNTS = [1000, 5000, 10000, 50000, 100000, 200000];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
 
 function positiveInteger(...values) {
@@ -68,10 +68,24 @@ export function publicFinancialConfig(payload) {
     ...financialCheckoutHosts,
     ...operatorCheckoutHosts,
   ].map((host) => String(host || "").trim()).filter(Boolean))];
+  const maxDailyDepositPaise = positiveInteger(
+    operatorLimits.max_daily_deposit_paise,
+    limits.max_daily_deposit_paise,
+    published.max_daily_deposit_paise,
+    financial.max_daily_deposit_paise,
+  );
+  const remainingDailyRaw = operatorLimits.remaining_daily_deposit_paise ?? limits.remaining_daily_deposit_paise;
+  const remainingDailyDepositPaise = (
+    Number.isSafeInteger(Number(remainingDailyRaw)) && Number(remainingDailyRaw) >= 0
+      ? Number(remainingDailyRaw)
+      : null
+  );
   return {
     chipsPerInr,
     minDepositPaise,
     maxDepositPaise,
+    maxDailyDepositPaise,
+    remainingDailyDepositPaise,
     minWithdrawalChips,
     maxWithdrawalChips,
     minWithdrawalPaise,
@@ -252,7 +266,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
       await Promise.allSettled([load(), refreshUser?.()]);
       changeTab("activity");
     } catch (error) {
-      toast.error(errMsg(error));
+      toast.error(errCode(error) === "UPI_DAILY_LIMIT" ? "Daily limit reached." : errMsg(error));
     } finally {
       setBusy("");
     }
@@ -315,9 +329,9 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Buy chips with UPI" : "Buy chips"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay in INR through SgPay secure UPI checkout. Your wallet updates only after the payment is verified by our server." : hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."}</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Buy chips with UPI" : "Buy chips"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay in INR through SgPay secure UPI checkout. Your wallet updates only after the payment is verified by our server." : hostedBuyAvailable ? "Pay in INR through secure hosted checkout. Your wallet updates after the verified provider confirmation." : "Submit a buy request in INR. Admin reviews it and credits chips after approval."} Daily buy limit {formatInrPaise(config.maxDailyDepositPaise || 20000000)} per player{config.remainingDailyDepositPaise == null ? "." : `. ${formatInrPaise(config.remainingDailyDepositPaise)} remaining today.`}</p></div></div>
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Buy Chips is temporarily unavailable."} />}
-            <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
+            <div className="grid grid-cols-3 gap-2">{QUICK_BUY_AMOUNTS.filter((value) => !config.maxDepositPaise || value * 100 <= config.maxDepositPaise).map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
             <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">You receive</span><strong className="tabular-nums text-primary">{formatChips(buyChips)} chips</strong></div>
             <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? (hostedUpiBuyAvailable ? "Opening UPI checkout…" : hostedBuyAvailable ? "Opening secure checkout…" : "Submitting request…") : hostedUpiBuyAvailable ? "Pay securely with UPI" : hostedBuyAvailable ? "Continue to payment" : "Submit buy request"}</Button>
