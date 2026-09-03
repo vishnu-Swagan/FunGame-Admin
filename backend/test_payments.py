@@ -113,6 +113,7 @@ sys.modules["db"] = types.SimpleNamespace(db=db, client=client)
 
 import financial_wallet as finance  # noqa: E402
 import routes_payments as routes  # noqa: E402
+import wager  # noqa: E402
 from payment_providers import (  # noqa: E402
     _PinnedHTTPSConnection as ProviderPinnedHTTPSConnection,
     Beneficiary,
@@ -1687,6 +1688,9 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(approved["request"]["status"], "APPROVED")
         user = await db.users.find_one({"id": self.user["id"]})
         self.assertEqual(user["chip_balance"], 6000)
+
+        # A real player must wager the deposit before requesting a withdrawal.
+        await wager.consume_stake(self.user["id"], 1000)
 
         method = await finance.create_payout_method(
             self.user["id"],
