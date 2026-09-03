@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 import json
+import re
 import os
 import sys
 import unittest
@@ -170,6 +171,8 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                 "https://play.example.com/chips/deposit/return"
                 "?deposit_id=order-12345678"
             ),
+            "callback_url": "https://api.chakri.casino/api/payments/webhooks/sgpay24",
+            "notify_url": "https://api.chakri.casino/api/payments/webhooks/sgpay24",
             "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
             "remark": "Chakri chips order-12345678",
         })
@@ -264,6 +267,14 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                 "order_id": "order-12345678", "merchant_id": "MERTEST123",
                 "status": "Processing",
             }, DepositStatus("PENDING", 50_000, "INR", None)),
+            ({
+                "order_id": "order-12345678", "merchant_id": "MERTEST123",
+                "amount": 500, "status": "Complete", "utr": "",
+            }, DepositStatus("PAID", 50_000, "INR", None)),
+            ({
+                "order_id": "order-12345678", "merchant_id": "MERTEST123",
+                "amount": 500, "status": 1,
+            }, DepositStatus("PAID", 50_000, "INR", None)),
         )
         for response, expected in cases:
             with self.subTest(response=response):
@@ -351,7 +362,7 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
         event = gateway.verify_webhook(raw, {})
         self.assertIsNone(event.occurred_at)
 
-    async def test_status_rejects_wrong_order_merchant_amount_and_missing_paid_utr(self):
+    async def test_status_rejects_wrong_order_merchant_and_amount(self):
         responses = (
             {
                 "order_id": "other-order-1234", "merchant_id": "MERTEST123",
@@ -364,10 +375,6 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
             {
                 "order_id": "order-12345678", "merchant_id": "MERTEST123",
                 "amount": 499, "status": 0,
-            },
-            {
-                "order_id": "order-12345678", "merchant_id": "MERTEST123",
-                "amount": 500, "status": 1, "utr": "",
             },
         )
         for response in responses:
@@ -1085,6 +1092,65 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 100)
         self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
 
+    async def test_paid_without_provider_utr_credits_synthetic_reference(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "paid-without-provider-utr", self.gateway,
+        )
+        result = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", None),
+            actor="authenticated-status",
+        )
+        self.assertEqual(result["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        seed = re.sub(
+            r"[^A-Z0-9]", "",
+            str(stored.get("provider_order_id") or stored["id"]).upper(),
+        )
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertFalse(stored.get("utr_claim"))
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "ref": f"upi-chip:{purchase['id']}",
+        }), 1)
+
+        duplicate = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", ""),
+            actor="duplicate-callback",
+        )
+        self.assertTrue(duplicate["duplicate"])
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "ref": f"upi-chip:{purchase['id']}",
+        }), 1)
+
+    async def test_paid_without_provider_utr_credits_even_if_player_pasted_claim(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "paid-missing-utr-with-player-claim", self.gateway,
+        )
+        await self.db[operator_rail.COLLECTION].update_one(
+            {"id": purchase["id"]},
+            {"$set": {"utr_claim": "PLAYER-PASTED-UTR"}},
+        )
+        result = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", None),
+            actor="authenticated-status",
+        )
+        self.assertEqual(result["status"], "CREDITED")
+        self.assertFalse(result.get("utr_mismatch"))
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        seed = re.sub(
+            r"[^A-Z0-9]", "",
+            str(stored.get("provider_order_id") or stored["id"]).upper(),
+        )
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertEqual(stored["utr_claim"], "PLAYER-PASTED-UTR")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+
     async def test_reconcile_missing_provider_order_id_looks_up_by_request_id(self):
         purchase, _ = await operator_rail.create_hosted_deposit(
             self.user, 50_000, "missing-provider-order", self.gateway,
@@ -1231,6 +1297,30 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["status"], "APPROVED")
         self.assertEqual(stored["source"], "ADMIN_REVIEW")
         self.assertEqual(stored["provider_reference"], "661158806148")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "user_id": self.user["id"],
+            "kind": operator_rail.ledger.DEPOSIT,
+            "ref": f"operator-deposit:{deposit['id']}",
+        }), 1)
+
+    async def test_admin_review_paid_empty_utr_credits_like_admin_approve(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        self.assertEqual(deposit["source"], "ADMIN_REVIEW")
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", None)
+
+        with patch.dict(os.environ, {"UPI_CHIP_PURCHASES_ENABLED": "false"}, clear=False):
+            result = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+
+        self.assertEqual(result["status"], "APPROVED")
+        self.assertFalse(result.get("duplicate"))
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": deposit["id"]})
+        seed = re.sub(r"[^A-Z0-9]", "", str(deposit["id"]).upper())
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertFalse(stored.get("utr_claim"))
         self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
         self.assertEqual(await self.db.chip_transactions.count_documents({
             "user_id": self.user["id"],

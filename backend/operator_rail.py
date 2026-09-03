@@ -59,6 +59,30 @@ OPERATOR_LIMITS = {
     "min_withdrawal_chips": 1_000,
     "max_withdrawal_chips": 1_000_000,
 }
+_PROVIDER_REFERENCE_RE = re.compile(r"^[A-Z0-9_-]{4,80}$")
+_HOSTED_PAID_STATUSES = frozenset({
+    "PAID", "SUCCESS", "SUCCEEDED", "CREDITED", "COMPLETE", "COMPLETED",
+})
+
+
+def _valid_provider_reference(value: str) -> bool:
+    return bool(_PROVIDER_REFERENCE_RE.fullmatch(value))
+
+
+def _synthetic_sgpay_reference(seed: str) -> str:
+    stem = re.sub(r"[^A-Z0-9]", "", str(seed or "").upper()) or "ORDER"
+    prefix = "SGPAY-"
+    return f"{prefix}{stem[:80 - len(prefix)]}"
+
+
+def _settlement_provider_reference(
+    authoritative: DepositStatus, current: Mapping[str, Any],
+) -> str:
+    reference = str(authoritative.provider_reference or "").strip().upper()
+    if _valid_provider_reference(reference):
+        return reference
+    seed = str(current.get("provider_order_id") or current.get("id") or "").strip()
+    return _synthetic_sgpay_reference(seed)
 
 # Single per-player buy cap: ₹2,00,000 chips per Asia/Kolkata calendar day.
 # Pin IST here — do not reuse ledger.gaming_day / SETTLEMENT_TZ (London default).
@@ -909,7 +933,7 @@ async def settle_hosted_deposit(
             }},
         )
         return {"id": request_id, "status": status}
-    if status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+    if status not in _HOSTED_PAID_STATUSES:
         raise HTTPException(status_code=409, detail={
             "code": "UPI_STATUS_INVALID", "message": "UPI payment returned an unsupported status.",
         })
@@ -924,7 +948,8 @@ async def settle_hosted_deposit(
                 "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
             })
         if current.get("status") == "CREDITED":
-            if str(current.get("provider_reference") or "").upper() != str(authoritative.provider_reference or "").upper():
+            settlement_ref = _settlement_provider_reference(authoritative, current)
+            if str(current.get("provider_reference") or "").upper() != settlement_ref:
                 raise HTTPException(status_code=409, detail={
                     "code": "UPI_TERMINAL_CONFLICT",
                     "message": "The verified payment reference changed and needs review.",
@@ -935,11 +960,9 @@ async def settle_hosted_deposit(
                 "code": "UPI_TERMINAL_CONFLICT",
                 "message": "This purchase already has a terminal status.",
             })
-        reference = str(authoritative.provider_reference or "").strip().upper()
         if (
             authoritative.amount_paise != int(current["amount_paise"])
             or authoritative.currency != "INR"
-            or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
         ):
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE},
@@ -950,10 +973,13 @@ async def settle_hosted_deposit(
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+        reference = _settlement_provider_reference(authoritative, current)
         claim = str(current.get("utr_claim") or "").strip().upper()
-        # Authenticated SgPay PAID/Complete already carries the provider UTR.
-        # Credit immediately unless the player pasted a conflicting claim.
-        if claim and claim != reference.upper():
+        provider_utr = str(authoritative.provider_reference or "").strip().upper()
+        # Empty player claim is not a conflict. Missing/invalid provider UTR is
+        # not a conflict either — the synthetic SGPAY- fallback is for the
+        # unique index only and must not be compared against a pasted claim.
+        if claim and _valid_provider_reference(provider_utr) and claim != provider_utr:
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
                 {"$set": {
@@ -1109,16 +1135,20 @@ async def settle_admin_review_deposit(
     if provider_status in {"FAILED", "EXPIRED"}:
         await _schedule_admin_review_retry(request_id, provider_status)
         return {"id": request_id, "status": provider_status}
-    if provider_status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+    if provider_status not in _HOSTED_PAID_STATUSES:
         await _schedule_admin_review_retry(request_id, "UNSUPPORTED_STATUS")
         return {"id": request_id, "status": "PENDING"}
-    reference = str(authoritative.provider_reference or "").strip().upper()
     if (
         authoritative.amount_paise != int(current["amount_paise"])
         or authoritative.currency != "INR"
-        or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
     ):
         await _schedule_admin_review_retry(request_id, "SGPAY_MISMATCH")
+        return {"id": request_id, "status": "PENDING"}
+    reference = _settlement_provider_reference(authoritative, current)
+    claim = str(current.get("utr_claim") or "").strip().upper()
+    provider_utr = str(authoritative.provider_reference or "").strip().upper()
+    if claim and _valid_provider_reference(provider_utr) and claim != provider_utr:
+        await _schedule_admin_review_retry(request_id, "UTR_MISMATCH")
         return {"id": request_id, "status": "PENDING"}
     claimed = await db[COLLECTION].find_one_and_update(
         {
