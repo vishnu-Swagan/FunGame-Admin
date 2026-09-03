@@ -484,6 +484,53 @@ async def main():
     assert stuck_row['email_verified'] is False
     assert stuck_row['email_verification_required'] is False
 
+    # Existing PHONE_OTP players who sign in with a Login ID must receive the
+    # stored-mobile destination so resend can deliver SMS. A typed username is
+    # not an E.164 identity and previously produced 422 / a dummy challenge.
+    existing_phone = '+919876543216'
+    await database.users.insert_one({
+        'id': 'existing-login-otp',
+        'role': 'PLAYER',
+        'status': 'PENDING',
+        'registration_source': 'SELF_SERVICE',
+        'activation_mode': routes_auth.PHONE_OTP_ACTIVATION_MODE,
+        'contact_verified': False,
+        'phone_verified': False,
+        'email_verified': False,
+        'phone': existing_phone,
+        'phone_normalized': existing_phone,
+        'email': 'existing.login@example.com',
+        'email_normalized': 'existing.login@example.com',
+        'username': 'Existing.Player',
+        'username_key': 'existing.player',
+        'password_hash': auth_utils.hash_password('Existing-Player-9'),
+        'accepted_terms': True,
+    })
+    login_unverified = await expect_http_error(routes_auth.login(LoginRequest(
+        identifier='Existing.Player', email='Existing.Player',
+        password='Existing-Player-9',
+    )), 403, 'CONTACT_NOT_VERIFIED')
+    assert login_unverified.detail['channel'] == 'PHONE'
+    assert login_unverified.detail['identifier'] == existing_phone
+    assert login_unverified.detail['login_id'] == 'Existing.Player'
+    assert await database.otp_challenges.count_documents({
+        'user_id': 'existing-login-otp',
+    }) == 0
+
+    resent = await routes_auth.resend_verification(ResendVerificationRequest(
+        channel='PHONE', identifier='Existing.Player',
+    ))
+    assert resent['channel'] == 'PHONE'
+    assert resent['challenge_id']
+    assert 'dev_code' in resent
+    issued = await database.otp_challenges.find_one({
+        'id': resent['challenge_id'],
+        'user_id': 'existing-login-otp',
+        'active': True,
+    })
+    assert issued['channel'] == 'SMS'
+    assert issued['status'] == 'PENDING'
+
     print('Phone OTP registration: all focused checks passed')
 
 

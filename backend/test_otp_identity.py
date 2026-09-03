@@ -371,9 +371,11 @@ async def main():
             'password_hash': auth_utils.hash_password('Legacy-Denied-Password-9'),
             **extra,
         })
-        await expect_http_error(routes_auth.login(LoginRequest(
+        denied = await expect_http_error(routes_auth.login(LoginRequest(
             identifier=email, email=email, password='Legacy-Denied-Password-9',
         )), 403, 'CONTACT_NOT_VERIFIED')
+        assert denied.detail['identifier'] == email
+        assert denied.detail['channel'] == 'EMAIL'
 
     await database.users.insert_one({
         'id': 'legacy-repair-race', 'role': 'PLAYER', 'status': 'ACTIVE',
@@ -403,6 +405,44 @@ async def main():
     raced_legacy = await database.users.find_one({'id': 'legacy-repair-race'})
     assert raced_legacy['email_verified'] is False
     assert not raced_legacy.get('contact_verified')
+
+    # Login ID is the usual existing-user subject. The 403 must name the
+    # stored mobile so /auth/resend-otp can deliver SMS instead of 422.
+    await database.users.insert_one({
+        'id': 'existing-login-id-otp',
+        'role': 'PLAYER',
+        'status': 'PENDING',
+        'registration_source': 'SELF_SERVICE',
+        'activation_mode': routes_auth.PHONE_OTP_ACTIVATION_MODE,
+        'contact_verified': False,
+        'phone_verified': False,
+        'phone': '+919100000321',
+        'phone_normalized': '+919100000321',
+        'email': 'existing.loginid@example.com',
+        'email_normalized': 'existing.loginid@example.com',
+        'username': 'Lobby.Player',
+        'username_key': 'lobby.player',
+        'password_hash': auth_utils.hash_password('Lobby-Player-9'),
+    })
+    login_id_blocked = await expect_http_error(routes_auth.login(LoginRequest(
+        identifier='Lobby.Player', email='Lobby.Player',
+        password='Lobby-Player-9',
+    )), 403, 'CONTACT_NOT_VERIFIED')
+    assert login_id_blocked.detail['channel'] == 'PHONE'
+    assert login_id_blocked.detail['identifier'] == '+919100000321'
+    assert login_id_blocked.detail['login_id'] == 'Lobby.Player'
+    login_id_resend = await routes_auth.resend_verification(ResendVerificationRequest(
+        channel='PHONE', identifier='Lobby.Player',
+    ))
+    assert login_id_resend['channel'] == 'PHONE'
+    assert login_id_resend['challenge_id']
+    assert 'dev_code' in login_id_resend
+    login_id_challenge = await database.otp_challenges.find_one({
+        'id': login_id_resend['challenge_id'],
+    })
+    assert login_id_challenge['user_id'] == 'existing-login-id-otp'
+    assert login_id_challenge['channel'] == 'SMS'
+    assert login_id_challenge['active'] is True
 
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',

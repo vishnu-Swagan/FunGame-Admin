@@ -182,6 +182,51 @@ test("an email next_verification step is ignored after phone OTP", async () => {
   await act(async () => root.unmount());
 });
 
+test("login recovery resends SMS to the stored mobile after a Login ID login", async () => {
+  mockPost.mockRejectedValueOnce({ response: { data: { detail: {
+    code: "CONTACT_NOT_VERIFIED",
+    channel: "PHONE",
+    identifier: "+919876543210",
+    login_id: "Lobby.Player",
+    message: "Verify your contact method before logging in.",
+  } } } });
+  mockGet.mockResolvedValue({ data: {
+    registration_enabled: true,
+    phone_registration: true,
+    email_registration: false,
+    phone_contact_verification: true,
+    email_contact_verification: true,
+    verification_required: true,
+    email_verification_required: false,
+    registration_mode: "PHONE_OTP",
+  } });
+  mockPost.mockResolvedValueOnce({ data: {
+    challenge_id: "login-phone-challenge",
+    verification_id: "login-phone-challenge",
+    destination_masked: "+91******10",
+    resend_after_seconds: 60,
+  } });
+  const { container, root } = await render(Login);
+  change(container.querySelector("#identifier"), "Lobby.Player");
+  change(container.querySelector("#password"), "Lobby-Player-9");
+  await submit(container.querySelector("form"));
+
+  expect(mockPost).toHaveBeenCalledWith("/auth/resend-otp", expect.objectContaining({
+    channel: "PHONE",
+    identifier: "+919876543210",
+    phone: "+919876543210",
+  }));
+  expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
+    state: expect.objectContaining({
+      channel: "PHONE",
+      identifier: "+919876543210",
+      challengeId: "login-phone-challenge",
+      loginId: "Lobby.Player",
+    }),
+  }));
+  await act(async () => root.unmount());
+});
+
 test("login recovery does not send PHONE_OTP players into email OTP", async () => {
   mockPost.mockRejectedValueOnce({ response: { data: { detail: {
     code: "CONTACT_NOT_VERIFIED",
