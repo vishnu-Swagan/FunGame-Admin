@@ -105,7 +105,7 @@ beforeEach(() => {
     phone_contact_verification: true,
     email_contact_verification: true,
     verification_required: true,
-    email_verification_required: true,
+    email_verification_required: false,
     registration_mode: "PHONE_OTP",
   };
 });
@@ -145,7 +145,7 @@ test("an auto-generated Login ID is not re-entered on verify", async () => {
   await act(async () => root.unmount());
 });
 
-test("phone then email verification sends the same editable Login ID on both steps", async () => {
+test("an email next_verification step is ignored after phone OTP", async () => {
   mockLocationState = {
     channel: "PHONE",
     identifier: "+447700900123",
@@ -153,19 +153,14 @@ test("phone then email verification sends the same editable Login ID on both ste
     secondaryIdentifier: "player@example.com",
     loginId: "Royal.Player",
   };
-  mockPost
-    .mockResolvedValueOnce({ data: {
-      next_verification: {
-        channel: "EMAIL",
-        identifier: "player@example.com",
-        verification_id: "email-challenge-2",
-        destination_masked: "p***@example.com",
-      },
-    } })
-    .mockResolvedValueOnce({ data: {
-      access_token: "token",
-      user: { id: "player-1", role: "PLAYER", status: "ACTIVE" },
-    } });
+  mockPost.mockResolvedValueOnce({ data: {
+    next_verification: {
+      channel: "EMAIL",
+      identifier: "player@example.com",
+      verification_id: "email-challenge-2",
+      destination_masked: "p***@example.com",
+    },
+  } });
   const { container, root } = await render(VerifyEmail);
 
   change(container.querySelector('[data-testid="verify-login-id-input"]'), "Royal.Player.2");
@@ -174,43 +169,27 @@ test("phone then email verification sends the same editable Login ID on both ste
   change(container.querySelector('[data-testid="verify-password-confirm-input"]'), "Strong-Password-9");
   await submit(container.querySelector("form"));
 
-  expect(mockPost).toHaveBeenNthCalledWith(1, "/auth/verify-otp", expect.objectContaining({
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(mockPost).toHaveBeenCalledWith("/auth/verify-otp", expect.objectContaining({
     channel: "PHONE",
     identifier: "+447700900123",
     challenge_id: "phone-challenge-1",
     verification_id: "phone-challenge-1",
     username: "Royal.Player.2",
   }));
-
-  change(container.querySelector('[data-testid="verification-code-input"]'), "654321");
-  await submit(container.querySelector("form"));
-
-  expect(mockPost).toHaveBeenNthCalledWith(2, "/auth/verify-otp", expect.objectContaining({
-    channel: "EMAIL",
-    identifier: "player@example.com",
-    email: "player@example.com",
-    challenge_id: "email-challenge-2",
-    verification_id: "email-challenge-2",
-    username: "Royal.Player.2",
-  }));
-  expect(mockLogin).toHaveBeenCalledWith("token", expect.objectContaining({ id: "player-1" }));
+  expect(mockLogin).not.toHaveBeenCalled();
+  expect(mockNavigate).toHaveBeenCalledWith("/login", { replace: true });
   await act(async () => root.unmount());
 });
 
-test("login recovery carries the pending Login ID into email verification", async () => {
-  mockPost
-    .mockRejectedValueOnce({ response: { data: { detail: {
-      code: "CONTACT_NOT_VERIFIED",
-      channel: "EMAIL",
-      identifier: "player@example.com",
-      login_id: "Royal.Player.2",
-      message: "Verify your contact method before logging in.",
-    } } } })
-    .mockResolvedValueOnce({ data: {
-      challenge_id: "recovery-challenge-1",
-      destination_masked: "p***@example.com",
-      resend_after_seconds: 30,
-    } });
+test("login recovery does not send PHONE_OTP players into email OTP", async () => {
+  mockPost.mockRejectedValueOnce({ response: { data: { detail: {
+    code: "CONTACT_NOT_VERIFIED",
+    channel: "EMAIL",
+    identifier: "player@example.com",
+    login_id: "Royal.Player.2",
+    message: "Verify your contact method before logging in.",
+  } } } });
   mockGet.mockResolvedValue({ data: {
     registration_enabled: true,
     phone_registration: true,
@@ -218,26 +197,17 @@ test("login recovery carries the pending Login ID into email verification", asyn
     phone_contact_verification: true,
     email_contact_verification: true,
     verification_required: true,
+    email_verification_required: false,
     registration_mode: "PHONE_OTP",
   } });
   const { container, root } = await render(Login);
-  // Pending dual-verification accounts have not claimed the Login ID yet;
-  // recovery authenticates with the already verified mobile number.
   change(container.querySelector("#identifier"), "+447700900123");
   change(container.querySelector("#password"), "Strong-Password-9");
   await submit(container.querySelector("form"));
 
-  expect(mockPost).toHaveBeenNthCalledWith(2, "/auth/resend-otp", expect.objectContaining({
-    channel: "EMAIL",
-    identifier: "player@example.com",
-    email: "player@example.com",
-  }));
-  expect(mockNavigate).toHaveBeenCalledWith("/verify", { state: expect.objectContaining({
-    channel: "EMAIL",
-    identifier: "player@example.com",
-    challengeId: "recovery-challenge-1",
-    loginId: "Royal.Player.2",
-  }) });
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(mockPost).not.toHaveBeenCalledWith("/auth/resend-otp", expect.anything());
+  expect(mockNavigate).not.toHaveBeenCalledWith("/verify", expect.anything());
   await act(async () => root.unmount());
 });
 

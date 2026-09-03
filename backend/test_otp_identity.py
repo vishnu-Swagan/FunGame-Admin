@@ -406,6 +406,7 @@ async def main():
 
     phone_registration = await routes_auth.register(RegisterRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
+        email='phone.player@example.com',
         username='Phone.Player', full_name='Phone Player', date_of_birth='1990-01-01', country='India',
         accepted_terms=True,
     ))

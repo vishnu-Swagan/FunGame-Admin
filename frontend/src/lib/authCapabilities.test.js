@@ -143,6 +143,14 @@ test("an issued OTP remains verifiable when delivery pauses but cannot be resent
 test("login recovery only builds a resend request for a ready channel", () => {
   const phoneOnly = normalizeAuthCapabilities({ registration_enabled: true, email_registration: false, phone_registration: true });
   expect(loginVerificationRecovery(phoneOnly, "EMAIL", "Player@Example.com")).toBeNull();
+  const phoneReadyEmailOptional = normalizeAuthCapabilities({
+    registration_enabled: true,
+    phone_registration: true,
+    email_contact_verification: true,
+    phone_contact_verification: true,
+    email_verification_required: false,
+  });
+  expect(loginVerificationRecovery(phoneReadyEmailOptional, "EMAIL", "Player@Example.com")).toBeNull();
   expect(loginVerificationRecovery(phoneOnly, "SMS", "+91 98765-43210")).toEqual({
     channel: "PHONE",
     contact: "+919876543210",
