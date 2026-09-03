@@ -44,7 +44,6 @@ from otp_service import (
     consume_prepared_challenge,
     consume_persistent_limit,
     delivery_adapter_ready,
-    email_service_configured,
     identity_query,
     issue_challenge,
     masked_destination,
@@ -368,20 +367,6 @@ def _identity_is_verified(user: dict, identity: Identity) -> bool:
     # KYC/identity verification is a separate financial control.  Only the
     # channel-specific OTP flag proves ownership of this contact method.
     return bool(user.get(identity.verified_field))
-
-
-def _verified_email_identity(user: dict) -> Identity | None:
-    """Return a verified email that can receive a code without enumerating."""
-    if not user or user.get('email_verified') is not True:
-        return None
-    raw = user.get('email_normalized') or user.get('email')
-    if not raw or str(raw).endswith(('.phone.invalid', '.manual.invalid')):
-        return None
-    try:
-        identity = normalize_identity(str(raw))
-    except ValueError:
-        return None
-    return identity if identity.channel == 'EMAIL' else None
 
 
 def _self_service_needs_profile(user: dict) -> bool:
@@ -1607,20 +1592,20 @@ async def logout(user: dict = Depends(get_current_user)):
 @router.post('/forgot-password', status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(body: ForgotPasswordRequest):
     identity = _request_identity(body)
-    requested_ready = delivery_adapter_ready(identity.channel)
-    email_ready = delivery_adapter_ready('EMAIL') or email_service_configured()
-    delivery_available = requested_ready or (
-        identity.channel == 'SMS' and email_ready
+    # Phone SMS only. Email is never a reset OTP channel or an SMS fallback,
+    # even if an email adapter is still configured.
+    delivery_available = (
+        identity.channel == 'SMS' and delivery_adapter_ready('SMS')
     )
     user = await _find_identity_user(identity)
-    if user and user.get('role') == 'PLAYER' and _identity_is_verified(user, identity):
-        fallback = None
-        if identity.channel == 'SMS' and email_ready:
-            fallback = _verified_email_identity(user)
+    if (
+        delivery_available
+        and user
+        and user.get('role') == 'PLAYER'
+        and _identity_is_verified(user, identity)
+    ):
         try:
-            await issue_challenge(
-                user, identity, RESET_PASSWORD, fallback_identity=fallback,
-            )
+            await issue_challenge(user, identity, RESET_PASSWORD)
         except OtpError as exc:
             # Enumeration safety wins here: delivery/cooldown state must not
             # reveal whether the contact belongs to an account. Never 500.
