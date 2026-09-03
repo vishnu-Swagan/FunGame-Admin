@@ -98,7 +98,7 @@ async def main():
         },
         'routes_chicken_road.py': {
             'chicken_road_state', 'chicken_road_round_fairness', 'chicken_road_top',
-            'chicken_road_place_bet', 'chicken_road_cancel_bet', 'chicken_road_cashout',
+            'chicken_road_play', 'chicken_road_go', 'chicken_road_cashout',
         },
         'routes_blackjack.py': {'bj_state', 'bj_deal', 'bj_insurance', 'bj_action'},
         'routes_rummy.py': {
