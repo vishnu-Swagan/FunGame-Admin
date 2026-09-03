@@ -19,6 +19,8 @@ test("the shared brand component renders one page-native 3D lockup", () => {
   expect(lockup?.getAttribute("aria-label")).toBe("CHAKRI.CASINO — PLAY IN THE LIGHT");
   expect(lockup?.className).toContain("brand-size");
   expect(lockup?.querySelectorAll(".chakri-logo__wheel")).toHaveLength(1);
+  expect(lockup?.className).toContain("chakri-logo");
+  expect(lockup?.querySelector(".chakri-logo__type")).not.toBeNull();
   expect(lockup?.querySelector("strong")?.textContent).toBe("CHAKRI.CASINO");
   expect(lockup?.querySelector("small")?.textContent).toBe("PLAY IN THE LIGHT");
   expect(lockup?.querySelector("img")?.getAttribute("src")).toBe(BRAND_ASSET);
@@ -38,6 +40,12 @@ test("the page-native lockup never paints an opaque panel", () => {
   const css = fs.readFileSync(path.join(__dirname, "Brand.css"), "utf8");
   const source = fs.readFileSync(path.join(__dirname, "Brand.js"), "utf8");
   expect(css).toContain('background: transparent');
+  expect(css).toContain('--chakri-wordmark-font: Georgia, "Times New Roman", serif');
+  expect(css).toContain('--chakri-gold: #efc86d');
+  expect(css).toContain('--chakri-gold-soft: #f5d584');
+  expect(css).toContain('--chakri-primary-hsl: 43 92% 56%');
+  expect(css).toMatch(/\.chakri-logo__type strong[\s\S]*font-family:\s*var\(--chakri-wordmark-font/);
+  expect(css).not.toMatch(/Gloock|Aptos|Orbitron/);
   expect(source).toContain('PLAY IN THE LIGHT');
   expect(css).not.toMatch(/background:\s*(?:#0b0c10|black|rgb\(11,\s*12,\s*16\))/i);
 });
@@ -71,7 +79,6 @@ test.each([
   "play/GameStage.js",
   "play/arcade/Cabinet.js",
   "play/GameIntro.js",
-  "../pages/play/RummyGame.js",
   "../pages/play/AviatorGame.js",
   "../pages/play/cabinet/SevenUpDownCabinet.js",
   "../pages/play/cabinet/PappuPicturesCabinet.js",
@@ -79,6 +86,13 @@ test.each([
 ])("%s keeps the website wordmark outside live gameplay", (relativePath) => {
   const source = fs.readFileSync(path.join(__dirname, relativePath), "utf8");
   expect(source).not.toContain("BrandWordmark");
+});
+
+test("the Rummy orientation overlay shows CHAKRI.CASINO through BrandWordmark", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../pages/play/RummyGame.js"), "utf8");
+  expect(source).toContain("BrandWordmark");
+  expect(source).toContain("rummy-orientation-logo");
+  expect(source).not.toContain('className="rummy-brand-lockup"');
 });
 
 test("the Rummy table-selection lobby keeps the approved website branding", () => {
