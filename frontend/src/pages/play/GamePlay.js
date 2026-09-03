@@ -38,7 +38,7 @@ import FunTargetCabinet from "@/pages/play/cabinet/FunTargetCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
 import PappuPicturesCabinet from "@/pages/play/cabinet/PappuPicturesCabinet";
 import CheckerCabinet from "@/pages/play/cabinet/CheckerCabinet";
-import { AviatorCabinet, ChickenRoadCabinet } from "@/pages/play/cabinet/FluidCabinets";
+import { AviatorCabinet } from "@/pages/play/cabinet/FluidCabinets";
 import {
   NoHoldCabinet, ChampionPokerCabinet, FeverJokerCabinet, GiantJackpotCabinet,
   Lucky8LineCabinet, TripleFunCabinet, BingoCabinet, GoldenWheelCabinet,
@@ -63,7 +63,6 @@ const COMPONENTS = {
   "lucky-8-line": Lucky8LineCabinet,
   "triple-fun": TripleFunCabinet,
   aviator: AviatorCabinet,
-  "chicken-road": ChickenRoadCabinet,
   checker: CheckerCabinet,
   "ice-fishing": IceFishingGame,
   blackjack: BlackjackGame,
@@ -73,14 +72,14 @@ const COMPONENTS = {
 /* Slugs already rebuilt as landscape cabinets. */
 const CABINET = new Set([
   "seven-up-down", "andar-bahar", "fun-target", "keno", "pappu-pictures", "bingo", "checker",
-  "fun-roulette", "aviator", "chicken-road", "super-golden-wheel", "no-hold", "champion-poker",
+  "fun-roulette", "aviator", "super-golden-wheel", "no-hold", "champion-poker",
   "fever-joker-bonus", "giant-jackpot", "lucky-8-line", "triple-fun",
   "rummy",
 ]);
 
 /* These fullscreen tables already carry dense, game-native result/history
    chrome. Keep the shared winner receipt off them so it never covers play. */
-const NO_WINNER_ROTATOR = new Set(["aviator", "chicken-road", "fun-roulette", "keno", "seven-up-down", "andar-bahar", "pappu-pictures", "rummy"]);
+const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down", "andar-bahar", "pappu-pictures", "rummy"]);
 
 export default function GamePlay() {
   const { slug } = useParams();
