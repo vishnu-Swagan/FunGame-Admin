@@ -7,12 +7,15 @@ import types
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ.setdefault('APP_ENV', 'test')
-os.environ.setdefault('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS', 'true')
-os.environ.setdefault('OTP_PEPPER', 'test-only-otp-pepper-with-at-least-32-characters')
-os.environ.setdefault('OTP_SMS_ADAPTER', 'mock')
-os.environ.setdefault('OTP_EMAIL_ADAPTER', 'mock')
-os.environ.setdefault('OTP_EXPOSE_DEV_CODE', 'true')
+# Pin adapters with assignment (not setdefault) so leftover CI/pytest env
+# cannot disable the SMS mock happy path or re-enable email OTP. Product
+# signup/login is phone SMS only; email OTP is off.
+os.environ['APP_ENV'] = 'test'
+os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
+os.environ['OTP_PEPPER'] = 'test-only-otp-pepper-with-at-least-32-characters'
+os.environ['OTP_SMS_ADAPTER'] = 'mock'
+os.environ['OTP_EMAIL_ADAPTER'] = 'disabled'
+os.environ['OTP_EXPOSE_DEV_CODE'] = 'true'
 
 from fastapi import HTTPException, Response
 from mongomock_motor import AsyncMongoMockClient
@@ -107,20 +110,29 @@ async def main():
         delivery_channels.append(identity.channel)
         if identity.channel == 'SMS':
             raise otp_service.OtpConfigurationError('SMS provider rejected delivery')
-        return {'challenge_id': 'fallback-challenge', 'channel': 'EMAIL'}
+        raise otp_service.OtpConfigurationError(
+            f'{identity.channel} OTP delivery is not configured',
+        )
 
     with patch.object(routes_admin, 'issue_challenge', side_effect=issue_with_sms_failure):
         fallback = await routes_admin.start_admin_step_up(
             AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), fallback_admin,
         )
-    T('admin step-up falls back to a verified email when SMS delivery fails',
-      fallback['channel'] == 'EMAIL' and delivery_channels == ['SMS', 'EMAIL'])
+    # Email OTP is off. SMS delivery failure therefore completes the CRM
+    # ceremony with password-only step-up, not an EMAIL channel object.
+    T('admin step-up completes password-only when SMS fails and email OTP is off',
+      fallback.get('password_only') is True
+      and fallback.get('verified') is True
+      and delivery_channels == ['SMS'])
     T('correct admin password is not blocked by exhausted failed-password attempts',
-      fallback['challenge_id'] == 'fallback-challenge')
-    T('admin step-up verification resolves the channel used by its challenge',
+      fallback.get('password_only') is True)
+    T('admin step-up identities are phone SMS only',
+      [item.channel for item in routes_admin._admin_step_up_identities(fallback_admin)]
+      == ['SMS'])
+    T('admin step-up resolves the stored phone contact for SMS OTP',
       routes_admin._admin_step_up_identity(
-          fallback_admin, channel='EMAIL',
-      ).value == 'admin-fallback@example.com')
+          fallback_admin, channel='SMS',
+      ).value == '+919999999999')
 
     enrollment_admin = {
         'id': 'admin-email-enrollment', 'role': 'ADMIN', 'status': 'ACTIVE',
@@ -133,15 +145,10 @@ async def main():
     enrollment = await routes_admin.start_admin_step_up(
         AdminStepUpStart(current_password='ADMIN-PASSWORD-12'), enrollment_admin,
     )
-    await routes_admin.verify_admin_step_up(
-        AdminStepUpVerify(
-            challenge_id=enrollment['challenge_id'], code=enrollment['dev_code'],
-        ), enrollment_admin,
-    )
     enrolled = await database.users.find_one({'id': enrollment_admin['id']})
-    T('password-confirmed admin can enroll its stored email through the OTP',
-      enrollment['channel'] == 'EMAIL'
-      and enrolled.get('email_verified') is True
+    T('email-only admin completes password-only step-up when email OTP is off',
+      enrollment.get('password_only') is True
+      and enrolled.get('email_verified') is False
       and enrolled.get('mfa_enabled') is True)
     wrong_session_admin = {**admin, 'active_session_id': 'replacement-session'}
     T('administrator step-up cannot be inherited by a replacement session',
