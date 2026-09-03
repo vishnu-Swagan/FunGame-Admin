@@ -136,7 +136,26 @@ def _telesign_flag(name: str) -> bool:
 
 
 def _registration_email_otp_required() -> bool:
-    return _telesign_flag('REGISTRATION_EMAIL_OTP_REQUIRED')
+    # Registration is phone OTP only. Email is collected for CRM/recovery and
+    # is not a second activation gate. REGISTRATION_EMAIL_OTP_REQUIRED is
+    # intentionally ignored so accounts go ACTIVE after a single SMS OTP and
+    # appear in Admin CRM immediately.
+    return False
+
+
+LOGIN_ID_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$')
+
+
+def _login_id_from_e164(phone: str) -> str:
+    """Build a Login ID from an E.164 mobile: ``p`` plus digits, max 32 chars."""
+    digits = re.sub(r'\D', '', phone or '')
+    login_id = ('p' + digits)[:32]
+    if not LOGIN_ID_PATTERN.fullmatch(login_id):
+        raise HTTPException(status_code=422, detail={
+            'code': 'LOGIN_ID_REQUIRED',
+            'message': 'Choose your Login ID to create an account.',
+        })
+    return login_id
 
 
 async def _telesign_onboarding_screen(
@@ -513,8 +532,8 @@ async def authentication_capabilities():
 async def _register_phone_otp(body: RegisterRequest):
     """Create a phone-OTP-pending self-service player.
 
-    Email remains optional for the legacy phone-only rollout. When the
-    dual-verification flag is enabled it becomes a second activation proof.
+    Email is collected for CRM and recovery; it is not a second activation
+    gate. A missing Login ID is derived from the E.164 mobile number.
     """
     if body.password is not None or body.password_confirmation is not None:
         raise HTTPException(status_code=422, detail={
@@ -529,10 +548,10 @@ async def _register_phone_otp(body: RegisterRequest):
         })
 
     email_required = _registration_email_otp_required()
-    if email_required and not body.email:
+    if not body.email:
         raise HTTPException(status_code=422, detail={
             'code': 'EMAIL_REQUIRED',
-            'message': 'A valid email address is required for verification.',
+            'message': 'A valid email address is required.',
         })
     try:
         await require_registration_readiness()
@@ -574,15 +593,9 @@ async def _register_phone_otp(body: RegisterRequest):
     )
     if not ok:
         raise HTTPException(status_code=403, detail={'code': code, 'message': message})
-    if not body.username:
-        # Enforce this before any contact lookup so the response cannot reveal
-        # whether the submitted mobile/email already belongs to an account.
-        raise HTTPException(status_code=422, detail={
-            'code': 'LOGIN_ID_REQUIRED',
-            'message': 'Choose your Login ID to create an account.',
-        })
+    login_id = body.username or _login_id_from_e164(identity.value)
     try:
-        await crm.assert_player_login_id_available(body.username)
+        await crm.assert_player_login_id_available(login_id)
     except ValueError as exc:
         # Login-ID availability is evaluated before contact existence for the
         # same anti-enumeration reason as the required-field check above.
@@ -669,7 +682,6 @@ async def _register_phone_otp(body: RegisterRequest):
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
-    login_id = body.username
     user = {
         'id': user_id,
         'role': 'PLAYER',
