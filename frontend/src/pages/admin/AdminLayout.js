@@ -11,6 +11,7 @@ import {
   FileText,
   Gamepad2,
   Gift,
+  Sparkles,
   History,
   LayoutDashboard,
   LogOut,
@@ -55,6 +56,7 @@ const NAV_GROUPS = [
       { to: "/Admin/play-history", label: "Play history", icon: History, testId: "admin-nav-play-history" },
       { to: "/Admin/payment-settings", label: "Payment controls", icon: Settings, permission: ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE, testId: "admin-nav-payment-settings" },
       { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
+      { to: "/Admin/free-cash", label: "Free Cash", icon: Sparkles, testId: "admin-nav-free-cash" },
       ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
         { to: "/Admin/bonuses", label: "Bonuses", icon: Gift, matches: ["/Admin/bonuses", "/Admin/chip-requests"], testId: "admin-nav-chip-requests" },
       ] : []),

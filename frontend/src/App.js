@@ -60,6 +60,7 @@ import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
 import AdminSettings from "@/pages/admin/AdminSettings";
 import AdminDistributors from "@/pages/admin/AdminDistributors";
 import AdminCommission from "@/pages/admin/AdminCommission";
+import AdminFreeCash from "@/pages/admin/AdminFreeCash";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
 import {
@@ -146,6 +147,7 @@ function AdminConsoleApp() {
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
+            <Route path="free-cash" element={<AdminFreeCash />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
@@ -231,6 +233,7 @@ function PlayerApp() {
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
+            <Route path="free-cash" element={<AdminFreeCash />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
