@@ -6,8 +6,12 @@ import { api } from "@/lib/api";
 import AdminUsers from "./AdminUsers";
 
 const mockSetSearchParams = jest.fn();
+const mockNavigate = jest.fn();
 
+// AdminUsers uses useNavigate for the per-row History button as well as
+// useSearchParams for the status filter, so both hooks must be stubbed here.
 jest.mock("react-router-dom", () => ({
+  useNavigate: () => mockNavigate,
   useSearchParams: () => [new URLSearchParams("status=ACTIVE"), mockSetSearchParams],
 }), { virtual: true });
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }));

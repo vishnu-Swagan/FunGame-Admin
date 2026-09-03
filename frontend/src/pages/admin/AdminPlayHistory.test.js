@@ -61,9 +61,21 @@ test("Admin play history lists won and lost chip rows and hides buys on the play
   expect(mockChipTransactions).toHaveBeenCalled();
   const rows = container.querySelectorAll('[data-testid="admin-history-row"]');
   expect(rows).toHaveLength(2);
-  expect(container.textContent).toContain("Won");
-  expect(container.textContent).toContain("Lost");
-  expect(container.textContent).toContain("Asha");
-  expect(container.textContent).not.toContain("Buy");
+
+  // "Buy & withdraw" is one of the page's scope filter tabs, so it is expected
+  // page chrome rather than a leaked buy row.
+  expect(container.querySelector('[data-testid="admin-history-scope-wallet"]')?.textContent)
+    .toBe("Buy & withdraw");
+
+  // Assert against the results list only, so the tab label above cannot mask a
+  // buy transaction that actually leaked onto the play-only tab.
+  const resultsText = Array.from(rows).map((row) => row.textContent).join("\n");
+  expect(resultsText).toContain("Won");
+  expect(resultsText).toContain("Lost");
+  expect(resultsText).toContain("Asha");
+  // walletKindLabel("DEPOSIT") renders "Buy" and signedChips renders "+500",
+  // so a leaked deposit row would show both.
+  expect(resultsText).not.toContain("Buy");
+  expect(resultsText).not.toContain("+500");
   await act(async () => root.unmount());
 });

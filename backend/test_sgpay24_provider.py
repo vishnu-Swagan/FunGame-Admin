@@ -1424,6 +1424,7 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
             "payout_status": "FAILED",
         }
         fake = AsyncMongoMockClient()["payout_toast"]
+        await fake.operator_payment_requests.insert_one(request)
         await fake.users.insert_one({
             "id": "player-1", "phone": "9876543210", "email": "player@example.com",
         })
@@ -1449,8 +1450,7 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 502)
         detail = caught.exception.detail
         self.assertEqual(detail["code"], "SGPAY_PAYOUT_FAILED")
-        self.assertIn("Internal server error", detail["message"])
-        self.assertIn("reserved", detail["message"])
+        self.assertEqual(detail["message"], "SgPay did not accept the payout. Chips are already reserved; retry from Admin.")
         self.assertIn("Internal server error", detail["error"])
         stored = await fake.operator_payment_requests.find_one({"id": "wd-toast-1"})
         self.assertIn("Internal server error", stored["payout_error"])
