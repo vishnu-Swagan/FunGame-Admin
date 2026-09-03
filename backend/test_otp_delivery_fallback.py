@@ -148,6 +148,21 @@ class OtpDeliveryFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response['message'], routes_auth.RESET_UNAVAILABLE_MESSAGE)
         self.assertIs(response['delivery_available'], False)
 
+    async def test_forgot_password_does_not_use_email_when_sms_is_unavailable(self):
+        original_sms = os.environ.get('OTP_SMS_ADAPTER')
+        original_email = os.environ.get('OTP_EMAIL_ADAPTER')
+        os.environ['OTP_SMS_ADAPTER'] = 'disabled'
+        os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
+        try:
+            response = await routes_auth.forgot_password(ForgotPasswordRequest(
+                identifier='+919800000011', phone='+919800000011',
+            ))
+        finally:
+            os.environ['OTP_SMS_ADAPTER'] = original_sms
+            os.environ['OTP_EMAIL_ADAPTER'] = original_email
+        self.assertEqual(response['message'], routes_auth.RESET_UNAVAILABLE_MESSAGE)
+        self.assertIs(response['delivery_available'], False)
+
     async def test_signup_keeps_pending_user_when_otp_cannot_be_sent(self):
         with patch.object(otp_service, 'delivery_adapter', lambda channel: FailingSmsAdapter()):
             response = await routes_auth.register(self._registration())
