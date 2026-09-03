@@ -997,7 +997,10 @@ class SgPay24PaymentProvider:
     _payout_status_path = "/api/check-payout-status"
     _v1_payout_host = "api.sgpay24.in"
     _v1_payout_path = "/v1/payout"
-    _PAID_STATUS_NAMES = frozenset({"complete", "completed", "success", "paid"})
+    _PAID_STATUS_NAMES = frozenset({
+        "complete", "completed", "success", "succeeded", "paid", "credited",
+    })
+    _DEFAULT_NOTIFY_URL = "https://api.chakri.casino/api/payments/webhooks/sgpay24"
     _FAILED_STATUS_NAMES = frozenset({"failed", "cancelled", "canceled", "expired"})
     _PENDING_STATUS_NAMES = frozenset({"pending", "processing"})
 
@@ -1131,6 +1134,13 @@ class SgPay24PaymentProvider:
             raise ProviderRequestError("Provider checkout URL is unsafe")
         return text
 
+    def _notify_callback_url(self) -> str:
+        return (
+            str(self._env.get("SGPAY24_NOTIFY_URL") or "").strip()
+            or str(self._env.get("SGPAY24_CALLBACK_URL") or "").strip()
+            or self._DEFAULT_NOTIFY_URL
+        )
+
     def _customer(self, customer: Optional[Mapping[str, Any]]) -> tuple[str, str, str]:
         source = customer or {}
         name = str(source.get("full_name") or source.get("display_name") or "Chakri Player").strip()
@@ -1238,6 +1248,7 @@ class SgPay24PaymentProvider:
         order_id = self._order_id(deposit_id)
         name, email, phone = self._customer(customer)
         expected_paise = int(amount_paise)
+        notify_url = self._notify_callback_url()
         response = await self._request_json(self._create_path, {
             "merchant_id": self._merchant_id,
             "order_id": order_id,
@@ -1246,6 +1257,8 @@ class SgPay24PaymentProvider:
             "email": email,
             "phone": phone,
             "redirect_url": self._safe_return_url(return_url),
+            "callback_url": notify_url,
+            "notify_url": notify_url,
             "api_token": self._api_token,
             "remark": f"Chakri chips {order_id[:24]}",
         })
@@ -1302,9 +1315,10 @@ class SgPay24PaymentProvider:
             if expected_amount_paise is not None and amount_paise != expected_amount_paise:
                 raise ProviderRequestError("Provider status amount did not match the order")
         utr = str(response.get("utr") or "").strip().upper()
-        if status == "PAID" and not re.fullmatch(r"[A-Za-z0-9_-]{4,80}", utr):
-            raise ProviderRequestError("Provider success status omitted a valid UTR")
-        reference = utr or (f"sgpay24:{order_id}:failed" if status == "FAILED" else None)
+        if re.fullmatch(r"[A-Za-z0-9_-]{4,80}", utr):
+            reference = utr
+        else:
+            reference = f"sgpay24:{order_id}:failed" if status == "FAILED" else None
         return DepositStatus(
             status, amount_paise, "INR", reference,
             extract_provider_occurred_at(response),
@@ -1411,6 +1425,7 @@ class SgPay24PaymentProvider:
         email = str(kwargs.get("email") or "").strip().lower()
         if not self._valid_email(email):
             email = self._fallback_email
+        notify_url = self._notify_callback_url()
         payload = {
             "merchant_id": self._merchant_id,
             "order_id": order_id,
@@ -1420,6 +1435,8 @@ class SgPay24PaymentProvider:
             "phone": phone,
             "api_token": self._api_token,
             "remark": f"Chakri payout {order_id[:24]}",
+            "callback_url": notify_url,
+            "notify_url": notify_url,
         }
         if account_number:
             payload["account_number"] = account_number

@@ -17,11 +17,11 @@ export const DEPOSIT_REFRESH_INTERVAL_MS = 7000;
 const UPI_STATUS_COPY = {
   CREATED: {
     title: "UPI payment being verified",
-    detail: "Returning from UPI checkout does not credit chips. Our server is checking the payment with SgPay.",
+    detail: "If you already paid in UPI, you do not need a UTR. We confirm the payment with SgPay and credit chips automatically.",
   },
   PENDING: {
     title: "UPI payment being verified",
-    detail: "Returning from UPI checkout does not credit chips. Our server is checking the payment with SgPay.",
+    detail: "If you already paid in UPI, you do not need a UTR. We confirm the payment with SgPay and credit chips automatically.",
   },
   CREDITED: {
     title: "Chips credited",
@@ -166,7 +166,7 @@ export default function DepositReturn() {
       {deposit && <div className="mx-auto flex max-w-sm items-center justify-between rounded-xl border border-white/10 bg-card/55 p-4 text-left"><div><p className="text-xs text-white/45">Deposit reference</p><p className="mt-1 max-w-[210px] truncate font-mono text-xs">{deposit.id}</p></div><PaymentStatus status={deposit.status} /></div>}
       {isHostedUpi && !TERMINAL_DEPOSIT_STATUSES.has(status) && (
         <form onSubmit={submitUtr} className="mx-auto max-w-sm space-y-3 rounded-xl border border-primary/25 bg-card/55 p-4 text-left" data-testid="deposit-utr-form">
-          <div><h2 className="text-sm font-semibold">Completed the UPI payment?</h2><p className="mt-1 text-xs leading-relaxed text-white/50">Enter the UTR from your UPI app. A UTR submission never credits chips by itself—our server must confirm the paid transaction directly with SgPay.</p></div>
+          <div><h2 className="text-sm font-semibold">Optional UTR</h2><p className="mt-1 text-xs leading-relaxed text-white/50">UTR is optional and only needed if credit is slow. Submitting a UTR never credits chips by itself—our server must confirm the paid transaction directly with SgPay.</p></div>
           <Input data-testid="deposit-utr" aria-label="UPI transaction reference (UTR)" type="text" autoComplete="off" maxLength={80} value={utr} onChange={(event) => setUtr(event.target.value)} placeholder="Enter UTR" disabled={utrBusy} className="h-11 rounded-xl border-white/12 bg-white/5 font-mono" />
           {utrError && <p role="alert" className="text-xs leading-relaxed text-red-300">{utrError}</p>}
           {utrNotice && <p role="status" className="text-xs leading-relaxed text-emerald-300">{utrNotice}</p>}
