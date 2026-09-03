@@ -1,6 +1,7 @@
 import axios from "axios";
 import {
   ADMIN_LOGIN_PATH,
+  ADMIN_LOGIN_LEGACY_PATH,
   DISTRIBUTOR_LOGIN_PATH,
   IS_ADMIN_CONSOLE,
   apiAlternatesForRuntime,
@@ -98,7 +99,7 @@ function failover() {
   return failoverInFlight;
 }
 
-const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH, DISTRIBUTOR_LOGIN_PATH]; // legacy auth paths still public while they redirect to `/`
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/register", "/verify", "/verify-email", "/forgot-password", "/maintenance", "/offline", "/update-required", ADMIN_LOGIN_PATH, ADMIN_LOGIN_LEGACY_PATH, DISTRIBUTOR_LOGIN_PATH]; // `/Admin` front door + legacy `/Admin/login` stay public
 
 function attachAccessToken(config) {
   const token = localStorage.getItem("fg_token");

@@ -10,6 +10,7 @@ import { LOGIN_SURFACES, loginRequestPayload } from "@/lib/loginSurface";
 import { loginVerificationRecovery, normalizeAuthCapabilities, normalizeContactChannel, useAuthCapabilities } from "@/lib/authCapabilities";
 import { useAuth } from "@/context/AuthContext";
 import { AUTH_PANELS, frontPathForAuthPanel } from "@/lib/frontDoor";
+import { adminLoginPathForConsole } from "@/lib/adminConsole";
 
 /**
  * Shared login form. When `onSwitchPanel` is provided (frontpage embed), panel
@@ -54,7 +55,7 @@ export default function LoginForm({
       );
       if (data.user.role === "ADMIN") {
         toast.info("Administrator accounts sign in through Chakri.Casino/Admin.");
-        navigate("/Admin/login", { replace: true });
+        navigate(adminLoginPathForConsole(), { replace: true });
         return;
       }
       if (data.user.role === "DISTRIBUTOR") {
