@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ShieldCheck, Coins, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Disclaimer } from "@/components/common";
+import SiteFooter from "@/components/SiteFooter";
 import { BrandWordmark } from "@/components/Brand";
 import { useAuthCapabilities } from "@/lib/authCapabilities";
 
@@ -71,6 +72,7 @@ export default function Welcome() {
           <p className="text-center text-xs text-white/45">
             {capabilitiesLoading ? "Checking registration availability…" : channelSummary}
           </p>
+          <SiteFooter />
         </div>
       </div>
     </div>

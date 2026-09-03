@@ -4,6 +4,7 @@ import { Home, Gamepad2, Search, Coins, User, Bell, WifiOff, Wrench } from "luci
 import { useAuth } from "@/context/AuthContext";
 import { api, APP_VERSION, compareVersions } from "@/lib/api";
 import { Disclaimer, formatChips } from "@/components/common";
+import SiteFooter from "@/components/SiteFooter";
 import { BrandWordmark } from "@/components/Brand";
 import { BrandBoot } from "@/components/BrandBoot";
 
@@ -122,7 +123,7 @@ export default function AppShell() {
   return (
     <div className="App fg-noise relative min-h-dvh bg-background">
       <BrandBoot />
-      <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(96px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
+      <div className={`mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] px-4 md:px-6 ${onPlay ? "pb-0" : "pb-[calc(120px+env(safe-area-inset-bottom))]"} relative z-[2]`}>
         {/* Header */}
         {!onPlay && <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
@@ -174,6 +175,7 @@ export default function AppShell() {
         <main className={onPlay ? "" : "pt-4"}>
           <Outlet />
         </main>
+        {!onPlay && <SiteFooter signedIn />}
       </div>
 
       {/* Bottom navigation */}
