@@ -39,3 +39,8 @@ export function authSearchForPanel(panel, registrationSubmitted = false) {
 export function frontPathForAuthPanel(panel, registrationSubmitted = false) {
   return `/${authSearchForPanel(panel, registrationSubmitted)}`;
 }
+
+/** Unified player auth page used when a guest hits a play entry point. */
+export function guestPlayAuthPath() {
+  return frontPathForAuthPanel(AUTH_PANELS.LOGIN);
+}

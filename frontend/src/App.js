@@ -12,6 +12,7 @@ import AppShell from "@/components/AppShell";
 
 // Auth
 import FrontPage from "@/pages/auth/FrontPage";
+import CasinoEntry from "@/pages/app/CasinoEntry";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import AdminLogin from "@/pages/auth/AdminLogin";
 import AdminFrontPage from "@/pages/auth/AdminFrontPage";
@@ -215,6 +216,7 @@ function PlayerApp() {
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/verify-email" element={<VerifyEmailRedirect />} />
           <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
+          <Route path="/casino" element={<CasinoEntry />} />
           {/* Canonical, same-origin operator entries. Player login never stores
               an admin or distributor token. */}
           <Route path={ADMIN_LOGIN_LEGACY_PATH} caseSensitive element={<Navigate to="/Admin" replace />} />
