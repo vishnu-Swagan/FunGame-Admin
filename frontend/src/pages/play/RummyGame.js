@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { api, errCode, errMsg } from "@/lib/api";
 import { formatChips } from "@/components/common";
+import { BrandWordmark } from "@/components/Brand";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { isMuted, onMuteChange, sfx, toggleMuted } from "@/lib/sound";
 import {
@@ -160,7 +161,10 @@ export function RummyLandscapeGuard({ children, onExit }) {
         <main className="rummy-orientation-gate" style={RUMMY_ART} data-testid="rummy-orientation-gate" role="dialog" aria-modal="true" aria-labelledby="rummy-orientation-title">
           <button type="button" className="rummy-orientation-back" onClick={onExit} aria-label="Leave Rummy"><ArrowLeft /></button>
           <section>
-            <span className="rummy-orientation-eyebrow">CHAKRI.CASINO · RUMMY</span>
+            <div className="rummy-orientation-brand">
+              <BrandWordmark logoClassName="rummy-orientation-logo" />
+              <span className="rummy-orientation-eyebrow">RUMMY</span>
+            </div>
             <div className="rummy-orientation-phone" aria-hidden="true"><i /><b>♛</b></div>
             <h1 id="rummy-orientation-title">Rotate to landscape</h1>
             <p>Turn your phone sideways to reveal the full royal table, your cards and every play control along the bottom.</p>

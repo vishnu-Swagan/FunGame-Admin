@@ -1,3 +1,10 @@
+:root {
+  --chakri-wordmark-font: Georgia, "Times New Roman", serif;
+  --chakri-gold: #efc86d;
+  --chakri-gold-soft: #f5d584;
+  --chakri-primary-hsl: 43 92% 56%;
+}
+
 .chakri-logo {
   display: inline-flex !important;
   aspect-ratio: 4 / 1;
@@ -30,8 +37,8 @@
 
 .chakri-logo__type strong {
   display: block;
-  color: #efc86d;
-  font-family: Georgia, "Times New Roman", serif;
+  color: var(--chakri-gold, #efc86d);
+  font-family: var(--chakri-wordmark-font, Georgia, "Times New Roman", serif);
   font-size: clamp(8px, 8.8cqw, 60px);
   font-weight: 800;
   letter-spacing: -.035em;
@@ -48,7 +55,7 @@
   display: block;
   margin-top: 6.5%;
   padding-left: .6%;
-  color: #f5d584;
+  color: var(--chakri-gold-soft, #f5d584);
   font-size: clamp(4px, 1.8cqw, 13px);
   font-weight: 850;
   letter-spacing: .42em;
