@@ -411,9 +411,12 @@ async def main():
         accepted_terms=True,
     ))
     assert phone_registration['channel'] == 'PHONE'
-    await expect_http_error(routes_auth.resend_verification(ResendVerificationRequest(
+    reused = await routes_auth.resend_verification(ResendVerificationRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
-    )), 429, 'OTP_RESEND_COOLDOWN')
+    ))
+    assert reused['challenge_id'] == phone_registration['challenge_id']
+    assert reused.get('resend_after_seconds', 0) > 0
+    assert 'dev_code' not in reused
     await routes_auth.verify_contact(VerifyEmailRequest(
         channel='PHONE', identifier='+919999888877', phone='+919999888877',
         code=phone_registration['dev_code'],

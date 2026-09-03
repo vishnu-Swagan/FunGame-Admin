@@ -74,6 +74,8 @@ def test_telesign_adapter_sends_normalized_code_without_leaking_credentials(monk
     assert body['template'] == [
         'Your Chakri.Casino verification code is $$CODE$$. It expires in 15 minutes.'
     ]
+    assert 'dlt_template_id' not in body
+    assert 'dlt_entity_id' not in body
     expected_auth = base64.b64encode(
         b'customer-id:provider-secret'
     ).decode('ascii')
@@ -191,7 +193,7 @@ def test_telesign_adapter_rejects_provider_error_status(monkeypatch):
     assert result == {
         'sent': False,
         'provider': 'telesign',
-        'error': 'provider_rejected',
+        'error': 'trial_unverified_destination',
     }
 
 
@@ -435,3 +437,66 @@ def test_verify_api_3906_email_falls_back_to_email_service(monkeypatch):
         otp_service.RESET_PASSWORD,
     ))
     assert result == {'sent': True, 'provider': 'resend'}
+
+
+def test_classify_sms_verify_error_is_metadata_only():
+    trial = telesign_service.TelesignServiceError(
+        'HTTPError',
+        http_status=401,
+        provider_error_codes=(-10033,),
+    )
+    assert telesign_service.classify_sms_verify_error(trial) == (
+        'trial_unverified_destination'
+    )
+    assert telesign_service.classify_sms_verify_error(
+        telesign_service.TelesignServiceError(
+            'HTTPError', provider_error_codes=(-20002,),
+        )
+    ) == 'product_not_enabled'
+    assert telesign_service.classify_sms_verify_error(
+        telesign_service.TelesignServiceError(
+            'HTTPError', provider_error_codes=(-10009,),
+        )
+    ) == 'invalid_source_ip'
+    assert telesign_service.classify_sms_verify_error(
+        telesign_service.TelesignServiceError('provider_rejected')
+    ) == 'provider_rejected'
+
+
+def test_india_dlt_fields_are_forwarded_without_logging_secrets(monkeypatch):
+    monkeypatch.setenv('TELESIGN_CUSTOMER_ID', 'customer-id-secret-sentinel')
+    monkeypatch.setenv('TELESIGN_API_KEY', 'provider-key-secret-sentinel')
+    monkeypatch.setenv('TELESIGN_DLT_TEMPLATE_ID', '1107163490000000001')
+    monkeypatch.setenv('TELESIGN_DLT_ENTITY_ID', '1102000000000000001')
+    monkeypatch.setenv('TELESIGN_SENDER_ID', 'CHAKRI')
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured['request'] = request
+        return FakeResponse({
+            'reference_id': 'dlt-reference-id',
+            'errors': [],
+            'status': {'code': 290, 'description': 'Message in progress'},
+        })
+
+    monkeypatch.setattr(telesign_service.urllib.request, 'urlopen', fake_urlopen)
+    result = asyncio.run(telesign_service.send_verify_sms(
+        '+919876543210', '123456', otp_service.VERIFY_CONTACT,
+    ))
+    assert result == {
+        'reference_id': 'dlt-reference-id',
+        'status_code': 290,
+    }
+    body = urllib.parse.parse_qs(captured['request'].data.decode('utf-8'))
+    assert body['phone_number'] == ['919876543210']
+    assert body['dlt_template_id'] == ['1107163490000000001']
+    assert body['dlt_entity_id'] == ['1102000000000000001']
+    assert body['sender_id'] == ['CHAKRI']
+    assert 'customer-id-secret-sentinel' not in captured['request'].data.decode('utf-8')
+
+
+def test_invalid_dlt_env_is_ignored(monkeypatch):
+    monkeypatch.setenv('TELESIGN_DLT_TEMPLATE_ID', 'not a valid id!')
+    monkeypatch.setenv('TELESIGN_DLT_ENTITY_ID', 'also invalid')
+    assert telesign_service.india_dlt_fields() == {}
+    assert telesign_service.india_dlt_configured() is False

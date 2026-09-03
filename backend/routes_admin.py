@@ -2089,15 +2089,28 @@ async def get_telesign_status(admin: dict = Depends(require_admin)):
             {'telesign_last_sign_in.risk.recommendation': {'$in': ['flag', 'block']}},
         ],
     })
+    telesign_filter = {'delivery_provider': {'$in': ['telesign', 'telesign_verify']}}
     verify_deliveries = await db.otp_challenges.count_documents({
         'delivery_provider': 'telesign',
+    })
+    verify_failed = await db.otp_challenges.count_documents({
+        **telesign_filter,
+        'status': 'DELIVERY_FAILED',
+    })
+    verify_accepted = await db.otp_challenges.count_documents({
+        'delivery_provider': 'telesign',
+        'status': {'$ne': 'DELIVERY_FAILED'},
     })
     return {
         **status,
         'usage': {
             'screened_players': screened_users,
             'flagged_players': flagged_users,
+            # Total rows that reached the Telesign SMS Verify adapter, including
+            # rejected sends. A zero here means the send path was never invoked.
             'sms_verify_challenges': verify_deliveries,
+            'sms_verify_accepted': verify_accepted,
+            'sms_verify_failed': verify_failed,
         },
         'secrets_managed_by_host': True,
     }

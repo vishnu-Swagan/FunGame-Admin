@@ -369,6 +369,66 @@ def _identity_is_verified(user: dict, identity: Identity) -> bool:
     return bool(user.get(identity.verified_field))
 
 
+def _player_sms_identity(user: dict) -> Identity | None:
+    """Return the stored mobile for a password-proved player, if it is usable."""
+    for candidate in (
+        user.get('phone_normalized'),
+        user.get('phone'),
+        user.get('pending_phone'),
+    ):
+        if not candidate:
+            continue
+        try:
+            identity = normalize_identity(candidate)
+        except ValueError:
+            continue
+        if identity.channel == 'SMS':
+            return identity
+    return None
+
+
+def _challenge_public_fields(challenge: dict) -> dict:
+    return {
+        key: challenge[key]
+        for key in (
+            'challenge_id', 'verification_id', 'destination',
+            'destination_masked', 'expires_in', 'expires_in_seconds',
+            'resend_in', 'resend_after_seconds',
+        )
+        if key in challenge
+    }
+
+
+async def _issue_login_verification_otp(user: dict, sms_identity: Identity) -> dict:
+    """Send VERIFY_CONTACT to the stored mobile after a correct password.
+
+    Existing accounts often sign in with a Login ID. The public resend client
+    previously reused that Login ID as the phone and never reached Telesign.
+    Issuing here binds the send to the account we already authenticated.
+    """
+    try:
+        challenge = await issue_challenge(user, sms_identity, VERIFY_CONTACT)
+    except OtpError as exc:
+        if exc.code == 'OTP_RESEND_COOLDOWN':
+            active = await _active_challenge_response(user, sms_identity)
+            if active:
+                logger.info(
+                    'Login verification reused live OTP: channel=SMS purpose=%s',
+                    VERIFY_CONTACT,
+                )
+                return _challenge_public_fields(active)
+        logger.warning(
+            'Login verification OTP not delivered: code=%s channel=SMS',
+            exc.code,
+        )
+        return {}
+    logger.info(
+        'Login verification OTP issued: channel=SMS purpose=%s',
+        VERIFY_CONTACT,
+    )
+    return _challenge_public_fields(challenge)
+
+
 def _self_service_needs_profile(user: dict) -> bool:
     """Repair the pre-profile state without reopening submitted applications."""
     return bool(
@@ -1188,9 +1248,11 @@ async def verify_contact(body: VerifyEmailRequest):
         kwargs = {'session': session} if session is not None else {}
         verification_query = {'id': user['id'], contact_field: {'$ne': True}}
         if phone_self_service:
+            # Pending signup still verifies here. Existing PHONE_OTP players
+            # who already have a password (login recovery) may be ACTIVE.
             verification_query.update({
                 'role': 'PLAYER',
-                'status': 'PENDING',
+                'status': {'$in': ['PENDING', 'ACTIVE', 'VERIFIED']},
                 'registration_source': 'SELF_SERVICE',
                 'activation_mode': PHONE_OTP_ACTIVATION_MODE,
                 'primary_identity_channel': 'PHONE',
@@ -1257,6 +1319,15 @@ async def resend_verification(body: ResendVerificationRequest):
         _raise_otp(exc)
     user = await _find_identity_user(identity)
     if not user or user.get('role') != 'PLAYER' or _identity_is_verified(user, identity):
+        skip_reason = (
+            'unknown' if not user
+            else 'not_player' if user.get('role') != 'PLAYER'
+            else 'already_verified'
+        )
+        logger.info(
+            'OTP resend skipped: reason=%s channel=%s purpose=%s',
+            skip_reason, identity.channel, VERIFY_CONTACT,
+        )
         return {'message': GENERIC_RESEND_MESSAGE, **_dummy_challenge(identity)}
     if (user.get('registration_source') == 'SELF_SERVICE'
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
@@ -1267,14 +1338,36 @@ async def resend_verification(body: ResendVerificationRequest):
                 'code': 'PHONE_REQUIRED',
                 'message': 'This account must begin verification by mobile OTP.',
             })
+    # Login verification issues the first SMS, then the client immediately
+    # calls resend-otp. Return the live challenge during cooldown instead of
+    # 429 so the verify screen can open against the code that was just sent.
+    active_challenge = await _active_challenge_response(user, identity)
+    if active_challenge and active_challenge.get('resend_in', 0) > 0:
+        logger.info(
+            'OTP resend reused live challenge: channel=%s purpose=%s',
+            identity.channel, VERIFY_CONTACT,
+        )
+        return {'message': GENERIC_RESEND_MESSAGE, **active_challenge}
     try:
         challenge = await issue_challenge(
             user, identity, VERIFY_CONTACT, consume_limit=False,
         )
     except OtpError as exc:
+        if exc.code == 'OTP_RESEND_COOLDOWN':
+            live = await _active_challenge_response(user, identity)
+            if live:
+                logger.info(
+                    'OTP resend reused live challenge after cooldown: channel=%s',
+                    identity.channel,
+                )
+                return {'message': GENERIC_RESEND_MESSAGE, **live}
         # Never tell a known player that a new SMS was sent when the provider
         # rejected it. Unknown/verified contacts retain the opaque response
         # above, which makes no unconditional delivery claim.
+        logger.warning(
+            'OTP resend not delivered: code=%s channel=%s',
+            exc.code, identity.channel,
+        )
         _raise_otp(exc)
     return {'message': GENERIC_RESEND_MESSAGE, **challenge}
 
@@ -1431,9 +1524,13 @@ async def login(body: LoginRequest):
             player_contact_verified = True
             legacy_operator_repair = True
         if not player_contact_verified:
+            sms_identity = _player_sms_identity(user)
+            # Phone OTP is the only login-verification channel. A Login ID or
+            # leftover email CONTACT_NOT_VERIFIED must still recover via SMS.
             channel = (
                 'EMAIL' if email_followup_required
-                else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
+                else 'PHONE' if sms_identity or (primary and primary.channel == 'SMS')
+                else 'EMAIL'
             )
             detail = {
                 'code': 'CONTACT_NOT_VERIFIED',
@@ -1446,6 +1543,17 @@ async def login(body: LoginRequest):
             if email_followup_required:
                 detail['identifier'] = user.get('email_normalized') or user.get('email')
                 detail['login_id'] = user.get('requested_username') or ''
+            elif sms_identity:
+                detail['identifier'] = sms_identity.value
+                detail['login_id'] = (
+                    user.get('username') or user.get('requested_username') or ''
+                )
+                detail.update(await _issue_login_verification_otp(user, sms_identity))
+            else:
+                logger.warning(
+                    'Login verification OTP skipped: no_usable_mobile channel=%s',
+                    channel,
+                )
             raise HTTPException(status_code=403, detail=detail)
 
     telesign_sign_in = None
@@ -1546,17 +1654,24 @@ async def login(body: LoginRequest):
             })
         if legacy_operator_repair or phone_self_service:
             dual_pending = False
+            sms_identity = _player_sms_identity(user) if user else None
             detail = {
                 'code': 'CONTACT_NOT_VERIFIED',
                 'message': 'Verify your contact method before logging in.',
                 'channel': (
                     'EMAIL' if dual_pending
-                    else 'PHONE' if primary and primary.channel == 'SMS' else 'EMAIL'
+                    else 'PHONE' if sms_identity or (primary and primary.channel == 'SMS')
+                    else 'EMAIL'
                 ),
             }
             if dual_pending:
                 detail['identifier'] = user.get('email_normalized') or user.get('email')
                 detail['login_id'] = user.get('requested_username') or ''
+            elif sms_identity:
+                detail['identifier'] = sms_identity.value
+                detail['login_id'] = (
+                    user.get('username') or user.get('requested_username') or ''
+                )
             raise HTTPException(status_code=403, detail=detail)
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':
@@ -1609,8 +1724,22 @@ async def forgot_password(body: ForgotPasswordRequest):
         except OtpError as exc:
             # Enumeration safety wins here: delivery/cooldown state must not
             # reveal whether the contact belongs to an account. Never 500.
-            logger.warning('Password reset challenge not issued: %s', exc.code)
+            logger.warning(
+                'Password reset challenge not issued: code=%s channel=SMS',
+                exc.code,
+            )
     else:
+        skip_reason = (
+            'channel_not_sms' if identity.channel != 'SMS'
+            else 'adapter_not_ready' if not delivery_available
+            else 'unknown' if not user
+            else 'not_player' if user.get('role') != 'PLAYER'
+            else 'contact_not_verified'
+        )
+        logger.info(
+            'Password reset OTP skipped: reason=%s channel=%s',
+            skip_reason, identity.channel,
+        )
         try:
             await consume_persistent_limit(
                 'otp_issue:RESET_PASSWORD', f'{identity.channel}:{identity.value}',

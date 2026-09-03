@@ -50,6 +50,10 @@ and `TELESIGN_API_KEY` as Render secrets, set `OTP_SMS_ADAPTER=telesign`, keep
 `OTP_EXPOSE_DEV_CODE=false`, and prove delivery to an approved test number
 before changing the registration mode. Trial accounts can send only to verified
 test numbers; upgrade the Telesign account before accepting live customers.
+Indian destinations also need DLT routing: after the template and PE-TM bind
+are approved in My Telesign, set `TELESIGN_DLT_TEMPLATE_ID` and
+`TELESIGN_DLT_ENTITY_ID` (optional `TELESIGN_SENDER_ID`) on fungame-api. The
+message text must match the registered template except for `$$CODE$$`.
 Administrator MFA is separate and is not changed here.
 
 The same Telesign credentials can expose the subscribed trust products, but

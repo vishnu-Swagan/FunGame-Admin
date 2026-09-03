@@ -12,11 +12,23 @@ import base64
 from datetime import timezone
 from email.utils import format_datetime, parsedate_to_datetime
 import json
+import logging
 import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+
+
+logger = logging.getLogger('telesign')
+
+# Provider error codes that are safe to classify without reading descriptions.
+# Descriptions can contain the destination or OTP and must never be logged.
+TRIAL_UNVERIFIED_DESTINATION = -10033
+PRODUCT_NOT_ENABLED = -20002
+INVALID_SOURCE_IP = -10009
+DLT_FIELD_MAX_LENGTH = 40
+SENDER_ID_MAX_LENGTH = 20
 
 
 VERIFY_SMS_URL = 'https://rest-ww.telesign.com/v1/verify/sms'
@@ -134,6 +146,62 @@ class TelesignServiceError(Exception):
                 'retry_after': self.retry_after,
             }.items() if value not in (None, ())
         }
+
+
+def classify_sms_verify_error(error: TelesignServiceError) -> str:
+    """Map a provider failure to a stable, non-PII diagnostic token."""
+    codes = set(error.provider_error_codes or ())
+    if TRIAL_UNVERIFIED_DESTINATION in codes:
+        return 'trial_unverified_destination'
+    if PRODUCT_NOT_ENABLED in codes:
+        return 'product_not_enabled'
+    if INVALID_SOURCE_IP in codes:
+        return 'invalid_source_ip'
+    if error.reason:
+        return str(error.reason)[:80]
+    return 'provider_rejected'
+
+
+def _optional_provider_field(name: str, *, max_length: int, pattern: str) -> str:
+    value = (os.environ.get(name) or '').strip()
+    if not value:
+        return ''
+    if len(value) > max_length or not re.fullmatch(pattern, value):
+        logger.error('Ignoring invalid %s (length or charset)', name)
+        return ''
+    return value
+
+
+def india_dlt_fields() -> dict:
+    """Return configured India DLT fields, omitting anything invalid or empty."""
+    fields = {}
+    template_id = _optional_provider_field(
+        'TELESIGN_DLT_TEMPLATE_ID',
+        max_length=DLT_FIELD_MAX_LENGTH,
+        pattern=r'[A-Za-z0-9]+',
+    )
+    entity_id = _optional_provider_field(
+        'TELESIGN_DLT_ENTITY_ID',
+        max_length=DLT_FIELD_MAX_LENGTH,
+        pattern=r'[A-Za-z0-9]+',
+    )
+    sender_id = _optional_provider_field(
+        'TELESIGN_SENDER_ID',
+        max_length=SENDER_ID_MAX_LENGTH,
+        pattern=r'[A-Za-z0-9]+',
+    )
+    if template_id:
+        fields['dlt_template_id'] = template_id
+    if entity_id:
+        fields['dlt_entity_id'] = entity_id
+    if sender_id:
+        fields['sender_id'] = sender_id
+    return fields
+
+
+def india_dlt_configured() -> bool:
+    fields = india_dlt_fields()
+    return bool(fields.get('dlt_template_id') and fields.get('dlt_entity_id'))
 
 
 def verify_api_unavailable(error: TelesignServiceError) -> bool:
@@ -407,14 +475,30 @@ async def report_sms_completion(reference_id: str) -> dict:
 
 async def send_verify_sms(phone: str, code: str, purpose: str) -> dict:
     label = 'password reset' if purpose == 'RESET_PASSWORD' else 'verification'
-    body = urllib.parse.urlencode({
-        'phone_number': phone_digits(phone),
+    digits = phone_digits(phone)
+    destination_region = 'IN' if digits.startswith('91') and len(digits) == 12 else 'other'
+    dlt = india_dlt_fields()
+    if destination_region == 'IN' and not india_dlt_configured():
+        logger.warning(
+            'Telesign SMS Verify to IN without DLT ids; Indian carriers may drop the message',
+        )
+    fields = {
+        'phone_number': digits,
         'verify_code': code,
         'template': (
             f'Your Chakri.Casino {label} code is $$CODE$$. '
             'It expires in 15 minutes.'
         ),
-    }).encode('utf-8')
+        **dlt,
+    }
+    logger.info(
+        'Telesign SMS Verify request: purpose=%s region=%s dlt=%s sender=%s',
+        purpose,
+        destination_region,
+        'configured' if india_dlt_configured() else 'absent',
+        'configured' if dlt.get('sender_id') else 'absent',
+    )
+    body = urllib.parse.urlencode(fields).encode('utf-8')
     http_status, response = await _request_json(
         VERIFY_SMS_URL,
         body=body,
