@@ -32,6 +32,7 @@ import routes_payments as routes  # noqa: E402
 from payment_providers import (  # noqa: E402
     DepositSession,
     DepositStatus,
+    PayoutSubmission,
     ProviderConfigurationError,
     ProviderRequestError,
     SgPay24PaymentProvider,
@@ -1414,6 +1415,167 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.event_type, "deposit.paid")
         self.assertTrue(event.data["requires_authenticated_status_lookup"])
         self.assertEqual(event.data["notice_kind"], "collection")
+
+
+class SgPay24PayoutContractTests(unittest.IsolatedAsyncioTestCase):
+    def _payout_kwargs(self, **overrides):
+        payload = {
+            "withdrawal_id": "wd-12345678",
+            "provider_beneficiary_id": "bank-1",
+            "amount_paise": 100_000,
+            "currency": "INR",
+            "idempotency_key": "op-wd-wd-12345678",
+            "account_holder_name": "Test Player",
+            "account_number": "12345678901",
+            "ifsc_code": "HDFC0000001",
+            "bank_name": "HDFC Bank",
+            "payout_identifier": "",
+            "phone": "+919876543210",
+            "email": "player@example.com",
+        }
+        payload.update(overrides)
+        return payload
+
+    async def test_create_payout_sends_merchant_docs_field_names(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "status": 0,
+            "data": {"payout_id": "po-1", "order_id": "wd-12345678", "status": 0},
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            result = await gateway.submit_payout(**self._payout_kwargs())
+
+        self.assertEqual(result, PayoutSubmission("po-1", "PROCESSING"))
+        path, payload = request_json.await_args.args
+        self.assertEqual(path, "/api/createPayoutRequest")
+        self.assertEqual(request_json.await_args.kwargs.get("as_query"), True)
+        self.assertEqual(payload["mid"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
+        self.assertEqual(payload["merchant_id"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
+        self.assertEqual(payload["api_token"], PROVIDER_ENV["SGPAY24_API_TOKEN"])
+        self.assertEqual(payload["order_id"], "wd-12345678")
+        self.assertEqual(payload["amount"], 1000)
+        self.assertEqual(payload["account"], "12345678901")
+        self.assertEqual(payload["ifsc_no"], "HDFC0000001")
+        self.assertEqual(payload["bank_name"], "HDFC Bank")
+        self.assertEqual(payload["benifeciryname"], "Test Player")
+        self.assertEqual(payload["email"], "player@example.com")
+        self.assertEqual(payload["phone"], "9876543210")
+        self.assertEqual(payload["redirect_url"], PROVIDER_ENV["PAYMENT_RETURN_URL"])
+        self.assertEqual(payload["remark"], "Chakri payout wd-12345678")
+        for legacy in (
+            "account_number", "ifsc", "ifsc_code", "name", "beneficiary_name",
+            "callback_url", "notify_url",
+        ):
+            self.assertNotIn(legacy, payload)
+
+    async def test_create_payout_requires_bank_name_when_account_present(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock()) as request_json:
+            with self.assertRaises(ProviderRequestError) as caught:
+                await gateway.submit_payout(**self._payout_kwargs(bank_name=""))
+        self.assertIn("bank name", str(caught.exception).lower())
+        request_json.assert_not_awaited()
+
+    async def test_create_payout_maps_numeric_status_codes(self):
+        cases = (
+            (0, "PROCESSING"),
+            (1, "PAID"),
+            (2, "FAILED"),
+            ("0", "PROCESSING"),
+            ("1", "PAID"),
+            ("2", "FAILED"),
+            ("Complete", "PAID"),
+            ("Rejected", "FAILED"),
+        )
+        for raw, expected in cases:
+            with self.subTest(raw=raw, expected=expected):
+                gateway = provider()
+                request_json = AsyncMock(return_value={
+                    "data": {"payout_id": "po-status", "order_id": "wd-12345678", "status": raw},
+                })
+                with patch.object(gateway, "_request_json", new=request_json):
+                    result = await gateway.submit_payout(**self._payout_kwargs())
+                self.assertEqual(result.status, expected)
+
+    async def test_create_payout_uses_dedicated_redirect_when_configured(self):
+        dedicated = "https://play.example.com/chips/withdraw"
+        gateway = provider({"SGPAY24_PAYOUT_REDIRECT_URL": dedicated})
+        request_json = AsyncMock(return_value={
+            "data": {"payout_id": "po-1", "order_id": "wd-12345678", "status": 0},
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            await gateway.submit_payout(**self._payout_kwargs())
+        self.assertEqual(request_json.await_args.args[1]["redirect_url"], dedicated)
+
+    def test_invalid_payout_redirect_url_fails_closed(self):
+        with self.assertRaises(ProviderConfigurationError) as caught:
+            provider({"SGPAY24_PAYOUT_REDIRECT_URL": "http://chakri.casino/chips/withdraw"})
+        self.assertIn("SGPAY24_PAYOUT_REDIRECT_URL", str(caught.exception))
+
+    async def test_create_payout_rejects_unapproved_redirect(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock()) as request_json:
+            with self.assertRaises(ProviderRequestError) as caught:
+                await gateway.submit_payout(
+                    **self._payout_kwargs(return_url="https://evil.example/steal"),
+                )
+        self.assertIn("return", str(caught.exception).lower())
+        request_json.assert_not_awaited()
+
+    async def test_get_payout_status_keeps_merchant_id_and_maps_codes(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "wd-12345678",
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "amount": 1000,
+            "status": 1,
+            "utr": "HDFCR12345",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payout_status("wd-12345678")
+        self.assertEqual(actual.status, "PAID")
+        self.assertEqual(actual.amount_paise, 100_000)
+        self.assertEqual(actual.provider_reference, "HDFCR12345")
+        path, payload = request_json.await_args.args
+        self.assertEqual(path, "/api/check-payout-status")
+        self.assertEqual(payload, {
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "order_id": "wd-12345678",
+            "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
+        })
+        self.assertNotIn("mid", payload)
+
+    def test_webhook_accepts_docs_payout_payload(self):
+        gateway = provider()
+        raw = json.dumps({
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "payout_id": "payout-12345678",
+            "order_id": "wd-12345678",
+            "amount": 1000,
+            "status": 1,
+            "utr": "HDFCR12345",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.object_id, "wd-12345678")
+        self.assertEqual(event.event_type, "payout.paid")
+        self.assertEqual(event.amount_paise, 100_000)
+        self.assertEqual(event.provider_reference, "HDFCR12345")
+        self.assertEqual(event.data["notice_kind"], "payout")
+        self.assertTrue(event.data["requires_authenticated_status_lookup"])
+
+    def test_webhook_payout_status_two_is_rejected(self):
+        gateway = provider()
+        raw = json.dumps({
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "payout_id": "payout-12345678",
+            "order_id": "wd-12345678",
+            "amount": 1000,
+            "status": 2,
+            "utr": "REJECTEDUTR1",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.event_type, "payout.failed")
+        self.assertEqual(event.data["notice_kind"], "payout")
 
 
 class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
