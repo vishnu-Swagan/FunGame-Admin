@@ -61,7 +61,7 @@ test("manual-review registration requires both contacts and password confirmatio
     capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
   };
   const screen = render(Register);
-  expect(screen.querySelector('#reg-login-id').required).toBe(true);
+  expect(screen.querySelector('#reg-login-id')).toBeNull();
   expect(screen.querySelector('#reg-contact').type).toBe("tel");
   expect(screen.querySelector('#reg-email').required).toBe(true);
   expect(screen.querySelector('#reg-password').required).toBe(true);
@@ -100,21 +100,23 @@ test("registration stays fail-closed without rendering the removed unavailable b
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
 });
 
-test("dual verification keeps its workflow without showing the app-view banner", () => {
+test("phone OTP registration requires email without a Login ID field", () => {
   mockLocationState = null;
   mockCapabilitiesState = {
     loading: false,
     capabilities: {
       registration_enabled: true,
-      email_registration: true,
+      email_registration: false,
       phone_registration: true,
       verification_required: true,
-      email_verification_required: true,
+      email_verification_required: false,
       registration_mode: "PHONE_OTP",
     },
   };
   const screen = render(Register);
   expect(screen.textContent).not.toMatch(/Mobile \+ email verification/);
+  expect(screen.textContent).toMatch(/one SMS code/i);
+  expect(screen.querySelector('#reg-login-id')).toBeNull();
   expect(screen.querySelector('#reg-contact')).not.toBeNull();
   expect(screen.querySelector('#reg-email').required).toBe(true);
 });

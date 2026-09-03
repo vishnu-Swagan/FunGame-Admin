@@ -5,7 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
+import { isValidE164Phone, normalizeContactIdentifier } from "@/lib/authCapabilities";
 import { AuthShell } from "@/pages/auth/AuthShell";
+
+function resetIdentityPayload(identifier) {
+  const raw = String(identifier || "").trim();
+  if (isValidE164Phone(raw)) {
+    const e164 = normalizeContactIdentifier("PHONE", raw);
+    return { identifier: e164, phone: e164 };
+  }
+  const email = normalizeContactIdentifier("EMAIL", raw);
+  return { identifier: email, email };
+}
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -19,7 +30,7 @@ export default function ForgotPassword() {
     event.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/forgot-password", { identifier, email: identifier });
+      const { data } = await api.post("/auth/forgot-password", resetIdentityPayload(identifier));
       toast.success(data.message || "If that account exists, a reset code has been sent.");
       if (data?.delivery_available === false) {
         return;
@@ -38,7 +49,11 @@ export default function ForgotPassword() {
     if (newPassword.length < 8) return toast.error("Password must be at least 8 characters");
     setBusy(true);
     try {
-      const { data } = await api.post("/auth/reset-password", { identifier, email: identifier, code, new_password: newPassword });
+      const { data } = await api.post("/auth/reset-password", {
+        ...resetIdentityPayload(identifier),
+        code,
+        new_password: newPassword,
+      });
       toast.success(data.message || "Password reset. You can now log in.");
       navigate("/login");
     } catch (error) {
@@ -49,7 +64,7 @@ export default function ForgotPassword() {
   };
 
   return (
-    <AuthShell title="Reset password" subtitle={step === 1 ? "Use the verified email or mobile number on your account." : "Enter the code and choose a new password."} backTo="/login">
+    <AuthShell title="Reset password" subtitle={step === 1 ? "Reset with the verified mobile number (SMS OTP) or email." : "Enter the code and choose a new password."} backTo="/login">
       {step === 1 ? (
         <form onSubmit={requestCode} className="space-y-4">
           <div className="space-y-1.5">

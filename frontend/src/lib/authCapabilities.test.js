@@ -1,5 +1,6 @@
 import {
   isValidE164Phone,
+  loginIdFromPhone,
   loginVerificationRecovery,
   normalizeAuthCapabilities,
   normalizeContactIdentifier,
@@ -152,4 +153,10 @@ test("login recovery only builds a resend request for a ready channel", () => {
       phone: "+919876543210",
     },
   });
+});
+
+test("login IDs derived from E.164 phones match the backend rule", () => {
+  expect(loginIdFromPhone("+91 98765-43210")).toBe("p919876543210");
+  expect(loginIdFromPhone("+447700900123")).toBe("p447700900123");
+  expect(loginIdFromPhone("+919876543210")).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$/);
 });

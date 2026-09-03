@@ -95,6 +95,11 @@ export function isValidE164Phone(identifier) {
   return /^\+[1-9]\d{7,14}$/.test(normalizeContactIdentifier("PHONE", identifier));
 }
 
+export function loginIdFromPhone(phone) {
+  const digits = String(normalizeContactIdentifier("PHONE", phone) || "").replace(/\D/g, "");
+  return (`p${digits}`).slice(0, 32);
+}
+
 export function verificationChannelState(capabilities, channel, issuedChallenge = false) {
   const deliveryAvailable = contactVerificationChannelAvailable(capabilities, channel);
   return {
