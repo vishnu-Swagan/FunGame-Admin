@@ -31,7 +31,7 @@ jest.mock("@/lib/api", () => ({
     get: (...args) => mockGet(...args),
   },
   errMsg: (error) => error?.response?.data?.detail?.message || error?.message || "Request failed",
-  routeForUser: () => "/welcome",
+  routeForUser: () => "/",
 }));
 
 jest.mock("sonner", () => ({
@@ -178,7 +178,7 @@ test("an email next_verification step is ignored after phone OTP", async () => {
     username: "Royal.Player.2",
   }));
   expect(mockLogin).not.toHaveBeenCalled();
-  expect(mockNavigate).toHaveBeenCalledWith("/login", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/?auth=login", { replace: true });
   await act(async () => root.unmount());
 });
 

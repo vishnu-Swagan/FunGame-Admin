@@ -32,7 +32,7 @@ export function Maintenance() {
     const t = setInterval(async () => {
       const cfg = await refreshConfig();
       if (cfg && !cfg.maintenance_mode) {
-        navigate(user ? routeForUser(user) : "/welcome", { replace: true });
+        navigate(user ? routeForUser(user) : "/", { replace: true });
       }
     }, 15000);
     return () => clearInterval(t);
@@ -40,7 +40,7 @@ export function Maintenance() {
 
   useEffect(() => {
     if (config && !config.maintenance_mode) {
-      navigate(user ? routeForUser(user) : "/welcome", { replace: true });
+      navigate(user ? routeForUser(user) : "/", { replace: true });
     }
   }, [config, navigate, user]);
 
@@ -54,7 +54,7 @@ export function Maintenance() {
         variant="outline"
         onClick={async () => {
           const cfg = await refreshConfig();
-          if (cfg && !cfg.maintenance_mode) navigate(user ? routeForUser(user) : "/welcome", { replace: true });
+          if (cfg && !cfg.maintenance_mode) navigate(user ? routeForUser(user) : "/", { replace: true });
         }}
         className="mt-6 w-full h-11 rounded-xl border-white/15 bg-white/5 hover:bg-white/10"
       >
@@ -68,7 +68,7 @@ export function Offline() {
   const navigate = useNavigate();
   const { user } = useAuth();
   useEffect(() => {
-    const on = () => navigate(user ? routeForUser(user) : "/welcome", { replace: true });
+    const on = () => navigate(user ? routeForUser(user) : "/", { replace: true });
     window.addEventListener("online", on);
     return () => window.removeEventListener("online", on);
   }, [navigate, user]);
@@ -89,7 +89,7 @@ export function UpdateRequired() {
 
   useEffect(() => {
     if (config && compareVersions(APP_VERSION, config.min_client_version) >= 0) {
-      navigate(user ? routeForUser(user) : "/welcome", { replace: true });
+      navigate(user ? routeForUser(user) : "/", { replace: true });
     }
   }, [config, navigate, user]);
 

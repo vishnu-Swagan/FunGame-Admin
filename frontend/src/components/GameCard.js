@@ -10,14 +10,19 @@ export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) 
   const enabled = isGameEnabled(game);
   const displayStatus = isReviewedGame(game) ? (game.status || "COMING_SOON") : "COMING_SOON";
 
+  const openGame = () => {
+    if (enabled) navigate(`/games/${game.slug}/play`);
+    else navigate(`/games/${game.slug}`);
+  };
+
   return (
     <div
       data-testid="game-card"
       role="button"
       tabIndex={0}
       aria-label={`${game.name} — ${gameStatusLabel(displayStatus)}`}
-      onClick={() => navigate(`/games/${game.slug}`)}
-      onKeyDown={(e) => e.key === "Enter" && navigate(`/games/${game.slug}`)}
+      onClick={openGame}
+      onKeyDown={(e) => e.key === "Enter" && openGame()}
       className={`group relative overflow-hidden rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.35)] cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45)] active:scale-[0.985] ${wide ? "w-[150px] shrink-0" : ""}`}
     >
       <GameArt game={game} className={`${wide ? "h-[110px]" : "h-[120px] sm:h-[140px]"} rounded-t-2xl`} glyphSize={wide ? "text-3xl" : "text-4xl"} />

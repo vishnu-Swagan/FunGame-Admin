@@ -11,12 +11,9 @@ import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
 
 // Auth
-import Welcome from "@/pages/auth/Welcome";
-import Register from "@/pages/auth/Register";
+import FrontPage from "@/pages/auth/FrontPage";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
-import Login from "@/pages/auth/Login";
 import AdminLogin from "@/pages/auth/AdminLogin";
-import ForgotPassword from "@/pages/auth/ForgotPassword";
 
 // Onboarding
 import OnboardingProfile from "@/pages/onboarding/OnboardingProfile";
@@ -24,8 +21,6 @@ import OnboardingReview from "@/pages/onboarding/OnboardingReview";
 import OnboardingPending from "@/pages/onboarding/OnboardingPending";
 
 // App
-import Home from "@/pages/app/Home";
-import Games from "@/pages/app/Games";
 import GameDetail from "@/pages/app/GameDetail";
 import SearchPage from "@/pages/app/SearchPage";
 import { Favorites, Recent } from "@/pages/app/FavoritesRecent";
@@ -91,7 +86,7 @@ import PartnerPasswordChange from "@/pages/partner/PartnerPasswordChange";
 function OnboardingRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" replace />;
+  if (!user) return <Navigate to="/" replace />;
   if (user.role === "ADMIN" || user.status === "ACTIVE") return <Navigate to={routeForUser(user)} replace />;
   return children;
 }
@@ -111,6 +106,23 @@ function LegacyPathRedirect({ from, to, emptyTo }) {
   const destination = !suffix && emptyTo ? emptyTo : `${to}${suffix}`;
   return <Navigate to={`${destination}${location.search}${location.hash}`} replace />;
 }
+
+/** Retire multi-page auth/lobby hops onto the single frontpage, keeping useful query. */
+function FrontDoorRedirect({ auth }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (auth && !params.get("auth")) params.set("auth", auth);
+  const search = params.toString();
+  return <Navigate to={{ pathname: "/", search: search ? `?${search}` : "" }} replace />;
+}
+
+function VerifyEmailRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("email_verify", "skip");
+  return <Navigate to={{ pathname: "/", search: `?${params.toString()}` }} replace />;
+}
+
 
 function AdminConsoleApp() {
   return (
@@ -195,13 +207,13 @@ function PlayerApp() {
               <Route path="/__preview/rummy" element={<RummyGame game={{ slug: "rummy", name: "Rummy", demo: true }} />} />
             </>
           )}
-          {/* Public / auth */}
-          <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
-          <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
-          <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+          {/* Single front door: auth panels + ACTIVE lobby */}
+          <Route path="/" element={<FrontPage />} />
+          <Route path="/welcome" element={<FrontDoorRedirect />} />
+          <Route path="/register" element={<FrontDoorRedirect auth="register" />} />
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
-          <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
-          <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+          <Route path="/verify-email" element={<VerifyEmailRedirect />} />
+          <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
           {/* Canonical, same-origin operator entries. Player login never stores
               an admin or distributor token. */}
           <Route path={ADMIN_LOGIN_PATH} caseSensitive element={<PortalPublicOnly role="ADMIN"><AdminLogin role="ADMIN" /></PortalPublicOnly>} />
@@ -245,7 +257,7 @@ function PlayerApp() {
           <Route path="/admin/*" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
           <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
           <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
+          <Route path="/forgot-password" element={<FrontDoorRedirect auth="forgot" />} />
 
           {/* Public company / legal pages (readable without an account). */}
           <Route path="/about" element={<LegalRouterPage />} />
@@ -263,8 +275,8 @@ function PlayerApp() {
 
           {/* Player app (ACTIVE only) */}
           <Route element={<RequireActive><AppShell /></RequireActive>}>
-            <Route path="/home" element={<Home />} />
-            <Route path="/games" element={<Games />} />
+            <Route path="/home" element={<Navigate to="/" replace />} />
+            <Route path="/games" element={<Navigate to="/?tab=games" replace />} />
             {/* Direct launch URL requested by the operator. caseSensitive keeps
                 the normal lowercase /games/aviator detail page intact. */}
             <Route

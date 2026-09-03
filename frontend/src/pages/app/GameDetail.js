@@ -42,7 +42,7 @@ export default function GameDetail() {
         }
         if (active) {
           toast.error("Game not found");
-          navigate("/games", { replace: true });
+          navigate("/", { replace: true });
         }
       } finally {
         if (active) setLoading(false);

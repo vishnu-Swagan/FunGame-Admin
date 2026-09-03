@@ -93,14 +93,14 @@ export default function VerifyEmail() {
             navigate(routeForUser(data.user), { replace: true });
           } else {
             toast.success(data.message || "Mobile verified. You can now log in.");
-            navigate("/login", { replace: true });
+            navigate("/?auth=login", { replace: true });
           }
           return;
         }
         const nextIdentifier = secondaryIdentifier || next.identifier || "";
         if (!nextIdentifier) {
           toast.success("Mobile verified. You can now log in.");
-          navigate("/login", { replace: true });
+          navigate("/?auth=login", { replace: true });
           return;
         }
         setChannel(nextChannel);
@@ -118,7 +118,7 @@ export default function VerifyEmail() {
         navigate(routeForUser(data.user), { replace: true });
       } else {
         toast.success(data.message || "Contact verified. You can now log in.");
-        navigate("/login", { replace: true });
+        navigate("/?auth=login", { replace: true });
       }
     } catch (error) {
       toast.error(errMsg(error));
@@ -163,7 +163,7 @@ export default function VerifyEmail() {
         <div className="rounded-xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm leading-relaxed text-amber-100">
           Enter your email, mobile number and password on the registration page. An administrator must approve the account before you can log in and play.
         </div>
-        <Button type="button" onClick={() => navigate("/register")} className="mt-5 h-12 w-full rounded-xl font-bold">
+        <Button type="button" onClick={() => navigate("/?auth=register")} className="mt-5 h-12 w-full rounded-xl font-bold">
           Go to registration
         </Button>
       </AuthShell>
@@ -233,8 +233,8 @@ export default function VerifyEmail() {
             : "No email? Check spam or junk. If these details were registered before, use login or account recovery instead."}
         </p>
         <div className="mt-2 flex gap-4 font-semibold text-primary">
-          <Link to="/login" className="hover:underline">Log in</Link>
-          <Link to="/forgot-password" className="hover:underline">Forgot password</Link>
+          <Link to="/?auth=login" className="hover:underline">Log in</Link>
+          <Link to="/?auth=forgot" className="hover:underline">Forgot password</Link>
         </div>
       </div>
     </AuthShell>

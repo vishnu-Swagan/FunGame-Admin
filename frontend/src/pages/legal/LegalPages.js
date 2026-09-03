@@ -9,7 +9,7 @@ function Shell({ title, children }) {
   return (
     <div className="App fg-noise min-h-dvh bg-background">
       <div className="mx-auto max-w-[560px] px-5 pb-16 pt-8">
-        <Link to="/welcome" className="inline-flex items-center gap-2 text-xs text-white/50 hover:text-white" data-testid="legal-back">
+        <Link to="/" className="inline-flex items-center gap-2 text-xs text-white/50 hover:text-white" data-testid="legal-back">
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <BrandWordmark logoClassName="mt-5 h-auto w-[min(70vw,240px)]" />

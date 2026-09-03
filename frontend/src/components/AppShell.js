@@ -9,8 +9,8 @@ import { BrandWordmark } from "@/components/Brand";
 import { BrandBoot } from "@/components/BrandBoot";
 
 const NAV = [
-  { to: "/home", label: "Home", icon: Home, testId: "bottom-nav-home" },
-  { to: "/games", label: "Games", icon: Gamepad2, testId: "bottom-nav-games" },
+  { to: "/", label: "Home", icon: Home, testId: "bottom-nav-home", end: true },
+  { to: "/?tab=games", label: "Games", icon: Gamepad2, testId: "bottom-nav-games", end: false },
   { to: "/search", label: "Search", icon: Search, testId: "bottom-nav-search" },
   { to: "/chips", label: "Chips", icon: Coins, testId: "bottom-nav-chips" },
   { to: "/profile", label: "Profile", icon: User, testId: "bottom-nav-profile" },
@@ -23,7 +23,7 @@ const FULLSCREEN_GAME_SLUGS = new Set([
   "lucky-8-line", "triple-fun", "rummy",
 ]);
 
-export default function AppShell() {
+export default function AppShell({ children }) {
   const { user, refreshUser, config, refreshConfig } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -115,7 +115,7 @@ export default function AppShell() {
         overflow: "hidden",
         background: "#08090b",
       }}>
-        <Outlet />
+        {children ?? <Outlet />}
       </div>
     );
   }
@@ -127,7 +127,7 @@ export default function AppShell() {
         {/* Header */}
         {!onPlay && <header ref={headerRef} className="sticky top-0 z-40 -mx-4 px-4 md:-mx-6 md:px-6 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[hsl(var(--background)/0.78)] backdrop-blur-xl border-b border-border/60 fg-aurora">
           <div className="flex items-center justify-between gap-3">
-            <button data-testid="header-logo" onClick={() => navigate("/home")} className="leading-none" aria-label="Chakri.Casino home">
+            <button data-testid="header-logo" onClick={() => navigate("/")} className="leading-none" aria-label="Chakri.Casino home">
               <BrandWordmark logoClassName="h-auto w-[clamp(170px,48vw,238px)] drop-shadow-[0_8px_22px_rgba(0,0,0,.45)]" />
             </button>
             <div className="flex items-center gap-2">
@@ -173,7 +173,7 @@ export default function AppShell() {
         )}
 
         <main className={onPlay ? "" : "pt-4"}>
-          <Outlet />
+          {children ?? <Outlet />}
         </main>
         {!onPlay && <SiteFooter signedIn />}
       </div>
@@ -182,22 +182,39 @@ export default function AppShell() {
       {!onPlay && (
         <nav data-testid="bottom-nav" aria-label="Main navigation" className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/60 bg-[hsl(var(--background)/0.8)] backdrop-blur-xl">
           <div className="mx-auto max-w-[430px] md:max-w-[560px] lg:max-w-[720px] h-[72px] pb-[env(safe-area-inset-bottom)] grid grid-cols-5">
-            {NAV.map(({ to, label, icon: Icon, testId }) => (
+            {NAV.map(({ to, label, icon: Icon, testId, end }) => (
               <NavLink
-                key={to}
+                key={testId}
                 to={to}
+                end={end}
                 data-testid={testId}
                 aria-label={label}
-                className={({ isActive }) =>
-                  `flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[44px] transition-[color] duration-150 ${isActive ? "text-primary" : "text-white/55 hover:text-white/80"}`
-                }
+                className={({ isActive }) => {
+                  const onFront = location.pathname === "/";
+                  const gamesTab = new URLSearchParams(location.search).get("tab") === "games";
+                  const active = testId === "bottom-nav-home"
+                    ? onFront && !gamesTab
+                    : testId === "bottom-nav-games"
+                      ? onFront && gamesTab
+                      : isActive;
+                  return `flex flex-col items-center justify-center gap-1 min-h-[44px] min-w-[44px] transition-[color] duration-150 ${active ? "text-primary" : "text-white/55 hover:text-white/80"}`;
+                }}
               >
-                {({ isActive }) => (
+                {({ isActive }) => {
+                  const onFront = location.pathname === "/";
+                  const gamesTab = new URLSearchParams(location.search).get("tab") === "games";
+                  const active = testId === "bottom-nav-home"
+                    ? onFront && !gamesTab
+                    : testId === "bottom-nav-games"
+                      ? onFront && gamesTab
+                      : isActive;
+                  return (
                   <>
-                    <Icon className="h-5 w-5" strokeWidth={isActive ? 2.4 : 2} />
-                    <span className={`text-[10px] tracking-wide ${isActive ? "font-bold" : "font-medium"}`}>{label}</span>
+                    <Icon className="h-5 w-5" strokeWidth={active ? 2.4 : 2} />
+                    <span className={`text-[10px] tracking-wide ${active ? "font-bold" : "font-medium"}`}>{label}</span>
                   </>
-                )}
+                  );
+                }}
               </NavLink>
             ))}
           </div>
