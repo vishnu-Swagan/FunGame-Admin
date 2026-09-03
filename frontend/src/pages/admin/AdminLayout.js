@@ -11,6 +11,7 @@ import {
   FileText,
   Gamepad2,
   Gift,
+  History,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -51,6 +52,7 @@ const NAV_GROUPS = [
       { to: "/Admin/deposits", label: "Deposits", icon: ArrowDownToLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-deposits" },
       { to: "/Admin/withdrawals", label: "Withdrawals", icon: ArrowUpFromLine, permission: ADMIN_PERMISSIONS.PAYMENTS_VIEW, testId: "admin-nav-withdrawals" },
       { to: "/Admin/wallet-ledger", label: "Wallet ledger", icon: BookOpenCheck, permission: ADMIN_PERMISSIONS.LEDGER_VIEW, testId: "admin-nav-wallet-ledger" },
+      { to: "/Admin/play-history", label: "Play history", icon: History, testId: "admin-nav-play-history" },
       { to: "/Admin/payment-settings", label: "Payment controls", icon: Settings, permission: ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE, testId: "admin-nav-payment-settings" },
       { to: "/Admin/commission", label: "Commission", icon: Calculator, testId: "admin-nav-commission" },
       ...(LEGACY_CHIP_REQUESTS_ENABLED ? [

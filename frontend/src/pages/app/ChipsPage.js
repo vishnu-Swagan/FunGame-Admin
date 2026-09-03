@@ -11,7 +11,8 @@ import { errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, paymentDisplayAt, rupeesToPaise } from "@/lib/walletUtils";
-import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
+import { PaymentRow, PlayRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
+import { isPlayTransaction, playSummary } from "@/lib/historyUtils";
 
 const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
@@ -115,6 +116,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const [config, setConfig] = useState(() => publicFinancialConfig(null));
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [playTx, setPlayTx] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [buyAmount, setBuyAmount] = useState("1000");
   const [withdrawAmount, setWithdrawAmount] = useState("1000");
@@ -123,8 +125,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const [busy, setBusy] = useState("");
   const load = useCallback(async () => {
     setLoading(true);
-    const [walletResult, depositsResult, withdrawalsResult, banksResult] = await Promise.allSettled([
-      payments.wallet(), payments.deposits(), payments.withdrawals(), payments.bankDetails(),
+    const [walletResult, depositsResult, withdrawalsResult, banksResult, playResult] = await Promise.allSettled([
+      payments.wallet(), payments.deposits(), payments.withdrawals(), payments.bankDetails(), payments.chipTransactions(),
     ]);
 
     if (walletResult.status === "fulfilled") {
@@ -152,6 +154,9 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (depositsResult.status === "fulfilled") setDeposits(depositsResult.value);
     if (withdrawalsResult.status === "fulfilled") setWithdrawals(withdrawalsResult.value);
     if (banksResult.status === "fulfilled") setBankAccounts(banksResult.value);
+    if (playResult.status === "fulfilled") {
+      setPlayTx((playResult.value || []).filter(isPlayTransaction));
+    }
     setLoading(false);
   }, [user?.chip_balance]);
 
@@ -209,6 +214,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     ...deposits.map((item) => ({ item, kind: "deposit" })),
     ...withdrawals.map((item) => ({ item, kind: "withdrawal" })),
   ].sort((left, right) => new Date(paymentDisplayAt(right.item) || 0) - new Date(paymentDisplayAt(left.item) || 0)), [deposits, withdrawals]);
+  const playSummaryTotals = useMemo(() => playSummary(playTx), [playTx]);
 
   const changeTab = (next) => {
     setTab(next);
@@ -292,7 +298,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     <PageTransition className="space-y-5" data-testid="wallet-page">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Chips wallet</h1>
-        <p className="mt-1 text-sm text-white/50">Buy chips securely, withdraw eligible balances, and follow every payment status.</p>
+        <p className="mt-1 text-sm text-white/50">Buy virtual chips, withdraw eligible balances, and follow play plus wallet history. Chips have no cash value.</p>
       </div>
       <WalletBalanceCard wallet={wallet} />
 
@@ -332,7 +338,32 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4">
-          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : activity.length === 0 ? <EmptyState icon={History} title="No payment activity" subtitle="Chip purchases and withdrawals will appear here." /> : <section aria-label="Payment activity" className="overflow-hidden rounded-2xl border border-white/10 bg-card/55"><div className="divide-y divide-white/5">{activity.map(({ item, kind }) => <PaymentRow key={`${kind}:${item.id}`} item={item} kind={kind} />)}</div></section>}
+          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : (
+            <div className="space-y-4">
+              {playTx.length > 0 && (
+                <section aria-label="Play history" data-testid="play-history">
+                  <div className="mb-2 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Play</p>
+                      <p className="text-[11px] text-white/40">Virtual chips won, lost, or returned. No cash value.</p>
+                    </div>
+                    <p className="text-[11px] tabular-nums text-white/50" data-testid="play-history-summary">Won {formatChips(playSummaryTotals.won)} · Lost {formatChips(playSummaryTotals.lost)}</p>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-card/55">
+                    <div className="divide-y divide-white/5">{playTx.map((item) => <PlayRow key={item.id} item={item} />)}</div>
+                  </div>
+                </section>
+              )}
+              {activity.length === 0 && playTx.length === 0 ? <EmptyState icon={History} title="No payment activity" subtitle="Chip purchases, withdrawals, and play results will appear here." /> : activity.length > 0 ? (
+                <section aria-label="Payment activity">
+                  <p className="mb-2 text-sm font-semibold">Buy & withdraw</p>
+                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-card/55">
+                    <div className="divide-y divide-white/5">{activity.map(({ item, kind }) => <PaymentRow key={`${kind}:${item.id}`} item={item} kind={kind} />)}</div>
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
       <p className="flex items-start gap-2 text-[11px] leading-relaxed text-white/40"><LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />Payment credentials and full bank details are never stored in this browser. Provider callbacks and wallet changes are verified by the server.</p>

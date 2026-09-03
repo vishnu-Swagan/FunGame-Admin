@@ -71,6 +71,7 @@ import {
   AdminWalletLedger,
   AdminWithdrawals,
 } from "@/pages/admin/AdminPaymentPages";
+import AdminPlayHistory from "@/pages/admin/AdminPlayHistory";
 import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
 import AdminPaymentGateways from "@/pages/admin/AdminPaymentGateways";
 import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
@@ -140,6 +141,7 @@ function AdminConsoleApp() {
             <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
             <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
             <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
@@ -224,6 +226,7 @@ function PlayerApp() {
             <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
             <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
             <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />

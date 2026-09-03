@@ -1160,6 +1160,34 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
     return {'users': serialize_doc(users)}
 
 
+
+@router.get('/chip-transactions')
+async def admin_chip_transactions(
+    user_id: str = Query(default=None, max_length=80),
+    limit: int = Query(default=300, ge=1, le=500),
+    admin: dict = Depends(require_admin),
+):
+    """Virtual-chip play and wallet history for Admin. Typed kind plus player labels."""
+    query = {}
+    if user_id:
+        query['user_id'] = user_id
+    rows = await db.chip_transactions.find(query, {'_id': 0}).sort('created_at', -1).to_list(limit)
+    user_ids = list({row.get('user_id') for row in rows if row.get('user_id')})
+    players = {}
+    if user_ids:
+        found = await db.users.find(
+            {'id': {'$in': user_ids}},
+            {'_id': 0, 'id': 1, 'name': 1, 'username': 1, 'email': 1, 'phone': 1},
+        ).to_list(len(user_ids))
+        players = {item['id']: item for item in found if item.get('id')}
+    for row in rows:
+        player = players.get(row.get('user_id')) or {}
+        row['user_name'] = player.get('name') or player.get('username')
+        row['user_email'] = player.get('email')
+        row['user_phone'] = player.get('phone')
+    return {'transactions': serialize_doc(rows)}
+
+
 @router.delete('/users/{user_id}')
 async def delete_user_account(user_id: str, admin: dict = Depends(require_admin)):
     """Delete a player login while retaining immutable game/audit history.

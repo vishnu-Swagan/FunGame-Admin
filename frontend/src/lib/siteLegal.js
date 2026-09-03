@@ -24,6 +24,7 @@ export function footerNav(signedIn) {
           { to: "/home", label: "Home" },
           { to: "/games", label: "Games" },
           { to: "/chips", label: "Chips" },
+          { to: "/chips/activity", label: "History" },
           { to: "/support", label: "Support" },
         ]
       : [

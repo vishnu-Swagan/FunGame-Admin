@@ -12,6 +12,7 @@ const mockCreateDeposit = jest.fn();
 const mockCreateWithdrawal = jest.fn();
 const mockCreateOperatorDeposit = jest.fn();
 const mockCreateOperatorWithdrawal = jest.fn();
+const mockChipTransactions = jest.fn();
 const mockFinancialIntentKey = jest.fn();
 const mockClearFinancialIntent = jest.fn();
 let mockPathname = "/chips";
@@ -34,6 +35,7 @@ jest.mock("@/lib/paymentApi", () => ({ payments: {
   createWithdrawal: (...args) => mockCreateWithdrawal(...args),
   createOperatorDeposit: (...args) => mockCreateOperatorDeposit(...args),
   createOperatorWithdrawal: (...args) => mockCreateOperatorWithdrawal(...args),
+  chipTransactions: (...args) => mockChipTransactions(...args),
 } }));
 
 jest.mock("@/lib/financialIntent", () => ({
@@ -64,6 +66,7 @@ jest.mock("@/components/common", () => ({
 jest.mock("@/pages/app/wallet/WalletBits", () => ({
   WalletBalanceCard: () => <div data-testid="wallet-balance-card" />,
   PaymentRow: ({ item, kind }) => <div data-testid={`${kind}-activity-row`}>{item.id}</div>,
+  PlayRow: ({ item }) => <div data-testid="play-activity-row">{item.id}</div>,
 }));
 
 jest.mock("@/components/ui/tabs", () => ({
@@ -151,6 +154,7 @@ beforeEach(() => {
   mockCreateWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "withdrawal-2", status: "PENDING" } });
   mockCreateOperatorDeposit.mockReset().mockResolvedValue({ deposit: { id: "op-deposit-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
   mockCreateOperatorWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "op-withdrawal-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
+  mockChipTransactions.mockReset().mockResolvedValue([]);
   mockFinancialIntentKey.mockReset().mockImplementation((kind) => `${kind}-key`);
   mockClearFinancialIntent.mockReset();
 });
@@ -403,6 +407,22 @@ test("operator rail submits withdrawals against available play chips", async () 
   expect(mockCreateWithdrawal).not.toHaveBeenCalled();
   expect(mockCreateOperatorWithdrawal).toHaveBeenCalledWith(1000, "bank-1");
   expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+test("Activity lists play win and loss rows above buy and withdraw history", async () => {
+  mockPathname = "/chips/activity";
+  mockChipTransactions.mockResolvedValue([
+    { id: "play-win-1", kind: "PAYOUT", amount: 80, game: "Roulette", created_at: "2026-09-03T04:10:00Z" },
+    { id: "play-loss-1", kind: "STAKE", amount: 50, game: "Roulette", created_at: "2026-09-03T04:09:00Z" },
+    { id: "buy-1", kind: "DEPOSIT", amount: 500, created_at: "2026-09-03T03:00:00Z" },
+  ]);
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="play-history"]')).not.toBeNull();
+  expect(container.querySelectorAll('[data-testid="play-activity-row"]')).toHaveLength(2);
+  expect(container.querySelector('[data-testid="play-history-summary"]').textContent).toMatch(/Won 80/);
+  expect(container.querySelector('[data-testid="deposit-activity-row"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="withdrawal-activity-row"]')).not.toBeNull();
   await act(async () => root.unmount());
 });
 

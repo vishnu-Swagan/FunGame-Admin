@@ -1,4 +1,4 @@
-import { financialApi, financialPost } from "@/lib/api";
+import { api, financialApi, financialPost } from "@/lib/api";
 
 // Kept in one module so a future provider adapter never leaks into React pages.
 const PLAYER_ROOT = "/payments";
@@ -85,6 +85,10 @@ export const payments = {
       note: note || null,
     }, { __noFailover: true });
     return data;
+  },
+  async chipTransactions() {
+    const { data } = await api.get("/chips/transactions");
+    return responseRows(data, "transactions");
   },
 };
 
@@ -224,6 +228,10 @@ export const adminPayments = {
   async ledger(params = {}) {
     const { data } = await financialApi.get(`${ADMIN_ROOT}/ledger`, { params });
     return responseRows(data, "entries");
+  },
+  async chipTransactions(params = {}) {
+    const { data } = await api.get("/admin/chip-transactions", { params });
+    return responseRows(data, "transactions");
   },
   async audit(params = {}) {
     const { data } = await financialApi.get(`${ADMIN_ROOT}/audit`, { params });
