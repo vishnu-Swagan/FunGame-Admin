@@ -25,6 +25,10 @@ a.game-card-hit {
     height: 100%;
 }
 
+a.game-card-hit * {
+    cursor: pointer;
+}
+
 /* Ready CTA: gold pill with bold PLAY NOW + arrow (replaces the 44px circle). */
 .play-button:not(.is-disabled) {
     color: #1a1105;
@@ -78,11 +82,16 @@ a.game-card-hit {
     flex: 0 0 auto;
 }
 
-/* CSS-only fallback when JSX has not wrapped the Phosphor arrow yet. */
+/* CSS-only fallback when JSX has not wrapped the Phosphor arrow yet.
+   Move the whole pill so PLAY NOW is obvious at catalogue scale; the arrow
+   still gets the extra slide/scale. The JSX path keeps the pill planted. */
+a.play-button:not(.is-disabled):not(:has(.play-button-motion)) {
+    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
+}
+
 a.play-button:not(.is-disabled):not(:has(.play-button-motion))::before {
     content: "PLAY NOW";
     font-weight: 800;
-    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
 }
 
 a.play-button:not(.is-disabled):not(:has(.play-button-motion)) svg {
@@ -140,6 +149,7 @@ a.play-button:not(.is-disabled)::after {
 @media (prefers-reduced-motion: reduce) {
     .play-button-motion,
     .play-button-arrow,
+    .play-button:not(.is-disabled),
     .play-button:not(.is-disabled) svg,
     a.play-button:not(.is-disabled)::before,
     .hero-play-now-motion,
