@@ -65,7 +65,9 @@ export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) 
           <span data-testid="game-card-play-cta" className="fg-play-now-cta" aria-hidden="true">
             <span className="fg-play-now-cta__motion">
               <b>PLAY NOW</b>
-              <ArrowRight className="fg-play-now-cta__arrow" strokeWidth={3} aria-hidden="true" />
+              <span className="fg-play-now-cta__arrow-wrap">
+                <ArrowRight className="fg-play-now-cta__arrow" strokeWidth={3} aria-hidden="true" />
+              </span>
             </span>
           </span>
         ) : null}

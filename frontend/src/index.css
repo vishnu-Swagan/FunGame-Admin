@@ -396,27 +396,26 @@ summary:focus-visible {
 
 /* Lobby game-card PLAY NOW CTA — gold pill with an obvious looping "click me" slide.
    The pill stays put so gold branding stays stable; PLAY NOW + the arrow bounce
-   together ~12px, and the arrow slides/pulses a bit farther so → reads as moving. */
+   together 14px, and the arrow slides/pulses farther so → reads as moving. */
 @keyframes fg-play-now-nudge {
-    0%, 100% { transform: translateX(0); }
-    18% { transform: translateX(12px); }
-    32% { transform: translateX(4px); }
-    46% { transform: translateX(12px); }
-    68% { transform: translateX(0); }
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    20% { transform: translate3d(14px, 0, 0); }
+    35% { transform: translate3d(5px, 0, 0); }
+    50% { transform: translate3d(14px, 0, 0); }
+    70% { transform: translate3d(0, 0, 0); }
 }
 @keyframes fg-play-now-arrow {
-    0%, 100% { transform: translateX(0) scale(1); }
-    18% { transform: translateX(6px) scale(1.22); }
-    32% { transform: translateX(2px) scale(1.08); }
-    46% { transform: translateX(8px) scale(1.28); }
-    68% { transform: translateX(0) scale(1); }
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    20% { transform: translate3d(8px, 0, 0) scale(1.28); }
+    35% { transform: translate3d(3px, 0, 0) scale(1.08); }
+    50% { transform: translate3d(10px, 0, 0) scale(1.32); }
+    70% { transform: translate3d(0, 0, 0) scale(1); }
 }
 .fg-play-now-cta {
     display: inline-flex;
     align-items: center;
     margin-top: 0.5rem;
-    padding: 0.32rem 1.55rem 0.32rem 0.62rem;
-    overflow: hidden;
+    padding: 0.34rem 1.85rem 0.34rem 0.64rem;
     border-radius: 999px;
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
@@ -432,25 +431,32 @@ summary:focus-visible {
 .fg-play-now-cta__motion {
     display: inline-flex;
     align-items: center;
-    gap: 0.2em;
-    animation: fg-play-now-nudge 1.15s ease-in-out infinite;
+    gap: 0.22em;
+    animation: fg-play-now-nudge 0.95s ease-in-out infinite;
     will-change: transform;
+    backface-visibility: hidden;
 }
 .fg-play-now-cta b {
     font-weight: 800;
     font-style: normal;
 }
+.fg-play-now-cta__arrow-wrap {
+    display: inline-flex;
+    align-items: center;
+    animation: fg-play-now-arrow 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
 .fg-play-now-cta__arrow {
-    width: 0.9em;
-    height: 0.9em;
+    width: 0.95em;
+    height: 0.95em;
     flex: 0 0 auto;
     stroke-width: 3;
-    animation: fg-play-now-arrow 1.15s ease-in-out infinite;
-    will-change: transform;
 }
 @media (prefers-reduced-motion: reduce) {
     .fg-play-now-cta,
     .fg-play-now-cta__motion,
+    .fg-play-now-cta__arrow-wrap,
     .fg-play-now-cta__arrow {
         animation: none;
     }

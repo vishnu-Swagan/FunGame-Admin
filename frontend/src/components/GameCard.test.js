@@ -58,7 +58,7 @@ test("enabled lobby cards show a bold PLAY NOW arrow CTA and open play from the 
   expect(cta.querySelector("b")?.textContent).toBe("PLAY NOW");
   expect(cta.querySelector("b")?.tagName).toBe("B");
   expect(cta.querySelector(".fg-play-now-cta__motion")).not.toBeNull();
-  expect(cta.querySelector("svg.fg-play-now-cta__arrow")).not.toBeNull();
+  expect(cta.querySelector(".fg-play-now-cta__arrow-wrap svg.fg-play-now-cta__arrow")).not.toBeNull();
 
   act(() => card.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   expect(mockNavigate).toHaveBeenCalledWith("/games/aviator/play");
@@ -110,10 +110,10 @@ test("PLAY NOW CTA uses a looping CSS animation that honors reduced motion", () 
   const css = fs.readFileSync(path.join(__dirname, "../index.css"), "utf8");
   expect(css).toContain("@keyframes fg-play-now-nudge");
   expect(css).toContain("@keyframes fg-play-now-arrow");
-  expect(css).toMatch(/@keyframes fg-play-now-nudge[\s\S]*translateX\((1[0-4]|[8-9])px\)/);
-  expect(css).toMatch(/@keyframes fg-play-now-arrow[\s\S]*translateX\([4-9]px\)/);
+  expect(css).toMatch(/@keyframes fg-play-now-nudge[\s\S]*translate3d\((1[0-4]|[8-9])px/);
+  expect(css).toMatch(/@keyframes fg-play-now-arrow[\s\S]*translate3d\(([6-9]|10)px/);
   expect(css).toMatch(/\.fg-play-now-cta__motion[\s\S]*animation:\s*fg-play-now-nudge\s+[\d.]+s\s+ease-in-out\s+infinite/);
-  expect(css).toMatch(/\.fg-play-now-cta__arrow[\s\S]*animation:\s*fg-play-now-arrow\s+[\d.]+s\s+ease-in-out\s+infinite/);
+  expect(css).toMatch(/\.fg-play-now-cta__arrow-wrap[\s\S]*animation:\s*fg-play-now-arrow\s+[\d.]+s\s+ease-in-out\s+infinite/);
   expect(css).toMatch(/\.fg-play-now-cta[\s\S]*font-weight:\s*800/);
   expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fg-play-now-cta[\s\S]*animation:\s*none/);
 });
