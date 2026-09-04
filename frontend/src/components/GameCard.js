@@ -63,8 +63,10 @@ export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) 
         <p className="text-xs text-white/55 mt-0.5">{game.category}</p>
         {enabled ? (
           <span data-testid="game-card-play-cta" className="fg-play-now-cta" aria-hidden="true">
-            <b>PLAY NOW</b>
-            <ArrowRight className="fg-play-now-cta__arrow" strokeWidth={3} aria-hidden="true" />
+            <span className="fg-play-now-cta__motion">
+              <b>PLAY NOW</b>
+              <ArrowRight className="fg-play-now-cta__arrow" strokeWidth={3} aria-hidden="true" />
+            </span>
           </span>
         ) : null}
       </div>

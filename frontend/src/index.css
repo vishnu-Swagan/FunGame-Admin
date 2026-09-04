@@ -394,17 +394,29 @@ summary:focus-visible {
     display: none;
 }
 
-/* Lobby game-card PLAY NOW CTA — gold pill with a looping nudge. */
+/* Lobby game-card PLAY NOW CTA — gold pill with an obvious looping "click me" slide.
+   The pill stays put so gold branding stays stable; PLAY NOW + the arrow bounce
+   together ~12px, and the arrow slides/pulses a bit farther so → reads as moving. */
 @keyframes fg-play-now-nudge {
     0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(3px); }
+    18% { transform: translateX(12px); }
+    32% { transform: translateX(4px); }
+    46% { transform: translateX(12px); }
+    68% { transform: translateX(0); }
+}
+@keyframes fg-play-now-arrow {
+    0%, 100% { transform: translateX(0) scale(1); }
+    18% { transform: translateX(6px) scale(1.22); }
+    32% { transform: translateX(2px) scale(1.08); }
+    46% { transform: translateX(8px) scale(1.28); }
+    68% { transform: translateX(0) scale(1); }
 }
 .fg-play-now-cta {
     display: inline-flex;
     align-items: center;
-    gap: 0.2em;
     margin-top: 0.5rem;
-    padding: 0.32rem 0.55rem 0.32rem 0.62rem;
+    padding: 0.32rem 1.55rem 0.32rem 0.62rem;
+    overflow: hidden;
     border-radius: 999px;
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
@@ -416,20 +428,30 @@ summary:focus-visible {
     text-transform: uppercase;
     white-space: nowrap;
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
-    animation: fg-play-now-nudge 1.7s ease-in-out infinite;
+}
+.fg-play-now-cta__motion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+    animation: fg-play-now-nudge 1.15s ease-in-out infinite;
+    will-change: transform;
 }
 .fg-play-now-cta b {
     font-weight: 800;
     font-style: normal;
 }
 .fg-play-now-cta__arrow {
-    width: 0.85em;
-    height: 0.85em;
+    width: 0.9em;
+    height: 0.9em;
     flex: 0 0 auto;
     stroke-width: 3;
+    animation: fg-play-now-arrow 1.15s ease-in-out infinite;
+    will-change: transform;
 }
 @media (prefers-reduced-motion: reduce) {
-    .fg-play-now-cta {
+    .fg-play-now-cta,
+    .fg-play-now-cta__motion,
+    .fg-play-now-cta__arrow {
         animation: none;
     }
 }
