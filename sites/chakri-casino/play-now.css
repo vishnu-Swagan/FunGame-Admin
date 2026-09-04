@@ -1,0 +1,151 @@
+/* Chakri.Casino marketing GameCard (Vinext ChakriSite `Wm`).
+   Append after the live stylesheet so these rules win over the circular .play-button. */
+
+@keyframes chakri-play-now-nudge {
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    20% { transform: translate3d(14px, 0, 0); }
+    35% { transform: translate3d(5px, 0, 0); }
+    50% { transform: translate3d(14px, 0, 0); }
+    70% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes chakri-play-now-arrow {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    20% { transform: translate3d(8px, 0, 0) scale(1.28); }
+    35% { transform: translate3d(3px, 0, 0) scale(1.08); }
+    50% { transform: translate3d(10px, 0, 0) scale(1.32); }
+    70% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+a.game-card-hit {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    height: 100%;
+}
+
+/* Ready CTA: gold pill with bold PLAY NOW + arrow (replaces the 44px circle). */
+.play-button:not(.is-disabled) {
+    color: #1a1105;
+    background: var(--gold, #f7bd2b);
+    border-radius: 999px;
+    flex: 0 0 auto;
+    width: auto;
+    height: auto;
+    min-height: 44px;
+    padding: 0.34rem 1.85rem 0.34rem 0.7rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.28em;
+    font-family: var(--sans, inherit);
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+    box-shadow: 0 8px 18px #0000004d;
+    overflow: visible;
+}
+
+.play-button:not(.is-disabled) b {
+    font-weight: 800;
+    font-style: normal;
+}
+
+.play-button-motion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22em;
+    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.play-button-arrow {
+    display: inline-flex;
+    align-items: center;
+    animation: chakri-play-now-arrow 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.play-button:not(.is-disabled) svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+}
+
+/* CSS-only fallback when JSX has not wrapped the Phosphor arrow yet. */
+a.play-button:not(.is-disabled):not(:has(.play-button-motion))::before {
+    content: "PLAY NOW";
+    font-weight: 800;
+    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
+}
+
+a.play-button:not(.is-disabled):not(:has(.play-button-motion)) svg {
+    animation: chakri-play-now-arrow 0.95s ease-in-out infinite;
+}
+
+/* Whole enabled card is the play hit target while the CTA stays an <a.play-button>. */
+a.play-button:not(.is-disabled)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+}
+
+.play-button.is-disabled {
+    pointer-events: none;
+}
+
+.hero-play-now-motion {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.hero-play-now-motion svg,
+.hero-actions .button-primary:not(:has(.hero-play-now-motion)) svg {
+    animation: chakri-play-now-arrow 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.hero-actions .button-primary:not(:has(.hero-play-now-motion)) {
+    animation: chakri-play-now-nudge 0.95s ease-in-out infinite;
+}
+
+@media (max-width: 640px) {
+    .play-button:not(.is-disabled) {
+        flex-basis: auto;
+        width: auto;
+        height: auto;
+        min-height: 38px;
+        padding: 0.3rem 1.45rem 0.3rem 0.55rem;
+        font-size: 0.58rem;
+    }
+
+    .play-button:not(.is-disabled) svg {
+        width: 17px;
+        height: 17px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .play-button-motion,
+    .play-button-arrow,
+    .play-button:not(.is-disabled) svg,
+    a.play-button:not(.is-disabled)::before,
+    .hero-play-now-motion,
+    .hero-play-now-motion svg,
+    .hero-actions .button-primary,
+    .hero-actions .button-primary svg {
+        animation: none;
+    }
+}
