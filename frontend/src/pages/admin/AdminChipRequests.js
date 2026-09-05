@@ -51,7 +51,7 @@ export default function AdminChipRequests() {
     try {
       await api.post(`/admin/chip-requests/${action.req.id}/${action.type}`, { note: note || null });
       const isReturn = action.req?.type === "RETURN";
-      toast.success(action.type !== "approve" ? "Request denied" : isReturn ? "Chips returned to operator" : "Chips credited to player");
+      toast.success(action.type !== "approve" ? "Request denied" : isReturn ? "Promotional balance returned" : "Promotional balance credited");
       setAction(null);
       setNote("");
       await load(filter);
@@ -66,7 +66,7 @@ export default function AdminChipRequests() {
     <PageTransition className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Bonuses</h1>
-        <p className="mt-1 text-sm text-white/50">Review promotional virtual-chip credits and player chip requests.</p>
+        <p className="mt-1 text-sm text-white/50">Review legacy promotional balance credits and return requests. These records remain separate from deposited cash.</p>
       </div>
 
       <div className="fg-rail flex gap-2 overflow-x-auto">
@@ -87,7 +87,7 @@ export default function AdminChipRequests() {
       {loading ? (
         <div className="h-40 rounded-2xl fg-shimmer border border-white/5" />
       ) : requests.length === 0 ? (
-        <EmptyState icon={HandCoins} title={`No ${filter.toLowerCase()} requests`} subtitle="Player chip requests appear here for review." />
+        <EmptyState icon={HandCoins} title={`No ${filter.toLowerCase()} requests`} subtitle="Promotional balance requests appear here for review." />
       ) : (
         <div className="rounded-2xl border border-white/10 overflow-x-auto">
           <Table data-testid="admin-chip-requests-table">
@@ -157,15 +157,15 @@ export default function AdminChipRequests() {
           <DialogHeader>
             <DialogTitle>
               {action?.type === "approve"
-                ? action?.req?.type === "RETURN" ? "Approve chip return" : "Approve chip request"
-                : action?.req?.type === "RETURN" ? "Deny chip return" : "Deny chip request"}
+                ? action?.req?.type === "RETURN" ? "Approve balance return" : "Approve bonus request"
+                : action?.req?.type === "RETURN" ? "Deny balance return" : "Deny bonus request"}
             </DialogTitle>
             <DialogDescription>
               {action?.type === "approve"
                 ? action?.req?.type === "RETURN"
-                  ? `Deduct ${formatChips(action?.req?.amount)} chips from ${action?.req?.user_email} — returned to the operator. This settles the request permanently.`
-                  : `Credit ${formatChips(action?.req?.amount)} play chips to ${action?.req?.user_email}. This settles the request permanently.`
-                : `Deny the ${formatChips(action?.req?.amount)} ${action?.req?.type === "RETURN" ? "return" : "chip"} request from ${action?.req?.user_email}.`}
+                  ? `Deduct ${formatChips(action?.req?.amount)} from the promotional balance for ${action?.req?.user_email}. This permanently settles the return request.`
+                  : `Credit ${formatChips(action?.req?.amount)} to the promotional balance for ${action?.req?.user_email}. This permanently settles the request.`
+                : `Deny the ${formatChips(action?.req?.amount)} ${action?.req?.type === "RETURN" ? "return" : "bonus"} request from ${action?.req?.user_email}.`}
             </DialogDescription>
           </DialogHeader>
           <Textarea

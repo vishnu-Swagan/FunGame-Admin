@@ -7,6 +7,18 @@ import FrontPage from "./FrontPage";
 let mockCapabilitiesState;
 let mockLocationState;
 
+jest.mock("@/lib/legalPolicies", () => ({
+  useRegistrationPolicies: () => ({
+    policies: {
+      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
+      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
+    },
+    loading: false,
+    error: null,
+    retry: jest.fn(),
+  }),
+}));
+
 jest.mock("@/lib/authCapabilities", () => ({
   ...jest.requireActual("@/lib/authCapabilities"),
   useAuthCapabilities: () => mockCapabilitiesState,
@@ -20,9 +32,8 @@ jest.mock("react-router-dom", () => {
   const React = require("react");
   return {
     useNavigate: () => jest.fn(),
-    useLocation: () => ({ state: mockLocationState, pathname: "/", search: "" }),
-    useSearchParams: () => [new URLSearchParams(), jest.fn()],
-    Navigate: () => null,
+    useSearchParams: () => [new URLSearchParams()],
+    useLocation: () => ({ state: mockLocationState }),
     Link: ({ children, to, ...props }) => React.createElement("a", { href: to, ...props }, children),
   };
 }, { virtual: true });
@@ -79,6 +90,7 @@ test("manual-review registration requires both contacts and password confirmatio
   expect(screen.querySelector('#reg-password').required).toBe(true);
   expect(screen.querySelector('#reg-password-confirmation').required).toBe(true);
   expect(screen.querySelector('[data-testid="register-terms-checkbox"]')).not.toBeNull();
+  expect(screen.querySelector('[data-testid="register-privacy-checkbox"]')).not.toBeNull();
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
   expect(screen.querySelector('[data-testid="registration-unavailable"]')).toBeNull();
 });

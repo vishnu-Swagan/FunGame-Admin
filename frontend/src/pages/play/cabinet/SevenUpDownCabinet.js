@@ -424,7 +424,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
               {realWinners.map((winner, index) => (
                 <div className="j7-winner" key={winner.id || index}>
                   <img src={winnerAvatar(winner, index)} alt="" aria-hidden="true" />
-                  <small>{winner.name}<b>{formatChips(winner.payout)} chips</b></small>
+                  <small>{winner.name}<b>{formatChips(winner.payout)} winnings</b></small>
                 </div>
               ))}
             </div>
@@ -472,8 +472,8 @@ function SevenUpDownTable({ game, live, demo = false }) {
           </div>
 
           <div className="j7-money-line">
-            <span>Balance <b>{balance === null ? "…" : formatChips(balance)} chips</b></span>
-            <span>Your Bet <b>{formatChips(myTotal)} chips</b></span>
+            <span>Balance <b>{balance === null ? "…" : formatChips(balance)}</b></span>
+            <span>Your Bet <b>{formatChips(myTotal)}</b></span>
           </div>
 
           <footer className="j7-tools">
@@ -506,7 +506,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
                   "--chip-ink": CHIP_COLORS[chip]?.ink,
                 }}
                 onClick={() => { setChipMenu((value) => !value); sfx.chip(); }}
-                aria-label={`Selected chip ${chip}`}
+                aria-label={`Selected stake ${chip}`}
               ><b>{chip}</b></button>
             </div>
             <ToolButton label="double" icon={<b>×2</b>} onClick={() => replay("double")} disabled={!betting || busy || !myBets.length} />
@@ -525,7 +525,7 @@ function SevenUpDownTable({ game, live, demo = false }) {
                 </> : <>
                   <h2>How to play</h2>
                   <p><b>DOWN</b> wins when the dice total 2–6. <b>UP</b> wins on 8–12. A total of <b>7</b> wins only the blue Lucky Seven bet. Exact-total bets pay the odds printed on the felt.</p>
-                  <p>Minimum stake: {minBet}. Maximum stake per chip: {maxBet}.</p>
+                  <p>Minimum stake: {minBet}. Maximum stake per selection: {maxBet}.</p>
                 </>}
               </div>
             </div>

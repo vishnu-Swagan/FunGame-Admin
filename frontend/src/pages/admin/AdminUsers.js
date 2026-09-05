@@ -165,7 +165,7 @@ export default function AdminUsers() {
                 <TableHead className="text-white/50">Review readiness</TableHead>
                 <TableHead className="text-white/50">Country</TableHead>
                 <TableHead className="text-white/50">Status</TableHead>
-                <TableHead className="text-white/50 text-right">Chips</TableHead>
+                <TableHead className="text-white/50 text-right">Balance</TableHead>
                 <TableHead className="text-white/50 text-right">Won</TableHead>
                 <TableHead className="text-white/50 text-right">Lost</TableHead>
                 <TableHead className="text-white/50">Joined</TableHead>

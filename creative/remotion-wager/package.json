@@ -1,0 +1,14 @@
+{
+  "name": "chakri-wager-mission-preview",
+  "private": true,
+  "scripts": {
+    "render:still": "remotion still index.jsx WagerMissionPreview wager-mission-preview.png --frame=178 --public-dir=../../frontend/public",
+    "render:preview": "remotion render index.jsx WagerMissionPreview wager-mission-preview.mp4 --public-dir=../../frontend/public"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.515",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.515"
+  }
+}

@@ -10,11 +10,13 @@ import { api, errMsg } from "@/lib/api";
 import { isValidE164Phone, loginIdFromPhone, normalizeContactIdentifier, registrationChannelAvailable, useAuthCapabilities } from "@/lib/authCapabilities";
 import { COUNTRY_OPTIONS } from "@/lib/countryOptions";
 import { AUTH_PANELS, frontPathForAuthPanel } from "@/lib/frontDoor";
+import { useRegistrationPolicies } from "@/lib/legalPolicies";
 
 export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
   const navigate = useNavigate();
   const formRef = useRef(null);
   const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
+  const { policies, loading: policiesLoading, error: policiesError, retry: retryPolicies } = useRegistrationPolicies();
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -23,6 +25,7 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
@@ -68,6 +71,7 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
     else if (manualReview && password.length > 128) errors.password = "Password must not exceed 128 characters";
     if (manualReview && password !== passwordConfirmation) errors.passwordConfirmation = "Password confirmation does not match";
     if (!termsAccepted) errors.terms = "Please accept the account and play terms";
+    if (!privacyAccepted) errors.privacy = "Please acknowledge the current Privacy Notice";
 
     setValidationErrors(errors);
     const firstInvalidField = Object.keys(errors)[0];
@@ -99,6 +103,9 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
         date_of_birth: dob,
         country,
         accepted_terms: true,
+        accepted_privacy: true,
+        terms_version: policies?.terms?.version,
+        privacy_version: policies?.privacy?.version,
         ...(manualReview ? { password, password_confirmation: passwordConfirmation } : {}),
       });
       toast.success(data?.message || (manualReview ? "Registration submitted for review" : "Verification code sent"));
@@ -137,7 +144,7 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
           <p className="mt-1 text-sm text-white/65 leading-relaxed">
             {manualReview
               ? "Enter your details and create a password. An administrator will review your account before you can play."
-              : "Enter your name, mobile number, and email. We send one SMS code, then you create a password. Virtual chips have no cash value."}
+              : "Enter your name, mobile number, and email. We send one SMS code, then you create a password."}
           </p>
         </div>
       )}
@@ -219,19 +226,35 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
             className="mt-0.5"
           />
           <span className="text-xs leading-relaxed text-white/70">
-            I confirm that my details are accurate, I am eligible to use the service, and I accept the account and play terms.
+            I confirm that my details are accurate, I am eligible to use the service, and I accept the current{" "}
+            <a href={policies?.terms?.url || "/legal/terms"} target="_blank" rel="noreferrer" className="font-bold text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>Terms and Conditions</a>
+            {policies?.terms?.version ? ` (version ${policies.terms.version})` : ""}.
           </span>
         </label>
         {validationErrors.terms && <p id="reg-terms-error" className="text-xs text-red-300">{validationErrors.terms}</p>}
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5">
+          <Checkbox
+            data-testid="register-privacy-checkbox"
+            data-validation-field="privacy"
+            checked={privacyAccepted}
+            onCheckedChange={(value) => { setPrivacyAccepted(!!value); clearValidationError("privacy"); }}
+            aria-invalid={Boolean(validationErrors.privacy)}
+            aria-describedby={validationErrors.privacy ? "reg-privacy-error" : undefined}
+            className="mt-0.5"
+          />
+          <span className="text-xs leading-relaxed text-white/70">I have read the current{" "}<a href={policies?.privacy?.url || "/legal/privacy"} target="_blank" rel="noreferrer" className="font-bold text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>Privacy Notice</a>{policies?.privacy?.version ? ` (version ${policies.privacy.version})` : ""}.</span>
+        </label>
+        {validationErrors.privacy && <p id="reg-privacy-error" className="text-xs text-red-300">{validationErrors.privacy}</p>}
+        {policiesError && <div className="rounded-xl border border-red-300/25 bg-red-300/8 p-3 text-xs text-red-100" role="alert">{policiesError}<button type="button" onClick={retryPolicies} className="ml-2 font-bold underline">Retry</button></div>}
         <p data-testid="register-verification-copy" className="text-[11px] text-white/45 leading-relaxed">
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
             : "We send one SMS code to your mobile number. After you verify it, create a password. Email is collected for CRM and recovery, not as a second activation code."}
         </p>
-        <p className="text-[11px] text-white/45 leading-relaxed">Virtual chips have no cash value and cannot be purchased, withdrawn, transferred, exchanged, or redeemed.</p>
-        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
+        <p className="text-[11px] text-white/45 leading-relaxed">Real-money play is available only to eligible adults in supported territories. Deposits, wagers, withdrawals, and bonus balances appear in wallet activity.</p>
+        <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || policiesLoading || Boolean(policiesError) || !policies || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
           {manualReview && <LockKeyhole className="mr-2 h-4 w-4" />}
-          {capabilitiesLoading
+          {capabilitiesLoading || policiesLoading
             ? "Checking availability…"
             : busy
               ? (manualReview ? "Submitting…" : "Sending code…")

@@ -25,6 +25,18 @@ jest.mock("@/lib/authCapabilities", () => ({
   }),
 }));
 
+jest.mock("@/lib/legalPolicies", () => ({
+  useRegistrationPolicies: () => ({
+    policies: {
+      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
+      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
+    },
+    loading: false,
+    error: null,
+    retry: jest.fn(),
+  }),
+}));
+
 jest.mock("react-router-dom", () => {
   const React = require("react");
   return {

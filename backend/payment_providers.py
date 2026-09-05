@@ -960,10 +960,23 @@ class ConfiguredRestPaymentProvider:
         amount = _strict_positive_int(_path_get(payload, mapping["amount_paise"]), "amount_paise")
         if amount is None:
             raise WebhookVerificationError("Webhook amount_paise is required")
+        event_data = {"provider_payload_hash": hashlib.sha256(raw_body).hexdigest()}
+        payment_fingerprint_path = mapping.get("payment_instrument_fingerprint")
+        if payment_fingerprint_path is not None:
+            payment_fingerprint = _path_get(payload, payment_fingerprint_path)
+            if not isinstance(payment_fingerprint, str) or not re.fullmatch(
+                r"[A-Za-z0-9._:=+/\-]{16,512}", payment_fingerprint,
+            ):
+                raise WebhookVerificationError(
+                    "Webhook payment_instrument_fingerprint is invalid",
+                )
+            # This trusted provider token is consumed and HMACed by the wallet;
+            # neither it nor the raw body is persisted in financial records.
+            event_data["payment_instrument_fingerprint"] = payment_fingerprint
         return ProviderEvent(
             event_id=event_id, event_type=event_type.lower(), object_id=object_id,
             amount_paise=amount, currency=currency, provider_reference=reference_value,
-            occurred_at=occurred_value, data={"provider_payload_hash": hashlib.sha256(raw_body).hexdigest()},
+            occurred_at=occurred_value, data=event_data,
         )
 
 

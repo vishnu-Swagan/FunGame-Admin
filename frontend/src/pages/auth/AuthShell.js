@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
+import LegalLinks from "@/components/LegalLinks";
 
 export const AuthShell = ({ title, subtitle, children, backTo = "/" }) => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ export const AuthShell = ({ title, subtitle, children, backTo = "/" }) => {
           {subtitle && <p className="mt-2 text-sm text-white/65 leading-relaxed">{subtitle}</p>}
           <div className="mt-7">{children}</div>
           <Disclaimer className="mt-8" />
+          <LegalLinks className="mt-3 border-t border-white/8 pt-2" />
         </motion.div>
       </div>
     </div>

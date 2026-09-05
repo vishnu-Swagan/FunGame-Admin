@@ -30,7 +30,7 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test("payment gateways reports the chips-only provider boundary", async () => {
+test("payment gateways reports the source-aware provider boundary", async () => {
   adminPayments.settings.mockResolvedValue({
     mode_version: 3,
     updated_at: "2026-08-25T08:00:00Z",
@@ -43,7 +43,7 @@ test("payment gateways reports the chips-only provider boundary", async () => {
   const { container, root } = await render(AdminPaymentGateways);
 
   expect(container.textContent).toContain("Payment gateways");
-  expect(container.textContent).toContain("Virtual chips");
+  expect(container.textContent).toContain("Source-aware balances");
   expect(container.textContent).toContain("Provider connection boundary");
   expect(container.textContent).toContain("Inactive");
   expect(adminPayments.settings).toHaveBeenCalledTimes(1);

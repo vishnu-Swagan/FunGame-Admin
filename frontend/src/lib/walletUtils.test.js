@@ -16,11 +16,34 @@ test("normalizes wallet balance aliases while preserving split balances", () => 
     available_chips: 90,
     cash_chips: 70,
     bonus_chips: 20,
+    restricted_bonus_chips: 20,
     held_chips: 10,
+    held_withdrawal_chips: 0,
     withdrawable_chips: 60,
-    wager_remaining_chips: 0,
+    pending_reward_chips: 0,
+    active_mission: null,
+    withdrawal_eligibility: null,
   });
-  expect(normalizeWallet({}, 25).available_chips).toBe(25);
+  expect(normalizeWallet({}, 25)).toEqual(expect.objectContaining({
+    available_chips: 25,
+    cash_chips: 0,
+    bonus_chips: 25,
+    restricted_bonus_chips: 25,
+    withdrawable_chips: 0,
+  }));
+  expect(normalizeWallet({ wallet: { available_chips: 90, cash_chips: 70 } })).toEqual(expect.objectContaining({
+    available_chips: 90,
+    cash_chips: 70,
+    bonus_chips: 0,
+    restricted_bonus_chips: 0,
+    withdrawable_chips: 0,
+  }));
+  expect(normalizeWallet({ wallet: { available_chips: 90, bonus_chips: 20 } })).toEqual(expect.objectContaining({
+    cash_chips: 0,
+    bonus_chips: 90,
+    restricted_bonus_chips: 90,
+    withdrawable_chips: 0,
+  }));
 });
 
 test("collapses internal withdrawal states into clear player states", () => {

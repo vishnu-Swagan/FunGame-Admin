@@ -59,7 +59,7 @@ def require_legacy_chip_requests_enabled() -> None:
     if not _legacy_chip_requests_enabled():
         raise HTTPException(status_code=409, detail={
             'code': 'LEGACY_CHIP_REQUESTS_DISABLED',
-            'message': 'Legacy chip requests are unavailable.',
+            'message': 'Legacy promotional balance requests are unavailable.',
         })
     require_legacy_chip_mutation_allowed()
 

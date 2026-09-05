@@ -174,7 +174,7 @@ export function useLiveRound(slug, { pollMs = 1500, formatResult, revealSound } 
       const { data } = await api.post(`/live/${slug}/bets/clear`);
       setBalance(data.balance);
       setState((s) => (s ? { ...s, my_bets: [], my_total: 0 } : s));
-      if (data.refunded > 0) toast.success(`Refunded ${data.refunded} chips`);
+      if (data.refunded > 0) toast.success(`Refunded ${data.refunded} to your balance`);
       return data;
     } catch (e) {
       toast.error(errMsg(e));

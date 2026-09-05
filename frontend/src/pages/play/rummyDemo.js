@@ -112,7 +112,7 @@ export function createRummyDemoState(categoryId = "LV1") {
     privateState: privateStateFor({ cards: clone(DEMO_HAND), groups: DEMO_GROUPS.map(({ cardIds }) => [...cardIds]), drawn: false, drawnCardId: null }),
     result: null,
     walletNeutral: true,
-    botTableNotice: "Practice table · AUTO seats fill missing places · no chips are used or returned",
+    botTableNotice: "Practice table · AUTO seats fill missing places · no funds are used or returned",
     balance: RUMMY_DEMO_BALANCE,
   };
 }
@@ -198,7 +198,7 @@ export function applyRummyDemoAction(current, actionType, actionPayload = {}) {
     return settledState(next, false, "PLAYER_DROPPED");
   } else if (actionType === "LEAVE") {
     next.state = "CANCELLED";
-    next.cancelReason = "Practice table closed. No chips were used.";
+    next.cancelReason = "Practice table closed. No funds were used.";
   }
 
   next.version += 1;

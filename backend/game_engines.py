@@ -2,12 +2,14 @@
 
 All outcomes are generated server-side with a cryptographically secure RNG.
 Clients only submit bets/selections - never outcomes.
-All payouts are integer play chips. PLAY CHIPS ONLY.
+All stakes and payouts use integer balance units. Money conversion, funding
+source restrictions, and withdrawals remain in the financial wallet layer.
 """
 import secrets
 import math
 import os
 import hashlib
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from fastapi import HTTPException
 
 RNG = secrets.SystemRandom()
@@ -952,6 +954,36 @@ def aviator_multiplier(elapsed_seconds):
         + (0.04 * seconds) ** 4
     )
     return max(1.0, math.floor(value * 100) / 100)
+
+
+def aviator_multiplier_hundredths(multiplier):
+    """Normalize an Aviator multiplier to an integer hundredth-of-x unit.
+
+    The flight curve is presentation data and may use floating point, but it
+    must never participate directly in a chip calculation. Conversion is
+    decimal-string based and rounded half-up to match the two-decimal value
+    shown to the player, avoiding Python's platform-surprising banker rounding.
+    """
+    if isinstance(multiplier, bool):
+        raise ValueError('Aviator multiplier must be numeric')
+    try:
+        value = Decimal(str(multiplier))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError('Aviator multiplier must be numeric') from exc
+    if not value.is_finite() or value < Decimal('1') or value > Decimal('1000000'):
+        raise ValueError('Aviator multiplier is outside the supported range')
+    return int((value * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def aviator_payout_chips(stake_chips, multiplier):
+    """Return a whole-chip payout using integer, round-half-up arithmetic."""
+    if isinstance(stake_chips, bool):
+        raise ValueError('Aviator stake must be a positive integer')
+    stake = int(stake_chips)
+    if stake != stake_chips or stake <= 0:
+        raise ValueError('Aviator stake must be a positive integer')
+    multiplier_hundredths = aviator_multiplier_hundredths(multiplier)
+    return (stake * multiplier_hundredths + 50) // 100
 
 
 def aviator_time_for(mult):

@@ -61,7 +61,7 @@ export default function Notifications() {
           ))}
         </div>
       ) : items.length === 0 ? (
-        <EmptyState icon={Bell} title="No notifications" subtitle="Approvals and chip updates will land here." />
+        <EmptyState icon={Bell} title="No notifications" subtitle="Account, wallet, and payment updates will appear here." />
       ) : (
         <div data-testid="notifications-list" className="space-y-2.5">
           {items.map((n) => (

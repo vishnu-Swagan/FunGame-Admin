@@ -112,7 +112,7 @@ test("server settlement drives a gated in-table celebration and exact premium su
   expect(document.activeElement).toBe(dialog);
   expect(container.querySelectorAll(".rrs-particles i")).toHaveLength(18);
   expect(container.querySelector(".rrs-win-ribbon")?.textContent).toContain("CHAKRI WIN");
-  expect(container.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 chips payout");
+  expect(container.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 payout");
   expect(container.querySelector(".rrs-showcase-hand")?.querySelectorAll(".rrs-card")).toHaveLength(13);
   expect(container.querySelectorAll('.rrs-showcase-hand [data-joker-kind="rank-wild"]')).toHaveLength(3);
   expect(container.querySelectorAll('.rrs-showcase-hand [data-joker-kind="printed"]')).toHaveLength(1);

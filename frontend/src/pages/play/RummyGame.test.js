@@ -442,7 +442,7 @@ test("Live entry requires the larger of the configured minimum and entry stake",
   const practice = [...container.querySelectorAll("button")].find((button) => button.textContent === "PRACTICE TABLE");
   expect(live.disabled).toBe(true);
   expect(practice.disabled).toBe(false);
-  expect(container.textContent).toContain("Live requires 500 chips");
+  expect(container.textContent).toContain("Live requires a 500 balance");
   act(() => root.unmount());
 });
 
@@ -591,7 +591,7 @@ test("the flagship result dialog renders a royal outcome hero and complete stand
   const winner = standings?.querySelector("article.is-winner");
 
   expect(hero?.querySelector(".rrs-summary-seal")).not.toBeNull();
-  expect(hero?.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 chips payout");
+  expect(hero?.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 payout");
   expect(standings?.getAttribute("aria-labelledby")).toBe("rrs-standings-title");
   expect(standings?.querySelectorAll(".rrs-standing-rows > article")).toHaveLength(5);
   expect(winner?.querySelector(".rrs-standing-player b")?.textContent).toBe("Mira");

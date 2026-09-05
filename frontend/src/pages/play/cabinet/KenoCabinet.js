@@ -199,8 +199,8 @@ function Paytable({ picks, table, hits, active }) {
   const rows = picks > 0 ? Array.from({ length: picks }, (_, index) => picks - index) : [];
   const maxValue = Math.max(1, ...Object.values(table || {}).map(Number));
   return (
-    <aside className="keno-paytable" aria-label="Chip return table" data-testid="keno-paytable">
-      <div className="keno-paytable-head" aria-hidden="true"><span>HITS</span><span>CHIP RETURN</span></div>
+    <aside className="keno-paytable" aria-label="Payout table" data-testid="keno-paytable">
+      <div className="keno-paytable-head" aria-hidden="true"><span>HITS</span><span>PAYOUT</span></div>
       {picks === 0 ? (
         <div className="keno-paytable-empty"><b>1–10</b><span>SELECT NUMBERS</span></div>
       ) : rows.map((count) => {
@@ -443,7 +443,7 @@ function KenoTable({ game, live, demo = false }) {
             <CircleHelp /><span>How to Play?</span>
           </button>
           <div className="keno-live-mode"><span><i />LIVE</span></div>
-          <div className="keno-balance" data-testid="keno-balance">{balance == null ? "…" : money(balance)} <span>CHIPS</span></div>
+          <div className="keno-balance" data-testid="keno-balance">{balance == null ? "…" : money(balance)} <span>BALANCE</span></div>
           <button
             type="button"
             className={`keno-music-button ${musicOn ? "is-active" : ""}`}
@@ -486,8 +486,8 @@ function KenoTable({ game, live, demo = false }) {
         <footer className="keno-betbar">
           <div className="keno-stake-control">
             <div className="keno-stake-amount">
-              <label htmlFor="keno-stake">Chip stake</label>
-              <input id="keno-stake" value={amount} inputMode="decimal" onChange={(event) => setAmount(event.target.value)} onBlur={() => setAmount(Math.min(maxBet, Math.max(minBet, Number(amount) || minBet)).toFixed(2))} disabled={locked || placing} aria-label="Bet amount in virtual chips" />
+              <label htmlFor="keno-stake">Stake</label>
+              <input id="keno-stake" value={amount} inputMode="decimal" onChange={(event) => setAmount(event.target.value)} onBlur={() => setAmount(Math.min(maxBet, Math.max(minBet, Number(amount) || minBet)).toFixed(2))} disabled={locked || placing} aria-label="Bet amount" />
             </div>
             <button type="button" onClick={() => adjustAmount(-minBet)} disabled={locked || placing} aria-label="Decrease bet"><Minus strokeWidth={3.4} /></button>
             <button type="button" onClick={cyclePreset} disabled={locked || placing} aria-label="Select bet preset"><Coins strokeWidth={2.8} /></button>
@@ -514,8 +514,8 @@ function KenoTable({ game, live, demo = false }) {
       {rulesOpen && (
         <Modal title="HOW TO PLAY" onClose={() => setRulesOpen(false)}>
           <div className="keno-rules">
-            <p>Pick from 1 to 10 numbers on the 36-number board, set your virtual-chip stake, then press <b>BET</b>.</p>
-            <p>Every live round draws 10 numbers. Your chip return is your stake multiplied by the value shown beside the number of hits.</p>
+            <p>Pick from 1 to 10 numbers on the 36-number board, set your stake, then press <b>BET</b>.</p>
+            <p>Every live round draws 10 numbers. Your return is your stake multiplied by the value shown beside the number of hits.</p>
             <ol><li>Pink numbers were drawn.</li><li>Gold numbers are winning hits.</li><li>A yellow ring marks one of your picks.</li></ol>
             <p className="keno-live-note">LIVE MODE means the round and result are synchronized by the server for every connected player.</p>
           </div>
@@ -529,7 +529,7 @@ function KenoTable({ game, live, demo = false }) {
             <div className="keno-auto-rounds">
               {AUTO_ROUNDS.map((rounds) => <button type="button" key={rounds} className={autoChoice === rounds ? "is-selected" : ""} onClick={() => setAutoChoice(rounds)}>{rounds}</button>)}
             </div>
-            <label>Stop if chips decrease by<input type="number" min="0" value={stopLoss || ""} onChange={(event) => setStopLoss(Number(event.target.value) || 0)} placeholder="0" /></label>
+            <label>Stop if balance decreases by<input type="number" min="0" value={stopLoss || ""} onChange={(event) => setStopLoss(Number(event.target.value) || 0)} placeholder="0" /></label>
             <label>Stop if single win exceeds<input type="number" min="0" value={stopWin || ""} onChange={(event) => setStopWin(Number(event.target.value) || 0)} placeholder="0.00" /></label>
             <button type="button" className="keno-start-auto" onClick={startAuto} disabled={!picks.length || locked}>START AUTO</button>
           </div>
@@ -546,7 +546,7 @@ function KenoTable({ game, live, demo = false }) {
             {locked && betting && <button type="button" onClick={() => {
               if (bettingOpenNow(CLIENT_BETTING_GUARD_SECONDS)) clearBets();
               setMenuOpen(false);
-            }}><X /><span>Cancel current bet {money(myTotal)} chips</span></button>}
+            }}><X /><span>Cancel current bet {money(myTotal)}</span></button>}
             <div className="keno-recent"><h3><History /> Recent live draws</h3>{recent.length ? recent.map((row) => <div key={row.round_number}><b>#{row.round_number}</b><span>{(row.drawn || []).join(" · ")}</span></div>) : <p>No completed rounds yet.</p>}</div>
             <button type="button" onClick={() => navigate(`/games/${game.slug}`)}><ChevronDown /><span>Exit game</span></button>
           </div>
@@ -569,8 +569,8 @@ function LiveKeno({ game }) {
         big: netWin && settled.payout >= settled.total_bet * 5,
         title: `${hits} hit${hits === 1 ? "" : "s"}`,
         subtitle: netWin
-          ? `Won ${money(settled.payout)} chips`
-          : settled.payout > 0 ? `Returned ${money(settled.payout)} chips` : "No chips returned this round",
+          ? `Won ${money(settled.payout)}`
+          : settled.payout > 0 ? `Returned ${money(settled.payout)}` : "No return this round",
       };
     },
   });

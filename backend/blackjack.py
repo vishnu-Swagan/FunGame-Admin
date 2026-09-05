@@ -2,7 +2,7 @@
 
 Real Evolution rules: dealer stands on all 17, blackjack pays 3:2, insurance
 2:1. Side bets Perfect Pairs (25/12/6:1) and 21+3 (flush 5, straight 10, trips
-30, straight-flush 40, suited-trips 100 :1). Secure RNG shoe. PLAY CHIPS ONLY.
+30, straight-flush 40, suited-trips 100 :1). Secure RNG shoe.
 """
 import secrets
 

@@ -79,7 +79,7 @@ export default function AdminSignups() {
             <Input id="cu-name" data-testid="create-name-input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Ravi Kumar" className="bg-white/5 border-white/12" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="cu-chips">Starting play chips</Label>
+            <Label htmlFor="cu-chips">Starting promotional balance</Label>
             <Input id="cu-chips" data-testid="create-chips-input" type="number" min={0} max={1000000} value={startingChips} onChange={(e) => setStartingChips(e.target.value)} className="bg-white/5 border-white/12" />
           </div>
           <Button data-testid="create-user-button" onClick={create} disabled={busy || fullName.trim().length < 1} className="w-full font-bold">

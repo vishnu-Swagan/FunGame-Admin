@@ -112,16 +112,21 @@ async def send_operator_payout(
         log.exception("SgPay payout failed for %s", request_id)
         await db.operator_payment_requests.update_one(
             {"id": request_id},
-            {"$set": {
+            {"$setOnInsert": {
+                **dict(request),
+                "id": request_id,
+                "created_at": request.get("created_at") or _now(),
+            }, "$set": {
                 "payout_status": "FAILED",
                 "payout_error": str(exc)[:500],
                 "payout_updated_at": _now(),
                 "payout_actor": actor,
             }},
+            upsert=True,
         )
         raise HTTPException(status_code=502, detail={
             "code": "SGPAY_PAYOUT_FAILED",
-            "message": "SgPay did not accept the payout. Chips are already reserved; retry from Admin.",
+            "message": f"SgPay did not accept the payout: {str(exc)[:200]}. Funds remain reserved; retry from Admin.",
             "error": str(exc)[:300],
         }) from exc
 

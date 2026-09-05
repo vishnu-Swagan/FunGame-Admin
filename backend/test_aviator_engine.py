@@ -15,6 +15,20 @@ class _FixedRandom:
 
 
 class AviatorEngineTests(unittest.TestCase):
+    def test_payout_uses_integer_half_up_math(self):
+        self.assertEqual(game_engines.aviator_payout_chips(50, 1.01), 51)
+        self.assertEqual(game_engines.aviator_payout_chips(1, 1.01), 1)
+        self.assertEqual(game_engines.aviator_payout_chips(100_000, 1000), 100_000_000)
+        self.assertEqual(game_engines.aviator_multiplier_hundredths(1.015), 102)
+
+    def test_payout_rejects_invalid_money_inputs(self):
+        for stake in (0, -1, 1.5, True):
+            with self.assertRaises(ValueError):
+                game_engines.aviator_payout_chips(stake, 2)
+        for multiplier in (0.99, float('nan'), float('inf'), True):
+            with self.assertRaises(ValueError):
+                game_engines.aviator_payout_chips(10, multiplier)
+
     def test_probability_factor_is_read_from_private_environment(self):
         with patch.dict(os.environ, {'AVIATOR_RETURN_FACTOR': '0.8'}), patch.object(
             game_engines, 'RNG', _FixedRandom(0.6)

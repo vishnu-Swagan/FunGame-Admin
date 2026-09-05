@@ -15,7 +15,20 @@ import FrontPage from "@/pages/auth/FrontPage";
 import CasinoEntry from "@/pages/app/CasinoEntry";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import AdminLogin from "@/pages/auth/AdminLogin";
-import AdminFrontPage from "@/pages/auth/AdminFrontPage";
+import ForgotPassword from "@/pages/auth/ForgotPassword";
+import {
+  AmlKycPage,
+  BonusesPage,
+  ComplaintsPage,
+  CookiesPage,
+  GameRulesPage,
+  PaymentsPolicyPage,
+  PrivacyPage,
+  ResponsibleGamblingPage,
+  RestrictedTerritoriesPage,
+  TermsPage,
+  WithdrawalsPolicyPage,
+} from "@/pages/legal";
 
 // Onboarding
 import OnboardingProfile from "@/pages/onboarding/OnboardingProfile";
@@ -32,6 +45,8 @@ import Notifications from "@/pages/app/Notifications";
 import { Profile, Security, Settings } from "@/pages/app/ProfilePages";
 import BankDetailsPage from "@/pages/app/wallet/BankDetailsPage";
 import DepositReturn from "@/pages/app/wallet/DepositReturn";
+import BonusMission from "@/pages/app/BonusMission";
+import ReferralRewards from "@/pages/app/ReferralRewards";
 import Support from "@/pages/app/Support";
 import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
 import { LegalRouterPage } from "@/pages/legal/LegalPages";
@@ -70,7 +85,7 @@ import {
 } from "@/pages/admin/AdminPaymentPages";
 import AdminPlayHistory from "@/pages/admin/AdminPlayHistory";
 import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
-import AdminPaymentGateways from "@/pages/admin/AdminPaymentGateways";
+import AdminPromotions from "@/pages/admin/AdminPromotions";
 import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
 
 // Partner portal (distributors)
@@ -159,6 +174,7 @@ function AdminConsoleApp() {
             <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
+            <Route path="promotions" element={<RequirePermission permission={ADMIN_PERMISSIONS.PROMOTIONS_VIEW}><AdminPromotions /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="free-cash" element={<AdminFreeCash />} />
@@ -209,10 +225,25 @@ function PlayerApp() {
               <Route path="/__preview/rummy" element={<RummyGame game={{ slug: "rummy", name: "Rummy", demo: true }} />} />
             </>
           )}
-          {/* Single front door: auth panels + ACTIVE lobby */}
-          <Route path="/" element={<FrontPage />} />
-          <Route path="/welcome" element={<FrontDoorRedirect />} />
-          <Route path="/register" element={<FrontDoorRedirect auth="register" />} />
+          {/* Public policy library. These routes remain available before and
+              after authentication so the exact documents can be reviewed at
+              registration, deposit, play, withdrawal, and complaint time. */}
+          <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
+          <Route path="/legal/terms" element={<TermsPage />} />
+          <Route path="/legal/privacy" element={<PrivacyPage />} />
+          <Route path="/legal/cookies" element={<CookiesPage />} />
+          <Route path="/legal/payments" element={<PaymentsPolicyPage />} />
+          <Route path="/legal/withdrawals" element={<WithdrawalsPolicyPage />} />
+          <Route path="/legal/responsible-gambling" element={<ResponsibleGamblingPage />} />
+          <Route path="/legal/aml-kyc" element={<AmlKycPage />} />
+          <Route path="/legal/bonuses" element={<BonusesPage />} />
+          <Route path="/legal/complaints" element={<ComplaintsPage />} />
+          <Route path="/legal/restricted-territories" element={<RestrictedTerritoriesPage />} />
+          <Route path="/legal/game-rules" element={<GameRulesPage />} />
+          {/* Public / auth */}
+          <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
+          <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
+          <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/verify-email" element={<VerifyEmailRedirect />} />
           <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
@@ -246,6 +277,7 @@ function PlayerApp() {
             <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
+            <Route path="promotions" element={<RequirePermission permission={ADMIN_PERMISSIONS.PROMOTIONS_VIEW}><AdminPromotions /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
             <Route path="free-cash" element={<AdminFreeCash />} />
@@ -292,14 +324,21 @@ function PlayerApp() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/recent" element={<Recent />} />
-            <Route path="/chips" element={<ChipsPage />} />
-            <Route path="/chips/deposit" element={<ChipsPage />} />
-            <Route path="/chips/deposit/return" element={<DepositReturn />} />
-            <Route path="/chips/deposit/return/:depositId" element={<DepositReturn />} />
-            <Route path="/chips/withdraw" element={<ChipsPage />} />
-            <Route path="/chips/activity" element={<ChipsPage />} />
-            <Route path="/chips/request" element={<Navigate to="/chips" replace />} />
-            <Route path="/chips/history" element={<Navigate to="/chips/activity" replace />} />
+            <Route path="/wallet" element={<ChipsPage />} />
+            <Route path="/wallet/deposit" element={<ChipsPage />} />
+            <Route path="/wallet/deposit/return" element={<DepositReturn />} />
+            <Route path="/wallet/deposit/return/:depositId" element={<DepositReturn />} />
+            <Route path="/wallet/withdraw" element={<ChipsPage />} />
+            <Route path="/wallet/activity" element={<ChipsPage />} />
+            <Route path="/wallet/request" element={<Navigate to="/wallet" replace />} />
+            <Route path="/wallet/history" element={<Navigate to="/wallet/activity" replace />} />
+            {/* Keep old bookmarks and provider return URLs working while the
+                public product language moves from chips to wallet. */}
+            <Route path="/chips" element={<LegacyPathRedirect from="/chips" to="/wallet" />} />
+            <Route path="/chips/*" element={<LegacyPathRedirect from="/chips" to="/wallet" />} />
+            <Route path="/bonus-mission" element={<BonusMission />} />
+            <Route path="/bonus-mission/:missionId" element={<BonusMission />} />
+            <Route path="/referral-rewards" element={<ReferralRewards />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/profile" element={<Profile />} />

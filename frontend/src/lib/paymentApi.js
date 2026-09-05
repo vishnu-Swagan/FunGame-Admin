@@ -19,26 +19,13 @@ export const payments = {
     const { data } = await financialApi.get(`${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}`);
     return data?.deposit || data;
   },
-  async refreshDeposit(id) {
-    const { data } = await financialApi.post(
-      `${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}/refresh`,
-      {},
-      { __noFailover: true },
-    );
-    return data?.deposit || data;
-  },
-  async submitDepositUtr(id, utr) {
-    const { data } = await financialApi.post(
-      `${PLAYER_ROOT}/deposits/${encodeURIComponent(id)}/utr`,
-      { utr },
-      { __noFailover: true },
-    );
-    return data?.deposit || data;
-  },
-  async createDeposit(amountPaise, idempotencyKey) {
+  async createDeposit(amountPaise, idempotencyKey, { promotionConsentId } = {}) {
     const { data } = await financialPost(
       `${PLAYER_ROOT}/deposits`,
-      { amount_paise: amountPaise },
+      {
+        amount_paise: amountPaise,
+        ...(promotionConsentId ? { promotion_consent_id: promotionConsentId } : {}),
+      },
       { idempotencyKey },
     );
     return data;

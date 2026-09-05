@@ -177,12 +177,12 @@ function AuthoritativeHand({ row, compact = false, ownerLabel = "Winner", wildRa
 
 function PayoutFigure({ value, displayValue, visualOnly = false }) {
   const available = isFiniteNumber(value);
-  const exactLabel = available ? `${formatChips(value)} chips payout` : "Payout unavailable";
+  const exactLabel = available ? `${formatChips(value)} payout` : "Payout unavailable";
   return (
     <div className="rrs-payout" aria-label={visualOnly ? undefined : exactLabel} aria-hidden={visualOnly ? "true" : undefined} data-payout-chips={available ? String(value) : "unavailable"}>
       <span>PAYOUT</span>
       <strong>{available ? formatChips(displayValue) : "—"}</strong>
-      <small>CHIPS</small>
+      <small>PAYOUT</small>
     </div>
   );
 }
@@ -212,7 +212,7 @@ function Standings({ rows, winnerSeat }) {
                 <div><dt>POINTS</dt><dd>{isFiniteNumber(row?.points) ? row.points : "—"}</dd></div>
               </dl>
               <strong className={delta > 0 ? "is-positive" : delta < 0 ? "is-negative" : ""}>
-                {hasDelta ? `${delta > 0 ? "+" : ""}${formatChips(delta)}` : "—"} <small>CHIPS</small>
+                {hasDelta ? `${delta > 0 ? "+" : ""}${formatChips(delta)}` : "—"} <small>BALANCE</small>
               </strong>
             </article>
           );
@@ -448,7 +448,7 @@ export function RummyRoyalSettlement({
       <p className="rrs-sr-only" role="status" aria-live="polite">
         {phase === RUMMY_ROYAL_SETTLEMENT_PHASES.CELEBRATION
           ? `Round settled. ${playerWon ? "You win" : `${winnerName} wins`}.`
-          : `Final standings ready. ${isFiniteNumber(result.payoutChips) ? `${formatChips(result.payoutChips)} chips payout.` : "Payout unavailable."}`}
+          : `Final standings ready. ${isFiniteNumber(result.payoutChips) ? `${formatChips(result.payoutChips)} payout.` : "Payout unavailable."}`}
       </p>
 
       {phase === RUMMY_ROYAL_SETTLEMENT_PHASES.CELEBRATION ? (

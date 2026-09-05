@@ -84,7 +84,7 @@ export function AdminDeposits() {
     }
   };
   return <PageTransition className="space-y-4">
-    <PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Admin-reviewed buy requests and provider-created deposits. Operator requests credit chips only after approval." onRefresh={load} loading={loading} />
+    <PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Admin-reviewed funding requests and provider-created deposits. Operator requests credit the player balance only after approval." onRefresh={load} loading={loading} />
     <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "APPROVED", "REJECTED", "CREATED", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />
     {shown.length ? <div className="space-y-3">{shown.map((item) => {
       const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
@@ -92,8 +92,8 @@ export function AdminDeposits() {
       return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-deposit-${item.id}` : `deposit-${item.id}`}>
         <div className="grid gap-3 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
-          <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">{formatChips(item.chips)} chips</p></div>
-          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(paymentDisplayAt(item))}</p></div>
+          <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">Balance credit {formatChips(item.chips)}</p></div>
+          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div>
           <PaymentStatus status={item.status} />
         </div>
         {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
@@ -164,8 +164,8 @@ export function AdminWithdrawals() {
       return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-withdrawal-${item.id}` : `withdrawal-${item.id}`}>
         <div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
-          <div><p className="tabular-nums font-bold text-primary">{formatChips(item.amount_chips)} chips</p><p className="text-[10px] text-white/35">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p></div>
-          <div><p className="text-xs text-white/60">{valueOf(item.bank_detail, "bank_name")}</p><p className="font-mono text-[10px] text-white/40">{valueOf(item.bank_detail, "account_number_masked", "masked_account_number")}</p><p className="text-[10px] text-white/35">{when(paymentDisplayAt(item))}</p>{item.bank_detail?.payout_identifier_masked && <p className="font-mono text-[10px] text-white/35">{item.bank_detail.payout_identifier_masked}</p>}</div>
+          <div><p className="tabular-nums font-bold text-primary">{formatChips(item.amount_chips)} balance units</p><p className="text-[10px] text-white/35">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p></div>
+          <div><p className="text-xs text-white/60">{valueOf(item.bank_detail, "bank_name")}</p><p className="font-mono text-[10px] text-white/40">{valueOf(item.bank_detail, "account_number_masked", "masked_account_number")}</p>{item.bank_detail?.payout_identifier_masked && <p className="font-mono text-[10px] text-white/35">{item.bank_detail.payout_identifier_masked}</p>}</div>
           <PaymentStatus status={internalStatus} />
         </div>
         {item.provider_reference && <div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Provider reference</p><p className="mt-0.5 break-all font-mono text-xs text-white/70">{item.provider_reference}</p></div>}
@@ -237,14 +237,14 @@ export function AdminPaymentEvents() {
 
 export function AdminWalletLedger() {
   const loader = useCallback(() => adminPayments.ledger(), []); const { rows, loading, load } = useAdminRows(loader);
-  return <PageTransition className="space-y-4"><PageHead icon={BookOpenCheck} title="Wallet ledger" subtitle="Immutable chip movements and their business references." onRefresh={load} loading={loading} />{rows.length ? <DataCard>{rows.map((item) => <div key={item.id} className="grid gap-2 p-4 sm:grid-cols-[1.1fr_.75fr_.75fr_1fr] sm:items-center"><div><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="font-mono text-[10px] text-white/35">{item.id}</p></div><div><p className={`tabular-nums font-bold ${Number(item.delta_chips ?? item.amount_chips) >= 0 ? "text-emerald-300" : "text-red-300"}`}>{Number(item.delta_chips ?? item.amount_chips) > 0 ? "+" : ""}{formatChips(item.delta_chips ?? item.amount_chips)}</p><p className="text-[10px] text-white/35">balance {formatChips(item.balance_after)}</p></div><p className="text-xs text-white/60">{valueOf(item, "bucket", "entry_type", "type")}</p><div><p className="truncate font-mono text-[10px] text-white/50">{valueOf(item, "operation_id", "reference", "reference_id")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div></div>)}</DataCard> : <Empty icon={BookOpenCheck} loading={loading} noun="ledger entries" />}</PageTransition>;
+  return <PageTransition className="space-y-4"><PageHead icon={BookOpenCheck} title="Wallet ledger" subtitle="Immutable balance movements and their business references." onRefresh={load} loading={loading} />{rows.length ? <DataCard>{rows.map((item) => <div key={item.id} className="grid gap-2 p-4 sm:grid-cols-[1.1fr_.75fr_.75fr_1fr] sm:items-center"><div><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="font-mono text-[10px] text-white/35">{item.id}</p></div><div><p className={`tabular-nums font-bold ${Number(item.delta_chips ?? item.amount_chips) >= 0 ? "text-emerald-300" : "text-red-300"}`}>{Number(item.delta_chips ?? item.amount_chips) > 0 ? "+" : ""}{formatChips(item.delta_chips ?? item.amount_chips)}</p><p className="text-[10px] text-white/35">balance {formatChips(item.balance_after)}</p></div><p className="text-xs text-white/60">{valueOf(item, "bucket", "entry_type", "type")}</p><div><p className="truncate font-mono text-[10px] text-white/50">{valueOf(item, "operation_id", "reference", "reference_id")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div></div>)}</DataCard> : <Empty icon={BookOpenCheck} loading={loading} noun="ledger entries" />}</PageTransition>;
 }
 
 export function AdminPaymentAudit() {
   const loader = useCallback(() => adminPayments.audit(), []);
   const { rows, loading, load } = useAdminRows(loader);
   return <PageTransition className="space-y-4">
-    <PageHead icon={ScrollText} title="Administrative audit" subtitle="Administrative approvals, rejections, virtual-chip actions, and control changes." onRefresh={load} loading={loading} />
+    <PageHead icon={ScrollText} title="Administrative audit" subtitle="Administrative approvals, rejections, wallet actions, and control changes." onRefresh={load} loading={loading} />
     {rows.length ? <div className="space-y-3">{rows.map((item) => {
       const state = auditState(item);
       const target = [item.target_type, item.target_id].filter(Boolean).join(" · ") || "—";

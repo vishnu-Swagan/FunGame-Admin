@@ -70,7 +70,7 @@ export const ResultBanner = ({ result }) => {
           {result.subtitle && <p className="text-xs text-white/60 mt-1">{result.subtitle}</p>}
           {result.payout > 0 && (
             <p className="tabular-nums text-lg font-extrabold text-primary mt-1" data-testid="result-payout">
-              +{formatChips(result.payout)} chips
+              +{formatChips(result.payout)} winnings
             </p>
           )}
         </motion.div>

@@ -53,6 +53,12 @@ export function mountRoulette(root, opts) {
   // through DOMParser keeps the innerHTML idiom out of the app entirely
   const parsed = new DOMParser().parseFromString('<div>' + MARKUP + '</div>', 'text/html');
   root.replaceChildren(...parsed.body.firstChild.childNodes);
+  const initialNeighbourCost = root.querySelector('#nbCost');
+  if (initialNeighbourCost) initialNeighbourCost.textContent = 'Stake 5';
+  const stakePicker = root.querySelector('#chipslot');
+  if (stakePicker) stakePicker.setAttribute('aria-label', 'Stake value');
+  const lowBalanceCopy = root.querySelector('#scrim .modal p');
+  if (lowBalanceCopy) lowBalanceCopy.textContent = 'Your available balance is too low to cover that bet. Reduce the stake or deposit funds in your wallet.';
   const tableName = root.querySelector('.tablename');
   const onPlaceBet = opts.onPlaceBet || (() => {});
   const onUndo = opts.onUndo || (() => {});
@@ -1155,7 +1161,7 @@ export function mountRoulette(root, opts) {
       b.dataset.chip = String(v);
       b.style.setProperty('--c', CHIP_LOOK[v][0]);
       b.style.setProperty('--c-dk', CHIP_LOOK[v][1]);
-      b.setAttribute('aria-label', 'Bet ' + v + ' chips');
+      b.setAttribute('aria-label', 'Stake ' + v);
       b.setAttribute('aria-pressed', String(i === chipIdx));
       const s = document.createElement('span');
       s.textContent = chipLabel(v);
@@ -1812,7 +1818,7 @@ export function mountRoulette(root, opts) {
         items.forEach(([label, list, name]) => {
           const b = el('button', 'gb small'); b.type = 'button';
           b.appendChild(el('b', null, label));
-          b.appendChild(el('i', null, list.length + (list.length === 1 ? ' CHIP' : ' CHIPS')));
+          b.appendChild(el('i', null, list.length + (list.length === 1 ? ' BET' : ' BETS')));
           b.addEventListener('click', () => { if (placeMany(list, name)) closeSheets(); });
           g.appendChild(b);
         });
@@ -1925,10 +1931,10 @@ export function mountRoulette(root, opts) {
 
     const kv = el('div');
     const row = (k, v) => { const d = el('div', 'kv'); d.append(el('span', null, k), el('b', null, v)); kv.appendChild(d); };
-    row('Bet per round', stake ? fmt(stake) + ' chips' : 'no bet on the table');
+    row('Bet per round', stake ? fmt(stake) : 'no bet on the table');
     row('Rounds', String(autoRounds));
-    row('Total committed', stake ? fmt(stake * autoRounds) + ' chips' : '—');
-    row('Balance', fmt(balance) + ' chips');
+    row('Total committed', stake ? fmt(stake * autoRounds) : '—');
+    row('Balance', fmt(balance));
     body.appendChild(kv);
 
     if (autoLeft > 0) {
@@ -2033,7 +2039,7 @@ export function mountRoulette(root, opts) {
     const body = $('menubody');
     body.replaceChildren();
     $('menusheet').querySelector('h3').textContent =
-      { history: 'Game history', payouts: 'Chip returns & limits', how: 'How to play' }[view] || 'Menu';
+      { history: 'Game history', payouts: 'Payouts and limits', how: 'How to play' }[view] || 'Menu';
 
     if (view === 'history') {
       const sec = el('div', 'sheetsec');
@@ -2068,22 +2074,22 @@ export function mountRoulette(root, opts) {
       t.appendChild(tb);
       body.appendChild(t);
       const kv = el('div');
-      [['Table minimum', fmt(tableLimits.minimum) + ' chips'],
-       ['Position maximum', fmt(tableLimits.position_max) + ' chips'],
-       ['Even-money maximum', fmt(tableLimits.even_money_position_max) + ' chips'],
+      [['Table minimum', fmt(tableLimits.minimum)],
+       ['Position maximum', fmt(tableLimits.position_max)],
+       ['Even-money maximum', fmt(tableLimits.even_money_position_max)],
        ['Wheel', 'American double zero, 38 pockets']].forEach(([k, v]) => {
         const d = el('div', 'kv'); d.append(el('span', null, k), el('b', null, v)); kv.appendChild(d);
       });
       body.appendChild(kv);
       body.appendChild(el('p', 'sthint',
-        'Chip returns are shown before a bet is placed and are rounded to whole chips.'));
+        'Payouts are shown before a bet is placed and are rounded to whole balance values.'));
       body.appendChild(backRow());
       return;
     }
 
     if (view === 'how') {
       const steps = [
-        ['Pick a chip', 'The tray sets the stake for your next tap. Every denomination is there at once — no cycling.'],
+        ['Choose a stake', 'The tray sets the stake for your next tap. Every denomination is available at once.'],
         ['Tap the layout', 'A tap lands on the nearest bet point, so the middle of a box is the number and a line is the split, street or corner it sits on.'],
         ['Or use the racetrack', 'The racetrack bets by position on the wheel: a number plus its neighbours, or one of the French calls.'],
         ['Wait for the ball', 'Betting closes when the wheel goes into play. The ball is simulated — deflectors, fret rattle and all.'],
@@ -2125,7 +2131,7 @@ export function mountRoulette(root, opts) {
     row('star', 'Favourite bets', slots.filter(Boolean).length + ' saved', () => { renderFav(); openSheet('favsheet'); });
     row('auto', 'Autoplay', autoLeft > 0 ? autoLeft + ' rounds left' : 'off', () => { renderAuto(); openSheet('autosheet'); });
     row('hist', 'Game history', '', () => renderMenu('history'));
-    row('coin', 'Chip returns & limits', '', () => renderMenu('payouts'));
+    row('coin', 'Payouts and limits', '', () => renderMenu('payouts'));
     row('help', 'How to play', '', () => renderMenu('how'));
     row('chat', 'Live support', '', () => toast('Support is in the app menu, outside the table'));
 
@@ -2279,7 +2285,7 @@ export function mountRoulette(root, opts) {
      that state; nothing here decides anything. */
   function winFlash(amount) {
     const f = $('winflash');
-    f.replaceChildren(document.createTextNode('+' + fmt(amount) + ' CHIPS'));
+    f.replaceChildren(document.createTextNode('+' + fmt(amount) + ' WINNINGS'));
     f.classList.remove('hide');
     void f.offsetWidth;
     f.classList.add('show');
@@ -2478,7 +2484,7 @@ export function mountRoulette(root, opts) {
       const staked = settled.total_bet, payout = settled.payout || 0;
       if (payout > 0) {
         const net = payout - staked;
-        const parts = [document.createTextNode('CHIPS RETURNED '), goldSpan(fmt(payout))];
+        const parts = [document.createTextNode('PAYOUT '), goldSpan(fmt(payout))];
         const n = document.createElement('span');
         n.className = net >= 0 ? 'netup' : 'netdown';
         n.textContent = (net >= 0 ? '  net +' : '  net ') + fmt(net);

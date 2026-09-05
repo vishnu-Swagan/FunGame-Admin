@@ -51,7 +51,7 @@ export const BrandBoot = () => {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
           >
-            Play Chips · Live Worldwide
+            Real Play · Responsible Gaming
           </motion.p>
           {!reduced && (
             <div className="mt-6 h-1 w-44 rounded-full overflow-hidden bg-white/10">

@@ -71,7 +71,7 @@ export default function AdminCommission() {
           <Calculator className="h-5 w-5 text-primary" /> Commission
         </h1>
         <p className="text-xs text-white/55 mt-1">
-          The night job settles the previous virtual-chip activity day at 02:00. These controls do the
+          The night job settles the previous player-activity day at 02:00. These controls do the
           same thing by hand — safely, because a settled period is refused rather than repeated.
         </p>
       </div>
@@ -97,7 +97,7 @@ export default function AdminCommission() {
         </div>
         <p className="text-[11px] text-white/40 flex items-start gap-1.5">
           <AlertTriangle className="h-3.5 w-3.5 mt-px shrink-0" />
-          Rebuilding recomputes the day's figures from the chip ledger. It is safe to run
+          Rebuilding recomputes the day's figures from the gameplay ledger. It is safe to run
           repeatedly — the figures are derived, never accumulated.
         </p>
       </div>
@@ -105,12 +105,12 @@ export default function AdminCommission() {
       {revenue && (
         <Panel title={`Revenue · ${revenue.day}`}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            <Metric label="Chips played" value={formatChips(revenue.totals.turnover)} />
-            <Metric label="Chips returned" value={formatChips(revenue.totals.payout)} />
+            <Metric label="Settled stakes" value={formatChips(revenue.totals.turnover)} />
+            <Metric label="Player returns" value={formatChips(revenue.totals.payout)} />
             <Metric label="Gross result" value={formatChips(revenue.totals.ggr)} />
             <Metric label="Net result" value={formatChips(revenue.totals.ngr)} tone={revenue.totals.ngr < 0 ? "loss" : "win"} />
           </div>
-          <Table head={["Distributor", "Players", "Chips played", "Gross result", "Net result"]}
+          <Table head={["Distributor", "Players", "Settled stakes", "Gross result", "Net result"]}
                  rows={revenue.distributors.map((d) => [
                    d.distributor_code || d.distributor_id.slice(0, 8),
                    d.players, formatChips(d.turnover), formatChips(d.ggr), formatChips(d.ngr),

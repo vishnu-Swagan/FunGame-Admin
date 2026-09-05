@@ -1,8 +1,8 @@
 # Chakri.Casino staging and production launch checklist
 
-Product: Chakri.Casino player web app, same-origin operator/distributor portal at <code>chakri.casino/Admin</code>, ten reviewed virtual-chip games, and an installable PWA.
+Product: Chakri.Casino player web app, same-origin operator/distributor portal at <code>chakri.casino/Admin</code>, wallet-backed games, public policy centre, and an installable PWA.
 
-Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, and chip ledger.
+Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, wallet, and transaction ledger.
 
 Deployment decision: **reviewed commits to <code>main</code> deploy automatically.** The checked-in Render Blueprint enables <code>autoDeployTrigger: commit</code> for both the API and static frontend. Treat merging to <code>main</code> as the production release action and keep the previous successful Render deployment available for rollback.
 
@@ -39,7 +39,7 @@ Legend:
 | Intended play host | <code>play.chakri.casino</code> currently has no DNS record | Connect it only after production promotion is approved |
 | Database | FastAPI uses Motor/MongoDB and production <code>DB_NAME=fungame</code> | Staging must use a separate cluster or database and credentials |
 | Supabase | Two visible projects are named Production; this repo is not linked to either | Do not use either as an improvised staging target |
-| Payments | All five financial switches are off and the provider integration is fail-closed | Keep real-money deposit and withdrawal unavailable |
+| Payments | The checked-in Blueprint keeps financial activation switches off; the Render dashboard and deployed revision remain authoritative | Reconcile source, deployed flags, provider mode, and wallet conservation before each release |
 | Cron | The invalid free cron has been removed from the Blueprint; an existing dashboard service is not deleted by that source change | Keep it disabled until a paid plan, working command, idempotency dry run, spend ceiling, and owner are approved |
 
 ## Current account-access mode — Telesign phone OTP
@@ -272,9 +272,9 @@ The Telesign account and product configuration already exist, and production alr
 
   **You'll know it worked when:** a direct push to <code>main</code> is rejected and the draft release PR cannot merge with a failing or missing check.
 
-- [ ] 🧑 **Complete the operator/legal launch gate** — 30–90 minutes, excluding external review. From the staging player footer and account screens, open Terms, Privacy, Responsible Play, age controls, self-exclusion, KYC, deposit/withdrawal copy, and support contacts. Record written approval from the responsible owner or counsel. Keep the product explicitly play-chip-only while financial flags are off. Cost: **provider-dependent; no legal-service cost is assumed here**.
+- [ ] 🧑 **Publish the approved operator policy set** — 30–90 minutes. Follow <code>docs/legal-policy-publication.md</code>, then open Terms, Privacy, Payments, Withdrawals, Responsible Gambling, AML/KYC, Bonuses, Complaints, Restricted Territories, and Game Rules from both registration and the signed-in profile. Enter approved public operator facts directly in Render, publish immutable versioned policy URLs, and turn on exact version acknowledgement only after the frontend and backend versions match. Cost: **provider-dependent**.
 
-  **You'll know it worked when:** every required policy has an approved version/date/owner and the UI makes no claim that real-money payment is available.
+  **You'll know it worked when:** the policy pages show PUBLISHED, no required company field is missing, registration posts both exact versions, and a stale version receives <code>POLICY_VERSION_MISMATCH</code>.
 
 - [ ] 🤖 **Prepare the immutable production release card** — 15 minutes.
 
@@ -316,11 +316,11 @@ The Telesign account and product configuration already exist, and production alr
 
   **You'll know it worked when:** one manual run completes successfully, a repeat is idempotent, and the next scheduled time is documented in both UTC and Europe/London.
 
-- [ ] 🤝 **Run the production smoke test as a controlled user journey** — 45–60 minutes. Use designated test accounts, not customer accounts. Test registration by email if enabled, login, onboarding, one low-stakes play-chip round in each reviewed game, history, balance refresh, logout, password reset, PWA install, and staging-approved admin reads. Do not test deposit or withdrawal with money. Cost: play chips only; email/SMS usage may incur provider charges.
+- [ ] 🤝 **Run the production smoke test as a controlled user journey** — 45–60 minutes. Use designated test accounts, not customer accounts. Test registration by email if enabled, login, onboarding, one approved minimum-stake round in each reviewed game, history, balance refresh, logout, password reset, PWA install, and staging-approved admin reads. Use only the operator-approved payment sandbox or documented live-payment test procedure; never use a customer payment method. Cost: the approved test stake and any email/SMS provider charges.
 
   > Prompt: “Observe the controlled production smoke test read-only. Correlate each action to server logs and ledger IDs, verify exactly-once settlement, watch error rate and latency, and confirm all five financial flags remain false. Redact user identifiers and do not initiate a payment, withdrawal, admin approval, or destructive action.”
 
-  **You'll know it worked when:** the full journey completes on phone and desktop, balances reconcile, no production error spike appears, and real-money functions remain unavailable.
+  **You'll know it worked when:** the approved journey completes on phone and desktop, balances and ledger entries reconcile, no production error spike appears, and every financial action remains within the enabled server-side controls.
 
 ## Phase 7 — operate safely after launch
 

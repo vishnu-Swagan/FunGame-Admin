@@ -414,6 +414,35 @@ class BlackjackAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.database.rows['game_rounds']), 1)
         self.assertTrue(all(session is not None for _, _, session in self.database.mutations))
 
+    async def test_each_hand_payout_uses_only_that_hands_source_refs(self):
+        game = _game(status='done', total_payout=40)
+        game['hands'][0].update(
+            payout=0, outcome='LOSE', stake_refs=['cash-funded-hand'],
+        )
+        game['hands'].append({
+            'bet': 20, 'cards': [[10, 'D'], [9, 'C']], 'done': True,
+            'outcome': 'WIN', 'payout': 40, 'doubled': False,
+            'from_split_aces': False, 'pp': 0, 't3': 0,
+            'stake_refs': ['bonus-funded-hand'],
+        })
+        game['main_stake_refs'] = ['cash-funded-hand', 'bonus-funded-hand']
+        game['total_staked'] = 40
+        self.database.seed('users', {'id': 'player-1', 'chip_balance': 60})
+        self.database.seed('blackjack_games', game)
+
+        async def transaction(session):
+            current = await route._load('player-1', session=session)
+            return await route._finalize(current, 'player-1', 'hand-1', session=session)
+
+        self.assertTrue(await route._run_transaction(transaction))
+        payouts = [
+            row for row in self.database.rows['chip_transactions']
+            if row.get('kind') == ledger.PAYOUT
+        ]
+        self.assertEqual(len(payouts), 1)
+        self.assertEqual(payouts[0]['amount'], 40)
+        self.assertEqual(payouts[0]['source_refs'], ['bonus-funded-hand'])
+
     async def test_concurrent_stand_requests_settle_endpoint_exactly_once(self):
         game = _game()
         self.database.seed('users', {'id': 'player-1', 'chip_balance': 80})

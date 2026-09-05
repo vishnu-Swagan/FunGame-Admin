@@ -334,7 +334,7 @@ export default function IceFishingGame({ game }) {
           </div>
           <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
             {CHIPS.map((c) => (
-              <button key={c.v} data-testid={`ice-chip-${c.v}`} onClick={() => setChip(c.v)} aria-label={`Chip ${c.v}`}
+              <button key={c.v} data-testid={`ice-chip-${c.v}`} onClick={() => setChip(c.v)} aria-label={`Stake ${c.v}`}
                 className={`h-10 w-10 rounded-full font-extrabold text-[10px] tabular-nums border-4 border-dashed shadow transition-transform duration-100 ${chip === c.v ? "scale-110 ring-2 ring-primary" : "opacity-80 hover:opacity-100"}`}
                 style={{ background: c.bg, color: c.fg, borderColor: "rgba(255,255,255,0.55)" }}>
                 {c.v >= 1000 ? `${c.v / 1000}k` : c.v}

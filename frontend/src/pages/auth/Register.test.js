@@ -19,6 +19,18 @@ jest.mock("@/lib/authCapabilities", () => ({
   }),
 }));
 
+jest.mock("@/lib/legalPolicies", () => ({
+  useRegistrationPolicies: () => ({
+    policies: {
+      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
+      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
+    },
+    loading: false,
+    error: null,
+    retry: jest.fn(),
+  }),
+}));
+
 jest.mock("@/lib/api", () => ({
   api: { post: (...args) => mockPost(...args) },
   errMsg: (error) => error?.message || "Request failed",
@@ -141,6 +153,7 @@ test("manual-review registration submits both contacts and confirmed password wi
   change(container.querySelector("#reg-password-confirmation"), "Strong-Password-9");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
     await settle();
   });
   await submit(container.querySelector("form"));
@@ -155,6 +168,9 @@ test("manual-review registration submits both contacts and confirmed password wi
     date_of_birth: "1990-05-20",
     country: "IN",
     accepted_terms: true,
+    accepted_privacy: true,
+    terms_version: "account-terms-2026.09",
+    privacy_version: "privacy-2026.09",
     password: "Strong-Password-9",
     password_confirmation: "Strong-Password-9",
   }));
@@ -193,7 +209,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   mockPost.mockResolvedValue({ data: { destination_masked: "+44******23", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
   expect(container.querySelector('[data-testid="register-verification-copy"]')?.textContent).toMatch(/one SMS code/i);
-  expect(container.textContent).toMatch(/Virtual chips have no cash value/);
+  expect(container.textContent).toMatch(/Real-money play is available only to eligible adults/i);
   expect(container.textContent).not.toMatch(/email code/i);
   change(container.querySelector("#reg-name"), "OTP Player");
   change(container.querySelector("#reg-contact"), "+44 7700 900123");
@@ -202,6 +218,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   changeSelect(container.querySelector("#reg-country"), "GB");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
     await settle();
   });
   await submit(container.querySelector("form"));
@@ -238,6 +255,7 @@ test("a real submit-button click posts the phone-OTP payload with a generated Lo
   expect(container.querySelector("#reg-country")?.value).toBe("IN");
   await act(async () => {
     container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
     await settle();
   });
   await clickPrimarySubmit(container);
@@ -253,6 +271,9 @@ test("a real submit-button click posts the phone-OTP payload with a generated Lo
     date_of_birth: "1990-05-20",
     country: "IN",
     accepted_terms: true,
+    accepted_privacy: true,
+    terms_version: "account-terms-2026.09",
+    privacy_version: "privacy-2026.09",
   });
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
     state: expect.objectContaining({

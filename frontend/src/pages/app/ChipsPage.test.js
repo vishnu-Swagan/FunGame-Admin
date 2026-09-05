@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import ChipsPage, { publicFinancialConfig, safeHostedCheckoutUrl } from "./ChipsPage";
+import { toast } from "sonner";
+import ChipsPage, { isServerPromotionOfferEligible, publicFinancialConfig, safeHostedCheckoutUrl } from "./ChipsPage";
 
 const mockNavigate = jest.fn();
 const mockRefreshUser = jest.fn();
@@ -13,9 +14,11 @@ const mockCreateWithdrawal = jest.fn();
 const mockCreateOperatorDeposit = jest.fn();
 const mockCreateOperatorWithdrawal = jest.fn();
 const mockChipTransactions = jest.fn();
+const mockOffers = jest.fn();
+const mockAcceptOffer = jest.fn();
 const mockFinancialIntentKey = jest.fn();
 const mockClearFinancialIntent = jest.fn();
-let mockPathname = "/chips";
+let mockPathname = "/wallet";
 
 jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
@@ -38,6 +41,15 @@ jest.mock("@/lib/paymentApi", () => ({ payments: {
   chipTransactions: (...args) => mockChipTransactions(...args),
 } }));
 
+jest.mock("@/lib/promotionApi", () => ({
+  normalizeMission: (value) => value,
+  isPromotionPolicyVersion: (value) => /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(String(value || "")),
+  promotions: {
+    offers: (...args) => mockOffers(...args),
+    acceptOffer: (...args) => mockAcceptOffer(...args),
+  },
+}));
+
 jest.mock("@/lib/financialIntent", () => ({
   financialIntentKey: (...args) => mockFinancialIntentKey(...args),
   clearFinancialIntent: (...args) => mockClearFinancialIntent(...args),
@@ -56,6 +68,17 @@ jest.mock("lucide-react", () => ({
   History: () => null,
   Landmark: () => null,
   LockKeyhole: () => null,
+  CircleAlert: () => null,
+  Check: () => null,
+  CircleDollarSign: () => null,
+  Clock3: () => null,
+  Gamepad2: () => null,
+  Info: () => null,
+  ShieldCheck: () => null,
+  X: () => null,
+  Gift: () => null,
+  CirclePause: () => null,
+  ArrowRight: () => null,
 }), { virtual: true });
 
 jest.mock("@/components/common", () => ({
@@ -141,10 +164,15 @@ async function submit(form) {
 
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
 });
 
 beforeEach(() => {
-  mockPathname = "/chips";
+  mockPathname = "/wallet";
   mockNavigate.mockReset();
   mockRefreshUser.mockReset().mockResolvedValue(undefined);
   mockWallet.mockReset().mockResolvedValue(READY_WALLET);
@@ -153,9 +181,9 @@ beforeEach(() => {
   mockBankDetails.mockReset().mockResolvedValue([{ id: "bank-1", bank_name: "Secure Bank", account_number_masked: "••••1234" }]);
   mockCreateDeposit.mockReset().mockResolvedValue({ checkout_url: "https://pay.example/checkout/order-1" });
   mockCreateWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "withdrawal-2", status: "PENDING" } });
-  mockCreateOperatorDeposit.mockReset().mockResolvedValue({ deposit: { id: "op-deposit-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
-  mockCreateOperatorWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "op-withdrawal-1", status: "PENDING" }, source: "ADMIN_REVIEW" });
   mockChipTransactions.mockReset().mockResolvedValue([]);
+  mockOffers.mockReset().mockResolvedValue([]);
+  mockAcceptOffer.mockReset().mockResolvedValue({ id: "consent-1", quote_token: "quote-token-1", quoted_deposit_amount_paise: 100000, quoted_deposit_chips: 1000, quoted_target_chips: 10000, quoted_deadline_at: "2026-09-05T10:00:00Z", rate_version: "rate-1" });
   mockFinancialIntentKey.mockReset().mockImplementation((kind) => `${kind}-key`);
   mockClearFinancialIntent.mockReset();
 });
@@ -182,12 +210,28 @@ test("normalizes server-owned financial limits and rejects unsafe checkout URLs"
   expect(safeHostedCheckoutUrl("https://pay.example:443/checkout/1", ["pay.example"])).toBe("https://pay.example/checkout/1");
 });
 
-test("Buy Chips creates an idempotent INR order and opens only the routed hosted checkout", async () => {
+test("promotion offer eligibility fails closed outside the disclosed 1 to 720 hour finality range", () => {
+  const offer = {
+    deposit_amount_paise: 100000, target_chips: 5000, rate_version: "rate-1",
+    quote_token: "quote-123", deadline_at: "2026-09-05T10:00:00Z",
+    quote_expires_at: "2026-09-02T10:10:00Z", terms_version: "terms-1",
+    jurisdiction: "IN", claim_finality_hours: 24,
+    settlement_finality_policy_version: "settlement-v1",
+  };
+  expect(isServerPromotionOfferEligible(offer, 100000)).toBe(true);
+  expect(isServerPromotionOfferEligible({ ...offer, claim_finality_hours: 0 }, 100000)).toBe(false);
+  expect(isServerPromotionOfferEligible({ ...offer, claim_finality_hours: 721 }, 100000)).toBe(false);
+  expect(isServerPromotionOfferEligible({ ...offer, claim_finality_hours: undefined }, 100000)).toBe(false);
+  expect(isServerPromotionOfferEligible({ ...offer, settlement_finality_policy_version: "" }, 100000)).toBe(false);
+  expect(isServerPromotionOfferEligible({ ...offer, settlement_finality_policy_version: "invalid policy!" }, 100000)).toBe(false);
+});
+
+test("Deposit creates an idempotent INR order and opens only the routed hosted checkout", async () => {
   const checkoutNavigator = jest.fn();
   const { container, root } = await renderPage({ checkoutNavigator });
   expect(container.querySelector('[data-testid="manual-chip-request-form"]')).toBeNull();
   expect(container.querySelector('[data-testid="deposit-form"]')).not.toBeNull();
-  expect(container.textContent).toContain("Buy Chips");
+  expect(container.textContent).toContain("Deposit funds");
   expect(container.textContent).toContain("₹1,000");
   expect(container.textContent).toContain("completed by the approved provider");
 
@@ -198,6 +242,100 @@ test("Buy Chips creates an idempotent INR order and opens only the routed hosted
   expect(mockCreateDeposit).toHaveBeenCalledWith(250000, "deposit-key");
   expect(checkoutNavigator).toHaveBeenCalledWith("https://pay.example/checkout/order-1");
   expect(mockClearFinancialIntent).toHaveBeenCalledWith("deposit", "player-1", "deposit-key");
+  await act(async () => root.unmount());
+});
+
+test("explicit bonus consent is attached to the exact deposit order", async () => {
+  mockOffers.mockResolvedValue([{
+    id: "campaign-1",
+    campaign_id: "campaign-1",
+    campaign_version: 2,
+    name: "Golden mission",
+    terms_version: "terms-2",
+    jurisdiction: "IN",
+    claim_finality_hours: 24,
+    settlement_finality_policy_version: "settlement-v1",
+    deposit_amount_paise: 100000,
+    deposit_chips: 1000,
+    rate_version: "rate-1",
+    quote_token: "quote-token-1",
+    quote_expires_at: "2026-09-02T10:10:00Z",
+    deadline_at: "2026-09-05T10:00:00Z",
+    reward: { type: "BONUS_CHIPS", chips: 500 },
+    target_chips: 10000,
+    contribution_rules: { default_bps: 10000, allowed_games: ["Aviator"], excluded_games: [] },
+    significant_terms: ["Complete before the displayed deadline."],
+    withdrawal_consequence: "Deposited cash stays withdrawable.",
+  }]);
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+
+  act(() => container.querySelector('[role="radio"]').click());
+  const consentCheckbox = container.querySelector('[role="checkbox"]');
+  expect(consentCheckbox).not.toBeNull();
+  act(() => consentCheckbox.click());
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+
+  expect(mockAcceptOffer).toHaveBeenCalledWith("campaign-1", {
+    campaign_version: 2,
+    jurisdiction: "IN",
+    deposit_amount_paise: 100000,
+    quote_token: "quote-token-1",
+    terms_accepted: true,
+  }, expect.any(String));
+  expect(mockCreateDeposit).toHaveBeenCalledWith(100000, "deposit-key", { promotionConsentId: "consent-1" });
+  expect(checkoutNavigator).toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("a malformed settlement-finality window cannot be accepted or open payment", async () => {
+  mockOffers.mockResolvedValue([{
+    id: "campaign-unsafe", campaign_id: "campaign-unsafe", campaign_version: 1,
+    name: "Incomplete mission", terms_version: "terms-1", jurisdiction: "IN",
+    claim_finality_hours: 0,
+    deposit_amount_paise: 100000, deposit_chips: 1000, target_chips: 5000,
+    rate_version: "rate-1", quote_token: "quote-token-unsafe",
+    quote_expires_at: "2026-09-02T10:10:00Z", deadline_at: "2026-09-05T10:00:00Z",
+    reward: { type: "BONUS_CHIPS", chips: 250 },
+    contribution_rules: { default_bps: 10000, allowed_games: ["Aviator"], excluded_games: [] },
+  }]);
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+
+  act(() => container.querySelector('[role="radio"]').click());
+  expect(container.querySelector('[role="checkbox"]').disabled).toBe(true);
+  expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(true);
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+  expect(mockAcceptOffer).not.toHaveBeenCalled();
+  expect(mockCreateDeposit).not.toHaveBeenCalled();
+  expect(checkoutNavigator).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("payment does not open when the accepted consent differs from the displayed quote", async () => {
+  mockOffers.mockResolvedValue([{
+    id: "campaign-1", campaign_id: "campaign-1", campaign_version: 2,
+    name: "Golden mission", terms_version: "terms-2", jurisdiction: "IN", claim_finality_hours: 24,
+    settlement_finality_policy_version: "settlement-v1",
+    deposit_amount_paise: 100000, deposit_chips: 1000, target_chips: 10000,
+    rate_version: "rate-1", quote_token: "quote-token-1",
+    quote_expires_at: "2026-09-02T10:10:00Z", deadline_at: "2026-09-05T10:00:00Z",
+    reward: { type: "BONUS_CHIPS", chips: 500 },
+    contribution_rules: { default_bps: 10000, allowed_games: ["Aviator"], excluded_games: [] },
+  }]);
+  mockAcceptOffer.mockResolvedValue({
+    id: "consent-1", quote_token: "quote-token-1",
+    quoted_deposit_amount_paise: 100000, quoted_deposit_chips: 1000,
+    quoted_target_chips: 12000, quoted_deadline_at: "2026-09-05T10:00:00Z",
+    rate_version: "rate-1",
+  });
+  const checkoutNavigator = jest.fn();
+  const { container, root } = await renderPage({ checkoutNavigator });
+  act(() => container.querySelector('[role="radio"]').click());
+  act(() => container.querySelector('[role="checkbox"]').click());
+  await submit(container.querySelector('[data-testid="deposit-form"]'));
+  expect(mockCreateDeposit).not.toHaveBeenCalled();
+  expect(checkoutNavigator).not.toHaveBeenCalled();
   await act(async () => root.unmount());
 });
 
@@ -229,9 +367,9 @@ test("provider readiness copy reports deposit-only availability precisely", asyn
   });
   const { container, root } = await renderPage();
 
-  expect(container.textContent).toContain("Chip purchases are completed by the approved provider");
+  expect(container.textContent).toContain("Deposits are completed by the approved provider");
   expect(container.textContent).toContain("Withdrawals are not active yet");
-  expect(container.textContent).not.toContain("Chip purchases and withdrawals are completed");
+  expect(container.textContent).not.toContain("Deposits and withdrawals are completed");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(true);
   await act(async () => root.unmount());
@@ -248,14 +386,14 @@ test("provider readiness copy reports withdrawal-only availability precisely", a
   const { container, root } = await renderPage();
 
   expect(container.textContent).toContain("Withdrawals are completed by the approved provider");
-  expect(container.textContent).toContain("Buy Chips is not active yet");
+  expect(container.textContent).toContain("Deposits are not active yet");
   expect(container.textContent).not.toContain("Chip purchases and withdrawals are completed");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(true);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(false);
   await act(async () => root.unmount());
 });
 
-test("Buy Chips remains fail-closed when the server publishes no checkout hosts", async () => {
+test("Deposit remains fail-closed when the server publishes no checkout hosts", async () => {
   const noCheckoutHosts = JSON.parse(JSON.stringify(READY_WALLET));
   delete noCheckoutHosts.money_config.checkout_hosts;
   mockWallet.mockResolvedValue(noCheckoutHosts);
@@ -270,7 +408,7 @@ test("Buy Chips remains fail-closed when the server publishes no checkout hosts"
 });
 
 test("withdrawal uses the selected masked bank account and the server ₹1,000 minimum", async () => {
-  mockPathname = "/chips/withdraw";
+  mockPathname = "/wallet/withdraw";
   const { container, root } = await renderPage();
   expect(container.textContent).toContain("Minimum withdrawal:");
   expect(container.textContent).toContain("₹1,000");
@@ -282,7 +420,65 @@ test("withdrawal uses the selected masked bank account and the server ₹1,000 m
   expect(mockFinancialIntentKey).toHaveBeenCalledWith("withdrawal", "player-1", "amount_chips=1000&bank=bank-1");
   expect(mockCreateWithdrawal).toHaveBeenCalledWith(1000, "bank-1", "withdrawal-key");
   expect(mockClearFinancialIntent).toHaveBeenCalledWith("withdrawal", "player-1", "withdrawal-key");
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+test("withdrawal exceeding cleared cash shows a structured split instead of submitting", async () => {
+  mockPathname = "/wallet/withdraw";
+  mockWallet.mockResolvedValue({
+    ...READY_WALLET,
+    wallet: {
+      ...READY_WALLET.wallet,
+      withdrawable_chips: 500,
+      restricted_bonus_chips: 300,
+      active_mission: { id: "mission-1", campaign_id: "gold-mission", campaign_version: 2, title: "Gold mission", status: "ACTIVE", forfeit_allowed: true, progress: { percent: 25 } },
+    },
+  });
+  const { container, root } = await renderPage();
+  await submit(container.querySelector('[data-testid="withdrawal-form"]'));
+
+  expect(mockCreateWithdrawal).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="withdrawal-balance-explanation"]')).not.toBeNull();
+  expect(container.textContent).toContain("500 is currently withdrawable");
+  expect(container.textContent).toContain("Restricted bonus");
+  expect(container.textContent).toContain("Gold mission");
+  expect(container.textContent).toContain("Campaign gold-mission · version 2");
+  expect(container.textContent).toContain("Mission mission-1");
+  expect(container.textContent).toContain("Review forfeiture option");
+  expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(false);
+  act(() => [...container.querySelectorAll("button")].find((button) => button.textContent.includes("Review forfeiture option")).click());
+  expect(mockNavigate).toHaveBeenCalledWith("/bonus-mission/mission-1");
+  expect(mockCreateWithdrawal).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("a server-race WITHDRAWABLE_CASH_EXCEEDED response renders structured guidance instead of a toast", async () => {
+  mockPathname = "/wallet/withdraw";
+  mockCreateWithdrawal.mockRejectedValue({
+    response: {
+      data: {
+        detail: {
+          code: "WITHDRAWABLE_CASH_EXCEEDED",
+          message: "The requested amount exceeds cleared cash.",
+          meta: {
+            requested_chips: 1000,
+            withdrawable_chips: 800,
+            restricted_bonus_chips: 250,
+            active_mission: { id: "mission-race", campaign_id: "race-campaign", campaign_version: 4, status: "ACTIVE", forfeit_allowed: false },
+          },
+        },
+      },
+    },
+  });
+  const { container, root } = await renderPage();
+  await submit(container.querySelector('[data-testid="withdrawal-form"]'));
+
+  expect(container.querySelector('[data-testid="withdrawal-balance-explanation"]')).not.toBeNull();
+  expect(container.textContent).toContain("800 is currently withdrawable");
+  expect(container.textContent).toContain("Campaign race-campaign · version 4");
+  expect(container.textContent).toContain("View mission");
+  expect(toast.error).not.toHaveBeenCalled();
   await act(async () => root.unmount());
 });
 
@@ -343,7 +539,7 @@ test("hosted UPI operator rail creates an idempotent deposit and opens only SgPa
     operatorCheckoutHosts: ["root.sgpay24.com"],
     checkoutHosts: ["root.sgpay24.com"],
   });
-  expect(container.textContent).toContain("Buy chips with UPI");
+  expect(container.textContent).toContain("Deposit with UPI");
   expect(container.textContent).toContain("SgPay secure UPI checkout");
   expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Pay securely with UPI");
 
@@ -389,14 +585,14 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
   expect(container.textContent).toMatch(/2,00,000|200,000/);
   expect(container.textContent).not.toContain("Payment services are not active yet");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
-  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit buy request");
+  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit deposit request");
 
   change(container.querySelector('[data-testid="deposit-amount"]'), "1000");
   await submit(container.querySelector('[data-testid="deposit-form"]'));
   expect(mockCreateDeposit).not.toHaveBeenCalled();
   expect(checkoutNavigator).not.toHaveBeenCalled();
   expect(mockCreateOperatorDeposit).toHaveBeenCalledWith(100000);
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
   await act(async () => root.unmount());
 });
 
@@ -410,7 +606,7 @@ test("operator rail submits withdrawals against available play chips", async () 
   await submit(container.querySelector('[data-testid="withdrawal-form"]'));
   expect(mockCreateWithdrawal).not.toHaveBeenCalled();
   expect(mockCreateOperatorWithdrawal).toHaveBeenCalledWith(1000, "bank-1");
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
   await act(async () => root.unmount());
 });
 

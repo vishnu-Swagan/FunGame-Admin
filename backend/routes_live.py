@@ -23,9 +23,9 @@ from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
-    MIN_BET, MAX_BET, AVIATOR_GROWTH, AVIATOR_FAIRNESS_VERSION, KENO_PAYTABLE,
-    aviator_commitment, aviator_commitment_payload, aviator_crash_point,
-    aviator_factor_text, aviator_multiplier, aviator_return_factor, aviator_time_for,
+    MIN_BET, MAX_BET, AVIATOR_GROWTH, KENO_PAYTABLE,
+    aviator_crash_point, aviator_multiplier, aviator_return_factor, aviator_time_for,
+    aviator_multiplier_hundredths, aviator_payout_chips,
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
@@ -123,12 +123,16 @@ async def _av_cash_bet(bet, mult, crash_point=None, auto=False, cashout_deadline
         )
         if not current:
             return None
-        payout = int(round(current['amount'] * mult))
+        multiplier_hundredths = aviator_multiplier_hundredths(mult)
+        payout = aviator_payout_chips(current['amount'], mult)
         res = await db.aviator_bets.update_one(
             {'id': current['id'], 'status': 'OPEN'},
             {'$set': {
                 'status': 'CASHED', 'active': False, 'payout': payout,
-                'multiplier': mult, 'auto': auto, 'settled_at': _now_iso(),
+                'multiplier': multiplier_hundredths / 100,
+                'multiplier_hundredths': multiplier_hundredths,
+                'payout_rounding': 'INTEGER_HALF_UP_TO_CHIP',
+                'auto': auto, 'settled_at': _now_iso(),
             }},
             session=session,
         )
@@ -137,6 +141,11 @@ async def _av_cash_bet(bet, mult, crash_point=None, auto=False, cashout_deadline
         await credit_chips(
             current['user_id'], payout, f'Aviator cashout {mult}x', ref=current['id'],
             kind=ledger.PAYOUT, game='aviator', session=session,
+            source_refs=[current['id']], settlement_ref=str(current['round_number']),
+        )
+        await ledger.record_settlement(
+            current['user_id'], [current['id']], 'aviator', status='SETTLED',
+            settlement_ref=str(current['round_number']), session=session,
         )
         await _av_history_doc(
             current, payout,
@@ -167,6 +176,10 @@ async def _av_lose_bet(bet, crash_point):
         )
         if res.modified_count == 0:
             return False
+        await ledger.record_settlement(
+            current['user_id'], [current['id']], 'aviator', status='SETTLED',
+            settlement_ref=str(current['round_number']), session=session,
+        )
         await _av_history_doc(
             current, 0, {'result': 'crashed', 'crash_point': crash_point},
             session=session,
@@ -398,10 +411,16 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
     else:
         target_rn = r['round_number'] + 1
     bet_id = str(uuid.uuid4())
-    auto = round(float(body.auto_cashout), 2) if body.auto_cashout else None
+    auto_hundredths = (
+        aviator_multiplier_hundredths(body.auto_cashout)
+        if body.auto_cashout is not None else None
+    )
+    auto = auto_hundredths / 100 if auto_hundredths is not None else None
     bet = {
         'id': bet_id, 'user_id': user['id'], 'round_number': target_rn, 'panel': body.panel,
-        'amount': body.amount, 'auto_cashout': auto, 'status': 'OPEN', 'active': True,
+        'amount': body.amount, 'auto_cashout': auto,
+        'auto_cashout_hundredths': auto_hundredths,
+        'status': 'OPEN', 'active': True,
         'payout': 0, 'multiplier': None, 'created_at': _now_iso(),
     }
 
@@ -424,7 +443,7 @@ async def aviator_place_bet(body: AviatorBet, user: dict = Depends(require_activ
     except DuplicateKeyError:
         raise HTTPException(status_code=409, detail='You already have an active bet on this panel for that round')
     except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
+        raise HTTPException(status_code=400, detail='Your available balance is too low for this stake')
     balance = await _fresh_balance(user['id'])
     return {
         'bet_id': bet_id, 'round_number': target_rn, 'panel': body.panel,
@@ -595,7 +614,7 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
             bets = await db.live_bets.find({
                 'user_id': user_id, 'slug': slug, 'round_number': rn, 'status': 'OPEN',
             }, **kwargs).to_list(length=None)
-            total_bet, total_payout, details = 0, 0, []
+            total_bet, total_payout, details, settled_refs = 0, 0, [], []
             for b in bets:
                 try:
                     payout, detail = settle_bet(
@@ -611,8 +630,16 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
                 )
                 if res.modified_count == 0:
                     continue
+                settled_refs.append(b['id'])
                 total_bet += b['amount']
                 total_payout += payout
+                if payout > 0:
+                    await credit_chips(
+                        user_id, payout, f'{gname} bet win (round {rn})',
+                        ref=f'{rn}:{b["id"]}', kind=ledger.PAYOUT,
+                        game=slug, session=session, source_refs=[b['id']],
+                        settlement_ref=str(rn),
+                    )
                 entry = {'selection': b.get('selection'), 'amount': b['amount'], 'payout': payout}
                 entry.update(detail)
                 if b.get('card'):
@@ -620,11 +647,10 @@ async def _live_settle_user(user_id, slug, current_rn, phase):
                 details.append(entry)
             if total_bet == 0:
                 return None
-            if total_payout > 0:
-                await credit_chips(
-                    user_id, total_payout, f'{gname} win (round {rn})', ref=str(rn),
-                    kind=ledger.PAYOUT, game=slug, session=session,
-                )
+            await ledger.record_settlement(
+                user_id, settled_refs, slug, status='SETTLED',
+                settlement_ref=str(rn), session=session,
+            )
             await db.game_rounds.insert_one({
                 'id': str(uuid.uuid4()), 'user_id': user_id, 'slug': slug, 'game_name': gname,
                 'bet': total_bet, 'payout': total_payout, 'status': 'SETTLED',
@@ -780,7 +806,7 @@ async def live_place_bet(slug: str, body: LiveBet, user: dict = Depends(require_
     try:
         await run_game_transaction(client, place_bet)
     except InsufficientChips:
-        raise HTTPException(status_code=400, detail='Not enough play chips for this bet')
+        raise HTTPException(status_code=400, detail='Your available balance is too low for this stake')
     my_bets = await db.live_bets.find(
         {'user_id': user['id'], 'slug': slug, 'round_number': rn, 'status': 'OPEN'},
         {'_id': 0, 'user_id': 0},
@@ -806,6 +832,7 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
         ).to_list(length=None)
         _require_live_betting(slug, expected_round=rn, message='Bets are locked for this round.')
         refunded = 0
+        refunded_refs = []
         for b in open_bets:
             res = await db.live_bets.update_one(
                 {'id': b['id'], 'status': 'OPEN'},
@@ -814,10 +841,12 @@ async def live_clear_bets(slug: str, user: dict = Depends(require_active_player)
             )
             if res.modified_count:
                 refunded += b['amount']
+                refunded_refs.append(b['id'])
         if refunded > 0:
             await credit_chips(
                 user['id'], refunded, f'Live bets refunded ({slug} round {rn})',
                 ref=str(rn), kind=ledger.REFUND, game=slug, session=session,
+                source_refs=refunded_refs, settlement_ref=str(rn),
             )
         return refunded
 

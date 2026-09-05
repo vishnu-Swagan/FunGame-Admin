@@ -1,25 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 112" role="img" aria-labelledby="title" data-flight-profile="side-view" data-tail-anchor="18 62">
-  <title id="title">Red Chakri propeller aircraft</title>
-  <g fill="#ed1747">
-    <!-- Original compact propeller-plane silhouette, anchored at the rear fuselage. -->
-    <path d="M18 58 38 53 29 41 39 37 58 51l49-2 42-10 51 2 29 10 25 5q13 3 13 8t-14 8l-31 5-65-5-57 1-42 6-18-2 13-12-35 1Z"/>
-    <path d="m38 53 15-25 14-1-9 25-20 1Z"/>
-    <path d="m95 49 49-29 25 1-26 27-48 1Z"/>
-    <path d="m91 68 61-2 55 27-31 3-85-28Z"/>
-    <path d="m42 66-18 16-12-1 14-15h16Z"/>
-    <path d="m145 40 18-22 29 2 23 27-70-7Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 112" aria-hidden="true" focusable="false" data-flight-profile="side-view">
+  <g class="plane-body">
+    <g fill="#ed0b42">
+      <!-- Original, compact side-profile vintage aircraft silhouette. -->
+      <path d="M20 54 43 50 31 29 45 25 68 49l33-1 27-25 28-1-19 25 59-2 25 7c11 3 17 7 17 11s-7 8-19 10l-26 3-58-5 20 19-27-2-30-19-62-2c-19-1-31-5-38-10Z"/>
+      <path d="m14 57 50-3-25 22-19-1 19-15-25 2Z"/>
+      <path d="m85 64 70-2 38 24-33 3-75-25Z"/>
+      <path d="m154 45 17-18 25 1 16 19-58-2Z"/>
+      <ellipse cx="229" cy="62" rx="13" ry="12"/>
+      <circle cx="241" cy="62" r="5"/>
+    </g>
+    <path fill="#101216" d="m172 42 7-10h14l9 13-30-3Z"/>
+    <path fill="#ed0b42" d="M185 28h5v8h-5z"/>
+    <path fill="#101216" d="m47 50 6-12 6 11-12 1Zm79 11 9-4 10 5-10 5-9-6Z" opacity=".72"/>
   </g>
-  <path fill="#12151a" d="m166 38 9-14 15 2 14 17-38-5Z"/>
-  <path fill="#12151a" d="m106 52 13-7 13 6-12 8-14-7Z" opacity=".78"/>
-  <path fill="#f5f7fa" d="m183 49 5-6 6 5-5 6-6-5Z" opacity=".9"/>
-  <g id="propeller" transform-origin="270px 63px">
-    <path fill="#ed1747" d="M266 16q4-10 8 0l-2 42h-6V16Zm0 52h6l2 38q-4 10-8 0V68Z"/>
-    <circle cx="269" cy="63" r="7" fill="#ed1747"/>
-    <circle cx="269" cy="63" r="2.5" fill="#12151a"/>
+  <g id="propeller" class="plane-propeller">
+    <path fill="#ed0b42" d="M240 18c3-8 7-8 9 0l-4 39h-6l1-39Zm-1 48h6l4 38c-2 8-6 8-9 0l-1-38Z"/>
+    <circle cx="244" cy="62" r="5" fill="#ed0b42"/>
+    <circle cx="244" cy="62" r="2" fill="#101216"/>
   </g>
-  <style>
-    #propeller { animation: propeller-spin .16s linear infinite; }
-    @keyframes propeller-spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { #propeller { animation: none; } }
-  </style>
 </svg>

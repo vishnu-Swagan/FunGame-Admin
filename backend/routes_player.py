@@ -124,7 +124,7 @@ async def _run_chip_request_transaction(callback):
         logger.error('Chip request transaction unavailable: %s', type(exc).__name__)
         raise HTTPException(status_code=503, detail={
             'code': 'CHIP_REQUESTS_UNAVAILABLE',
-            'message': 'Chip requests are temporarily unavailable.',
+            'message': 'Legacy promotional balance requests are unavailable.',
         }) from exc
     try:
         async with session_cm as session:
@@ -135,7 +135,7 @@ async def _run_chip_request_transaction(callback):
         logger.error('Chip request transaction failed: %s', type(exc).__name__)
         raise HTTPException(status_code=503, detail={
             'code': 'CHIP_REQUESTS_UNAVAILABLE',
-            'message': 'Chip requests are temporarily unavailable.',
+            'message': 'Legacy promotional balance requests are unavailable.',
         }) from exc
 
 
@@ -213,7 +213,7 @@ async def system_config():
         'maintenance_mode': cfg.get('maintenance_mode', False),
         'maintenance_message': cfg.get('maintenance_message', ''),
         'min_client_version': cfg.get('min_client_version', '1.0.0'),
-        'disclaimer': 'PLAY CHIPS ONLY',
+        'disclaimer': '18+ | PLAY RESPONSIBLY | TERMS APPLY',
     }
 
 
@@ -442,29 +442,28 @@ async def toggle_favorite(slug: str, user: dict = Depends(require_active_player)
 # NOTE: gameplay endpoints (play/cashout/draw/history) live in routes_games.py
 
 
-# ---------- Chips ----------
+# ---------- Player balance (legacy API path retained for compatibility) ----------
 @router.get('/chips/balance')
 async def chip_balance(user: dict = Depends(require_active_player)):
     fresh = await db.users.find_one({'id': user['id']})
     return {
         'balance': fresh.get('chip_balance', 0),
         'points': fresh.get('points_balance', 0),
-        'disclaimer': 'PLAY CHIPS ONLY',
+        'disclaimer': '18+ | PLAY RESPONSIBLY | TERMS APPLY',
     }
 
 
 @router.post('/chips/convert')
 async def convert_chips_points(body: ConvertRequest, user: dict = Depends(require_active_player)):
-    """Points -> chips is instant (1:1, minimum 500).
-    Chips -> points now requires an admin-approved SELL request."""
+    """Legacy points conversion. Disabled when the source-aware wallet is in use."""
     require_legacy_chip_mutation_allowed()
     if user.get('role') == 'ADMIN':
-        raise HTTPException(status_code=400, detail='Admins do not convert chips')
+        raise HTTPException(status_code=400, detail='Admins do not convert player balances')
     uid = user['id']
     if body.direction == 'CHIPS_TO_POINTS':
         raise HTTPException(
             status_code=400,
-            detail='Selling chips for points now requires operator approval. Please submit a sell request instead.',
+            detail='Converting promotional balance to points requires operator approval. Please submit a legacy balance request instead.',
         )
     # POINTS_TO_CHIPS (instant)
     result = await db.users.find_one_and_update(
@@ -476,11 +475,11 @@ async def convert_chips_points(body: ConvertRequest, user: dict = Depends(requir
     points_balance = result.get('points_balance', 0)
     await db.points_transactions.insert_one({
         'id': str(uuid.uuid4()), 'user_id': uid, 'type': 'DEBIT', 'amount': body.amount,
-        'balance_after': points_balance, 'note': f'Converted {body.amount} points to chips (1:1)',
+        'balance_after': points_balance, 'note': f'Converted {body.amount} points to promotional balance (1:1)',
         'ref': 'convert', 'created_at': _now(),
     })
-    chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to chips (1:1)', ref='convert', kind=ledger.DEPOSIT)
-    message = f'Converted {body.amount} points — {body.amount} chips credited.'
+    chip_balance = await credit_chips(uid, body.amount, f'Converted {body.amount} points to promotional balance (1:1)', ref='convert', kind=ledger.DEPOSIT)
+    message = f'Converted {body.amount} points. {body.amount} promotional balance units were credited.'
     return {'message': message, 'chip_balance': chip_balance, 'points_balance': points_balance}
 
 
@@ -494,7 +493,7 @@ async def my_points_transactions(user: dict = Depends(require_active_player)):
 async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(require_active_player)):
     require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
-        raise HTTPException(status_code=400, detail='Admins do not request chips')
+        raise HTTPException(status_code=400, detail='Admins do not request promotional balance')
     # Checked when the request is made so the player is told now, and again at
     # approval so an operator cannot wave through what the limit refuses.
     await compliance.check_deposit(user['id'], body.amount)
@@ -507,7 +506,7 @@ async def create_chip_request(body: ChipRequestCreate, user: dict = Depends(requ
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
     req = await _create_chip_request_with_cap(req, 'BUY')
-    return {'message': 'Chip request submitted for review.', 'request': serialize_doc(req)}
+    return {'message': 'Legacy promotional balance request submitted for review.', 'request': serialize_doc(req)}
 
 
 @router.post('/chips/sell-request')
@@ -516,11 +515,11 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
     Chips stay in the balance until the admin approves the request."""
     require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
-        raise HTTPException(status_code=400, detail='Admins do not sell chips')
+        raise HTTPException(status_code=400, detail='Admins do not convert promotional balance')
     fresh = await db.users.find_one({'id': user['id']})
     balance = fresh.get('chip_balance', 0) if fresh else 0
     if balance < body.amount:
-        raise HTTPException(status_code=400, detail='Not enough chips — you can only sell up to your current balance.')
+        raise HTTPException(status_code=400, detail='Not enough promotional balance for this legacy conversion request.')
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
         **_requester_contact(user),
@@ -530,7 +529,7 @@ async def create_sell_request(body: SellChipsRequestCreate, user: dict = Depends
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
     req = await _create_chip_request_with_cap(req, 'SELL')
-    return {'message': 'Sell request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
+    return {'message': 'Legacy conversion request submitted for operator review. The promotional balance changes only after approval.', 'request': serialize_doc(req)}
 
 
 @router.post('/chips/return-request')
@@ -539,11 +538,11 @@ async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Dep
     only when the admin approves the request (nothing is credited back)."""
     require_legacy_chip_requests_enabled()
     if user.get('role') == 'ADMIN':
-        raise HTTPException(status_code=400, detail='Admins do not return chips')
+        raise HTTPException(status_code=400, detail='Admins do not return promotional balance')
     fresh = await db.users.find_one({'id': user['id']})
     balance = fresh.get('chip_balance', 0) if fresh else 0
     if balance < body.amount:
-        raise HTTPException(status_code=400, detail='Not enough chips — you can only return up to your current balance.')
+        raise HTTPException(status_code=400, detail='Not enough promotional balance for this legacy return request.')
     req = {
         'id': str(uuid.uuid4()), 'user_id': user['id'],
         **_requester_contact(user),
@@ -553,7 +552,7 @@ async def create_return_request(body: ReturnChipsRequestCreate, user: dict = Dep
         'admin_note': None, 'created_at': _now(), 'resolved_at': None,
     }
     req = await _create_chip_request_with_cap(req, 'RETURN')
-    return {'message': 'Return request submitted — an operator will review it. Chips are deducted only on approval.', 'request': serialize_doc(req)}
+    return {'message': 'Legacy balance return submitted for operator review. The promotional balance changes only after approval.', 'request': serialize_doc(req)}
 
 
 @router.get('/chips/requests')
