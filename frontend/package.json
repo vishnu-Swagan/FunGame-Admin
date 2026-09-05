@@ -64,7 +64,7 @@
     "prestart": "yarn build:aviator",
     "start": "craco start",
     "build:aviator": "npm --prefix aviator-reference ci --legacy-peer-deps --no-audit --no-fund && PUBLIC_URL=/aviator-live BUILD_PATH=../public/aviator-live npm --prefix aviator-reference run build",
-    "build": "yarn build:aviator && craco build",
+    "build": "npm run build:aviator && craco build",
     "test": "craco test"
   },
   "browserslist": {

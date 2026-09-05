@@ -106,8 +106,8 @@ export default function FreeCash({ open, onClose, initial }) {
     }
   };
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-4" data-testid="free-cash-modal">
-      <div className="chakri-free-cash-sheet relative flex w-full max-w-md flex-col overflow-hidden rounded-t-[32px] border border-amber-200/20 bg-gradient-to-b from-[#0c2418] via-[#07150f] to-[#04110c] px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] pt-6 shadow-[0_20px_80px_rgba(0,0,0,0.55)] sm:rounded-[32px] sm:px-6 sm:pb-6">
+    <div className="chakri-free-cash-backdrop fixed inset-0 z-[70] flex min-h-0 items-end justify-center overflow-y-auto overscroll-y-contain bg-black/75 p-0 sm:items-center sm:p-4" data-testid="free-cash-modal">
+      <div className="chakri-free-cash-sheet relative flex min-h-0 w-full max-w-md flex-col overflow-y-auto overscroll-y-contain rounded-t-[32px] border border-amber-200/20 bg-gradient-to-b from-[#0c2418] via-[#07150f] to-[#04110c] px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] pt-6 shadow-[0_20px_80px_rgba(0,0,0,0.55)] sm:rounded-[32px] sm:px-6 sm:pb-6" data-testid="free-cash-sheet">
         <button
           type="button"
           onClick={onClose}

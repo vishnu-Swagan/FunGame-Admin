@@ -65,6 +65,7 @@ import AccountClosed from "@/pages/system/AccountClosed";
 
 // Admin
 import AdminDashboard from "@/pages/admin/AdminDashboard";
+import AdminSignups from "@/pages/admin/AdminSignups";
 import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
 import AdminGames from "@/pages/admin/AdminGames";
@@ -155,6 +156,7 @@ function AdminConsoleApp() {
           <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="create-user" element={<AdminSignups />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
             <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />
@@ -258,6 +260,7 @@ function PlayerApp() {
           <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="create-user" element={<AdminSignups />} />
             <Route path="players" element={<AdminUsers />} />
             <Route path="finance/*" element={<Navigate to="/Admin/dashboard" replace />} />
             <Route path="payment-gateways" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentGateways /></RequirePermission>} />

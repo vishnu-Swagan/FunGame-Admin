@@ -22,6 +22,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -41,6 +42,7 @@ const NAV_GROUPS = [
   {
     label: "People",
     items: [
+      { to: "/Admin/create-user", label: "Create user", icon: UserPlus, testId: "admin-nav-create-user" },
       { to: "/Admin/players", label: "Players", icon: Users, matches: ["/Admin/players", "/Admin/users"], testId: "admin-nav-users" },
       { to: "/Admin/kyc", label: "Verification", icon: ShieldCheck, permission: ADMIN_PERMISSIONS.KYC_VIEW, testId: "admin-nav-kyc" },
       { to: "/Admin/distributors", label: "Distributors", icon: Network, permission: ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW, testId: "admin-nav-distributors" },

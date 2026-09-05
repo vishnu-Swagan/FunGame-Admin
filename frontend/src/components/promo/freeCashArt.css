@@ -31,6 +31,14 @@
 }
 
 .chakri-free-cash-sheet {
-  max-height: min(92dvh, 720px);
+  max-height: min(calc(var(--fg-usable-h, 100dvh) - 1rem), 720px);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chakri-free-cash-backdrop {
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
 }
