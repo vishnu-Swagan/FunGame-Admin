@@ -1441,19 +1441,20 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         wallet = await finance.wallet_public("player-1")
         self.assertEqual((wallet["cash_chips"], wallet["held_chips"]), (0, 1000))
 
-    async def test_player_limits_deposit_rows_do_not_block_chip_purchases(self):
+    async def test_player_deposit_limits_block_excess_pending_purchases(self):
         await db.player_limits.insert_one({
             "user_id": "player-1", "kind": "DEPOSIT", "period": "DAY", "amount": 150,
         })
         first, _ = await finance.create_deposit(
             "player-1", 10000, "deposit-limit-reserve-a", self.provider,
         )
-        second, _ = await finance.create_deposit(
-            "player-1", 10000, "deposit-limit-reserve-b", self.provider,
-        )
+        with self.assertRaises(finance.FinancialError) as blocked:
+            await finance.create_deposit(
+                "player-1", 10000, "deposit-limit-reserve-b", self.provider,
+            )
         self.assertEqual(first["limit_reservation_status"], "HELD")
-        self.assertEqual(second["limit_reservation_status"], "HELD")
-        self.assertEqual(await db.deposit_orders.count_documents({}), 2)
+        self.assertEqual(blocked.exception.code, "DEPOSIT_LIMIT")
+        self.assertEqual(await db.deposit_orders.count_documents({}), 1)
 
     async def test_pending_deposits_release_reservation_on_failure(self):
         held, _ = await finance.create_deposit(

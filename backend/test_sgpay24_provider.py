@@ -1612,7 +1612,10 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 502)
         detail = caught.exception.detail
         self.assertEqual(detail["code"], "SGPAY_PAYOUT_FAILED")
-        self.assertEqual(detail["message"], "SgPay did not accept the payout. Chips are already reserved; retry from Admin.")
+        self.assertEqual(
+            detail["message"],
+            "SgPay did not accept the payout: SgPay payout failed (500): Internal server error. Funds remain reserved; retry from Admin.",
+        )
         self.assertIn("Internal server error", detail["error"])
         stored = await fake.operator_payment_requests.find_one({"id": "wd-toast-1"})
         self.assertIn("Internal server error", stored["payout_error"])

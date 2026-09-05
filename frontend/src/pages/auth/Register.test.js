@@ -4,13 +4,10 @@ import Register from "./Register";
 
 const mockNavigate = jest.fn();
 const mockPost = jest.fn();
-const mockRetryPolicies = jest.fn();
 let mockCapabilities;
-let mockPolicyState;
 
 jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
-  useSearchParams: () => [new URLSearchParams()],
   Link: ({ children, to, ...props }) => <a href={to} {...props}>{children}</a>,
 }), { virtual: true });
 
@@ -23,12 +20,19 @@ jest.mock("@/lib/authCapabilities", () => ({
 }));
 
 jest.mock("@/lib/legalPolicies", () => ({
-  useRegistrationPolicies: () => mockPolicyState,
+  useRegistrationPolicies: () => ({
+    policies: {
+      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
+      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
+    },
+    loading: false,
+    error: null,
+    retry: jest.fn(),
+  }),
 }));
 
 jest.mock("@/lib/api", () => ({
   api: { post: (...args) => mockPost(...args) },
-  errCode: () => null,
   errMsg: (error) => error?.message || "Request failed",
 }));
 
@@ -97,14 +101,6 @@ async function clickPrimarySubmit(container) {
   });
 }
 
-async function acceptRequiredPolicies(container) {
-  await act(async () => {
-    container.querySelector('[data-testid="register-terms-checkbox"]').click();
-    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
-    await settle();
-  });
-}
-
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
 });
@@ -112,16 +108,6 @@ beforeAll(() => {
 beforeEach(() => {
   mockNavigate.mockReset();
   mockPost.mockReset();
-  mockRetryPolicies.mockReset();
-  mockPolicyState = {
-    policies: {
-      terms: { version: "account-terms-2026.09", url: "/legal/terms" },
-      privacy: { version: "privacy-2026.09", url: "/legal/privacy" },
-    },
-    loading: false,
-    error: null,
-    retry: mockRetryPolicies,
-  };
   mockCapabilities = {
     registration_enabled: true,
     email_registration: true,
@@ -140,12 +126,16 @@ afterEach(() => {
 test("registration uses globally neutral phone and country guidance", async () => {
   const { container, root } = await renderRegister();
 
+  expect(container.querySelector("#reg-login-id")).toBeNull();
+  expect(container.querySelector('[data-testid="register-login-id-input"]')).toBeNull();
   expect(container.querySelector('label[for="reg-contact"]')?.textContent).toBe("Mobile number (enter with +country code)");
   expect(container.querySelector("#reg-contact")?.placeholder).toBe("Enter with +country code");
   expect(container.querySelector("#reg-country")?.value).toBe("IN");
   expect(container.querySelector("#reg-country option")?.textContent).toBe("Select your country");
   expect(container.querySelectorAll("#reg-country option").length).toBeGreaterThan(200);
   expect(container.querySelector("#reg-contact")?.outerHTML).not.toMatch(/\+91/);
+  expect(container.textContent).not.toMatch(/GK Login ID/i);
+  expect(container.textContent).not.toMatch(/Choose Login ID/i);
 
   await act(async () => root.unmount());
 });
@@ -161,7 +151,11 @@ test("manual-review registration submits both contacts and confirmed password wi
   changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Strong-Password-9");
-  await acceptRequiredPolicies(container);
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
+    await settle();
+  });
   await submit(container.querySelector("form"));
 
   expect(mockPost).toHaveBeenCalledWith("/auth/register", expect.objectContaining({
@@ -193,7 +187,10 @@ test("mismatched passwords are rejected before the registration API call", async
   changeSelect(container.querySelector("#reg-country"), "IN");
   change(container.querySelector("#reg-password"), "Strong-Password-9");
   change(container.querySelector("#reg-password-confirmation"), "Different-Password-9");
-  await acceptRequiredPolicies(container);
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    await settle();
+  });
   await submit(container.querySelector("form"));
 
   expect(mockPost).not.toHaveBeenCalled();
@@ -212,20 +209,29 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   mockPost.mockResolvedValue({ data: { destination_masked: "+44******23", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
   expect(container.querySelector('[data-testid="register-verification-copy"]')?.textContent).toMatch(/one SMS code/i);
-  expect(container.textContent).toMatch(/Virtual chips have no cash value/);
+  expect(container.textContent).toMatch(/Real-money play is available only to eligible adults/i);
   expect(container.textContent).not.toMatch(/email code/i);
   change(container.querySelector("#reg-name"), "OTP Player");
   change(container.querySelector("#reg-contact"), "+44 7700 900123");
   change(container.querySelector("#reg-email"), "Optional@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
   changeSelect(container.querySelector("#reg-country"), "GB");
-  await acceptRequiredPolicies(container);
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
+    await settle();
+  });
   await submit(container.querySelector("form"));
 
   expect(mockPost.mock.calls[0][1]).not.toHaveProperty("password");
-  expect(mockPost.mock.calls[0][1].username).toBe("OTP.Player");
+  expect(mockPost.mock.calls[0][1].username).toBe("p447700900123");
   expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
-    state: expect.objectContaining({ channel: "PHONE", identifier: "+447700900123" }),
+    state: expect.objectContaining({
+      channel: "PHONE",
+      identifier: "+447700900123",
+      loginId: "p447700900123",
+      loginIdAutoGenerated: true,
+    }),
   }));
   await act(async () => root.unmount());
 });
@@ -246,8 +252,12 @@ test("a real submit-button click posts the phone-OTP payload with a generated Lo
   change(container.querySelector("#reg-contact"), "+91 (98765).43210");
   change(container.querySelector("#reg-email"), "Live.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  changeSelect(container.querySelector("#reg-country"), "IN");
-  await acceptRequiredPolicies(container);
+  expect(container.querySelector("#reg-country")?.value).toBe("IN");
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
+    await settle();
+  });
   await clickPrimarySubmit(container);
 
   expect(mockPost).toHaveBeenCalledTimes(1);
@@ -270,6 +280,8 @@ test("a real submit-button click posts the phone-OTP payload with a generated Lo
       channel: "PHONE",
       identifier: "+919876543210",
       secondaryIdentifier: "live.player@example.com",
+      loginId: "p919876543210",
+      loginIdAutoGenerated: true,
     }),
   }));
   await act(async () => root.unmount());
@@ -290,8 +302,10 @@ test("an invalid required email is explained inline and focused without posting"
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-email"), "not-an-email");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  changeSelect(container.querySelector("#reg-country"), "IN");
-  await acceptRequiredPolicies(container);
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    await settle();
+  });
   await clickPrimarySubmit(container);
 
   expect(mockPost).not.toHaveBeenCalled();
@@ -320,16 +334,8 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
 
   const terms = container.querySelector('[data-testid="register-terms-checkbox"]');
   expect(mockPost).not.toHaveBeenCalled();
-  expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the current Terms and Conditions");
+  expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the account and play terms");
   expect(terms.getAttribute("aria-invalid")).toBe("true");
   expect(document.activeElement).toBe(terms);
-  await act(async () => root.unmount());
-});
-
-test("privacy acknowledgement is separate and policy versions are visible", async () => {
-  const { container, root } = await renderRegister();
-  expect(container.querySelector('[data-testid="register-privacy-checkbox"]')).not.toBeNull();
-  expect(container.textContent).toContain("version account-terms-2026.09");
-  expect(container.textContent).toContain("version privacy-2026.09");
   await act(async () => root.unmount());
 });

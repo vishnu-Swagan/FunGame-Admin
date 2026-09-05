@@ -13,6 +13,7 @@ const mockCreateDeposit = jest.fn();
 const mockCreateWithdrawal = jest.fn();
 const mockCreateOperatorDeposit = jest.fn();
 const mockCreateOperatorWithdrawal = jest.fn();
+const mockChipTransactions = jest.fn();
 const mockOffers = jest.fn();
 const mockAcceptOffer = jest.fn();
 const mockFinancialIntentKey = jest.fn();
@@ -180,6 +181,7 @@ beforeEach(() => {
   mockBankDetails.mockReset().mockResolvedValue([{ id: "bank-1", bank_name: "Secure Bank", account_number_masked: "••••1234" }]);
   mockCreateDeposit.mockReset().mockResolvedValue({ checkout_url: "https://pay.example/checkout/order-1" });
   mockCreateWithdrawal.mockReset().mockResolvedValue({ withdrawal: { id: "withdrawal-2", status: "PENDING" } });
+  mockChipTransactions.mockReset().mockResolvedValue([]);
   mockOffers.mockReset().mockResolvedValue([]);
   mockAcceptOffer.mockReset().mockResolvedValue({ id: "consent-1", quote_token: "quote-token-1", quoted_deposit_amount_paise: 100000, quoted_deposit_chips: 1000, quoted_target_chips: 10000, quoted_deadline_at: "2026-09-05T10:00:00Z", rate_version: "rate-1" });
   mockFinancialIntentKey.mockReset().mockImplementation((kind) => `${kind}-key`);

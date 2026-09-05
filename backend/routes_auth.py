@@ -1084,7 +1084,6 @@ async def _register_phone_otp(
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
-    login_id = body.username
     policy_acceptance = policy_acceptance or _registration_policy_acceptance(
         body, PHONE_OTP_ACTIVATION_MODE,
     )

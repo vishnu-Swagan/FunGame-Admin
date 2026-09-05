@@ -11,9 +11,10 @@ import { errCode, errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { isPromotionPolicyVersion, promotions } from "@/lib/promotionApi";
-import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
-import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
+import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, paymentDisplayAt, rupeesToPaise } from "@/lib/walletUtils";
+import { PaymentRow, PlayRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 import { MissionCard, OfferReview } from "@/components/promotions";
+import { isPlayTransaction, playSummary } from "@/lib/historyUtils";
 
 const QUICK_BUY_AMOUNTS = [1000, 5000, 10000, 50000, 100000, 200000];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
@@ -420,7 +421,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Deposit with UPI" : "Deposit funds"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay through SgPay secure UPI checkout. Your wallet updates only after server verification." : operatorBuyAvailable && !hostedBuyAvailable ? "Submit a deposit request for Admin review. Your wallet updates only after verified approval." : "Pay in INR through secure hosted checkout. Your wallet updates after verified provider confirmation."}</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Deposit with UPI" : "Deposit funds"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay through SgPay secure UPI checkout. Your wallet updates only after server verification." : operatorBuyAvailable && !hostedBuyAvailable ? "Submit a deposit request for Admin review. Your wallet updates only after verified approval." : "Pay in INR through secure hosted checkout. Your wallet updates after verified provider confirmation."} Daily buy limit {formatInrPaise(config.maxDailyDepositPaise || 20000000)} per player{config.remainingDailyDepositPaise == null ? "." : `. ${formatInrPaise(config.remainingDailyDepositPaise)} remaining today.`}</p></div></div>
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Deposits are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
@@ -445,7 +446,22 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4">
-          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : activity.length === 0 ? <EmptyState icon={History} title="No payment activity" subtitle="Deposits and withdrawals will appear here." /> : <section aria-label="Payment activity" className="overflow-hidden rounded-2xl border border-white/10 bg-card/55"><div className="divide-y divide-white/5">{activity.map(({ item, kind }) => <PaymentRow key={`${kind}:${item.id}`} item={item} kind={kind} />)}</div></section>}
+          {loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : (
+            <div className="space-y-4">
+              {playTx.length > 0 && (
+                <section aria-label="Play history" data-testid="play-history">
+                  <div className="mb-2 flex items-end justify-between gap-3">
+                    <div><p className="text-sm font-semibold">Play activity</p><p className="text-[11px] text-white/40">Settled game outcomes and returned stakes.</p></div>
+                    <p className="text-[11px] tabular-nums text-white/50" data-testid="play-history-summary">Won {formatChips(playSummaryTotals.won)} · Lost {formatChips(playSummaryTotals.lost)}</p>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-card/55"><div className="divide-y divide-white/5">{playTx.map((item) => <PlayRow key={item.id} item={item} />)}</div></div>
+                </section>
+              )}
+              {activity.length === 0 && playTx.length === 0
+                ? <EmptyState icon={History} title="No wallet activity" subtitle="Deposits, withdrawals, and settled play will appear here." />
+                : activity.length > 0 && <section aria-label="Payment activity" className="overflow-hidden rounded-2xl border border-white/10 bg-card/55"><div className="divide-y divide-white/5">{activity.map(({ item, kind }) => <PaymentRow key={`${kind}:${item.id}`} item={item} kind={kind} />)}</div></section>}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
       <p className="flex items-start gap-2 text-[11px] leading-relaxed text-white/40"><LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />Payment credentials and full bank details are never stored in this browser. Provider callbacks and wallet changes are verified by the server.</p>
