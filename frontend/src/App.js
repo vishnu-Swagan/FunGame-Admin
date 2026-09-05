@@ -16,6 +16,7 @@ import CasinoEntry from "@/pages/app/CasinoEntry";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import AdminLogin from "@/pages/auth/AdminLogin";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
+import AdminFrontPage from "@/pages/auth/AdminFrontPage";
 import {
   AmlKycPage,
   BonusesPage,
@@ -85,6 +86,7 @@ import {
 } from "@/pages/admin/AdminPaymentPages";
 import AdminPlayHistory from "@/pages/admin/AdminPlayHistory";
 import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
+import AdminPaymentGateways from "@/pages/admin/AdminPaymentGateways";
 import AdminPromotions from "@/pages/admin/AdminPromotions";
 import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
 
@@ -241,9 +243,9 @@ function PlayerApp() {
           <Route path="/legal/restricted-territories" element={<RestrictedTerritoriesPage />} />
           <Route path="/legal/game-rules" element={<GameRulesPage />} />
           {/* Public / auth */}
-          <Route path="/" element={<PublicOnly><Welcome /></PublicOnly>} />
-          <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
-          <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+          <Route path="/" element={<FrontPage />} />
+          <Route path="/welcome" element={<FrontDoorRedirect />} />
+          <Route path="/register" element={<FrontDoorRedirect auth="register" />} />
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
           <Route path="/verify-email" element={<VerifyEmailRedirect />} />
           <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
