@@ -35,7 +35,13 @@ logger = logging.getLogger('otp')
 VERIFY_CONTACT = 'VERIFY_CONTACT'
 RESET_PASSWORD = 'RESET_PASSWORD'
 ADMIN_STEP_UP = 'ADMIN_STEP_UP'
-OTP_PURPOSES = frozenset({VERIFY_CONTACT, RESET_PASSWORD, ADMIN_STEP_UP})
+LOGIN_VERIFICATION = 'LOGIN_VERIFICATION'
+OTP_PURPOSES = frozenset({
+    VERIFY_CONTACT,
+    RESET_PASSWORD,
+    ADMIN_STEP_UP,
+    LOGIN_VERIFICATION,
+})
 
 OTP_TTL_SECONDS = 15 * 60
 OTP_RESEND_COOLDOWN_SECONDS = 60
@@ -534,7 +540,10 @@ class TwilioSmsAdapter:
         sender = (os.environ.get('TWILIO_FROM_NUMBER') or '').strip()
         if not sid or not token or not sender:
             return {'sent': False, 'provider': 'twilio', 'error': 'not_configured'}
-        label = 'password reset' if purpose == RESET_PASSWORD else 'verification'
+        label = {
+            RESET_PASSWORD: 'password reset',
+            LOGIN_VERIFICATION: 'login verification',
+        }.get(purpose, 'verification')
         payload = urllib.parse.urlencode({
             'To': identity.value,
             'From': sender,

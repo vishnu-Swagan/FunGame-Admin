@@ -163,6 +163,35 @@ class OtpDeliveryFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response['message'], routes_auth.RESET_UNAVAILABLE_MESSAGE)
         self.assertIs(response['delivery_available'], False)
 
+    async def test_forgot_password_uses_verified_email_when_email_delivery_is_ready(self):
+        await database.users.insert_one({
+            'id': 'email-reset-player',
+            'role': 'PLAYER',
+            'status': 'ACTIVE',
+            'email': 'email.reset@example.com',
+            'email_normalized': 'email.reset@example.com',
+            'email_verified': True,
+            'password_hash': auth_utils.hash_password('Known-Password-9'),
+        })
+        original_email = os.environ.get('OTP_EMAIL_ADAPTER')
+        os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
+        try:
+            response = await routes_auth.forgot_password(ForgotPasswordRequest(
+                identifier='email.reset@example.com',
+                email='email.reset@example.com',
+            ))
+        finally:
+            os.environ['OTP_EMAIL_ADAPTER'] = original_email
+        self.assertEqual(response['message'], routes_auth.GENERIC_RESET_MESSAGE)
+        self.assertIs(response['delivery_available'], True)
+        challenge = await database.otp_challenges.find_one({
+            'user_id': 'email-reset-player',
+            'purpose': otp_service.RESET_PASSWORD,
+        })
+        self.assertIsNotNone(challenge)
+        self.assertEqual(challenge['channel'], 'EMAIL')
+        self.assertIs(challenge['active'], True)
+
     async def test_signup_keeps_pending_user_when_otp_cannot_be_sent(self):
         with patch.object(otp_service, 'delivery_adapter', lambda channel: FailingSmsAdapter()):
             response = await routes_auth.register(self._registration())

@@ -151,6 +151,7 @@ def public_user(user: dict) -> dict:
         'mobile_reviewed_by', 'mobile_review_note', 'mobile_review_phone_snapshot',
         'admin_step_up_password_verified_at', 'admin_step_up_session_id',
         'mfa_verified_at', 'reauthenticated_at', 'admin_step_up_completed_at',
+        'login_otp_bypass_once', 'password_reset_by_admin_id',
     ):
         public.pop(key, None)
     # Phone registrations and provisional manual applications carry unique
@@ -329,13 +330,13 @@ async def require_distributor(user: dict = Depends(get_current_user)):
 
 
 async def require_password_ready_user(user: dict = Depends(get_current_user)):
-    """Block provisioned partners from every non-auth route until reset.
+    """Block temporary credentials from every non-auth route until reset.
 
     `/auth/me`, `/auth/change-password` and `/auth/logout` intentionally keep
     using `get_current_user` directly; every shared signed-in application route
     uses this dependency so a temporary credential cannot read or mutate data.
     """
-    if user.get('role') == 'DISTRIBUTOR' and user.get('password_change_required'):
+    if user.get('role') in {'PLAYER', 'DISTRIBUTOR'} and user.get('password_change_required'):
         raise HTTPException(status_code=403, detail={
             'code': 'PASSWORD_CHANGE_REQUIRED',
             'message': 'Change the temporary password before continuing.',
@@ -366,6 +367,7 @@ async def require_active_player(user: dict = Depends(get_current_user)):
             'code': 'NOT_A_PLAYER',
             'message': 'Partner logins cannot play. Sign in to the partner portal instead.',
         })
+    await require_password_ready_user(user)
     if user.get('status') == 'SUSPENDED':
         raise HTTPException(status_code=403, detail={'code': 'SUSPENDED', 'message': 'Your account is suspended. Contact support.'})
     if user.get('status') == 'REJECTED':

@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # path prefix -> (max_requests, window_seconds). Only auth/abuse-prone routes.
 RATE_LIMITS = {
+    '/api/auth/login/verify-otp': (10, 900),
     '/api/auth/login': (8, 300),               # 8 tries / 5 min — brute-force guard
     '/api/auth/register': (5, 3600),
     '/api/auth/forgot-password': (5, 900),     # 5 / 15 min

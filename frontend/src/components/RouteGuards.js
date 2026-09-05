@@ -39,6 +39,9 @@ export function RequireActive({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to={guestPlayAuthPath()} state={{ from: location }} replace />;
   if (user.role !== "PLAYER" || user.status !== "ACTIVE") return <Navigate to={routeForUser(user)} replace />;
+  if (user.password_change_required && location.pathname !== "/security") {
+    return <Navigate to="/security" replace />;
+  }
   return children;
 }
 

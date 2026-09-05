@@ -207,6 +207,16 @@ class AdminCredentialControlTests(unittest.IsolatedAsyncioTestCase):
             'active_session_id': 'player-session',
             'role': 'PLAYER',
         })
+        await self.database.otp_challenges.insert_many([
+            {
+                'id': 'reset-code-1', 'user_id': 'player-1',
+                'purpose': 'RESET_PASSWORD', 'active': True, 'status': 'PENDING',
+            },
+            {
+                'id': 'login-code-1', 'user_id': 'player-1',
+                'purpose': 'LOGIN_VERIFICATION', 'active': True, 'status': 'PENDING',
+            },
+        ])
 
         with patch.object(routes_admin, 'hash_password', return_value='new-hash'):
             response = await routes_admin.admin_reset_password(
@@ -214,16 +224,32 @@ class AdminCredentialControlTests(unittest.IsolatedAsyncioTestCase):
                 self.operator,
             )
 
-        self.assertIn('Password reset', response['message'])
+        self.assertIn('Temporary password issued', response['message'])
+        self.assertIs(response['password_change_required'], True)
         stored = await self.database.users.find_one({'id': 'player-1'})
         self.assertEqual(stored['password_hash'], 'new-hash')
         self.assertTrue(stored['active_session_id'].startswith('revoked-'))
+        self.assertIs(stored['password_change_required'], True)
+        self.assertIs(stored['login_otp_bypass_once'], True)
+        self.assertEqual(stored['password_reset_by_admin_id'], self.operator['id'])
         self.assertNotIn('reset_code_hash', stored)
         self.assertNotIn('reset_expires_at', stored)
         self.assertEqual(
             await self.database.notifications.count_documents({'user_id': 'player-1'}),
             1,
         )
+        self.assertEqual(await self.database.otp_challenges.count_documents({
+            'user_id': 'player-1', 'active': False, 'status': 'ADMIN_RESET',
+        }), 2)
+        audit = await self.database.admin_audit.find_one({
+            'actor_id': self.operator['id'],
+            'action': 'PLAYER_PASSWORD_RESET',
+            'target_id': 'player-1',
+        })
+        self.assertIsNotNone(audit)
+        self.assertIs(audit['after']['password_change_required'], True)
+        self.assertNotIn('password_hash', str(audit).lower())
+        self.assertNotIn('temporary_password', str(audit).lower())
 
     async def test_player_email_change_remains_available_and_revokes_sessions(self):
         await self.database.users.insert_one({

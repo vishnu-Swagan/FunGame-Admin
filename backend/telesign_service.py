@@ -406,7 +406,10 @@ async def report_sms_completion(reference_id: str) -> dict:
 
 
 async def send_verify_sms(phone: str, code: str, purpose: str) -> dict:
-    label = 'password reset' if purpose == 'RESET_PASSWORD' else 'verification'
+    label = {
+        'RESET_PASSWORD': 'password reset',
+        'LOGIN_VERIFICATION': 'login verification',
+    }.get(purpose, 'verification')
     body = urllib.parse.urlencode({
         'phone_number': phone_digits(phone),
         'verify_code': code,

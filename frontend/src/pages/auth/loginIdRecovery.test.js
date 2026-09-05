@@ -256,6 +256,40 @@ test("login recovery does not send PHONE_OTP players into email OTP", async () =
   await act(async () => root.unmount());
 });
 
+test("a password-verified player completes login with the issued OTP challenge", async () => {
+  mockPost
+    .mockResolvedValueOnce({ data: {
+      requires_otp: true,
+      challenge_id: "login-verification-challenge",
+      destination_masked: "+91******10",
+      resend_after_seconds: 60,
+      message: "Enter the verification code sent to your account contact.",
+    } })
+    .mockResolvedValueOnce({ data: {
+      access_token: "verified-player-token",
+      user: { id: "player-otp", role: "PLAYER", status: "ACTIVE" },
+    } });
+  const { container, root } = await render(Login);
+  change(container.querySelector("#identifier"), "+919876543210");
+  change(container.querySelector("#password"), "Strong-Password-9");
+  await submit(container.querySelector("form"));
+
+  expect(container.querySelector('[data-testid="login-otp-form"]')).not.toBeNull();
+  expect(mockLogin).not.toHaveBeenCalled();
+  change(container.querySelector('[data-testid="login-otp-input"]'), "123456");
+  await submit(container.querySelector('[data-testid="login-otp-form"]'));
+
+  expect(mockPost).toHaveBeenNthCalledWith(2, "/auth/login/verify-otp", {
+    challenge_id: "login-verification-challenge",
+    code: "123456",
+  });
+  expect(mockLogin).toHaveBeenCalledWith(
+    "verified-player-token",
+    expect.objectContaining({ id: "player-otp" }),
+  );
+  await act(async () => root.unmount());
+});
+
 test("verification rejects a six-character nonnumeric code before calling the API", async () => {
   mockLocationState = {
     channel: "PHONE",

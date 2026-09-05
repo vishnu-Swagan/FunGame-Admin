@@ -17,6 +17,8 @@ test("auth capabilities fail closed for missing, malformed or inconsistent respo
     phone_contact_verification: false,
     email_password_reset: false,
     phone_password_reset: false,
+    player_login_verification_required: false,
+    player_login_verification_available: false,
     phone_verification_required: true,
     email_verification_required: false,
     manual_admin_review: false,
@@ -37,6 +39,8 @@ test("the client never accepts a no-OTP capability downgrade", () => {
     phone_contact_verification: false,
     email_password_reset: false,
     phone_password_reset: false,
+    player_login_verification_required: false,
+    player_login_verification_available: false,
     verification_required: false,
   })).toMatchObject({ registration_enabled: true, verification_required: true, registration_mode: "PHONE_OTP" });
   expect(normalizeAuthCapabilities({
@@ -81,6 +85,8 @@ test("manual admin review is accepted only when the server names the mode and bo
     phone_contact_verification: false,
     email_password_reset: false,
     phone_password_reset: false,
+    player_login_verification_required: false,
+    player_login_verification_available: false,
     phone_verification_required: false,
     email_verification_required: false,
     verification_required: false,

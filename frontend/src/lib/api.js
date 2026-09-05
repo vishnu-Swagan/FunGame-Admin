@@ -228,6 +228,9 @@ export function routeForUser(user) {
       ? "/distributor/change-password"
       : "/distributor/dashboard";
   }
+  if (user.role === "PLAYER" && user.status === "ACTIVE" && user.password_change_required) {
+    return "/security";
+  }
   switch (user.status) {
     case "VERIFIED":
       return "/onboarding/profile";

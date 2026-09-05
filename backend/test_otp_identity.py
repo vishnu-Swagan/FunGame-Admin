@@ -318,6 +318,71 @@ async def main():
     assert login['access_token']
     assert 'active_session_id' not in login['user']
 
+    # When the operator enables player login verification, a correct password
+    # establishes only a pending session. The one-use code is required before
+    # an access token is minted, and replaying it is rejected.
+    os.environ['PLAYER_LOGIN_OTP_REQUIRED'] = 'true'
+    try:
+        otp_login = await routes_auth.login(LoginRequest(
+            identifier='+919100000001', phone='+919100000001',
+            password='Victim-Owned-Password-9',
+        ))
+        assert otp_login['requires_otp'] is True
+        assert 'access_token' not in otp_login
+        assert otp_login['destination_masked']
+        assert otp_login['dev_code']
+        completed_login = await routes_auth.verify_login_otp(
+            AuthenticatedOtpVerify(
+                challenge_id=otp_login['challenge_id'],
+                code=otp_login['dev_code'],
+            ),
+        )
+        assert completed_login['access_token']
+        consumed_login_code = await database.otp_challenges.find_one({
+            'id': otp_login['challenge_id'],
+        })
+        assert consumed_login_code['active'] is False
+        assert consumed_login_code['status'] == 'VERIFIED'
+        await expect_http_error(
+            routes_auth.verify_login_otp(AuthenticatedOtpVerify(
+                challenge_id=otp_login['challenge_id'],
+                code=otp_login['dev_code'],
+            )),
+            400, 'OTP_INVALID',
+        )
+
+        # An administrator-issued temporary password grants exactly one
+        # recovery session without a player OTP. It exposes only the forced
+        # password-change flag and returns to the OTP policy immediately.
+        await database.users.update_one({'id': player['id']}, {'$set': {
+            'password_change_required': True,
+            'login_otp_bypass_once': True,
+        }})
+        recovery_login = await routes_auth.login(LoginRequest(
+            identifier='+919100000001', phone='+919100000001',
+            password='Victim-Owned-Password-9',
+        ))
+        assert recovery_login['access_token']
+        assert recovery_login['user']['password_change_required'] is True
+        assert 'login_otp_bypass_once' not in recovery_login['user']
+        recovery_row = await database.users.find_one({'id': player['id']})
+        assert 'login_otp_bypass_once' not in recovery_row
+        next_login = await routes_auth.login(LoginRequest(
+            identifier='+919100000001', phone='+919100000001',
+            password='Victim-Owned-Password-9',
+        ))
+        assert next_login['requires_otp'] is True
+        await database.otp_challenges.update_one(
+            {'id': next_login['challenge_id']},
+            {'$set': {'active': False, 'status': 'TEST_CLEANUP'}},
+        )
+        await database.users.update_one({'id': player['id']}, {
+            '$set': {'password_change_required': False},
+        })
+    finally:
+        os.environ.pop('PLAYER_LOGIN_OTP_REQUIRED', None)
+        await database.auth_rate_limits.delete_many({'action': 'password_login'})
+
     # Accounts contact-verified before the state-machine fix are repaired on
     # login so they reach profile/terms rather than remaining stuck in review.
     await database.users.insert_one({

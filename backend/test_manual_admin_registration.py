@@ -104,6 +104,8 @@ async def main():
         'phone_contact_verification': False,
         'email_password_reset': False,
         'phone_password_reset': False,
+        'player_login_verification_required': False,
+        'player_login_verification_available': False,
         'verification_required': False,
         'manual_admin_review': True,
         'registration_mode': routes_auth.ADMIN_REVIEW_ACTIVATION_MODE,

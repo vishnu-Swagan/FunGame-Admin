@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, MonitorSmartphone, UserCheck } from "lucide-react";
+import { Eye, EyeOff, MonitorSmartphone, ShieldCheck, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +29,10 @@ export default function LoginForm({
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sessionNotice, setSessionNotice] = useState("");
+  const [otpChallengeId, setOtpChallengeId] = useState("");
+  const [otpDestination, setOtpDestination] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [resendIn, setResendIn] = useState(0);
   const passwordResetAvailable = capabilities.email_password_reset
     || capabilities.phone_password_reset;
 
@@ -40,32 +44,59 @@ export default function LoginForm({
     }
   }, []);
 
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const timer = window.setInterval(() => setResendIn((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendIn]);
+
   const goPanel = (panel) => {
     if (onSwitchPanel) onSwitchPanel(panel);
     else navigate(frontPathForAuthPanel(panel));
+  };
+
+  const finishLogin = (data) => {
+      if (data.user.role === "ADMIN") {
+        toast.info("Administrator accounts sign in through Chakri.Casino/Admin.");
+        navigate(adminLoginPathForConsole(), { replace: true });
+        return false;
+      }
+      if (data.user.role === "DISTRIBUTOR") {
+        toast.info("Distributor accounts use the dedicated distributor portal.");
+        navigate("/distributor/login", { replace: true });
+        return false;
+      }
+      login(data.access_token, data.user);
+      toast.success(`Welcome back${data.user.display_name ? ", " + data.user.display_name : ""}!`);
+      navigate(routeForUser(data.user), { replace: true });
+      return true;
+  };
+
+  const rememberOtpChallenge = (data) => {
+    setOtpChallengeId(data?.challenge_id || data?.verification_id || "");
+    setOtpDestination(data?.destination_masked || "your account contact");
+    setOtpCode("");
+    setResendIn(Number(data?.resend_after_seconds || 60));
+    toast.success(data?.message || "Verification code sent");
+  };
+
+  const requestLogin = async () => {
+    const { data } = await api.post(
+      "/auth/login",
+      loginRequestPayload(identifier, password, LOGIN_SURFACES.PLAYER),
+    );
+    if (data?.requires_otp) {
+      rememberOtpChallenge(data);
+      return;
+    }
+    finishLogin(data);
   };
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.post(
-        "/auth/login",
-        loginRequestPayload(identifier, password, LOGIN_SURFACES.PLAYER),
-      );
-      if (data.user.role === "ADMIN") {
-        toast.info("Administrator accounts sign in through Chakri.Casino/Admin.");
-        navigate(adminLoginPathForConsole(), { replace: true });
-        return;
-      }
-      if (data.user.role === "DISTRIBUTOR") {
-        toast.info("Distributor accounts use the dedicated distributor portal.");
-        navigate("/distributor/login", { replace: true });
-        return;
-      }
-      login(data.access_token, data.user);
-      toast.success(`Welcome back${data.user.display_name ? ", " + data.user.display_name : ""}!`);
-      navigate(routeForUser(data.user), { replace: true });
+      await requestLogin();
     } catch (err) {
       const detail = err?.response?.data?.detail;
       if (["EMAIL_NOT_VERIFIED", "CONTACT_NOT_VERIFIED"].includes(detail?.code)) {
@@ -108,6 +139,34 @@ export default function LoginForm({
     }
   };
 
+  const verifyLoginOtp = async (event) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(otpCode)) return toast.error("Enter the 6-digit verification code.");
+    setBusy(true);
+    try {
+      const { data } = await api.post("/auth/login/verify-otp", {
+        challenge_id: otpChallengeId,
+        code: otpCode,
+      });
+      finishLogin(data);
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendLoginOtp = async () => {
+    setBusy(true);
+    try {
+      await requestLogin();
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div data-testid="frontpage-login-panel">
       {showTitle && (
@@ -128,6 +187,39 @@ export default function LoginForm({
           <span>{sessionNotice}</span>
         </div>
       )}
+      {otpChallengeId ? (
+        <form onSubmit={verifyLoginOtp} className="space-y-4" data-testid="login-otp-form">
+          <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm text-white/75">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>Enter the one-time code sent to <strong className="text-white">{otpDestination}</strong>.</span>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="login-otp">Login verification code</Label>
+            <Input
+              id="login-otp"
+              data-testid="login-otp-input"
+              required
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              placeholder="6-digit code"
+              value={otpCode}
+              onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="h-12 rounded-xl bg-white/5 border-white/12"
+            />
+          </div>
+          <Button data-testid="login-otp-submit-button" type="submit" disabled={busy || otpCode.length !== 6} className="w-full h-12 rounded-xl text-base font-bold">
+            {busy ? "Verifying…" : "Verify and log in"}
+          </Button>
+          <div className="flex items-center justify-between text-xs text-white/55">
+            <button type="button" disabled={busy || resendIn > 0} onClick={resendLoginOtp} className="hover:text-primary disabled:cursor-wait disabled:opacity-50">
+              {resendIn > 0 ? `New code in ${resendIn}s` : "Send a new code"}
+            </button>
+            <button type="button" onClick={() => { setOtpChallengeId(""); setOtpCode(""); }} className="hover:text-primary">Use different details</button>
+          </div>
+        </form>
+      ) : (
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="identifier">Email, mobile with +country code, or Login ID</Label>
@@ -166,6 +258,7 @@ export default function LoginForm({
           {busy ? "Logging in…" : "Log in"}
         </Button>
       </form>
+      )}
       <div className="mt-5 flex items-center justify-between text-sm">
         {passwordResetAvailable ? (
           <button type="button" data-testid="login-forgot-link" onClick={() => goPanel(AUTH_PANELS.FORGOT)} className="text-white/60 hover:text-white/85">

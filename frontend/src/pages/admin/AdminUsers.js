@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { UserCheck, UserX, Ban, RotateCcw, Search, Trash2, Users, History } from "lucide-react";
+import { UserCheck, UserX, Ban, RotateCcw, Search, Trash2, Users, History, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +27,9 @@ export default function AdminUsers() {
   const [rejectNote, setRejectNote] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [resetTarget, setResetTarget] = useState(null);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [temporaryPasswordConfirmation, setTemporaryPasswordConfirmation] = useState("");
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async (f) => {
@@ -91,6 +94,38 @@ export default function AdminUsers() {
       toast.success(data?.message || "Player account deleted permanently");
       setDeleteTarget(null);
       setDeleteConfirmation("");
+      await load(filter);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openResetDialog = (user) => {
+    setTemporaryPassword("");
+    setTemporaryPasswordConfirmation("");
+    setResetTarget(user);
+  };
+
+  const closeResetDialog = () => {
+    if (busyId === resetTarget?.id) return;
+    setResetTarget(null);
+    setTemporaryPassword("");
+    setTemporaryPasswordConfirmation("");
+  };
+
+  const confirmAccessReset = async () => {
+    if (!resetTarget || temporaryPassword.length < 8 || temporaryPassword !== temporaryPasswordConfirmation) return;
+    setBusyId(resetTarget.id);
+    try {
+      const { data } = await api.post(`/admin/users/${resetTarget.id}/reset-password`, {
+        password: temporaryPassword,
+      });
+      toast.success(data?.message || "Temporary password issued");
+      setResetTarget(null);
+      setTemporaryPassword("");
+      setTemporaryPasswordConfirmation("");
       await load(filter);
     } catch (e) {
       toast.error(errMsg(e));
@@ -270,6 +305,16 @@ export default function AdminUsers() {
                         </Button>
                       )}
                       <Button
+                        data-testid="admin-reset-player-access-button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === u.id}
+                        onClick={() => openResetDialog(u)}
+                        className="h-8 rounded-lg text-xs font-bold border-primary/35 bg-primary/8 text-primary hover:bg-primary/15"
+                      >
+                        <KeyRound className="h-3.5 w-3.5 mr-1" /> Reset access
+                      </Button>
+                      <Button
                         data-testid="admin-delete-user-button"
                         size="sm"
                         variant="outline"
@@ -309,6 +354,71 @@ export default function AdminUsers() {
             <Button variant="outline" onClick={() => setRejectTarget(null)} className="rounded-xl border-white/15">Cancel</Button>
             <Button data-testid="admin-reject-confirm-button" onClick={confirmReject} className="rounded-xl bg-destructive text-white hover:brightness-110">
               <RotateCcw className="h-4 w-4 mr-1.5" /> Reject user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Audited player access recovery dialog */}
+      <Dialog open={!!resetTarget} onOpenChange={(open) => !open && closeResetDialog()}>
+        <DialogContent className="rounded-2xl border-primary/25 bg-card">
+          <DialogHeader>
+            <DialogTitle>Reset player access</DialogTitle>
+            <DialogDescription>
+              Issue a temporary password for{" "}
+              <span className="font-semibold text-white">
+                {resetTarget?.display_name || resetTarget?.username || resetTarget?.email}
+              </span>
+              . The player does not need an OTP for the first recovery login. Existing sessions and pending codes are revoked, and the player must immediately create a new password.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100">
+              This action is recorded in the administrator audit log. It does not reveal the existing password or override suspension, rejection, or onboarding requirements.
+            </div>
+            <label htmlFor="temporary-player-password" className="block space-y-1.5 text-xs font-semibold text-white/70">
+              <span>Temporary password</span>
+              <Input
+                id="temporary-player-password"
+                data-testid="admin-reset-player-password-input"
+                type="password"
+                minLength={8}
+                maxLength={128}
+                autoComplete="new-password"
+                value={temporaryPassword}
+                onChange={(event) => setTemporaryPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                className="rounded-xl border-white/12 bg-white/5"
+              />
+            </label>
+            <label htmlFor="temporary-player-password-confirmation" className="block space-y-1.5 text-xs font-semibold text-white/70">
+              <span>Confirm temporary password</span>
+              <Input
+                id="temporary-player-password-confirmation"
+                data-testid="admin-reset-player-password-confirmation-input"
+                type="password"
+                minLength={8}
+                maxLength={128}
+                autoComplete="new-password"
+                value={temporaryPasswordConfirmation}
+                onChange={(event) => setTemporaryPasswordConfirmation(event.target.value)}
+                className="rounded-xl border-white/12 bg-white/5"
+              />
+            </label>
+            {temporaryPasswordConfirmation && temporaryPassword !== temporaryPasswordConfirmation && (
+              <p className="text-xs text-red-300" role="alert">The passwords do not match.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={busyId === resetTarget?.id} onClick={closeResetDialog} className="rounded-xl border-white/15">Cancel</Button>
+            <Button
+              data-testid="admin-reset-player-access-confirm-button"
+              disabled={busyId === resetTarget?.id || temporaryPassword.length < 8 || temporaryPassword !== temporaryPasswordConfirmation}
+              onClick={confirmAccessReset}
+              className="rounded-xl font-bold"
+            >
+              <KeyRound className="h-4 w-4 mr-1.5" />
+              {busyId === resetTarget?.id ? "Resetting…" : "Issue temporary password"}
             </Button>
           </DialogFooter>
         </DialogContent>

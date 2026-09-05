@@ -42,6 +42,8 @@ import payouts
 from game_access import assert_admin_status_change_allowed
 from otp_service import (
     ADMIN_STEP_UP,
+    LOGIN_VERIFICATION,
+    RESET_PASSWORD,
     OTP_TTL_SECONDS,
     OtpConfigurationError,
     OtpError,
@@ -1441,32 +1443,110 @@ async def suspend_user(user_id: str, body: AdminUserAction = None, admin: dict =
 
 @router.post('/users/{user_id}/reset-password')
 async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict = Depends(require_admin)):
-    """Reset a player's password and force re-login on all devices.
+    """Issue a temporary player password without requiring the player's OTP.
 
     Administrator accounts are deliberately excluded. An administrator changes
     their own password through ``/auth/change-password``, which requires the
     current password, and cannot use this route against another administrator.
+    The player receives one OTP-bypassed recovery session and must replace the
+    temporary password before any account data or gameplay route is available.
     """
-    user = await db.users.find_one({'id': user_id})
-    if not user:
+    preflight_user = await db.users.find_one({'id': user_id})
+    if not preflight_user:
         raise HTTPException(status_code=404, detail='User not found')
-    _require_player_credential_target(user)
-    result = await db.users.update_one({'id': user_id, 'role': 'PLAYER'}, {
-        '$set': {
-            'password_hash': hash_password(body.password),
-            # revoke every outstanding session/token
-            'active_session_id': f'revoked-{uuid.uuid4()}',
-        },
-        '$unset': {'reset_code_hash': '', 'reset_expires_at': ''},
-    })
-    if result.matched_count != 1:
-        raise HTTPException(status_code=409, detail={
-            'code': 'ACCOUNT_STATE_CHANGED',
-            'message': 'The player account changed while the password reset was being applied.',
-        })
-    await _notify(user_id, 'Password changed', 'An administrator reset your Chakri.Casino password. Please log in with your new password.', 'INFO')
-    logger.info(f'admin {admin.get("email")} reset password for user {user_id}')
-    return {'message': 'Password reset. The user must log in again with the new password.'}
+    _require_player_credential_target(preflight_user)
+    password_hash = await asyncio.to_thread(hash_password, body.password)
+    changed_at = _now()
+
+    async def commit_reset(session):
+        kwargs = {'session': session} if session is not None else {}
+        user = await db.users.find_one({'id': user_id}, **kwargs)
+        if not user:
+            raise HTTPException(status_code=404, detail='User not found')
+        _require_player_credential_target(user)
+        result = await db.users.update_one(
+            {
+                'id': user_id,
+                'role': 'PLAYER',
+                'password_hash': user.get('password_hash'),
+            },
+            {
+                '$set': {
+                    'password_hash': password_hash,
+                    'password_change_required': True,
+                    # A single temporary-password session can reach only the
+                    # password-change endpoint. Normal login OTP resumes after.
+                    'login_otp_bypass_once': True,
+                    'password_changed_at': changed_at,
+                    'password_reset_by_admin_id': admin.get('id'),
+                    'password_failed_attempts': 0,
+                    # revoke every outstanding session/token
+                    'active_session_id': f'revoked-{uuid.uuid4()}',
+                },
+                '$unset': {
+                    'reset_code_hash': '',
+                    'reset_expires_at': '',
+                    'locked_until': '',
+                },
+            },
+            **kwargs,
+        )
+        if result.matched_count != 1:
+            raise HTTPException(status_code=409, detail={
+                'code': 'ACCOUNT_STATE_CHANGED',
+                'message': 'The player account changed while the password reset was being applied.',
+            })
+        await db.otp_challenges.update_many(
+            {
+                'user_id': user_id,
+                'purpose': {'$in': [RESET_PASSWORD, LOGIN_VERIFICATION]},
+                'active': True,
+            },
+            {'$set': {
+                'active': False,
+                'status': 'ADMIN_RESET',
+                'updated_at': datetime.now(timezone.utc),
+            }},
+            **kwargs,
+        )
+        await _notify(
+            user_id,
+            'Temporary password issued',
+            'An administrator reset your Chakri.Casino password. Log in with the temporary password and create a new one immediately.',
+            'SECURITY',
+            session=session,
+        )
+        await db.admin_audit.insert_one({
+            'id': str(uuid.uuid4()),
+            'actor_id': admin.get('id'),
+            'action': 'PLAYER_PASSWORD_RESET',
+            'target_type': 'PLAYER',
+            'target_id': user_id,
+            'before': {
+                'status': user.get('status'),
+                'password_change_required': bool(user.get('password_change_required')),
+            },
+            'after': {
+                'status': user.get('status'),
+                'password_change_required': True,
+                'sessions_revoked': True,
+            },
+            'metadata': {
+                'player_otp_bypassed': True,
+                'bypass_scope': 'ONE_PASSWORD_CHANGE_SESSION',
+            },
+            'created_at': changed_at,
+        }, **kwargs)
+
+    await _run_account_transaction(commit_reset)
+    logger.info('admin %s reset password for player %s', admin.get('id'), user_id)
+    return {
+        'message': (
+            'Temporary password issued. Existing sessions and OTPs were '
+            'revoked; the player must choose a new password at next login.'
+        ),
+        'password_change_required': True,
+    }
 
 
 # ---------- Direct account provisioning (admin creates the login) ----------
