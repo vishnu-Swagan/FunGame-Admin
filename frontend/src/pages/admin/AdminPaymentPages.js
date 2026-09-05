@@ -68,7 +68,40 @@ export function AdminDeposits() {
   const [drafts, setDrafts] = useState({});
   const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status), [rows, query, status]);
-  return <PageTransition className="space-y-4"><PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Provider-created deposits. Credit status is driven only by verified server webhooks." onRefresh={load} loading={loading} /><FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["CREATED", "PENDING", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />{shown.length ? <DataCard>{shown.map((item) => <div key={item.id} className="grid gap-3 p-4 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div><div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">Balance credit {formatChips(item.chips)}</p></div><div><p className="truncate font-mono text-[10px] text-white/55">{valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div><PaymentStatus status={item.status} /></div>)}</DataCard> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}</PageTransition>;
+  const canReview = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
+  const act = async (item, action) => {
+    const note = (drafts[item.id] || "").trim();
+    if (action === "reject" && !note) return toast.error("Enter a rejection reason first");
+    const key = `${item.id}:${action}`;
+    setActing(key);
+    try {
+      await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
+      toast.success(`Buy request ${action === "approve" ? "approved" : "rejected"}`);
+      setDrafts((current) => ({ ...current, [item.id]: "" }));
+      await load();
+    } catch (error) {
+      toast.error(errMsg(error));
+    } finally {
+      setActing("");
+    }
+  };
+  return <PageTransition className="space-y-4">
+    <PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Admin-reviewed funding requests and provider-created deposits. Operator requests credit the player balance only after approval." onRefresh={load} loading={loading} />
+    <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "APPROVED", "REJECTED", "CREATED", "CREDITED", "FAILED", "EXPIRED", "REFUNDED"]} />
+    {shown.length ? <div className="space-y-3">{shown.map((item) => {
+      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
+      const pending = operator && String(item.status || "").toUpperCase() === "PENDING";
+      return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-deposit-${item.id}` : `deposit-${item.id}`}>
+        <div className="grid gap-3 sm:grid-cols-[1.3fr_.8fr_.8fr_auto] sm:items-center">
+          <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
+          <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise)}</p><p className="text-[10px] text-white/35">Balance credit {formatChips(item.chips)}</p></div>
+          <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div>
+          <PaymentStatus status={item.status} />
+        </div>
+        {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
+      </article>;
+    })}</div> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}
+  </PageTransition>;
 }
 
 const WITHDRAWAL_ACTIONS = {
@@ -133,7 +166,7 @@ export function AdminWithdrawals() {
       return <article key={item.id} className="rounded-2xl border border-white/10 bg-card/55 p-4" data-testid={operator ? `operator-withdrawal-${item.id}` : `withdrawal-${item.id}`}>
         <div className="grid gap-3 sm:grid-cols-[1.2fr_.75fr_.8fr_auto] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{valueOf(item, "user_email", "user_phone", "user_id")}</p><p className="truncate font-mono text-[10px] text-white/35">{item.id}</p></div>
-          <div><p className="tabular-nums font-bold text-primary">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p><p className="text-[10px] text-white/35">Balance debit {formatChips(item.amount_chips)}</p></div>
+          <div><p className="tabular-nums font-bold text-primary">{formatChips(item.amount_chips)} balance units</p><p className="text-[10px] text-white/35">{formatInrPaise(item.amount_paise ?? item.locked_amount_paise)}</p></div>
           <div><p className="text-xs text-white/60">{valueOf(item.bank_detail, "bank_name")}</p><p className="font-mono text-[10px] text-white/40">{valueOf(item.bank_detail, "account_number_masked", "masked_account_number")}</p>{item.bank_detail?.payout_identifier_masked && <p className="font-mono text-[10px] text-white/35">{item.bank_detail.payout_identifier_masked}</p>}</div>
           <PaymentStatus status={internalStatus} />
         </div>

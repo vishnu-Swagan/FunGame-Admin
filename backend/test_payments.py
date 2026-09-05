@@ -1884,7 +1884,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(await routes._require_player("deposits", no_kyc), no_kyc)
         with self.assertRaises(HTTPException) as blocked:
             await routes._require_player("withdrawals", no_kyc)
-        self.assertEqual(blocked.exception.detail["code"], "KYC_REQUIRED")
+        self.assertEqual(blocked.exception.detail["code"], "KYC_WITHDRAWAL_HOLD")
         with self.assertRaises(HTTPException) as no_mfa:
             routes._require_recent_step_up({"role": "ADMIN", "admin_role": "SUPER_ADMIN"})
         self.assertEqual(no_mfa.exception.detail["code"], "ADMIN_MFA_REQUIRED")

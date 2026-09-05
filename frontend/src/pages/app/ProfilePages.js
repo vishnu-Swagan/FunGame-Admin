@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
-  Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle, FileText,
+  Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle, FileText, Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

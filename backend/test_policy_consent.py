@@ -42,6 +42,7 @@ def registration(**overrides) -> RegisterRequest:
         'identifier': '+919876543210',
         'phone': '+919876543210',
         'email': 'policy.player@example.com',
+        'username': 'Policy.Player',
         'full_name': 'Policy Player',
         'date_of_birth': '1990-01-01',
         'country': 'India',
@@ -203,6 +204,16 @@ class PolicyConsentTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 routes_auth.crm,
                 'require_registration_attribution_readiness',
+                new=AsyncMock(),
+            ),
+            patch.object(
+                routes_auth.crm,
+                'require_portal_identity_readiness',
+                new=AsyncMock(),
+            ),
+            patch.object(
+                routes_auth.crm,
+                'assert_player_login_id_available',
                 new=AsyncMock(),
             ),
             patch.object(routes_auth.crm, 'attribute_user', new=AsyncMock()),

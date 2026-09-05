@@ -11,6 +11,30 @@ import { TERMINAL_DEPOSIT_STATUSES } from "@/lib/walletUtils";
 import { PaymentStatus } from "@/pages/app/wallet/WalletBits";
 import { MissionReceipt } from "@/components/promotions";
 import { promotions } from "@/lib/promotionApi";
+import WagerBonusOverlay from "@/components/promo/WagerBonusOverlay";
+import { promoApi } from "@/lib/promoApi";
+
+export const DEPOSIT_REFRESH_INTERVAL_MS = 7000;
+
+const UPI_STATUS_COPY = {
+  CREATED: { title: "UPI payment being verified", detail: "Returning from UPI checkout does not credit funds. Our server is checking the payment with SgPay." },
+  PENDING: { title: "UPI payment being verified", detail: "Returning from UPI checkout does not credit funds. Our server is checking the payment with SgPay." },
+  CREDITED: { title: "Funds credited", detail: "The UPI payment was verified by our server and your wallet is updated." },
+  FAILED: { title: "UPI payment failed", detail: "SgPay did not confirm this payment. No funds were credited. You can start a new deposit." },
+  EXPIRED: { title: "UPI payment expired", detail: "The UPI checkout expired before payment was confirmed. No funds were credited. You can start a new deposit." },
+  REFUNDED: { title: "UPI payment refunded", detail: "The provider reports that this payment was refunded. Check Wallet activity or contact support if you need help with the balance." },
+  RECONCILIATION_REQUIRED: { title: "UPI payment needs review", detail: "The verified provider details did not match this deposit order. No funds were credited; support can review the reference safely." },
+};
+
+const PAYMENT_STATUS_COPY = {
+  CREATED: { title: "Payment being verified", detail: "Returning from checkout does not credit funds. Our server is checking the payment with the provider." },
+  PENDING: { title: "Payment being verified", detail: "Returning from checkout does not credit funds. Our server is checking the payment with the provider." },
+  CREDITED: { title: "Funds credited", detail: "The provider payment was verified by our server and your wallet is updated." },
+  FAILED: { title: "Payment failed", detail: "The provider did not confirm this payment. No funds were credited. You can start a new deposit." },
+  EXPIRED: { title: "Payment expired", detail: "The checkout expired before payment was confirmed. No funds were credited. You can start a new deposit." },
+  REFUNDED: { title: "Payment refunded", detail: "The provider reports that this payment was refunded. Check Wallet activity or contact support if you need help with the balance." },
+  RECONCILIATION_REQUIRED: { title: "Payment needs review", detail: "The verified provider details did not match this deposit order. No funds were credited; support can review the reference safely." },
+};
 
 export default function DepositReturn() {
   const { depositId: pathId } = useParams();
@@ -119,9 +143,19 @@ export default function DepositReturn() {
   return (
     <PageTransition className="space-y-5 py-8 text-center" data-testid="deposit-return-page">
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-primary/30 bg-primary/10"><Icon className={`h-8 w-8 ${status === "CREDITED" ? "text-emerald-300" : ["FAILED", "EXPIRED", "RECONCILIATION_REQUIRED"].includes(status) ? "text-red-300" : "text-primary"}`} /></div>
-      <div><h1 className="text-2xl font-bold">{status === "CREDITED" ? "Funds credited" : ["CREATED", "PENDING"].includes(status) ? "Payment being verified" : status === "RECONCILIATION_REQUIRED" ? "Payment needs review" : "Deposit update"}</h1><p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-white/55">{error || (status === "CREDITED" ? "The provider payment was verified by our server and your wallet is updated." : status === "RECONCILIATION_REQUIRED" ? "The provider details did not reconcile with the deposit order. No funds were credited; support can review the reference safely." : "Returning from checkout does not credit funds. We are waiting for the verified provider webhook.")}</p></div>
+      <div><h1 className="text-2xl font-bold">{copy.title}</h1><p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-white/55">{error || copy.detail}</p></div>
       {deposit && <div className="mx-auto flex max-w-sm items-center justify-between rounded-xl border border-white/10 bg-card/55 p-4 text-left"><div><p className="text-xs text-white/45">Deposit reference</p><p className="mt-1 max-w-[210px] truncate font-mono text-xs">{deposit.id}</p></div><PaymentStatus status={deposit.status} /></div>}
+      {isHostedUpi && !TERMINAL_DEPOSIT_STATUSES.has(status) && (
+        <form onSubmit={submitUtr} className="mx-auto max-w-sm space-y-3 rounded-xl border border-primary/25 bg-card/55 p-4 text-left" data-testid="deposit-utr-form">
+          <div><h2 className="text-sm font-semibold">Completed the UPI payment?</h2><p className="mt-1 text-xs leading-relaxed text-white/50">Enter the UTR from your UPI app. Submitting a UTR never credits funds by itself—our server must confirm the paid transaction directly with SgPay.</p></div>
+          <Input data-testid="deposit-utr" aria-label="UPI transaction reference (UTR)" type="text" autoComplete="off" maxLength={80} value={utr} onChange={(event) => setUtr(event.target.value)} placeholder="Enter UTR" disabled={utrBusy} className="h-11 rounded-xl border-white/12 bg-white/5 font-mono" />
+          {utrError && <p role="alert" className="text-xs leading-relaxed text-red-300">{utrError}</p>}
+          {utrNotice && <p role="status" className="text-xs leading-relaxed text-emerald-300">{utrNotice}</p>}
+          <Button data-testid="deposit-utr-submit" type="submit" disabled={utrBusy || !utr.trim()} className="h-11 w-full rounded-xl font-bold">{utrBusy ? "Verifying UTR…" : "Submit UTR for verification"}</Button>
+        </form>
+      )}
       <div className="grid grid-cols-2 gap-3"><Button type="button" variant="outline" onClick={check} disabled={checking} className="h-12 rounded-xl border-white/15"><RefreshCw className={`mr-2 h-4 w-4 ${checking ? "animate-spin" : ""}`} />Check status</Button><Button type="button" onClick={() => navigate("/wallet/activity", { replace: true })} className="h-12 rounded-xl font-bold">Wallet activity</Button></div>
+      <WagerBonusOverlay overlay={overlay} onClose={() => setOverlay(null)} />
     </PageTransition>
   );
 }

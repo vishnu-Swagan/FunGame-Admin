@@ -11,6 +11,8 @@ const mockWithdrawals = jest.fn();
 const mockBankDetails = jest.fn();
 const mockCreateDeposit = jest.fn();
 const mockCreateWithdrawal = jest.fn();
+const mockCreateOperatorDeposit = jest.fn();
+const mockCreateOperatorWithdrawal = jest.fn();
 const mockOffers = jest.fn();
 const mockAcceptOffer = jest.fn();
 const mockFinancialIntentKey = jest.fn();
@@ -531,7 +533,7 @@ test("hosted UPI operator rail creates an idempotent deposit and opens only SgPa
     operatorCheckoutHosts: ["root.sgpay24.com"],
     checkoutHosts: ["root.sgpay24.com"],
   });
-  expect(container.textContent).toContain("Buy chips with UPI");
+  expect(container.textContent).toContain("Deposit with UPI");
   expect(container.textContent).toContain("SgPay secure UPI checkout");
   expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Pay securely with UPI");
 
@@ -575,14 +577,14 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
   expect(container.textContent).toContain("submitted for Admin review");
   expect(container.textContent).not.toContain("Payment services are not active yet");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
-  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit buy request");
+  expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit deposit request");
 
   change(container.querySelector('[data-testid="deposit-amount"]'), "1000");
   await submit(container.querySelector('[data-testid="deposit-form"]'));
   expect(mockCreateDeposit).not.toHaveBeenCalled();
   expect(checkoutNavigator).not.toHaveBeenCalled();
   expect(mockCreateOperatorDeposit).toHaveBeenCalledWith(100000);
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
   await act(async () => root.unmount());
 });
 
@@ -596,7 +598,7 @@ test("operator rail submits withdrawals against available play chips", async () 
   await submit(container.querySelector('[data-testid="withdrawal-form"]'));
   expect(mockCreateWithdrawal).not.toHaveBeenCalled();
   expect(mockCreateOperatorWithdrawal).toHaveBeenCalledWith(1000, "bank-1");
-  expect(mockNavigate).toHaveBeenCalledWith("/chips/activity", { replace: true });
+  expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
   await act(async () => root.unmount());
 });
 

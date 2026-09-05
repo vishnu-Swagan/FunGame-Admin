@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
@@ -140,6 +142,17 @@ def _country_allowlist() -> set[str]:
         item.strip().upper()
         for item in os.environ.get("FINANCIAL_ALLOWED_COUNTRIES", "").split(",")
         if item.strip()
+    }
+
+
+def _payment_verification_state(user: Mapping[str, Any]) -> dict[str, bool]:
+    """Resolve payment eligibility from explicit contact, age and KYC evidence."""
+    contact = operator_rail.payment_contact_state(user)
+    return {
+        "contact_verified": contact["phone_verified"] or contact["email_verified"],
+        "phone_verified": contact["phone_verified"],
+        "age_verified": user.get("age_verified") is True or user.get("accepted_terms") is True,
+        "kyc_verified": str(user.get("kyc_status") or "").upper() == "VERIFIED",
     }
 
 
@@ -391,6 +404,17 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         # invalid value or internal configuration diagnostics to the player.
         money_config = None
     config_ready = money_config is not None
+    operator = operator_rail.operator_status()
+    promo = None
+    free_cash_state = None
+    try:
+        import wager as _promo_wager
+        import free_cash as _promo_free
+        promo = await _promo_wager.public_state(user["id"])
+        free_cash_state = await _promo_free.public_state(user["id"])
+    except Exception:
+        promo = None
+        free_cash_state = None
     wallet = await finance.wallet_public(user["id"])
     try:
         import promotions

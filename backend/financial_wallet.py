@@ -2382,8 +2382,6 @@ async def create_withdrawal(
 ) -> dict[str, Any]:
     idem = validate_idempotency_key(idempotency_key)
     chips = int(amount_chips)
-    import wager as _promo_wager
-    await _promo_wager.require_clear_for_withdrawal(user_id)
     existing = await db.withdrawal_requests.find_one(
         {"user_id": user_id, "idempotency_key": idem}, {"_id": 0},
     )

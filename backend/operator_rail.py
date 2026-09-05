@@ -394,8 +394,6 @@ async def create_request(
                 "code": "OPERATOR_BALANCE_INSUFFICIENT",
                 "message": "You do not have enough chips for this withdrawal.",
             })
-        import wager
-        await wager.require_clear_for_withdrawal(user["id"])
     row = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],

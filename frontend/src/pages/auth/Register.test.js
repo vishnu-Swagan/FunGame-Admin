@@ -216,6 +216,7 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   mockPost.mockResolvedValue({ data: { destination_masked: "+44******23", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
   change(container.querySelector("#reg-name"), "OTP Player");
+  change(container.querySelector("#reg-login-id"), "OTP.Player");
   change(container.querySelector("#reg-contact"), "+44 7700 900123");
   change(container.querySelector("#reg-email"), "Optional@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -244,6 +245,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Live Player");
+  change(container.querySelector("#reg-login-id"), "Live.Player");
   change(container.querySelector("#reg-contact"), "+91 (98765).43210");
   change(container.querySelector("#reg-email"), "Live.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -257,6 +259,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
     identifier: "+919876543210",
     phone: "+919876543210",
     email: "live.player@example.com",
+    username: "Live.Player",
     full_name: "Live Player",
     date_of_birth: "1990-05-20",
     country: "IN",
@@ -287,6 +290,7 @@ test("an invalid required email is explained inline and focused without posting"
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Live Player");
+  change(container.querySelector("#reg-login-id"), "Live.Player");
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-email"), "not-an-email");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -312,6 +316,7 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Terms Player");
+  change(container.querySelector("#reg-login-id"), "Terms.Player");
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-dob"), "1990-05-20");
   changeSelect(container.querySelector("#reg-country"), "IN");

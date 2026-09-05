@@ -11,7 +11,7 @@ import { errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { isPromotionPolicyVersion, promotions } from "@/lib/promotionApi";
-import { formatInrPaise, isFinancialFeatureAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
+import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, normalizeWallet, rupeesToPaise } from "@/lib/walletUtils";
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 import { MissionCard, OfferReview } from "@/components/promotions";
 
@@ -185,15 +185,30 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (bankAccountId && !bankAccounts.some((account) => account.id === bankAccountId)) setBankAccountId(bankAccounts[0]?.id || "");
   }, [bankAccounts, bankAccountId]);
 
-  const buyFeatureAvailable = isFinancialFeatureAvailable(financial, "deposits");
-  const withdrawalFeatureAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
-  const providerReadinessCopy = buyFeatureAvailable && withdrawalFeatureAvailable
-    ? "Deposits and withdrawals are completed by the approved provider selected by the secure server. Funds are credited only after server verification; returning from checkout never changes your balance by itself."
-    : buyFeatureAvailable
-      ? "Deposits are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Funds are credited only after server verification; returning from checkout never changes your balance by itself."
-      : withdrawalFeatureAvailable
-        ? "Withdrawals are completed by the approved provider selected by the secure server. Deposits are not active yet."
-        : "Payment services are not active yet. Deposits and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
+  const hostedBuyAvailable = isFinancialFeatureAvailable(financial, "deposits");
+  const hostedWithdrawAvailable = isFinancialFeatureAvailable(financial, "withdrawals");
+  const operatorBuyAvailable = isOperatorRailAvailable(financial, "deposits");
+  const operatorWithdrawAvailable = isOperatorRailAvailable(financial, "withdrawals");
+  const hostedUpiBuyAvailable = Boolean(
+    operatorBuyAvailable
+    && String(financial?.operator?.rail || "").toUpperCase() === "UPI_HOSTED"
+    && financial?.operator?.hosted_checkout === true,
+  );
+  const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
+  const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
+  const providerReadinessCopy = hostedUpiBuyAvailable && operatorWithdrawAvailable
+    ? "Deposit securely through SgPay hosted UPI checkout. Withdrawals are submitted for Admin review and paid to your saved bank or UPI method after approval. Funds are credited only after server verification."
+    : hostedUpiBuyAvailable && hostedWithdrawAvailable
+      ? "Deposit securely through SgPay hosted UPI checkout. Withdrawals use the approved provider selected by the secure server. Funds are credited only after server verification."
+      : hostedBuyAvailable && hostedWithdrawAvailable
+        ? "Deposits and withdrawals are completed by the approved provider selected by the secure server. Funds are credited only after server verification; returning from checkout never changes your balance by itself."
+        : operatorBuyAvailable || operatorWithdrawAvailable
+          ? "Deposit and withdrawal requests are submitted for Admin review. Your wallet changes only after verified approval."
+          : buyFeatureAvailable
+            ? "Deposits are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Funds are credited only after server verification."
+            : withdrawalFeatureAvailable
+              ? "Withdrawals are completed by the approved provider selected by the secure server. Deposits are not active yet."
+              : "Payment services are not active yet. Deposits and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
@@ -281,14 +296,29 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         );
         if (!consentMatchesDisplayedQuote) throw new Error("The bonus quote changed before acceptance. Payment was not opened; review the refreshed target and deadline.");
       }
-      const result = selectedOffer
-        ? await payments.createDeposit(buyPaise, key, { promotionConsentId: consent.id })
-        : await payments.createDeposit(buyPaise, key);
-      const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.checkoutHosts);
-      if (!checkoutUrl) throw new Error("The payment provider returned an invalid checkout address. No funds were credited.");
-      checkoutNavigator(checkoutUrl);
-      clearFinancialIntent("deposit", user?.id, key);
-      if (consentKey) clearFinancialIntent("promotion-consent", user?.id, consentKey);
+      if (hostedUpiBuyAvailable && config.operatorCheckoutHosts.length) {
+        if (selectedOffer) throw new Error("This bonus is not available on the selected payment rail. Continue without the bonus.");
+        const result = await payments.createOperatorDeposit(buyPaise, key);
+        const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.operatorCheckoutHosts);
+        if (!checkoutUrl) throw new Error("The payment provider returned an invalid UPI checkout address. No funds were credited.");
+        checkoutNavigator(checkoutUrl);
+        clearFinancialIntent("deposit", user?.id, key);
+      } else if (hostedBuyAvailable && config.checkoutHosts.length) {
+        const result = selectedOffer
+          ? await payments.createDeposit(buyPaise, key, { promotionConsentId: consent.id })
+          : await payments.createDeposit(buyPaise, key);
+        const checkoutUrl = safeHostedCheckoutUrl(result?.checkout_url, config.checkoutHosts);
+        if (!checkoutUrl) throw new Error("The payment provider returned an invalid checkout address. No funds were credited.");
+        checkoutNavigator(checkoutUrl);
+        clearFinancialIntent("deposit", user?.id, key);
+        if (consentKey) clearFinancialIntent("promotion-consent", user?.id, consentKey);
+      } else {
+        if (selectedOffer) throw new Error("This bonus is not available for manual deposit review. Continue without the bonus.");
+        await payments.createOperatorDeposit(buyPaise);
+        toast.success("Deposit request submitted. Track its status in Activity.");
+        await Promise.allSettled([load(), refreshUser?.()]);
+        changeTab("activity");
+      }
     } catch (error) {
       toast.error(errMsg(error));
     } finally {
@@ -307,7 +337,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (!withdrawChips || withdrawChips < config.minWithdrawalChips || withdrawChips > config.maxWithdrawalChips) {
       return toast.error("Choose an INR amount that converts to an eligible wallet amount.");
     }
-    if (withdrawChips > wallet.withdrawable_chips) {
+    const availableForWithdraw = hostedWithdrawAvailable ? wallet.withdrawable_chips : wallet.available_chips;
+    if (withdrawChips > availableForWithdraw) {
       setWithdrawalIssue({
         code: "WITHDRAWABLE_CASH_EXCEEDED",
         requested_chips: withdrawChips,
@@ -321,9 +352,14 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
     setBusy("withdraw");
     try {
-      await payments.createWithdrawal(withdrawChips, bankAccountId, key);
+      if (operatorWithdrawAvailable) {
+        await payments.createOperatorWithdrawal(withdrawChips, bankAccountId);
+      } else {
+        const key = financialIntentKey("withdrawal", user?.id, `amount_chips=${withdrawChips}&bank=${bankAccountId}`);
+        await payments.createWithdrawal(withdrawChips, bankAccountId, key);
+        clearFinancialIntent("withdrawal", user?.id, key);
+      }
       setWithdrawalIssue(null);
-      clearFinancialIntent("withdrawal", user?.id, key);
       toast.success("Withdrawal submitted. Track its status in Activity.");
       await Promise.allSettled([load(), refreshUser?.()]);
       changeTab("activity");
@@ -365,13 +401,13 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="buy" className="mt-4">
           <form onSubmit={buy} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="deposit-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Deposit funds</p><p className="mt-1 text-xs leading-relaxed text-white/50">Pay in INR through secure hosted checkout. Your wallet updates after verified provider confirmation.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowDownToLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">{hostedUpiBuyAvailable ? "Deposit with UPI" : "Deposit funds"}</p><p className="mt-1 text-xs leading-relaxed text-white/50">{hostedUpiBuyAvailable ? "Pay through SgPay secure UPI checkout. Your wallet updates only after server verification." : operatorBuyAvailable && !hostedBuyAvailable ? "Submit a deposit request for Admin review. Your wallet updates only after verified approval." : "Pay in INR through secure hosted checkout. Your wallet updates after verified provider confirmation."}</p></div></div>
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Deposits are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
             <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">Player balance credit</span><strong className="tabular-nums text-primary">{formatChips(buyChips)}</strong></div>
             <OfferReview offers={offers} selectedOfferId={selectedOfferId} onSelect={setSelectedOfferId} accepted={bonusAccepted} onAcceptedChange={setBonusAccepted} depositPaise={buyPaise} />
-            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured || Boolean(selectedOffer && (!bonusAccepted || !selectedOfferEligible))} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? "Opening secure checkout…" : selectedOffer ? "Accept bonus and continue" : "Continue to payment"}</Button>
+            <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured || Boolean(selectedOffer && (!bonusAccepted || !selectedOfferEligible))} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? "Processing securely…" : selectedOffer ? "Accept bonus and continue" : hostedUpiBuyAvailable ? "Pay securely with UPI" : operatorBuyAvailable && !hostedBuyAvailable ? "Submit deposit request" : "Continue to payment"}</Button>
           </form>
         </TabsContent>
 

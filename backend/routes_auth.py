@@ -943,6 +943,7 @@ async def _register_phone_otp(
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    login_id = body.username
     policy_acceptance = policy_acceptance or _registration_policy_acceptance(
         body, PHONE_OTP_ACTIVATION_MODE,
     )
@@ -981,6 +982,9 @@ async def _register_phone_otp(
     }
     acceptance_record = _policy_acceptance_record(user, policy_acceptance)
     _apply_policy_acceptance_to_user(user, acceptance_record)
+    if login_id:
+        # Verification atomically claims the requested Login ID.
+        user['requested_username'] = login_id
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,
@@ -1026,27 +1030,7 @@ async def _register_phone_otp(
         # response generic so it does not disclose which identity matched.
         return _opaque_registration_response(identity)
 
-    try:
-        challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
-    except OtpError as exc:
-        # A registration is not successful unless the SMS provider accepted
-        # the challenge. Remove the unusable pending row and its attribution so
-        # the player can retry cleanly when delivery recovers.
-        async def rollback_failed_registration(session):
-            kwargs = {'session': session} if session is not None else {}
-            await db.otp_challenges.delete_many({'user_id': user['id']}, **kwargs)
-            await db.player_attribution.delete_many({'user_id': user['id']}, **kwargs)
-            await db.player_referrals.delete_many({'invited_user_id': user['id']}, **kwargs)
-            await db.policy_acceptances.delete_many({'user_id': user['id']}, **kwargs)
-            await db.users.delete_one({
-                'id': user['id'], 'status': 'PENDING', 'phone_verified': False,
-            }, **kwargs)
-
-        try:
-            await _run_auth_transaction(rollback_failed_registration)
-        except HTTPException:
-            logger.error('Failed to roll back undeliverable registration')
-        _raise_otp(exc)
+    challenge = await _issue_or_public_challenge(user, identity, VERIFY_CONTACT)
     return {
         'message': GENERIC_REGISTER_MESSAGE,
         'verification_required': True,
@@ -1175,6 +1159,7 @@ async def _register_for_admin_review(
 
     user_id = str(uuid.uuid4())
     created_at = _now().isoformat()
+    login_id = body.username
     policy_acceptance = policy_acceptance or _registration_policy_acceptance(
         body, ADMIN_REVIEW_ACTIVATION_MODE,
     )
@@ -1221,6 +1206,9 @@ async def _register_for_admin_review(
     }
     acceptance_record = _policy_acceptance_record(user, policy_acceptance)
     _apply_policy_acceptance_to_user(user, acceptance_record)
+    if login_id:
+        # Administrator approval is the trusted claim point in this mode.
+        user['requested_username'] = login_id
     if telesign_onboarding:
         user['telesign_onboarding'] = {
             **telesign_onboarding,

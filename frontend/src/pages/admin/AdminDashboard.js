@@ -121,45 +121,14 @@ export default function AdminDashboard() {
     return () => { active = false; };
   }, []);
 
-  const metrics = useMemo(() => {
-    const data = stats || {};
-    return [
-      { label: "Registered players", value: number(data.total_users), note: "Platform database", to: "/Admin/users" },
-      { label: "Active players", value: number(data.active_users), note: "Approved accounts", to: "/Admin/users?status=ACTIVE" },
-      { label: "Pending review", value: number(data.pending_users), note: "Manual approval queue", to: "/Admin/users?status=PENDING", trend: true },
-      ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Bonus requests", value: number(data.pending_chip_requests), note: "Awaiting operator action", to: "/Admin/chip-requests", trend: true },
-      ] : []),
-      { label: "Live games", value: `${number(data.enabled_games)}/${number(data.total_games)}`, note: "Catalog availability", to: "/Admin/games" },
-      ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Promotional balance", value: formatChips(number(data.held_chips)), note: "Separate from cash funds", to: "/Admin/chip-requests" },
-      ] : []),
-    ];
-  }, [stats]);
-
-  const queues = useMemo(() => {
-    const data = stats || {};
-    const items = [
-      { label: "Player approvals", count: number(data.pending_users), oldest: "Manual review required", to: "/Admin/users?status=PENDING", severity: "critical" },
-      ...(LEGACY_CHIP_REQUESTS_ENABLED ? [
-        { label: "Bonus requests", count: number(data.pending_chip_requests), oldest: "Operator decision required", to: "/Admin/chip-requests", severity: "warning" },
-      ] : []),
-    ];
-    return items.filter((item) => item.count > 0);
-  }, [stats]);
-
-  const chartValues = useMemo(() => {
-    const data = stats || {};
-    const raw = [
-      number(data.pending_chip_requests),
-      number(data.active_users),
-      number(data.pending_users),
-      number(data.enabled_games),
-      number(data.total_users),
-    ];
-    const max = Math.max(...raw, 1);
-    return raw.map((value) => Math.max(8, Math.round((value / max) * 88)));
-  }, [stats]);
+  const metrics = useMemo(() => data?.metrics || [], [data]);
+  const queue = useMemo(() => data?.action_queue || [], [data]);
+  const cash = data?.cash_movement || {};
+  const cashTransactions = cash?.recent || [];
+  const distributors = data?.distributors || { count: 0, top: [] };
+  const transactions = data?.recent_transactions || [];
+  const audit = data?.audit_activity || [];
+  const hasCashMovement = number(cash?.deposits?.count) > 0 || number(cash?.withdrawals?.count) > 0;
 
   if (loading) {
     return (
@@ -183,7 +152,7 @@ export default function AdminDashboard() {
         <div className="crm-page-header-copy">
           <span className="crm-page-context">Platform operations</span>
           <h1>Operations overview</h1>
-          <p>Player activity, wallet controls, distributor attribution, and queues requiring attention.</p>
+          <p>Financial movement, player activity, and queues requiring attention across the platform.</p>
         </div>
         <div className="crm-page-actions">
           <span className="source-badge">
@@ -303,12 +272,16 @@ export default function AdminDashboard() {
       </div>
 
       <div className="dashboard-bottom-grid">
-        {LEGACY_CHIP_REQUESTS_ENABLED && (
-          <Panel title="Legacy bonus controls" action={<TextLink onClick={() => navigate("/Admin/chip-requests")}>View requests</TextLink>}>
-            <div className="compact-list">
-              <div className="compact-row"><span className="transaction-glyph">R</span><span className="compact-main"><strong>Pending bonus requests</strong><small>Manual operator review</small></span><strong>{number(stats?.pending_chip_requests)}</strong></div>
-              <div className="compact-row"><span className="transaction-glyph">C</span><span className="compact-main"><strong>Promotional balance</strong><small>Tracked separately from deposited cash</small></span><strong>{formatChips(number(stats?.held_chips))}</strong></div>
-              <div className="compact-row"><span className="transaction-glyph">18</span><span className="compact-main"><strong>Age gate</strong><small>Adults only · play responsibly</small></span><strong>On</strong></div>
+        <Panel title="Recent transactions" action={<TextLink onClick={() => navigate("/Admin/wallet-ledger")}>View all</TextLink>}>
+          {transactions.length ? (
+            <div className="compact-list" data-testid="recent-transactions">
+              {transactions.map((item) => (
+                <div className="compact-row" key={item.id}>
+                  <span className="transaction-glyph">{String(item.type || "?").slice(0, 1)}</span>
+                  <span className="compact-main"><strong>{item.note || item.kind || item.type}</strong><small>{when(item.created_at)}</small></span>
+                  <strong>{item.type === "DEBIT" ? "-" : "+"}{chips(item.amount)}</strong>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="empty-state-compact" data-testid="recent-transactions-empty"><span><Receipt size={19} /></span><h3>No recent transactions</h3><p>Wallet movements will appear here as players transact.</p></div>

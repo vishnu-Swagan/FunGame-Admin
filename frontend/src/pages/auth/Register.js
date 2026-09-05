@@ -59,6 +59,7 @@ export default function Register() {
 
     if (fullName.trim().length < 2) errors.fullName = "Enter your full name using at least 2 characters";
     else if (fullName.trim().length > 64) errors.fullName = "Full name must not exceed 64 characters";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$/.test(loginId.trim())) errors.loginId = "Start your Login ID with a letter or number; use 4–32 letters, numbers, dots, underscores, or hyphens";
     if (!isValidE164Phone(phone)) errors.phone = "Enter your mobile number in international format, starting with + and your country code";
     if ((manualReview || emailVerificationRequired) && !normalizedEmail) errors.email = "Enter your email address";
     else if (normalizedEmail && (normalizedEmail.length > 254 || emailInput?.validity?.typeMismatch)) errors.email = "Enter a valid email address";
@@ -176,6 +177,28 @@ export default function Register() {
         </p>
         <Field label="Full name" htmlFor="reg-name" error={validationErrors.fullName}>
           <Input id="reg-name" data-validation-field="fullName" required minLength={2} maxLength={64} autoComplete="name" value={fullName} onChange={(e) => { setFullName(e.target.value); clearValidationError("fullName"); }} aria-invalid={Boolean(validationErrors.fullName)} aria-describedby={validationErrors.fullName ? "reg-name-error" : undefined} className="h-12 rounded-xl bg-white/5 border-white/12" />
+        </Field>
+        <Field label="Choose Login ID" htmlFor="reg-login-id" error={validationErrors.loginId}>
+          <Input
+            id="reg-login-id"
+            data-testid="register-login-id-input"
+            data-validation-field="loginId"
+            type="text"
+            inputMode="text"
+            autoComplete="username"
+            spellCheck="false"
+            autoCapitalize="none"
+            required
+            minLength={4}
+            maxLength={32}
+            placeholder="Create your Login ID"
+            value={loginId}
+            onChange={(event) => { setLoginId(event.target.value); clearValidationError("loginId"); }}
+            aria-invalid={Boolean(validationErrors.loginId)}
+            aria-describedby={validationErrors.loginId ? "reg-login-id-error" : "reg-login-id-help"}
+            className="h-12 rounded-xl bg-white/5 border-white/12"
+          />
+          {!validationErrors.loginId && <p id="reg-login-id-help" className="text-[11px] leading-relaxed text-white/45">Start with a letter or number, then use 4–32 letters, numbers, dots, underscores, or hyphens.</p>}
         </Field>
         <Field label="Mobile number (enter with +country code)" htmlFor="reg-contact" error={validationErrors.phone}>
           <Input

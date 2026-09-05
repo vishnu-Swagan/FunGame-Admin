@@ -7,12 +7,12 @@ import types
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ.setdefault('APP_ENV', 'test')
-os.environ.setdefault('AUTH_ALLOW_NON_TRANSACTIONAL_TESTS', 'true')
-os.environ.setdefault('OTP_PEPPER', 'test-only-otp-pepper-with-at-least-32-characters')
-os.environ.setdefault('OTP_SMS_ADAPTER', 'mock')
-os.environ.setdefault('OTP_EMAIL_ADAPTER', 'mock')
-os.environ.setdefault('OTP_EXPOSE_DEV_CODE', 'true')
+os.environ['APP_ENV'] = 'test'
+os.environ['AUTH_ALLOW_NON_TRANSACTIONAL_TESTS'] = 'true'
+os.environ['OTP_PEPPER'] = 'test-only-otp-pepper-with-at-least-32-characters'
+os.environ['OTP_SMS_ADAPTER'] = 'mock'
+os.environ['OTP_EMAIL_ADAPTER'] = 'mock'
+os.environ['OTP_EXPOSE_DEV_CODE'] = 'true'
 
 from fastapi import HTTPException, Response
 from mongomock_motor import AsyncMongoMockClient
@@ -499,6 +499,14 @@ else:
         completed = subprocess.run(
             [sys.executable, __file__],
             cwd=os.path.dirname(os.path.dirname(__file__)),
+            env={
+                **os.environ,
+                'APP_ENV': 'test',
+                'AUTH_ALLOW_NON_TRANSACTIONAL_TESTS': 'true',
+                'OTP_SMS_ADAPTER': 'mock',
+                'OTP_EMAIL_ADAPTER': 'mock',
+                'OTP_EXPOSE_DEV_CODE': 'true',
+            },
             capture_output=True,
             text=True,
             timeout=60,

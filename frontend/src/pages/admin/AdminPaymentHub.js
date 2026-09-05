@@ -136,6 +136,10 @@ export default function AdminPaymentHub() {
     try {
       const hub = await adminPayments.hubStatus();
       setStatus(hub);
+      if (!hub?.admin) {
+        setGateways([]); setRoutes([]); setEvents([]); setActivity([]); setApprovals([]);
+        return;
+      }
       const [gatewayRows, routeRows, eventRows, activityRows, approvalRows] = await Promise.all([
         adminPayments.gateways(), adminPayments.routes(), adminPayments.hubWebhookEvents(),
         adminPayments.hubActivity(), adminPayments.paymentApprovals(),
@@ -163,7 +167,7 @@ export default function AdminPaymentHub() {
   const canManageRoutes = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_MANAGE_ROUTES);
   const canActivateGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_ACTIVATE);
   const canDisableGateway = isSuperAdmin && hasPermission(user, ADMIN_PERMISSIONS.GATEWAY_DISABLE);
-  const adminEnabled = Boolean(status);
+  const adminEnabled = Boolean(status?.admin);
   const paymentsV2 = Boolean(status?.payments_v2);
   const webhookBase = publicBase(status);
 
@@ -299,7 +303,7 @@ export default function AdminPaymentHub() {
 
     <div data-testid="payment-hub-boundary" className="flex gap-3 rounded-2xl border border-sky-300/25 bg-sky-300/8 p-4 text-sm text-sky-50">
       <ShieldCheck className="h-5 w-5 shrink-0" />
-      <div><strong>Provider registration is available here.</strong><p className="mt-1 text-xs opacity-85">This release exposes configuration and callback URLs only. Player pay-ins, payouts, wallet credit/debit, and V2 activation remain disabled by source-controlled rollout flags.</p></div>
+      <div><strong>Provider registration is available here.</strong><p className="mt-1 text-xs opacity-85">This release exposes configuration and callback URLs only. Player pay-ins, payouts, wallet credit/debit, and V2 activation remain disabled by source-controlled rollout flags.</p>{status && !adminEnabled && <p className="mt-1 text-xs font-semibold">PAYMENT_GATEWAY_ADMIN_ENABLED must be on in Render before provider administration is available.</p>}</div>
     </div>
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
