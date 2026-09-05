@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageTransition, EmptyState, formatChips } from "@/components/common";
 import { useAuth } from "@/context/AuthContext";
-import { errMsg } from "@/lib/api";
+import { errCode, errMsg } from "@/lib/api";
 import { clearFinancialIntent, financialIntentKey } from "@/lib/financialIntent";
 import { payments } from "@/lib/paymentApi";
 import { isPromotionPolicyVersion, promotions } from "@/lib/promotionApi";
@@ -15,7 +15,7 @@ import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, n
 import { PaymentRow, WalletBalanceCard } from "@/pages/app/wallet/WalletBits";
 import { MissionCard, OfferReview } from "@/components/promotions";
 
-const QUICK_BUY_AMOUNTS = [100, 500, 1000, 2500];
+const QUICK_BUY_AMOUNTS = [1000, 5000, 10000, 50000, 100000, 200000];
 const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
 
 function positiveInteger(...values) {
@@ -69,10 +69,24 @@ export function publicFinancialConfig(payload) {
     ...financialCheckoutHosts,
     ...operatorCheckoutHosts,
   ].map((host) => String(host || "").trim()).filter(Boolean))];
+  const maxDailyDepositPaise = positiveInteger(
+    operatorLimits.max_daily_deposit_paise,
+    limits.max_daily_deposit_paise,
+    published.max_daily_deposit_paise,
+    financial.max_daily_deposit_paise,
+  );
+  const remainingDailyRaw = operatorLimits.remaining_daily_deposit_paise ?? limits.remaining_daily_deposit_paise;
+  const remainingDailyDepositPaise = (
+    Number.isSafeInteger(Number(remainingDailyRaw)) && Number(remainingDailyRaw) >= 0
+      ? Number(remainingDailyRaw)
+      : null
+  );
   return {
     chipsPerInr,
     minDepositPaise,
     maxDepositPaise,
+    maxDailyDepositPaise,
+    remainingDailyDepositPaise,
     minWithdrawalChips,
     maxWithdrawalChips,
     minWithdrawalPaise,
@@ -134,6 +148,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const [config, setConfig] = useState(() => publicFinancialConfig(null));
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
+  const [playTx, setPlayTx] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [offers, setOffers] = useState([]);
   const [selectedOfferId, setSelectedOfferId] = useState("");
@@ -146,8 +161,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const [withdrawalIssue, setWithdrawalIssue] = useState(null);
   const load = useCallback(async () => {
     setLoading(true);
-    const [walletResult, depositsResult, withdrawalsResult, banksResult] = await Promise.allSettled([
-      payments.wallet(), payments.deposits(), payments.withdrawals(), payments.bankDetails(),
+    const [walletResult, depositsResult, withdrawalsResult, banksResult, playResult] = await Promise.allSettled([
+      payments.wallet(), payments.deposits(), payments.withdrawals(), payments.bankDetails(), payments.chipTransactions(),
     ]);
 
     if (walletResult.status === "fulfilled") {
@@ -175,6 +190,9 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (depositsResult.status === "fulfilled") setDeposits(depositsResult.value);
     if (withdrawalsResult.status === "fulfilled") setWithdrawals(withdrawalsResult.value);
     if (banksResult.status === "fulfilled") setBankAccounts(banksResult.value);
+    if (playResult.status === "fulfilled") {
+      setPlayTx((playResult.value || []).filter(isPlayTransaction));
+    }
     setLoading(false);
   }, [user?.chip_balance]);
 
@@ -255,7 +273,8 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const activity = useMemo(() => [
     ...deposits.map((item) => ({ item, kind: "deposit" })),
     ...withdrawals.map((item) => ({ item, kind: "withdrawal" })),
-  ].sort((left, right) => new Date(right.item.created_at || 0) - new Date(left.item.created_at || 0)), [deposits, withdrawals]);
+  ].sort((left, right) => new Date(paymentDisplayAt(right.item) || 0) - new Date(paymentDisplayAt(left.item) || 0)), [deposits, withdrawals]);
+  const playSummaryTotals = useMemo(() => playSummary(playTx), [playTx]);
 
   const changeTab = (next) => {
     setTab(next);
@@ -320,7 +339,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         changeTab("activity");
       }
     } catch (error) {
-      toast.error(errMsg(error));
+      toast.error(errCode(error) === "UPI_DAILY_LIMIT" ? "Daily limit reached." : errMsg(error));
     } finally {
       setBusy("");
     }

@@ -291,14 +291,16 @@ async def _credit_chips(user_id: str, amount: int, note: str, ref: str = None, *
 
 
 def _admin_step_up_identities(admin: dict):
-    """Return trusted contacts, then stored contacts eligible for MFA enrollment."""
+    """Return trusted phone contacts, then stored phones eligible for MFA enrollment.
+
+    Email is never an OTP destination. Step-up sends phone SMS only; if SMS
+    cannot be delivered, start_admin_step_up completes password-only.
+    """
     verified = []
     enrollment = []
     candidates = (
         (admin.get('phone_normalized') or admin.get('phone'),
          admin.get('phone_verified') is True),
-        (admin.get('email_normalized') or admin.get('email'),
-         admin.get('email_verified') is True),
     )
     for value, is_verified in candidates:
         if not value:
@@ -307,8 +309,7 @@ def _admin_step_up_identities(admin: dict):
             identity = normalize_identity(value)
         except ValueError:
             continue
-        # Synthetic migration addresses must never become MFA destinations.
-        if identity.channel == 'EMAIL' and identity.value.endswith('.invalid'):
+        if identity.channel != 'SMS':
             continue
         destination = verified if is_verified else enrollment
         if identity not in verified and identity not in enrollment:
@@ -330,7 +331,7 @@ def _admin_step_up_identity(admin: dict, channel: str | None = None):
         return identities[0]
     raise HTTPException(status_code=403, detail={
         'code': 'ADMIN_MFA_CONTACT_REQUIRED',
-        'message': 'Add a valid administrator phone or email before requesting a security code.',
+        'message': 'Add a valid administrator phone before requesting a security code.',
     })
 
 
@@ -346,7 +347,7 @@ def _raise_otp_http(exc: OtpError):
 async def _complete_password_only_step_up(admin: dict, original_hash: str) -> dict:
     """Finish operator step-up when OTP delivery is not actually available.
 
-    CRM KYC and payout approvals require a recent ceremony. If SMS/email OTP
+    CRM KYC and payout approvals require a recent ceremony. If SMS OTP
     cannot be sent, a correct administrator password still records the session
     window so Verification is not stranded behind a provider outage.
     """
@@ -406,7 +407,7 @@ async def start_admin_step_up(body: AdminStepUpStart,
     ):
         # Count failed passwords, not legitimate retries caused by a delivery
         # outage. A correct password must not remain trapped behind failures
-        # from the SMS or email provider.
+        # from the SMS provider.
         try:
             await consume_persistent_limit(
                 'admin_step_up_password', admin['id'], limit=5,
@@ -432,13 +433,11 @@ async def start_admin_step_up(body: AdminStepUpStart,
                 challenge = await issue_challenge(admin, identity, ADMIN_STEP_UP)
                 break
             except OtpConfigurationError as exc:
-                # A configured provider can still reject delivery at runtime. Try
-                # the administrator's other stored contact without weakening MFA.
+                # SMS provider rejected delivery. Do not fall through to email
+                # OTP; password-only step-up below keeps CRM KYC unblocked.
                 delivery_error = exc
             except OtpError as exc:
                 if exc.code == 'RATE_LIMITED' and identity != identities[-1]:
-                    # OTP limits are destination-scoped. A saturated broken SMS
-                    # route must not suppress the separately limited email route.
                     delivery_error = exc
                     continue
                 _raise_otp_http(exc)
@@ -464,7 +463,7 @@ async def start_admin_step_up(body: AdminStepUpStart,
         }, {'$set': {'password_verified_at': password_verified_at}})
         return {'message': 'Security code sent.', **challenge}
 
-    # OTP cannot be delivered (provider down, SMS/email disabled, or pepper
+    # OTP cannot be delivered (SMS provider down/disabled, or pepper
     # missing). Password re-auth still completes the CRM ceremony so KYC
     # Verify is not stuck on "Verification is temporarily unavailable."
     if delivery_error or not otp_configured or not identities:
@@ -1158,6 +1157,34 @@ async def list_users(status: str = Query(default=None), admin: dict = Depends(re
             u['email'] = u.get('pending_email') or u.get('email')
             u['phone'] = u.get('pending_phone') or u.get('phone')
     return {'users': serialize_doc(users)}
+
+
+
+@router.get('/chip-transactions')
+async def admin_chip_transactions(
+    user_id: str = Query(default=None, max_length=80),
+    limit: int = Query(default=300, ge=1, le=500),
+    admin: dict = Depends(require_admin),
+):
+    """Virtual-chip play and wallet history for Admin. Typed kind plus player labels."""
+    query = {}
+    if user_id:
+        query['user_id'] = user_id
+    rows = await db.chip_transactions.find(query, {'_id': 0}).sort('created_at', -1).to_list(limit)
+    user_ids = list({row.get('user_id') for row in rows if row.get('user_id')})
+    players = {}
+    if user_ids:
+        found = await db.users.find(
+            {'id': {'$in': user_ids}},
+            {'_id': 0, 'id': 1, 'name': 1, 'username': 1, 'email': 1, 'phone': 1},
+        ).to_list(len(user_ids))
+        players = {item['id']: item for item in found if item.get('id')}
+    for row in rows:
+        player = players.get(row.get('user_id')) or {}
+        row['user_name'] = player.get('name') or player.get('username')
+        row['user_email'] = player.get('email')
+        row['user_phone'] = player.get('phone')
+    return {'transactions': serialize_doc(rows)}
 
 
 @router.delete('/users/{user_id}')

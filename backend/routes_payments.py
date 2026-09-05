@@ -25,6 +25,7 @@ from payment_providers import (
     ProviderEvent,
     ProviderRequestError,
     WebhookVerificationError,
+    datetime_to_iso_utc,
     load_payment_provider,
 )
 
@@ -405,6 +406,19 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         money_config = None
     config_ready = money_config is not None
     operator = operator_rail.operator_status()
+    try:
+        used_daily = await operator_rail.used_buy_paise_today(user["id"])
+        daily_cap = int(operator["limits"]["max_daily_deposit_paise"])
+        operator = {
+            **operator,
+            "limits": {
+                **operator["limits"],
+                "used_daily_deposit_paise": used_daily,
+                "remaining_daily_deposit_paise": max(0, daily_cap - used_daily),
+            },
+        }
+    except Exception:
+        pass
     promo = None
     free_cash_state = None
     try:
@@ -738,7 +752,7 @@ async def provider_webhook(provider_name: str, request: Request):
             amount_paise=authoritative.amount_paise,
             currency=authoritative.currency,
             provider_reference=authoritative.provider_reference,
-            occurred_at=None,
+            occurred_at=datetime_to_iso_utc(getattr(authoritative, "occurred_at", None)),
             data={"authenticated_status_lookup": True},
         )
     try:

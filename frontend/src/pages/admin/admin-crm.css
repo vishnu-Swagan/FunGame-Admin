@@ -10,10 +10,10 @@
   --ink-faint: #858b95;
   --line: #dcdfe4;
   --line-strong: #c6cad2;
-  --crm-accent: #a82f42;
-  --crm-accent-hover: #861f31;
-  --crm-accent-soft: #f7e8eb;
-  --crm-accent-ink: #7d1e30;
+  --crm-accent: hsl(var(--chakri-primary-hsl, 43 92% 56%));
+  --crm-accent-hover: hsl(38 78% 42%);
+  --crm-accent-soft: hsl(43 70% 92%);
+  --crm-accent-ink: hsl(36 70% 24%);
   --sidebar: #0d1118;
   --sidebar-elevated: #151b25;
   --sidebar-line: #272d38;
@@ -36,26 +36,26 @@
   --card-foreground: 224 14% 10%;
   --popover: 60 14% 99%;
   --popover-foreground: 224 14% 10%;
-  --primary: 351 56% 42%;
-  --primary-foreground: 0 0% 100%;
+  --primary: var(--chakri-primary-hsl, 43 92% 56%);
+  --primary-foreground: 222 55% 8%;
   --secondary: 220 10% 94%;
   --secondary-foreground: 224 14% 10%;
   --muted: 220 10% 94%;
   --muted-foreground: 218 7% 39%;
-  --accent: 348 48% 94%;
-  --accent-foreground: 350 61% 30%;
+  --accent: 43 70% 92%;
+  --accent-foreground: 36 70% 24%;
   --destructive: 354 51% 46%;
   --destructive-foreground: 0 0% 100%;
   --border: 220 11% 88%;
   --input: 220 11% 79%;
-  --ring: 351 56% 42%;
+  --ring: var(--chakri-primary-hsl, 43 92% 56%);
   --cyan: 219 63% 48%;
   --emerald: 161 64% 28%;
   --magenta: 354 51% 46%;
   min-height: 100dvh;
   background: var(--canvas);
   color: var(--ink);
-  font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -63,6 +63,7 @@
 body.crm-admin-active {
   background: #f2f3f5 !important;
   color: #15171c;
+  font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
 
 body.crm-admin-active [data-radix-popper-content-wrapper] > div,
@@ -152,6 +153,12 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
 }
 
 .admin-brand-logo { display: block; width: 188px; max-width: 100%; height: auto; filter: drop-shadow(0 5px 12px rgb(0 0 0 / 24%)); }
+.admin-brand-logo .chakri-logo__type strong,
+.crm-login-brand-logo .chakri-logo__type strong {
+  color: var(--chakri-gold, #efc86d);
+  font-family: var(--chakri-wordmark-font, Georgia, "Times New Roman", serif);
+  -webkit-text-fill-color: transparent;
+}
 
 .sidebar-close {
   display: none;
@@ -292,7 +299,7 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
 .crm-admin [class*="text-white/"] { color: var(--ink-soft) !important; }
 .crm-admin [class~="text-white"] { color: var(--ink) !important; }
 .crm-admin [class*="bg-destructive"][class~="text-white"] { color: white !important; }
-.crm-admin [class*="bg-primary"][class*="text-primary-foreground"] { color: white !important; }
+.crm-admin [class*="bg-primary"][class*="text-primary-foreground"] { color: hsl(var(--primary-foreground)) !important; }
 .crm-admin [class~="bg-card/55"],
 .crm-admin [class~="bg-card/45"],
 .crm-admin [class~="bg-card"],
@@ -421,18 +428,18 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .empty-state-compact p { max-width: 44ch; margin: 0; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
 
 /* Login exactly follows the separate CRM's split workspace composition. */
-.crm-login-page { display: grid; min-height: 100dvh; grid-template-columns: minmax(430px, 1fr) minmax(560px, 1.08fr); background: #f4f5f7; color: var(--ink); font-family: Aptos, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+.crm-login-page { display: grid; min-height: 100dvh; grid-template-columns: minmax(430px, 1fr) minmax(560px, 1.08fr); background: #f4f5f7; color: var(--ink); font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
 .crm-login-brand-panel { position: relative; display: flex; min-height: 100dvh; flex-direction: column; justify-content: space-between; overflow: hidden; padding: 58px 60px 36px; isolation: isolate; background: #0c1016; color: #f5f7fa; }
-.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: 0; background: radial-gradient(circle at 14% 22%, rgb(167 105 33 / 23%), transparent 34%), radial-gradient(circle at 88% 78%, rgb(113 21 34 / 18%), transparent 38%); content: ""; }
+.crm-login-brand-panel::before { position: absolute; z-index: -2; inset: 0; background: radial-gradient(circle at 14% 22%, rgb(239 200 109 / 26%), transparent 34%), radial-gradient(circle at 88% 78%, rgb(154 92 18 / 22%), transparent 38%); content: ""; }
 .crm-login-brand-panel::after { position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, rgb(8 12 18 / 36%), rgb(8 12 18 / 5%)), linear-gradient(180deg, rgb(8 12 18 / 12%), rgb(8 12 18 / 28%)); content: ""; }
 .crm-login-brand-lockup { display: flex; align-items: center; }
 .crm-login-brand-logo { display: block; width: min(420px, 100%); height: auto; filter: drop-shadow(0 10px 24px rgb(0 0 0 / 34%)); }
 .crm-login-statement { display: grid; max-width: 560px; gap: 18px; margin: auto 0; padding: 48px 0; }
-.crm-login-statement > span { color: #e58a9b; font-size: 10px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+.crm-login-statement > span { color: var(--chakri-gold-soft, #f5d584); font-size: 10px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
 .crm-login-statement h1 { max-width: 560px; margin: 0; color: white !important; font-size: clamp(43px, 4.25vw, 66px); font-weight: 800; letter-spacing: -.065em; line-height: .91; text-wrap: balance; }
 .crm-login-statement p { max-width: 530px; margin: 10px 0 0; color: rgb(235 241 248 / 64%); font-size: 13px; line-height: 1.65; }
 .crm-login-trust { display: grid; min-height: 57px; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 11px; padding: 10px 16px; border: 1px solid rgb(133 157 185 / 28%); border-radius: 11px; background: rgb(19 27 39 / 72%); backdrop-filter: blur(8px); }
-.crm-login-trust svg { color: #d85b75; }
+.crm-login-trust svg { color: var(--chakri-gold, #efc86d); }
 .crm-login-trust span { display: grid; gap: 2px; }
 .crm-login-trust strong { font-size: 11px; }
 .crm-login-trust small { color: rgb(235 241 248 / 58%); font-size: 9.5px; }
@@ -443,7 +450,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .crm-login-role-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .crm-login-role-grid button, .crm-login-role-grid > div { display: grid; min-height: 86px; align-content: start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #fcfcfb; color: var(--ink-soft); text-align: left; transition: border-color .16s ease, background-color .16s ease, transform .16s ease, box-shadow .16s ease; }
 .crm-login-role-grid button:hover { border-color: var(--line-strong); transform: translateY(-1px); }
-.crm-login-role-grid button.active, .crm-login-role-grid > div.active { border-color: var(--crm-accent); background: var(--crm-accent-soft); color: var(--crm-accent-ink); box-shadow: 0 0 0 2px rgb(168 47 66 / 10%), 0 12px 22px rgb(168 47 66 / 8%); }
+.crm-login-role-grid button.active, .crm-login-role-grid > div.active { border-color: var(--crm-accent); background: var(--crm-accent-soft); color: var(--crm-accent-ink); box-shadow: 0 0 0 2px hsl(var(--chakri-primary-hsl, 43 92% 56%) / 18%), 0 12px 22px hsl(var(--chakri-primary-hsl, 43 92% 56%) / 12%); }
 .crm-login-role-grid button > span, .crm-login-role-grid > div > span { display: grid; gap: 4px; }
 .crm-login-role-grid strong { color: var(--ink); font-size: 11px; }
 .crm-login-role-grid small { color: var(--ink-faint); font-size: 8.5px; line-height: 1.35; }
@@ -457,7 +464,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .crm-password-control input { min-width: 0; height: 37px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; }
 .crm-password-control button { display: grid; width: 38px; height: 37px; place-items: center; border: 0; background: transparent; color: var(--ink-faint); }
 .crm-login-form-meta { display: flex; justify-content: flex-end; color: var(--ink-faint); font-size: 9.5px; }
-.crm-login-submit { display: inline-flex; min-height: 41px; align-items: center; justify-content: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--crm-accent); border-radius: var(--radius-control); background: var(--crm-accent); color: #fff; font-size: 11.5px; font-weight: 680; transition: background-color .14s ease, transform .14s ease; }
+.crm-login-submit { display: inline-flex; min-height: 41px; align-items: center; justify-content: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--crm-accent); border-radius: var(--radius-control); background: var(--crm-accent); color: hsl(var(--primary-foreground)); font-size: 11.5px; font-weight: 680; transition: background-color .14s ease, transform .14s ease; }
 .crm-login-submit:hover { background: var(--crm-accent-hover); }
 .crm-login-submit:active { transform: translateY(1px); }
 .crm-login-submit:disabled { border-color: var(--line); background: var(--surface-strong); color: #8591a0; }
@@ -544,7 +551,7 @@ button.metric-cell:hover { background: var(--surface-muted); }
 .gateway-tabs button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 47px; padding: 8px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-soft); cursor: pointer; font: inherit; font-size: 11px; font-weight: 650; }
 .gateway-tabs button:hover { background: var(--surface); color: var(--ink); }
 .gateway-tabs button.is-active { border-color: var(--crm-accent, var(--accent)); background: var(--surface); color: var(--ink); box-shadow: 0 4px 12px #16233014; }
-.gateway-tabs button b { display: inline-grid; min-width: 21px; min-height: 21px; place-items: center; border-radius: 999px; background: var(--crm-accent, var(--accent)); color: #fff; font-size: 9px; }
+.gateway-tabs button b { display: inline-grid; min-width: 21px; min-height: 21px; place-items: center; border-radius: 999px; background: var(--crm-accent, var(--accent)); color: hsl(var(--primary-foreground)); font-size: 9px; }
 .gateway-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .gateway-create-panel { grid-column: 1 / -1; }
 .gateway-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-panel); }

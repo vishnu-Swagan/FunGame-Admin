@@ -1,24 +1,41 @@
 import { useNavigate } from "react-router-dom";
-import { Heart } from "lucide-react";
+import { ArrowRight, Heart } from "lucide-react";
 import { GameArt } from "@/components/GameArt";
 import { GameStatusBadge } from "@/components/common";
+import { useAuth } from "@/context/AuthContext";
+import { guestPlayAuthPath } from "@/lib/frontDoor";
 import { gameStatusLabel, isGameEnabled, isReviewedGame } from "@/lib/gameAvailability";
 
 export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const wide = size === "rail";
   const enabled = isGameEnabled(game);
   const displayStatus = isReviewedGame(game) ? (game.status || "COMING_SOON") : "COMING_SOON";
+
+  const openGame = () => {
+    if (!user) {
+      navigate(guestPlayAuthPath());
+      return;
+    }
+    if (enabled) navigate(`/games/${game.slug}/play`);
+    else navigate(`/games/${game.slug}`);
+  };
 
   return (
     <div
       data-testid="game-card"
       role="button"
       tabIndex={0}
-      aria-label={`${game.name} — ${gameStatusLabel(displayStatus)}`}
-      onClick={() => navigate(`/games/${game.slug}`)}
-      onKeyDown={(e) => e.key === "Enter" && navigate(`/games/${game.slug}`)}
-      className={`group relative overflow-hidden rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.35)] cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45)] active:scale-[0.985] ${wide ? "w-[150px] shrink-0" : ""}`}
+      aria-label={enabled ? `Play ${game.name}` : `${game.name} — ${gameStatusLabel(displayStatus)}`}
+      onClick={openGame}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openGame();
+        }
+      }}
+      className={`group relative overflow-hidden rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.35)] outline-none focus-visible:ring-2 focus-visible:ring-ring transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45)] active:scale-[0.985] ${enabled ? "cursor-pointer" : "cursor-default"} ${wide ? "w-[150px] shrink-0" : ""}`}
     >
       <GameArt game={game} className={`${wide ? "h-[110px]" : "h-[120px] sm:h-[140px]"} rounded-t-2xl`} glyphSize={wide ? "text-3xl" : "text-4xl"} />
 
@@ -44,6 +61,16 @@ export const GameCard = ({ game, isFavorite, onToggleFavorite, size = "grid" }) 
       <div className="p-3">
         <p className="font-display text-[15px] leading-tight text-white">{game.name}</p>
         <p className="text-xs text-white/55 mt-0.5">{game.category}</p>
+        {enabled ? (
+          <span data-testid="game-card-play-cta" className="fg-play-now-cta" aria-hidden="true">
+            <span className="fg-play-now-cta__motion">
+              <b>PLAY NOW</b>
+              <span className="fg-play-now-cta__arrow-wrap">
+                <ArrowRight className="fg-play-now-cta__arrow" strokeWidth={3} aria-hidden="true" />
+              </span>
+            </span>
+          </span>
+        ) : null}
       </div>
     </div>
   );

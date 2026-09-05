@@ -394,6 +394,74 @@ summary:focus-visible {
     display: none;
 }
 
+/* Lobby game-card PLAY NOW CTA — gold pill with an obvious looping "click me" slide.
+   The pill stays put so gold branding stays stable; PLAY NOW + the arrow bounce
+   together 14px, and the arrow slides/pulses farther so → reads as moving. */
+@keyframes fg-play-now-nudge {
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    20% { transform: translate3d(14px, 0, 0); }
+    35% { transform: translate3d(5px, 0, 0); }
+    50% { transform: translate3d(14px, 0, 0); }
+    70% { transform: translate3d(0, 0, 0); }
+}
+@keyframes fg-play-now-arrow {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    20% { transform: translate3d(8px, 0, 0) scale(1.28); }
+    35% { transform: translate3d(3px, 0, 0) scale(1.08); }
+    50% { transform: translate3d(10px, 0, 0) scale(1.32); }
+    70% { transform: translate3d(0, 0, 0) scale(1); }
+}
+.fg-play-now-cta {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 0.5rem;
+    padding: 0.34rem 1.85rem 0.34rem 0.64rem;
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-family: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+}
+.fg-play-now-cta__motion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22em;
+    animation: fg-play-now-nudge 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+.fg-play-now-cta b {
+    font-weight: 800;
+    font-style: normal;
+}
+.fg-play-now-cta__arrow-wrap {
+    display: inline-flex;
+    align-items: center;
+    animation: fg-play-now-arrow 0.95s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+.fg-play-now-cta__arrow {
+    width: 0.95em;
+    height: 0.95em;
+    flex: 0 0 auto;
+    stroke-width: 3;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fg-play-now-cta,
+    .fg-play-now-cta__motion,
+    .fg-play-now-cta__arrow-wrap,
+    .fg-play-now-cta__arrow {
+        animation: none;
+    }
+}
+
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;

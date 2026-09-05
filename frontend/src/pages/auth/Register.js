@@ -11,7 +11,10 @@ import { isValidE164Phone, normalizeContactIdentifier, registrationChannelAvaila
 import { COUNTRY_OPTIONS } from "@/lib/countryOptions";
 import { useRegistrationPolicies } from "@/lib/legalPolicies";
 import { AuthShell } from "@/pages/auth/AuthShell";
+import RegisterForm from "@/pages/auth/forms/RegisterForm";
+import { useAuthCapabilities } from "@/lib/authCapabilities";
 
+/** Legacy route wrapper — production redirects `/register` → `/?auth=register`. */
 export default function Register() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -146,9 +149,8 @@ export default function Register() {
       title="Create your account"
       subtitle={manualReview
         ? "Enter your details and create a password. An administrator will review your account before you can play."
-        : emailVerificationRequired
-          ? "Verify your mobile number and email address with secure one-time codes before entering the lounge."
-          : "Register with your mobile number. We will send a one-time SMS code before you create your password."}
+        : "Enter your name, mobile number, and email. We send one SMS code, then you create a password. Virtual chips have no cash value."}
+      backTo="/"
     >
       {!emailVerificationRequired && (
         <div className="mb-5 flex h-11 items-center justify-center gap-2 rounded-xl border border-primary/55 bg-primary/12 text-sm font-semibold text-primary">
@@ -346,15 +348,5 @@ export default function Register() {
       </form>
       <p className="mt-5 text-center text-sm text-white/60">Already registered? <Link to="/login" className="text-primary font-semibold hover:underline">Log in</Link></p>
     </AuthShell>
-  );
-}
-
-function Field({ label, htmlFor, error, children }) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-      {error && <p id={`${htmlFor}-error`} className="text-xs text-red-300">{error}</p>}
-    </div>
   );
 }

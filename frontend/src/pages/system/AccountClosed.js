@@ -36,7 +36,7 @@ export default function AccountClosed() {
   }, []);
 
   // Nothing to be closed out of if nobody is signed in.
-  useEffect(() => { if (!user) navigate("/welcome", { replace: true }); }, [user, navigate]);
+  useEffect(() => { if (!user) navigate("/", { replace: true }); }, [user, navigate]);
 
   const ends = detail?.ends_at ? String(detail.ends_at).slice(0, 10) : null;
   const expired = ends && new Date(ends) <= new Date();
@@ -48,7 +48,7 @@ export default function AccountClosed() {
       if (data.status === "LIFTED") {
         localStorage.removeItem(STORE);
         toast.success(data.message);
-        navigate("/home", { replace: true });
+        navigate("/", { replace: true });
       } else {
         toast.info(data.message);
       }
@@ -87,7 +87,7 @@ export default function AccountClosed() {
           <LifeBuoy className="h-4 w-4" /> Contact support
         </button>
         <button
-          onClick={() => { localStorage.removeItem(STORE); logout(); navigate("/welcome", { replace: true }); }}
+          onClick={() => { localStorage.removeItem(STORE); logout(); navigate("/", { replace: true }); }}
           data-testid="account-closed-logout"
           className="mt-3 w-full h-11 rounded-xl border border-white/10 text-white/60 font-semibold flex items-center justify-center gap-2">
           <LogOut className="h-4 w-4" /> Sign out

@@ -37,6 +37,7 @@ jest.mock("@/lib/paymentApi", () => ({ payments: {
   createWithdrawal: (...args) => mockCreateWithdrawal(...args),
   createOperatorDeposit: (...args) => mockCreateOperatorDeposit(...args),
   createOperatorWithdrawal: (...args) => mockCreateOperatorWithdrawal(...args),
+  chipTransactions: (...args) => mockChipTransactions(...args),
 } }));
 
 jest.mock("@/lib/promotionApi", () => ({
@@ -55,6 +56,7 @@ jest.mock("@/lib/financialIntent", () => ({
 
 jest.mock("@/lib/api", () => ({
   errMsg: (error, fallback) => error?.message || fallback || "Request failed",
+  errCode: (error) => error?.code || error?.response?.data?.detail?.code || null,
 }));
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }), { virtual: true });
@@ -87,6 +89,7 @@ jest.mock("@/components/common", () => ({
 jest.mock("@/pages/app/wallet/WalletBits", () => ({
   WalletBalanceCard: () => <div data-testid="wallet-balance-card" />,
   PaymentRow: ({ item, kind }) => <div data-testid={`${kind}-activity-row`}>{item.id}</div>,
+  PlayRow: ({ item }) => <div data-testid="play-activity-row">{item.id}</div>,
 }));
 
 jest.mock("@/components/ui/tabs", () => ({
@@ -497,7 +500,8 @@ const OPERATOR_WALLET = {
       limits: {
         chips_per_inr: 1,
         min_deposit_paise: 10000,
-        max_deposit_paise: 10000000,
+        max_deposit_paise: 20000000,
+        max_daily_deposit_paise: 20000000,
         min_withdrawal_paise: 100000,
         min_withdrawal_chips: 1000,
         max_withdrawal_chips: 1000000,
@@ -575,6 +579,8 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
     minWithdrawalPaise: 100000,
   });
   expect(container.textContent).toContain("submitted for Admin review");
+  expect(container.textContent).toContain("Daily buy limit");
+  expect(container.textContent).toMatch(/2,00,000|200,000/);
   expect(container.textContent).not.toContain("Payment services are not active yet");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="deposit-submit"]').textContent).toContain("Submit deposit request");
@@ -599,6 +605,22 @@ test("operator rail submits withdrawals against available play chips", async () 
   expect(mockCreateWithdrawal).not.toHaveBeenCalled();
   expect(mockCreateOperatorWithdrawal).toHaveBeenCalledWith(1000, "bank-1");
   expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
+  await act(async () => root.unmount());
+});
+
+test("Activity lists play win and loss rows above buy and withdraw history", async () => {
+  mockPathname = "/chips/activity";
+  mockChipTransactions.mockResolvedValue([
+    { id: "play-win-1", kind: "PAYOUT", amount: 80, game: "Roulette", created_at: "2026-09-03T04:10:00Z" },
+    { id: "play-loss-1", kind: "STAKE", amount: 50, game: "Roulette", created_at: "2026-09-03T04:09:00Z" },
+    { id: "buy-1", kind: "DEPOSIT", amount: 500, created_at: "2026-09-03T03:00:00Z" },
+  ]);
+  const { container, root } = await renderPage();
+  expect(container.querySelector('[data-testid="play-history"]')).not.toBeNull();
+  expect(container.querySelectorAll('[data-testid="play-activity-row"]')).toHaveLength(2);
+  expect(container.querySelector('[data-testid="play-history-summary"]').textContent).toMatch(/Won 80/);
+  expect(container.querySelector('[data-testid="deposit-activity-row"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="withdrawal-activity-row"]')).not.toBeNull();
   await act(async () => root.unmount());
 });
 

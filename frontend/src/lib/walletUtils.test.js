@@ -1,4 +1,4 @@
-import { formatInrPaise, isFinancialFeatureAvailable, isOperatorRailAvailable, isPlayerPaymentAvailable, normalizeWallet, rupeesToPaise, userWithdrawalStatus } from "./walletUtils";
+import { formatInrPaise, formatPaymentTime, isFinancialFeatureAvailable, isOperatorRailAvailable, isPlayerPaymentAvailable, normalizeWallet, paymentDisplayAt, rupeesToPaise, userWithdrawalStatus } from "./walletUtils";
 
 test("parses rupees to integer paise without float arithmetic", () => {
   expect(rupeesToPaise("500")).toBe(50000);
@@ -71,4 +71,34 @@ test("operator rail unlocks player money actions without flipping certified fina
   expect(isPlayerPaymentAvailable(dormant, "deposits")).toBe(true);
   expect(isPlayerPaymentAvailable(dormant, "withdrawals")).toBe(true);
   expect(isOperatorRailAvailable({ operator: { enabled: false, deposits_enabled: true } }, "deposits")).toBe(false);
+});
+
+test("completed payments prefer provider capture time over checkout created_at", () => {
+  const created = "2026-09-02T06:32:05.329Z";
+  const captured = "2026-09-02T11:17:47.759Z";
+  const resolved = "2026-09-02T11:17:47.759Z";
+  expect(paymentDisplayAt({
+    status: "CREDITED",
+    created_at: created,
+    provider_occurred_at: captured,
+    resolved_at: resolved,
+  })).toBe(captured);
+  expect(paymentDisplayAt({
+    status: "CREDITED",
+    created_at: created,
+    resolved_at: resolved,
+  })).toBe(resolved);
+  expect(paymentDisplayAt({
+    status: "PENDING",
+    created_at: created,
+    provider_occurred_at: captured,
+  })).toBe(created);
+});
+
+test("formats payment times in Asia/Kolkata with an IST label", () => {
+  const shown = formatPaymentTime("2026-09-02T11:17:47.759Z");
+  expect(shown).toMatch(/IST/i);
+  expect(shown).toMatch(/47/);
+  expect(shown).not.toBe("—");
+  expect(formatPaymentTime(null)).toBe("—");
 });

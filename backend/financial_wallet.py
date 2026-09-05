@@ -39,7 +39,9 @@ from payment_providers import (
     PayoutStatus,
     ProviderConfigurationError,
     ProviderEvent,
+    datetime_to_iso_utc,
     load_payment_provider,
+    parse_provider_datetime,
 )
 
 
@@ -744,62 +746,13 @@ async def _deposit_limit_violations(
     user_id: str, additional_chips: int, *, exclude_deposit_id: Optional[str] = None,
     session=None,
 ) -> list[dict[str, int | str]]:
-    """Evaluate credited plus reserved deposits against every active limit."""
-    kwargs = _session_kwargs(session)
-    limits = await db.player_limits.find(
-        {"user_id": user_id, "kind": compliance.DEPOSIT}, {"_id": 0}, **kwargs,
-    ).to_list(20)
-    violations: list[dict[str, int | str]] = []
-    checked_at = now()
-    for row in limits:
-        period = str(row.get("period") or "")
-        if period not in compliance.PERIODS:
-            # Corrupt/unknown compliance configuration must fail closed.
-            violations.append({
-                "period": period or "UNKNOWN", "limit": 0,
-                "used": 0, "reserved": 0, "remaining": 0,
-            })
-            continue
-        effective_at = _parse_optional_datetime(row.get("pending_effective_from"))
-        cap = row.get("pending_amount") if effective_at and effective_at <= checked_at else row.get("amount")
-        if cap is None:
-            continue
-        cap = int(cap)
-        since = compliance.window_start(period, checked_at)
-        credited = await _sum_chips(db.chip_transactions, [
-            {"$match": {
-                "user_id": user_id, "kind": ledger.DEPOSIT,
-                "gaming_day": {"$gte": since},
-            }},
-            {"$group": {"_id": None, "chips": {"$sum": "$amount"}}},
-        ], session=session)
-        held_query: dict[str, Any] = {
-            "user_id": user_id, "limit_reservation_status": "HELD",
-            "reservation_gaming_day": {"$gte": since},
-        }
-        if exclude_deposit_id:
-            held_query["id"] = {"$ne": exclude_deposit_id}
-        reserved = await _sum_chips(db.deposit_orders, [
-            {"$match": held_query},
-            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
-        ], session=session)
-        hosted_reserved = await _sum_chips(db.operator_payment_requests, [
-            {"$match": {
-                "user_id": user_id,
-                "source": "SGPAY24_UPI",
-                "status": {"$in": ["CREATED", "PENDING", "RECONCILIATION_REQUIRED"]},
-                "reservation_gaming_day": {"$gte": since},
-            }},
-            {"$group": {"_id": None, "chips": {"$sum": "$chips"}}},
-        ], session=session)
-        reserved += hosted_reserved
-        proposed = credited + reserved + int(additional_chips)
-        if proposed > cap:
-            violations.append({
-                "period": period, "limit": cap, "used": credited,
-                "reserved": reserved, "remaining": max(0, cap - credited - reserved),
-            })
-    return violations
+    """Extra player_limits deposit amount caps no longer block chip purchases.
+
+    Responsible Play self-exclusion and take-a-break still run through
+    compliance.assert_playable. Callers may still invoke this helper; it
+    never refuses a buy.
+    """
+    return []
 
 
 def _deposit_limit_error(violation: Mapping[str, Any]) -> FinancialError:
@@ -1949,7 +1902,33 @@ async def deactivate_payout_method(user_id: str, method_id: str) -> dict[str, An
     return await _run_transaction(work)
 
 
+_TERMINAL_PAYMENT_STATUSES = {
+    "CREDITED", "PAID", "FAILED", "EXPIRED", "REFUNDED", "REJECTED",
+    "CANCELLED", "APPROVED", "RECONCILIATION_REQUIRED",
+}
+
+
+def _iso_payment_time(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return datetime_to_iso_utc(dt)
+    return datetime_to_iso_utc(parse_provider_datetime(value) or value)
+
+
+def _payment_display_at(doc: Mapping[str, Any]) -> Any:
+    status = str(doc.get("status") or doc.get("internal_status") or "").upper()
+    provider = doc.get("provider_occurred_at")
+    resolved = doc.get("resolved_at") or doc.get("paid_at") or doc.get("credited_at")
+    created = doc.get("created_at")
+    if status in _TERMINAL_PAYMENT_STATUSES:
+        return provider or resolved or created
+    return created or provider or resolved
+
+
 def deposit_dto(doc: Mapping[str, Any]) -> dict[str, Any]:
+    display = _payment_display_at(doc)
     return {
         "id": doc.get("id"), "status": doc.get("status"),
         "amount_paise": int(doc.get("amount_paise", 0)), "currency": CURRENCY,
@@ -2262,8 +2241,12 @@ async def _credit_deposit(
             {"id": current["id"], "status": {"$ne": "CREDITED"}},
             {"$set": {
                 "status": "CREDITED", "provider_reference": payment_reference,
-                "wallet_operation_id": movement["operation_id"], "paid_at": now(),
+                "wallet_operation_id": movement["operation_id"],
+                "paid_at": parse_provider_datetime(event.occurred_at) or now(),
                 "credited_at": now(), "updated_at": now(),
+                **({} if current.get("provider_occurred_at") or not event.occurred_at else {
+                    "provider_occurred_at": parse_provider_datetime(event.occurred_at) or event.occurred_at,
+                }),
                 "limit_reservation_status": "CONSUMED",
                 "promotion_mission_id": (mission or {}).get("id"),
                 "promotion_activation_status": (
@@ -2357,12 +2340,18 @@ async def _credit_deposit(
 def withdrawal_dto(doc: Mapping[str, Any], admin: bool = False) -> dict[str, Any]:
     internal = str(doc.get("status", "REQUESTED"))
     display = internal if internal in WITHDRAWAL_TERMINAL else "PENDING"
+    shown = _payment_display_at({**doc, "status": internal})
     result = {
         "id": doc.get("id"), "status": display,
         "amount_chips": int(doc.get("amount_chips", 0)),
         "amount_paise": int(doc.get("amount_paise", 0)), "currency": CURRENCY,
         "bank_detail": doc.get("bank_detail_snapshot"),
-        "created_at": doc.get("created_at"), "updated_at": doc.get("updated_at"),
+        "created_at": _iso_payment_time(doc.get("created_at")),
+        "updated_at": _iso_payment_time(doc.get("updated_at")),
+        "resolved_at": _iso_payment_time(doc.get("resolved_at") or doc.get("paid_at")),
+        "provider_occurred_at": _iso_payment_time(doc.get("provider_occurred_at")),
+        "paid_at": _iso_payment_time(shown),
+        "occurred_at": _iso_payment_time(shown),
     }
     if admin:
         result.update({
@@ -3047,9 +3036,11 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
         )
         raise FinancialError("BANK_DETAILS_NOT_FOUND", "Bank details are unavailable.", 409)
     beneficiary_id = method.get("provider_beneficiary_id")
+    details: dict[str, str] = {}
     try:
-        if not beneficiary_id:
+        if not beneficiary_id or getattr(provider, "name", "") == "sgpay24":
             details = decrypt_payout_details(method)
+        if not beneficiary_id:
             beneficiary = await provider.create_beneficiary(
                 bank_details=details, idempotency_key=f"beneficiary:{method['id']}",
             )
@@ -3078,11 +3069,28 @@ async def submit_automatic_withdrawal(withdrawal_id: str, provider: PaymentProvi
             "AUTO_WITHDRAWALS_PAUSED", "Automatic withdrawals are paused.", 409,
         )
     try:
-        submitted = await provider.submit_payout(
-            withdrawal_id=withdrawal_id, provider_beneficiary_id=beneficiary_id,
-            amount_paise=int(row["amount_paise"]), currency=CURRENCY,
-            idempotency_key=f"withdrawal:{withdrawal_id}",
-        )
+        payout_kwargs = {
+            "withdrawal_id": withdrawal_id,
+            "provider_beneficiary_id": beneficiary_id,
+            "amount_paise": int(row["amount_paise"]),
+            "currency": CURRENCY,
+            "idempotency_key": f"withdrawal:{withdrawal_id}",
+        }
+        if getattr(provider, "name", "") == "sgpay24":
+            user = await db.users.find_one({"id": row["user_id"]}, {
+                "_id": 0, "email": 1, "email_normalized": 1,
+                "phone": 1, "phone_normalized": 1,
+            }) or {}
+            payout_kwargs.update(
+                account_holder_name=details.get("account_holder_name") or "",
+                account_number=details.get("account_number") or "",
+                ifsc_code=details.get("ifsc_code") or "",
+                payout_identifier=details.get("payout_identifier") or "",
+                bank_name=details.get("bank_name") or "",
+                phone=str(user.get("phone_normalized") or user.get("phone") or ""),
+                email=str(user.get("email_normalized") or user.get("email") or ""),
+            )
+        submitted = await provider.submit_payout(**payout_kwargs)
     except Exception as exc:  # noqa: BLE001 - unknown outcome must never release funds
         await db.withdrawal_requests.update_one(
             {"id": withdrawal_id, "status": {"$in": ["SUBMITTING", "SUBMISSION_UNKNOWN"]}},
@@ -3591,7 +3599,7 @@ async def reconcile_deposit(
             object_id=str(order["provider_order_id"]),
             amount_paise=authoritative.amount_paise, currency=authoritative.currency,
             provider_reference=authoritative.provider_reference,
-            occurred_at=None, data={},
+            occurred_at=datetime_to_iso_utc(getattr(authoritative, "occurred_at", None)), data={},
         )
         result = await _credit_deposit(order, event, actor=actor)
         if order.get("status") == "CREDITED":

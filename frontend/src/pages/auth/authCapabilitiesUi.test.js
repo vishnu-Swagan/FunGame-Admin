@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import Register from "./Register";
-import Login from "./Login";
+import LoginForm from "./forms/LoginForm";
 import VerifyEmail from "./VerifyEmail";
-import Welcome from "./Welcome";
+import FrontPage from "./FrontPage";
 
 let mockCapabilitiesState;
 let mockLocationState;
@@ -25,7 +25,7 @@ jest.mock("@/lib/authCapabilities", () => ({
 }));
 
 jest.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ login: jest.fn() }),
+  useAuth: () => ({ user: null, loading: false, login: jest.fn() }),
 }));
 
 jest.mock("react-router-dom", () => {
@@ -37,6 +37,16 @@ jest.mock("react-router-dom", () => {
     Link: ({ children, to, ...props }) => React.createElement("a", { href: to, ...props }, children),
   };
 }, { virtual: true });
+
+jest.mock("@/components/AppShell", () => ({
+  __esModule: true,
+  default: ({ children }) => children,
+}));
+
+jest.mock("@/pages/app/PlayerLobby", () => ({
+  __esModule: true,
+  default: () => null,
+}));
 
 function render(Component) {
   const container = document.createElement("div");
@@ -50,7 +60,7 @@ test("welcome page removes the unavailable warning while registration itself rem
     loading: false,
     capabilities: { registration_enabled: false, email_registration: false, phone_registration: false },
   };
-  const screen = render(Welcome);
+  const screen = render(FrontPage);
   expect(screen.querySelector('[data-testid="welcome-register-button"]').disabled).toBe(false);
   expect(screen.querySelector('[data-testid="welcome-registration-unavailable"]')).toBeNull();
 });
@@ -61,7 +71,7 @@ test("welcome page describes administrator review in the current manual mode", (
     loading: false,
     capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
   };
-  const screen = render(Welcome);
+  const screen = render(FrontPage);
   expect(screen.textContent).toMatch(/Admin-reviewed access/);
   expect(screen.textContent).toMatch(/reviewed by an administrator before login and play/i);
   expect(screen.textContent).not.toMatch(/mandatory mobile OTP/i);
@@ -74,7 +84,7 @@ test("manual-review registration requires both contacts and password confirmatio
     capabilities: { registration_enabled: true, email_registration: true, phone_registration: true, verification_required: false, manual_admin_review: true, registration_mode: "ADMIN_REVIEW" },
   };
   const screen = render(Register);
-  expect(screen.querySelector('#reg-login-id').required).toBe(true);
+  expect(screen.querySelector('#reg-login-id')).toBeNull();
   expect(screen.querySelector('#reg-contact').type).toBe("tel");
   expect(screen.querySelector('#reg-email').required).toBe(true);
   expect(screen.querySelector('#reg-password').required).toBe(true);
@@ -95,7 +105,7 @@ test("registration clearly labels manual approval without claiming an OTP", () =
   expect(screen.querySelector('[data-testid="register-verification-copy"]').textContent).toMatch(/No verification code is sent.*administrator must approve/i);
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').textContent).toMatch(/Create account for review/);
 
-  const login = render(Login);
+  const login = render(LoginForm);
   const loginIdentifier = login.querySelector('#identifier');
   expect(loginIdentifier.placeholder).toBe("Email, mobile with +country code, or your Login ID");
   expect(loginIdentifier.placeholder).not.toMatch(/\+91|GK Login ID/i);
@@ -114,21 +124,23 @@ test("registration stays fail-closed without rendering the removed unavailable b
   expect(screen.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(true);
 });
 
-test("dual verification keeps its workflow without showing the app-view banner", () => {
+test("phone OTP registration requires email without a Login ID field", () => {
   mockLocationState = null;
   mockCapabilitiesState = {
     loading: false,
     capabilities: {
       registration_enabled: true,
-      email_registration: true,
+      email_registration: false,
       phone_registration: true,
       verification_required: true,
-      email_verification_required: true,
+      email_verification_required: false,
       registration_mode: "PHONE_OTP",
     },
   };
   const screen = render(Register);
   expect(screen.textContent).not.toMatch(/Mobile \+ email verification/);
+  expect(screen.textContent).toMatch(/one SMS code/i);
+  expect(screen.querySelector('#reg-login-id')).toBeNull();
   expect(screen.querySelector('#reg-contact')).not.toBeNull();
   expect(screen.querySelector('#reg-email').required).toBe(true);
 });
@@ -173,6 +185,6 @@ test("an already delivered code stays verifiable while resend is unavailable", (
   expect(screen.querySelector('[data-testid="verify-login-id-input"]').value).toBe("Royal.Player");
   expect(screen.querySelector('[data-testid="verify-login-id-input"]').required).toBe(true);
   expect(screen.querySelector('[data-testid="verification-recovery-guidance"]')?.textContent).toMatch(/registered before.*login or account recovery/i);
-  expect(screen.querySelector('a[href="/login"]')).not.toBeNull();
-  expect(screen.querySelector('a[href="/forgot-password"]')).not.toBeNull();
+  expect(screen.querySelector('a[href="/?auth=login"]')).not.toBeNull();
+  expect(screen.querySelector('a[href="/?auth=forgot"]')).not.toBeNull();
 });

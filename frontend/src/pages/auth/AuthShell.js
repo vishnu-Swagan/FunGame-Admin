@@ -5,7 +5,7 @@ import { Disclaimer } from "@/components/common";
 import { BrandWordmark } from "@/components/Brand";
 import LegalLinks from "@/components/LegalLinks";
 
-export const AuthShell = ({ title, subtitle, children, backTo = "/welcome" }) => {
+export const AuthShell = ({ title, subtitle, children, backTo = "/" }) => {
   const navigate = useNavigate();
   return (
     <div className="App fg-noise min-h-dvh bg-background relative overflow-hidden" data-testid="auth-shell">

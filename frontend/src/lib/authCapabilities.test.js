@@ -1,5 +1,6 @@
 import {
   isValidE164Phone,
+  loginIdFromPhone,
   loginVerificationRecovery,
   normalizeAuthCapabilities,
   normalizeContactIdentifier,
@@ -142,6 +143,14 @@ test("an issued OTP remains verifiable when delivery pauses but cannot be resent
 test("login recovery only builds a resend request for a ready channel", () => {
   const phoneOnly = normalizeAuthCapabilities({ registration_enabled: true, email_registration: false, phone_registration: true });
   expect(loginVerificationRecovery(phoneOnly, "EMAIL", "Player@Example.com")).toBeNull();
+  const phoneReadyEmailOptional = normalizeAuthCapabilities({
+    registration_enabled: true,
+    phone_registration: true,
+    email_contact_verification: true,
+    phone_contact_verification: true,
+    email_verification_required: false,
+  });
+  expect(loginVerificationRecovery(phoneReadyEmailOptional, "EMAIL", "Player@Example.com")).toBeNull();
   expect(loginVerificationRecovery(phoneOnly, "SMS", "+91 98765-43210")).toEqual({
     channel: "PHONE",
     contact: "+919876543210",
@@ -152,4 +161,18 @@ test("login recovery only builds a resend request for a ready channel", () => {
       phone: "+919876543210",
     },
   });
+  expect(loginVerificationRecovery(
+    phoneReadyEmailOptional,
+    "EMAIL",
+    "+91 98765-43210",
+  )).toMatchObject({
+    channel: "PHONE",
+    contact: "+919876543210",
+  });
+});
+
+test("login IDs derived from E.164 phones match the backend rule", () => {
+  expect(loginIdFromPhone("+91 98765-43210")).toBe("p919876543210");
+  expect(loginIdFromPhone("+447700900123")).toBe("p447700900123");
+  expect(loginIdFromPhone("+919876543210")).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{3,31}$/);
 });

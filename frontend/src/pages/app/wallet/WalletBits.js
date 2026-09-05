@@ -1,6 +1,7 @@
 import { Banknote, Gift, Hourglass, LockKeyhole, WalletCards } from "lucide-react";
 import { formatChips } from "@/components/common";
-import { statusTone, userWithdrawalStatus } from "@/lib/walletUtils";
+import { formatPaymentTime, paymentDisplayAt, statusTone, userWithdrawalStatus } from "@/lib/walletUtils";
+import { classifyChipTransaction, playOutcomeLabel } from "@/lib/historyUtils";
 
 const TONE = {
   success: "border-emerald-400/35 bg-emerald-400/10 text-emerald-300",
@@ -65,6 +66,24 @@ export function PaymentRow({ item, kind }) {
         <p className="mt-0.5 truncate text-[11px] text-white/40">{when}{bankLabel ? ` · ${bank.bank_name || "Bank"} ${bankLabel}` : ""}{reference ? ` · ${reference}` : ""}</p>
       </div>
       <PaymentStatus status={item.status} playerFriendly={!isDeposit} />
+    </article>
+  );
+}
+
+export function PlayRow({ item }) {
+  const kind = classifyChipTransaction(item);
+  const won = kind === "PAYOUT";
+  const returned = kind === "REFUND";
+  const tone = won ? "success" : returned ? "info" : "danger";
+  const amountClass = won ? "text-emerald-300" : returned ? "text-sky-300" : "text-red-300";
+  const sign = won || returned ? "+" : "−";
+  return (
+    <article className="flex items-center justify-between gap-3 p-3.5" data-testid="play-activity-row">
+      <div className="min-w-0">
+        <p className={`font-semibold tabular-nums ${amountClass}`}>{sign}{formatChips(item.amount)} chips</p>
+        <p className="mt-0.5 truncate text-[11px] text-white/40">{item.game || "Play"} · {formatPaymentTime(item.created_at)}{item.note ? ` · ${item.note}` : ""}</p>
+      </div>
+      <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold tracking-wide ${TONE[tone]}`}>{playOutcomeLabel(kind)}</span>
     </article>
   );
 }

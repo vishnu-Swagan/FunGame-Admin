@@ -14,6 +14,7 @@ import re
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Mapping
 
 from fastapi import HTTPException
@@ -30,7 +31,9 @@ from payment_providers import (
     PaymentProvider,
     ProviderConfigurationError,
     ProviderRequestError,
+    datetime_to_iso_utc,
     load_payment_provider,
+    parse_provider_datetime,
 )
 
 
@@ -51,15 +54,97 @@ _TEST_HOSTED_LOCKS: dict[str, asyncio.Lock] = {}
 OPERATOR_LIMITS = {
     "chips_per_inr": 1,
     "min_deposit_paise": 10_000,
-    "max_deposit_paise": 10_000_000,
+    "max_deposit_paise": 20_000_000,
     "min_withdrawal_paise": 100_000,
     "min_withdrawal_chips": 1_000,
     "max_withdrawal_chips": 1_000_000,
 }
+_PROVIDER_REFERENCE_RE = re.compile(r"^[A-Z0-9_-]{4,80}$")
+_HOSTED_PAID_STATUSES = frozenset({
+    "PAID", "SUCCESS", "SUCCEEDED", "CREDITED", "COMPLETE", "COMPLETED",
+})
+
+
+def _valid_provider_reference(value: str) -> bool:
+    return bool(_PROVIDER_REFERENCE_RE.fullmatch(value))
+
+
+def _synthetic_sgpay_reference(seed: str) -> str:
+    stem = re.sub(r"[^A-Z0-9]", "", str(seed or "").upper()) or "ORDER"
+    prefix = "SGPAY-"
+    return f"{prefix}{stem[:80 - len(prefix)]}"
+
+
+def _settlement_provider_reference(
+    authoritative: DepositStatus, current: Mapping[str, Any],
+) -> str:
+    reference = str(authoritative.provider_reference or "").strip().upper()
+    if _valid_provider_reference(reference):
+        return reference
+    seed = str(current.get("provider_order_id") or current.get("id") or "").strip()
+    return _synthetic_sgpay_reference(seed)
+
+# Single per-player buy cap: ₹2,00,000 chips per Asia/Kolkata calendar day.
+# Pin IST here — do not reuse ledger.gaming_day / SETTLEMENT_TZ (London default).
+BUY_CHIPS_TZ = ZoneInfo("Asia/Kolkata")
+BUY_DAILY_LIMIT_PAISE = 20_000_000
+_BUY_CAP_STATUSES = (
+    "CREATED",
+    "PENDING",
+    "PROCESSING",
+    "CREDITED",
+    "APPROVED",
+    "RECONCILIATION_REQUIRED",
+)
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_utc(value) -> datetime | None:
+    """Coerce stored or provider timestamps to aware UTC. Naive values are UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return parse_provider_datetime(value)
+
+
+def isoformat_utc(value) -> str | None:
+    dt = as_utc(value)
+    return datetime_to_iso_utc(dt) if dt is not None else None
+
+
+_TERMINAL_PAYMENT_STATUSES = {
+    "CREDITED", "PAID", "FAILED", "EXPIRED", "REFUNDED", "REJECTED",
+    "CANCELLED", "APPROVED", "RECONCILIATION_REQUIRED",
+}
+
+
+def payment_display_at(row: Mapping[str, Any]) -> datetime | None:
+    """Capture time when known; checkout created_at only for pending rows."""
+    status = str(row.get("status") or row.get("internal_status") or "").upper()
+    provider = as_utc(row.get("provider_occurred_at"))
+    resolved = as_utc(row.get("resolved_at") or row.get("paid_at") or row.get("credited_at"))
+    created = as_utc(row.get("created_at"))
+    if status in _TERMINAL_PAYMENT_STATUSES:
+        return provider or resolved or created
+    return created or provider or resolved
+
+
+def provider_occurred_update(
+    authoritative: DepositStatus, existing: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist the provider capture time once; never overwrite with reconcile time."""
+    occurred = as_utc(getattr(authoritative, "occurred_at", None))
+    if occurred is None:
+        return {}
+    if as_utc((existing or {}).get("provider_occurred_at")) is not None:
+        return {}
+    return {"provider_occurred_at": occurred}
 
 
 def _env_true(name: str, environ: Mapping[str, str] | None = None) -> bool:
@@ -86,17 +171,48 @@ def hosted_upi_chips_per_inr(environ: Mapping[str, str] | None = None) -> int:
 
 
 def hosted_upi_daily_limit_paise(environ: Mapping[str, str] | None = None) -> int:
-    env = os.environ if environ is None else environ
-    raw = env.get("UPI_MAX_DAILY_DEPOSIT_PAISE")
-    if raw is None or str(raw).strip() == "":
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be explicitly configured")
-    try:
-        limit = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE must be an integer") from exc
-    if not OPERATOR_LIMITS["min_deposit_paise"] <= limit <= 100_000_000:
-        raise ProviderConfigurationError("UPI_MAX_DAILY_DEPOSIT_PAISE is outside the allowed range")
-    return limit
+    """₹2,00,000 per IST day for every player.
+
+    Ignore UPI_MAX_DAILY_DEPOSIT_PAISE so a lower Render env cannot keep a 1L cap.
+    """
+    return BUY_DAILY_LIMIT_PAISE
+
+
+def buy_chips_ist_day(when: datetime | None = None) -> str:
+    dt = as_utc(when) if when is not None else utcnow()
+    return dt.astimezone(BUY_CHIPS_TZ).date().isoformat()
+
+
+def buy_chips_day_bounds_utc(when: datetime | None = None) -> tuple[datetime, datetime]:
+    """Asia/Kolkata midnight-to-midnight as UTC instants for the daily buy cap."""
+    dt = as_utc(when) if when is not None else utcnow()
+    local = dt.astimezone(BUY_CHIPS_TZ)
+    start_local = datetime(local.year, local.month, local.day, tzinfo=BUY_CHIPS_TZ)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def _daily_buy_limit_error() -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "UPI_DAILY_LIMIT",
+        "message": "Daily limit reached. You can buy up to ₹2,00,000 chips per day.",
+    })
+
+
+async def used_buy_paise_today(user_id: str, *, session=None) -> int:
+    """Paise already counting toward today's IST buy cap across UPI and admin-review."""
+    kwargs = {"session": session} if session is not None else {}
+    day_start, day_end = buy_chips_day_bounds_utc()
+    totals = await db[COLLECTION].aggregate([
+        {"$match": {
+            "user_id": user_id,
+            "kind": "DEPOSIT",
+            "status": {"$in": list(_BUY_CAP_STATUSES)},
+            "created_at": {"$gte": day_start, "$lt": day_end},
+        }},
+        {"$group": {"_id": None, "amount_paise": {"$sum": "$amount_paise"}}},
+    ], **kwargs).to_list(1)
+    return int((totals[0] if totals else {}).get("amount_paise", 0))
 
 
 def hosted_upi_provider(
@@ -198,9 +314,7 @@ def operator_status() -> dict[str, Any]:
             "chips_per_inr": (
                 hosted_upi_chips_per_inr() if hosted_ready else OPERATOR_LIMITS["chips_per_inr"]
             ),
-            "max_daily_deposit_paise": (
-                hosted_upi_daily_limit_paise() if hosted_ready else None
-            ),
+            "max_daily_deposit_paise": hosted_upi_daily_limit_paise(),
         },
     }
 
@@ -227,8 +341,11 @@ def request_dto(row: Mapping[str, Any] | None) -> dict[str, Any]:
             and str(row.get("status") or "").upper() in {"CREATED", "PENDING"}
         ),
         "utr_submitted": bool(row.get("utr_claim")) or bool(row.get("utr_submitted")),
-        "created_at": row.get("created_at"),
-        "resolved_at": row.get("resolved_at"),
+        "created_at": isoformat_utc(row.get("created_at")),
+        "resolved_at": isoformat_utc(row.get("resolved_at")),
+        "provider_occurred_at": isoformat_utc(row.get("provider_occurred_at")),
+        "paid_at": isoformat_utc(payment_display_at(row)),
+        "occurred_at": isoformat_utc(payment_display_at(row)),
         "resolved_by": row.get("resolved_by"),
         "payout_status": row.get("payout_status"),
         "payout_ref": row.get("payout_ref"),
@@ -244,12 +361,11 @@ def _chips_for_paise(amount_paise: int) -> int:
 
 
 def _created_sort_key(row: Mapping[str, Any]) -> float:
-    value = row.get("created_at")
+    value = payment_display_at(row)
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
         return value.timestamp()
-    return 0.0
+    parsed = as_utc(row.get("created_at"))
+    return parsed.timestamp() if parsed else 0.0
 
 
 def sort_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -269,6 +385,10 @@ def as_player_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         "utr_submitted": dto["utr_submitted"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
+        "resolved_at": dto["resolved_at"],
+        "provider_occurred_at": dto["provider_occurred_at"],
+        "paid_at": dto["paid_at"],
+        "occurred_at": dto["occurred_at"],
     }
 
 
@@ -289,6 +409,10 @@ def as_player_withdrawal(row: Mapping[str, Any]) -> dict[str, Any]:
         "source": dto["source"],
         "created_at": dto["created_at"],
         "updated_at": dto["resolved_at"],
+        "resolved_at": dto["resolved_at"],
+        "provider_occurred_at": dto["provider_occurred_at"],
+        "paid_at": dto["paid_at"],
+        "occurred_at": dto["occurred_at"],
     }
 
 
@@ -689,8 +813,7 @@ async def create_hosted_deposit(
                 "message": "This purchase key belongs to another amount.",
             })
         return await _ensure_hosted_checkout(existing, gateway)
-    gaming_day = ledger.gaming_day()
-    day_start, day_end = ledger.day_bounds_utc(gaming_day)
+    gaming_day = buy_chips_ist_day()
     row = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -734,19 +857,6 @@ async def create_hosted_deposit(
                     "message": "This purchase key belongs to another request.",
                 })
             return duplicate
-        await finance._touch_deposit_limit_lock(user["id"], session=session)
-        violations = await finance._deposit_limit_violations(
-            user["id"], chips, session=session,
-        )
-        if violations:
-            violation = violations[0]
-            raise HTTPException(status_code=403, detail={
-                "code": "DEPOSIT_LIMIT",
-                "message": (
-                    f"This would take you past your {str(violation.get('period') or 'deposit').lower()} "
-                    f"deposit limit. You have {int(violation.get('remaining', 0)):,} chips left in this period."
-                ),
-            })
         pending_count = await db[COLLECTION].count_documents({
             "user_id": user["id"], "source": UPI_SOURCE,
             "status": {"$in": ["CREATED", "PENDING"]},
@@ -756,20 +866,9 @@ async def create_hosted_deposit(
                 "code": "UPI_PENDING_LIMIT",
                 "message": "Complete or wait for an existing UPI purchase before starting another.",
             })
-        totals = await db[COLLECTION].aggregate([
-            {"$match": {
-                "user_id": user["id"], "source": UPI_SOURCE,
-                "status": {"$in": ["CREATED", "PENDING", "CREDITED", "RECONCILIATION_REQUIRED"]},
-                "created_at": {"$gte": day_start, "$lt": day_end},
-            }},
-            {"$group": {"_id": None, "amount_paise": {"$sum": "$amount_paise"}}},
-        ], **kwargs).to_list(1)
-        used_paise = int((totals[0] if totals else {}).get("amount_paise", 0))
+        used_paise = await used_buy_paise_today(user["id"], session=session)
         if used_paise + paise > hosted_upi_daily_limit_paise():
-            raise HTTPException(status_code=409, detail={
-                "code": "UPI_DAILY_LIMIT",
-                "message": "This purchase would exceed the daily UPI purchase limit.",
-            })
+            raise _daily_buy_limit_error()
         await db[COLLECTION].insert_one(dict(row), **kwargs)
         return row
 
@@ -819,12 +918,16 @@ async def settle_hosted_deposit(
         )
         return {"id": request_id, "status": "PENDING"}
     if status in {"FAILED", "EXPIRED"}:
+        current = await db[COLLECTION].find_one({"id": request_id, "source": UPI_SOURCE})
         await db[COLLECTION].update_one(
             {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
-            {"$set": {"status": status, "resolved_at": utcnow(), "updated_at": utcnow()}},
+            {"$set": {
+                "status": status, "resolved_at": utcnow(), "updated_at": utcnow(),
+                **provider_occurred_update(authoritative, current),
+            }},
         )
         return {"id": request_id, "status": status}
-    if status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+    if status not in _HOSTED_PAID_STATUSES:
         raise HTTPException(status_code=409, detail={
             "code": "UPI_STATUS_INVALID", "message": "UPI payment returned an unsupported status.",
         })
@@ -839,7 +942,8 @@ async def settle_hosted_deposit(
                 "code": "UPI_PURCHASE_NOT_FOUND", "message": "The UPI purchase was not found.",
             })
         if current.get("status") == "CREDITED":
-            if str(current.get("provider_reference") or "").upper() != str(authoritative.provider_reference or "").upper():
+            settlement_ref = _settlement_provider_reference(authoritative, current)
+            if str(current.get("provider_reference") or "").upper() != settlement_ref:
                 raise HTTPException(status_code=409, detail={
                     "code": "UPI_TERMINAL_CONFLICT",
                     "message": "The verified payment reference changed and needs review.",
@@ -850,22 +954,26 @@ async def settle_hosted_deposit(
                 "code": "UPI_TERMINAL_CONFLICT",
                 "message": "This purchase already has a terminal status.",
             })
-        reference = str(authoritative.provider_reference or "").strip().upper()
         if (
             authoritative.amount_paise != int(current["amount_paise"])
             or authoritative.currency != "INR"
-            or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
         ):
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE},
-                {"$set": {"status": "RECONCILIATION_REQUIRED", "updated_at": utcnow()}},
+                {"$set": {
+                    "status": "RECONCILIATION_REQUIRED", "updated_at": utcnow(),
+                    **provider_occurred_update(authoritative, current),
+                }},
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
+        reference = _settlement_provider_reference(authoritative, current)
         claim = str(current.get("utr_claim") or "").strip().upper()
-        # Authenticated SgPay PAID/Complete already carries the provider UTR.
-        # Credit immediately unless the player pasted a conflicting claim.
-        if claim and claim != reference.upper():
+        provider_utr = str(authoritative.provider_reference or "").strip().upper()
+        # Empty player claim is not a conflict. Missing/invalid provider UTR is
+        # not a conflict either — the synthetic SGPAY- fallback is for the
+        # unique index only and must not be compared against a pasted claim.
+        if claim and _valid_provider_reference(provider_utr) and claim != provider_utr:
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
                 {"$set": {
@@ -890,7 +998,11 @@ async def settle_hosted_deposit(
         if duplicate_reference:
             await db[COLLECTION].update_one(
                 {"id": request_id, "source": UPI_SOURCE},
-                {"$set": {"status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR", "updated_at": utcnow()}},
+                {"$set": {
+                    "status": "RECONCILIATION_REQUIRED", "last_error": "DUPLICATE_UTR",
+                    "updated_at": utcnow(),
+                    **provider_occurred_update(authoritative, current),
+                }},
                 **kwargs,
             )
             return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
@@ -914,6 +1026,7 @@ async def settle_hosted_deposit(
                         "last_error": f"ELIGIBILITY_{(exc.detail or {}).get('code', 'BLOCKED')}",
                         "resolved_at": utcnow(),
                         "updated_at": utcnow(),
+                        **provider_occurred_update(authoritative, current),
                     }},
                     **kwargs,
                 )
@@ -947,6 +1060,7 @@ async def settle_hosted_deposit(
                 "resolved_at": utcnow(),
                 "resolved_by": actor,
                 "updated_at": utcnow(),
+                **provider_occurred_update(authoritative, current),
             }},
             **kwargs,
         )
@@ -1015,16 +1129,20 @@ async def settle_admin_review_deposit(
     if provider_status in {"FAILED", "EXPIRED"}:
         await _schedule_admin_review_retry(request_id, provider_status)
         return {"id": request_id, "status": provider_status}
-    if provider_status not in {"PAID", "SUCCESS", "SUCCEEDED", "CREDITED"}:
+    if provider_status not in _HOSTED_PAID_STATUSES:
         await _schedule_admin_review_retry(request_id, "UNSUPPORTED_STATUS")
         return {"id": request_id, "status": "PENDING"}
-    reference = str(authoritative.provider_reference or "").strip().upper()
     if (
         authoritative.amount_paise != int(current["amount_paise"])
         or authoritative.currency != "INR"
-        or not re.fullmatch(r"[A-Z0-9_-]{4,80}", reference)
     ):
         await _schedule_admin_review_retry(request_id, "SGPAY_MISMATCH")
+        return {"id": request_id, "status": "PENDING"}
+    reference = _settlement_provider_reference(authoritative, current)
+    claim = str(current.get("utr_claim") or "").strip().upper()
+    provider_utr = str(authoritative.provider_reference or "").strip().upper()
+    if claim and _valid_provider_reference(provider_utr) and claim != provider_utr:
+        await _schedule_admin_review_retry(request_id, "UTR_MISMATCH")
         return {"id": request_id, "status": "PENDING"}
     claimed = await db[COLLECTION].find_one_and_update(
         {
@@ -1076,6 +1194,7 @@ async def settle_admin_review_deposit(
             "resolved_by": actor,
             "last_error": None,
             "updated_at": utcnow(),
+            **provider_occurred_update(authoritative, current),
         }},
         return_document=ReturnDocument.AFTER,
     )

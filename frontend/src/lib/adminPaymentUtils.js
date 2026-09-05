@@ -1,3 +1,5 @@
+export { formatPaymentTime, paymentDisplayAt } from "./walletUtils";
+
 export function auditState(item) {
   const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
   return {

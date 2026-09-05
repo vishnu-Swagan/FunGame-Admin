@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import uuid
 import json
+import re
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -30,6 +32,7 @@ import routes_payments as routes  # noqa: E402
 from payment_providers import (  # noqa: E402
     DepositSession,
     DepositStatus,
+    PayoutSubmission,
     ProviderConfigurationError,
     ProviderRequestError,
     SgPay24PaymentProvider,
@@ -45,7 +48,7 @@ PROVIDER_ENV = {
     "SGPAY24_TIMEOUT_SECONDS": "7",
     "PAYMENT_RETURN_URL": "https://play.example.com/chips/deposit/return",
     "UPI_CHIPS_PER_INR": "1",
-    "UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000",
+    "UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000",  # ignored; buy cap is hardcoded ₹2L
 }
 
 
@@ -78,31 +81,47 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                     provider(overrides)
                 self.assertIn(field, str(caught.exception))
 
-    def test_hosted_rail_requires_explicit_rate_and_daily_limit(self):
+    def test_hosted_rail_requires_explicit_rate_and_hardcodes_daily_limit(self):
         valid = {**PROVIDER_ENV, "UPI_CHIP_PURCHASES_ENABLED": "true"}
         self.assertEqual(operator_rail.hosted_upi_chips_per_inr(valid), 1)
         self.assertEqual(
-            operator_rail.hosted_upi_daily_limit_paise(valid), 10_000_000,
+            operator_rail.hosted_upi_daily_limit_paise(valid), 20_000_000,
         )
+        self.assertEqual(
+            operator_rail.hosted_upi_daily_limit_paise({"UPI_MAX_DAILY_DEPOSIT_PAISE": "50000"}),
+            20_000_000,
+        )
+        self.assertEqual(operator_rail.hosted_upi_daily_limit_paise({}), 20_000_000)
+        limits = operator_rail.operator_status()["limits"]
+        self.assertEqual(limits["max_deposit_paise"], 20_000_000)
+        self.assertEqual(limits["max_daily_deposit_paise"], 20_000_000)
+        self.assertEqual(limits["min_deposit_paise"], 10_000)
 
         invalid_cases = (
             ("UPI_CHIPS_PER_INR", None),
             ("UPI_CHIPS_PER_INR", "0"),
             ("UPI_CHIPS_PER_INR", "1.5"),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", None),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "9999"),
-            ("UPI_MAX_DAILY_DEPOSIT_PAISE", "not-an-int"),
         )
         for field, value in invalid_cases:
             with self.subTest(field=field, value=value):
                 environ = dict(valid)
                 if value is None:
-                    environ.pop(field)
+                    environ.pop(field, None)
                 else:
                     environ[field] = value
                 with self.assertRaises(ProviderConfigurationError) as caught:
                     operator_rail.hosted_upi_provider(environ)
                 self.assertIn(field, str(caught.exception))
+
+        # A missing or lower env daily cap must not fail provider boot or keep 1L.
+        for value in (None, "10000000", "not-an-int"):
+            environ = dict(valid)
+            if value is None:
+                environ.pop("UPI_MAX_DAILY_DEPOSIT_PAISE", None)
+            else:
+                environ["UPI_MAX_DAILY_DEPOSIT_PAISE"] = value
+            loaded = operator_rail.hosted_upi_provider(environ)
+            self.assertEqual(loaded.name, "sgpay24")
 
     async def test_create_payload_uses_merchant_token_and_validates_checkout(self):
         gateway = provider()
@@ -153,6 +172,8 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                 "https://play.example.com/chips/deposit/return"
                 "?deposit_id=order-12345678"
             ),
+            "callback_url": "https://api.chakri.casino/api/payments/webhooks/sgpay24",
+            "notify_url": "https://api.chakri.casino/api/payments/webhooks/sgpay24",
             "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
             "remark": "Chakri chips order-12345678",
         })
@@ -247,6 +268,14 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                 "order_id": "order-12345678", "merchant_id": "MERTEST123",
                 "status": "Processing",
             }, DepositStatus("PENDING", 50_000, "INR", None)),
+            ({
+                "order_id": "order-12345678", "merchant_id": "MERTEST123",
+                "amount": 500, "status": "Complete", "utr": "",
+            }, DepositStatus("PAID", 50_000, "INR", None)),
+            ({
+                "order_id": "order-12345678", "merchant_id": "MERTEST123",
+                "amount": 500, "status": 1,
+            }, DepositStatus("PAID", 50_000, "INR", None)),
         )
         for response, expected in cases:
             with self.subTest(response=response):
@@ -263,7 +292,78 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
                     "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
                 })
 
-    async def test_status_rejects_wrong_order_merchant_amount_and_missing_paid_utr(self):
+    async def test_status_parses_naive_ist_date_as_utc_occurred_at(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": 500, "status": 1, "utr": "UTR12345678",
+            "date": "2026-09-02 16:47:00",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertEqual(actual.status, "PAID")
+        self.assertEqual(
+            actual.occurred_at,
+            datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc),
+        )
+
+    async def test_status_prefers_paid_at_over_created_at(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": 500, "status": 1, "utr": "UTR12345678",
+            "created_at": "2026-09-02 12:02:05",
+            "paid_at": "2026-09-02T16:47:00+05:30",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertEqual(
+            actual.occurred_at,
+            datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc),
+        )
+
+    async def test_status_without_date_leaves_occurred_at_none(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "order-12345678", "merchant_id": "MERTEST123",
+            "amount": "500.00", "status": 1, "utr": "UTR12345678",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payment_status(
+                "order-12345678", expected_amount_paise=50_000,
+            )
+        self.assertIsNone(actual.occurred_at)
+
+    def test_webhook_parses_updated_at_when_present(self):
+        gateway = provider()
+        raw = json.dumps({
+            "order_id": "order-12345678",
+            "amount": 500,
+            "status": 1,
+            "transaction_id": 918273,
+            "utr": "CALLBACK-CLAIMED-UTR",
+            "updated_at": "2026-09-02T16:47:00+05:30",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.occurred_at, "2026-09-02T11:17:00.000Z")
+
+    def test_webhook_without_date_leaves_occurred_at_none(self):
+        gateway = provider()
+        raw = json.dumps({
+            "order_id": "order-12345678",
+            "amount": 500,
+            "status": 1,
+            "transaction_id": 918273,
+            "utr": "CALLBACK-CLAIMED-UTR",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertIsNone(event.occurred_at)
+
+    async def test_status_rejects_wrong_order_merchant_and_amount(self):
         responses = (
             {
                 "order_id": "other-order-1234", "merchant_id": "MERTEST123",
@@ -276,10 +376,6 @@ class SgPay24ProviderContractTests(unittest.IsolatedAsyncioTestCase):
             {
                 "order_id": "order-12345678", "merchant_id": "MERTEST123",
                 "amount": 499, "status": 0,
-            },
-            {
-                "order_id": "order-12345678", "merchant_id": "MERTEST123",
-                "amount": 500, "status": 1, "utr": "",
             },
         )
         for response in responses:
@@ -561,10 +657,10 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         ):
             results = await asyncio.gather(
                 operator_rail.create_hosted_deposit(
-                    self.user, 50_000, "daily-cap-concurrent-a", self.gateway,
+                    self.user, 20_000_000, "daily-cap-concurrent-a", self.gateway,
                 ),
                 operator_rail.create_hosted_deposit(
-                    self.user, 50_000, "daily-cap-concurrent-b", self.gateway,
+                    self.user, 20_000_000, "daily-cap-concurrent-b", self.gateway,
                 ),
                 return_exceptions=True,
             )
@@ -578,36 +674,96 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
             await self.db[operator_rail.COLLECTION].count_documents({}), 1,
         )
         stored = await self.db[operator_rail.COLLECTION].find_one({})
-        self.assertEqual(stored["reservation_gaming_day"], operator_rail.ledger.gaming_day())
+        self.assertEqual(stored["reservation_gaming_day"], operator_rail.buy_chips_ist_day())
         self.assertEqual(
             await self.db[operator_rail.DAILY_GUARD_COLLECTION].count_documents({}), 1,
         )
 
-    async def test_concurrent_hosted_purchases_honor_player_day_limit(self):
+    async def test_player_limits_deposit_rows_do_not_block_hosted_buy(self):
         await self.db.player_limits.insert_one({
             "user_id": self.user["id"],
             "kind": operator_rail.finance.compliance.DEPOSIT,
             "period": "DAY",
             "amount": 500,
         })
-        results = await asyncio.gather(
-            operator_rail.create_hosted_deposit(
-                self.user, 50_000, "player-limit-concurrent-a", self.gateway,
-            ),
-            operator_rail.create_hosted_deposit(
-                self.user, 50_000, "player-limit-concurrent-b", self.gateway,
-            ),
-            return_exceptions=True,
+        first, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "player-limit-a", self.gateway,
+        )
+        second, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "player-limit-b", self.gateway,
+        )
+        self.assertEqual(first["amount_paise"], 50_000)
+        self.assertEqual(second["amount_paise"], 50_000)
+        self.assertEqual(
+            await self.db[operator_rail.COLLECTION].count_documents({}), 2,
         )
 
-        successes = [item for item in results if not isinstance(item, Exception)]
-        failures = [item for item in results if isinstance(item, HTTPException)]
-        self.assertEqual((len(successes), len(failures)), (1, 1))
-        self.assertEqual(failures[0].status_code, 403)
-        self.assertEqual(failures[0].detail["code"], "DEPOSIT_LIMIT")
-        self.assertEqual(
-            await self.db[operator_rail.COLLECTION].count_documents({}), 1,
+    async def test_two_lakh_exact_buy_allowed_and_overflow_rejected(self):
+        exact, _ = await operator_rail.create_hosted_deposit(
+            self.user, 20_000_000, "exact-two-lakh", self.gateway,
         )
+        self.assertEqual(exact["amount_paise"], 20_000_000)
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 10_000, "after-exact-two-lakh", self.gateway,
+            )
+        self.assertEqual(overflow.exception.status_code, 409)
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+
+    async def test_two_lakh_minus_one_hundred_plus_two_hundred_is_rejected(self):
+        first, _ = await operator_rail.create_hosted_deposit(
+            self.user, 19_990_000, "two-lakh-minus-100", self.gateway,
+        )
+        self.assertEqual(first["amount_paise"], 19_990_000)
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000, "plus-200", self.gateway,
+            )
+        self.assertEqual(overflow.exception.status_code, 409)
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+        leftover, _ = await operator_rail.create_hosted_deposit(
+            self.user, 10_000, "remaining-one-hundred", self.gateway,
+        )
+        self.assertEqual(leftover["amount_paise"], 10_000)
+
+    async def test_daily_buy_cap_uses_asia_kolkata_calendar_day_not_london(self):
+        late_ist = datetime(2026, 9, 3, 18, 29, tzinfo=timezone.utc)
+        next_ist = datetime(2026, 9, 3, 18, 30, tzinfo=timezone.utc)
+        with patch.object(operator_rail, "utcnow", return_value=late_ist):
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000_000, "ist-day-full", self.gateway,
+            )
+            with self.assertRaises(HTTPException) as same_day:
+                await operator_rail.create_hosted_deposit(
+                    self.user, 10_000, "ist-day-over", self.gateway,
+                )
+            self.assertEqual(same_day.exception.detail["code"], "UPI_DAILY_LIMIT")
+        with patch.object(operator_rail, "utcnow", return_value=next_ist):
+            nxt, _ = await operator_rail.create_hosted_deposit(
+                self.user, 20_000_000, "next-ist-day", self.gateway,
+            )
+        self.assertEqual(nxt["amount_paise"], 20_000_000)
+        self.assertEqual(nxt["reservation_gaming_day"], "2026-09-04")
+
+    async def test_admin_review_and_hosted_upi_share_one_ist_daily_cap(self):
+        admin = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=19_990_000,
+        )
+        self.assertEqual(admin["source"], "ADMIN_REVIEW")
+        with self.assertRaises(HTTPException) as overflow:
+            await operator_rail.create_hosted_deposit(
+                self.user, 20_000, "shared-cap-over", self.gateway,
+            )
+        self.assertEqual(overflow.exception.detail["code"], "UPI_DAILY_LIMIT")
+
+    async def test_lower_env_cannot_keep_one_lakh_transaction_cap(self):
+        with patch.dict(
+            os.environ, {"UPI_MAX_DAILY_DEPOSIT_PAISE": "10000000"}, clear=False,
+        ):
+            purchase, _ = await operator_rail.create_hosted_deposit(
+                self.user, 15_000_000, "above-old-one-lakh", self.gateway,
+            )
+        self.assertEqual(purchase["amount_paise"], 15_000_000)
 
     async def test_terminal_idempotency_reuse_never_returns_checkout_redirect(self):
         purchase, checkout_url = await operator_rail.create_hosted_deposit(
@@ -643,6 +799,48 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 100)
         self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
+
+    async def test_settle_persists_provider_occurred_at_and_does_not_overwrite(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "buy-chips-timestamp-0001", self.gateway,
+        )
+        captured = datetime(2026, 9, 2, 11, 17, tzinfo=timezone.utc)
+        later = datetime(2026, 9, 2, 11, 47, tzinfo=timezone.utc)
+        credited = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-CAPTURE-TIME", captured),
+            actor="test-status-check",
+        )
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(operator_rail.isoformat_utc(stored["provider_occurred_at"]), "2026-09-02T11:17:00.000Z")
+        dto = operator_rail.as_player_deposit(stored)
+        self.assertEqual(dto["paid_at"], "2026-09-02T11:17:00.000Z")
+        self.assertNotEqual(dto["paid_at"], dto["created_at"])
+
+        await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-CAPTURE-TIME", later),
+            actor="late-reconcile",
+        )
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(operator_rail.isoformat_utc(stored["provider_occurred_at"]), "2026-09-02T11:17:00.000Z")
+
+    async def test_player_dto_falls_back_to_resolved_at_when_provider_date_missing(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "buy-chips-timestamp-fallback", self.gateway,
+        )
+        credited = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", "UTR-NO-DATE"),
+            actor="test-status-check",
+        )
+        self.assertEqual(credited["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertIsNone(stored.get("provider_occurred_at"))
+        dto = operator_rail.as_player_deposit(stored)
+        self.assertEqual(dto["paid_at"], dto["resolved_at"])
+        self.assertNotEqual(dto["paid_at"], dto["created_at"])
 
     async def test_reconciliation_passes_expected_amount_and_credits_exactly_once(self):
         purchase, _ = await operator_rail.create_hosted_deposit(
@@ -895,6 +1093,65 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 100)
         self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
 
+    async def test_paid_without_provider_utr_credits_synthetic_reference(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "paid-without-provider-utr", self.gateway,
+        )
+        result = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", None),
+            actor="authenticated-status",
+        )
+        self.assertEqual(result["status"], "CREDITED")
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        seed = re.sub(
+            r"[^A-Z0-9]", "",
+            str(stored.get("provider_order_id") or stored["id"]).upper(),
+        )
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertFalse(stored.get("utr_claim"))
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "ref": f"upi-chip:{purchase['id']}",
+        }), 1)
+
+        duplicate = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", ""),
+            actor="duplicate-callback",
+        )
+        self.assertTrue(duplicate["duplicate"])
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "ref": f"upi-chip:{purchase['id']}",
+        }), 1)
+
+    async def test_paid_without_provider_utr_credits_even_if_player_pasted_claim(self):
+        purchase, _ = await operator_rail.create_hosted_deposit(
+            self.user, 50_000, "paid-missing-utr-with-player-claim", self.gateway,
+        )
+        await self.db[operator_rail.COLLECTION].update_one(
+            {"id": purchase["id"]},
+            {"$set": {"utr_claim": "PLAYER-PASTED-UTR"}},
+        )
+        result = await operator_rail.settle_hosted_deposit(
+            purchase["id"],
+            DepositStatus("PAID", 50_000, "INR", None),
+            actor="authenticated-status",
+        )
+        self.assertEqual(result["status"], "CREDITED")
+        self.assertFalse(result.get("utr_mismatch"))
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": purchase["id"]})
+        seed = re.sub(
+            r"[^A-Z0-9]", "",
+            str(stored.get("provider_order_id") or stored["id"]).upper(),
+        )
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertEqual(stored["utr_claim"], "PLAYER-PASTED-UTR")
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 600)
+
     async def test_reconcile_missing_provider_order_id_looks_up_by_request_id(self):
         purchase, _ = await operator_rail.create_hosted_deposit(
             self.user, 50_000, "missing-provider-order", self.gateway,
@@ -1048,6 +1305,30 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
             "ref": f"operator-deposit:{deposit['id']}",
         }), 1)
 
+    async def test_admin_review_paid_empty_utr_credits_like_admin_approve(self):
+        deposit = await operator_rail.create_request(
+            self.user, kind="DEPOSIT", amount_paise=10_000,
+        )
+        self.assertEqual(deposit["source"], "ADMIN_REVIEW")
+        self.gateway.status = DepositStatus("PAID", 10_000, "INR", None)
+
+        with patch.dict(os.environ, {"UPI_CHIP_PURCHASES_ENABLED": "false"}, clear=False):
+            result = await operator_rail.reconcile_hosted_deposit(deposit["id"], self.gateway)
+
+        self.assertEqual(result["status"], "APPROVED")
+        self.assertFalse(result.get("duplicate"))
+        stored = await self.db[operator_rail.COLLECTION].find_one({"id": deposit["id"]})
+        seed = re.sub(r"[^A-Z0-9]", "", str(deposit["id"]).upper())
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertEqual(stored["provider_reference"], f"SGPAY-{seed[:74]}")
+        self.assertFalse(stored.get("utr_claim"))
+        self.assertEqual((await self.db.users.find_one({"id": self.user["id"]}))["chip_balance"], 200)
+        self.assertEqual(await self.db.chip_transactions.count_documents({
+            "user_id": self.user["id"],
+            "kind": operator_rail.ledger.DEPOSIT,
+            "ref": f"operator-deposit:{deposit['id']}",
+        }), 1)
+
     async def test_admin_review_already_credited_does_not_double(self):
         deposit = await operator_rail.create_request(
             self.user, kind="DEPOSIT", amount_paise=10_000,
@@ -1136,6 +1417,167 @@ class HostedUpiOperatorRailTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.data["notice_kind"], "collection")
 
 
+class SgPay24PayoutContractTests(unittest.IsolatedAsyncioTestCase):
+    def _payout_kwargs(self, **overrides):
+        payload = {
+            "withdrawal_id": "wd-12345678",
+            "provider_beneficiary_id": "bank-1",
+            "amount_paise": 100_000,
+            "currency": "INR",
+            "idempotency_key": "op-wd-wd-12345678",
+            "account_holder_name": "Test Player",
+            "account_number": "12345678901",
+            "ifsc_code": "HDFC0000001",
+            "bank_name": "HDFC Bank",
+            "payout_identifier": "",
+            "phone": "+919876543210",
+            "email": "player@example.com",
+        }
+        payload.update(overrides)
+        return payload
+
+    async def test_create_payout_sends_merchant_docs_field_names(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "status": 0,
+            "data": {"payout_id": "po-1", "order_id": "wd-12345678", "status": 0},
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            result = await gateway.submit_payout(**self._payout_kwargs())
+
+        self.assertEqual(result, PayoutSubmission("po-1", "PROCESSING"))
+        path, payload = request_json.await_args.args
+        self.assertEqual(path, "/api/createPayoutRequest")
+        self.assertEqual(request_json.await_args.kwargs.get("as_query"), True)
+        self.assertEqual(payload["mid"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
+        self.assertEqual(payload["merchant_id"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
+        self.assertEqual(payload["api_token"], PROVIDER_ENV["SGPAY24_API_TOKEN"])
+        self.assertEqual(payload["order_id"], "wd-12345678")
+        self.assertEqual(payload["amount"], 1000)
+        self.assertEqual(payload["account"], "12345678901")
+        self.assertEqual(payload["ifsc_no"], "HDFC0000001")
+        self.assertEqual(payload["bank_name"], "HDFC Bank")
+        self.assertEqual(payload["benifeciryname"], "Test Player")
+        self.assertEqual(payload["email"], "player@example.com")
+        self.assertEqual(payload["phone"], "9876543210")
+        self.assertEqual(payload["redirect_url"], PROVIDER_ENV["PAYMENT_RETURN_URL"])
+        self.assertEqual(payload["remark"], "Chakri payout wd-12345678")
+        for legacy in (
+            "account_number", "ifsc", "ifsc_code", "name", "beneficiary_name",
+            "callback_url", "notify_url",
+        ):
+            self.assertNotIn(legacy, payload)
+
+    async def test_create_payout_requires_bank_name_when_account_present(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock()) as request_json:
+            with self.assertRaises(ProviderRequestError) as caught:
+                await gateway.submit_payout(**self._payout_kwargs(bank_name=""))
+        self.assertIn("bank name", str(caught.exception).lower())
+        request_json.assert_not_awaited()
+
+    async def test_create_payout_maps_numeric_status_codes(self):
+        cases = (
+            (0, "PROCESSING"),
+            (1, "PAID"),
+            (2, "FAILED"),
+            ("0", "PROCESSING"),
+            ("1", "PAID"),
+            ("2", "FAILED"),
+            ("Complete", "PAID"),
+            ("Rejected", "FAILED"),
+        )
+        for raw, expected in cases:
+            with self.subTest(raw=raw, expected=expected):
+                gateway = provider()
+                request_json = AsyncMock(return_value={
+                    "data": {"payout_id": "po-status", "order_id": "wd-12345678", "status": raw},
+                })
+                with patch.object(gateway, "_request_json", new=request_json):
+                    result = await gateway.submit_payout(**self._payout_kwargs())
+                self.assertEqual(result.status, expected)
+
+    async def test_create_payout_uses_dedicated_redirect_when_configured(self):
+        dedicated = "https://play.example.com/chips/withdraw"
+        gateway = provider({"SGPAY24_PAYOUT_REDIRECT_URL": dedicated})
+        request_json = AsyncMock(return_value={
+            "data": {"payout_id": "po-1", "order_id": "wd-12345678", "status": 0},
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            await gateway.submit_payout(**self._payout_kwargs())
+        self.assertEqual(request_json.await_args.args[1]["redirect_url"], dedicated)
+
+    def test_invalid_payout_redirect_url_fails_closed(self):
+        with self.assertRaises(ProviderConfigurationError) as caught:
+            provider({"SGPAY24_PAYOUT_REDIRECT_URL": "http://chakri.casino/chips/withdraw"})
+        self.assertIn("SGPAY24_PAYOUT_REDIRECT_URL", str(caught.exception))
+
+    async def test_create_payout_rejects_unapproved_redirect(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock()) as request_json:
+            with self.assertRaises(ProviderRequestError) as caught:
+                await gateway.submit_payout(
+                    **self._payout_kwargs(return_url="https://evil.example/steal"),
+                )
+        self.assertIn("return", str(caught.exception).lower())
+        request_json.assert_not_awaited()
+
+    async def test_get_payout_status_keeps_merchant_id_and_maps_codes(self):
+        gateway = provider()
+        request_json = AsyncMock(return_value={
+            "order_id": "wd-12345678",
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "amount": 1000,
+            "status": 1,
+            "utr": "HDFCR12345",
+        })
+        with patch.object(gateway, "_request_json", new=request_json):
+            actual = await gateway.get_payout_status("wd-12345678")
+        self.assertEqual(actual.status, "PAID")
+        self.assertEqual(actual.amount_paise, 100_000)
+        self.assertEqual(actual.provider_reference, "HDFCR12345")
+        path, payload = request_json.await_args.args
+        self.assertEqual(path, "/api/check-payout-status")
+        self.assertEqual(payload, {
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "order_id": "wd-12345678",
+            "api_token": PROVIDER_ENV["SGPAY24_API_TOKEN"],
+        })
+        self.assertNotIn("mid", payload)
+
+    def test_webhook_accepts_docs_payout_payload(self):
+        gateway = provider()
+        raw = json.dumps({
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "payout_id": "payout-12345678",
+            "order_id": "wd-12345678",
+            "amount": 1000,
+            "status": 1,
+            "utr": "HDFCR12345",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.object_id, "wd-12345678")
+        self.assertEqual(event.event_type, "payout.paid")
+        self.assertEqual(event.amount_paise, 100_000)
+        self.assertEqual(event.provider_reference, "HDFCR12345")
+        self.assertEqual(event.data["notice_kind"], "payout")
+        self.assertTrue(event.data["requires_authenticated_status_lookup"])
+
+    def test_webhook_payout_status_two_is_rejected(self):
+        gateway = provider()
+        raw = json.dumps({
+            "merchant_id": PROVIDER_ENV["SGPAY24_MERCHANT_ID"],
+            "payout_id": "payout-12345678",
+            "order_id": "wd-12345678",
+            "amount": 1000,
+            "status": 2,
+            "utr": "REJECTEDUTR1",
+        }).encode()
+        event = gateway.verify_webhook(raw, {})
+        self.assertEqual(event.event_type, "payout.failed")
+        self.assertEqual(event.data["notice_kind"], "payout")
+
+
 class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
     async def test_payout_502_message_includes_provider_error(self):
         import sgpay_payout
@@ -1144,6 +1586,7 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
             "payout_status": "FAILED",
         }
         fake = AsyncMongoMockClient()["payout_toast"]
+        await fake.operator_payment_requests.insert_one(request)
         await fake.users.insert_one({
             "id": "player-1", "phone": "9876543210", "email": "player@example.com",
         })
@@ -1169,8 +1612,7 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 502)
         detail = caught.exception.detail
         self.assertEqual(detail["code"], "SGPAY_PAYOUT_FAILED")
-        self.assertIn("Internal server error", detail["message"])
-        self.assertIn("reserved", detail["message"])
+        self.assertEqual(detail["message"], "SgPay did not accept the payout. Chips are already reserved; retry from Admin.")
         self.assertIn("Internal server error", detail["error"])
         stored = await fake.operator_payment_requests.find_one({"id": "wd-toast-1"})
         self.assertIn("Internal server error", stored["payout_error"])

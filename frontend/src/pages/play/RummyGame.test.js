@@ -362,9 +362,10 @@ test("partial server seat arrays still render all five visible table positions",
   act(() => root.unmount());
 });
 
-test("the live Rummy table leaves Chakri branding in the lobby", () => {
+test("the live Rummy table leaves Chakri branding in the lobby and orientation overlay", () => {
   const source = fs.readFileSync(path.join(__dirname, "RummyGame.js"), "utf8");
-  expect(source).not.toContain("BrandWordmark");
+  expect(source).toContain("BrandWordmark");
+  expect(source).toContain("rummy-orientation-logo");
   expect(source).not.toContain('className="rummy-brand-lockup"');
 });
 

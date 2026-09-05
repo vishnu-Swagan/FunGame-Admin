@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Optional, Protocol
 
@@ -58,6 +59,116 @@ class DepositSession:
     status: str = "PENDING"
 
 
+# Naive SgPay timestamps are treated as India Standard Time (no DST).
+IST = timezone(timedelta(hours=5, minutes=30))
+
+# Capture-like keys first. created_at is last so checkout-start is never
+# preferred over an explicit paid/updated/date field when both exist.
+_PROVIDER_OCCURRED_KEYS = (
+    "paid_at",
+    "captured_at",
+    "completed_at",
+    "settled_at",
+    "txn_date",
+    "transaction_date",
+    "payment_date",
+    "txn_time",
+    "date",
+    "datetime",
+    "timestamp",
+    "occurred_at",
+    "updated_at",
+    "created_at",
+)
+
+
+def parse_provider_datetime(value: Any) -> Optional[datetime]:
+    """Parse a provider timestamp and return timezone-aware UTC.
+
+    Timezone-aware values keep their offset. Naive wall-clock values from
+    Indian gateways are treated as Asia/Kolkata. Unparseable input is None.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    dt: Optional[datetime] = None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, (int, float)):
+        stamp = float(value)
+        if stamp > 1e12:
+            stamp /= 1000.0
+        if not 1e9 <= stamp < 1e11:
+            return None
+        dt = datetime.fromtimestamp(stamp, tz=timezone.utc)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d{10,13}", text):
+            return parse_provider_datetime(int(text))
+        normalized = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except ValueError:
+            dt = None
+            for fmt in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S.%f",
+                "%d-%m-%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S",
+                "%Y/%m/%d %H:%M:%S",
+                "%d-%m-%Y %H:%M",
+                "%Y-%m-%d",
+            ):
+                try:
+                    dt = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    continue
+            if dt is None:
+                return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(timezone.utc)
+
+
+def datetime_to_iso_utc(value: Any) -> Optional[str]:
+    """Serialize a datetime (or parseable string) as ISO-8601 UTC with Z."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    else:
+        dt = parse_provider_datetime(value)
+    if dt is None:
+        return None
+    text = dt.isoformat(timespec="milliseconds")
+    if text.endswith("+00:00"):
+        text = text[:-6] + "Z"
+    return text
+
+
+def extract_provider_occurred_at(*payloads: Any) -> Optional[datetime]:
+    """Return the first parseable capture timestamp from an allowlist of keys."""
+    for payload in payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        sources = [payload]
+        nested = payload.get("data")
+        if isinstance(nested, Mapping):
+            sources.append(nested)
+        for source in sources:
+            for key in _PROVIDER_OCCURRED_KEYS:
+                if key not in source:
+                    continue
+                parsed = parse_provider_datetime(source.get(key))
+                if parsed is not None:
+                    return parsed
+    return None
+
+
 @dataclass(frozen=True)
 class DepositStatus:
     """Authoritative provider view used for server-side reconciliation.
@@ -71,6 +182,7 @@ class DepositStatus:
     amount_paise: Optional[int]
     currency: Optional[str]
     provider_reference: Optional[str]
+    occurred_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +208,7 @@ class PayoutStatus:
     idempotency_key: Optional[str]
     provider_beneficiary_id: Optional[str]
     provider_reference: Optional[str]
+    occurred_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -745,6 +858,7 @@ class ConfiguredRestPaymentProvider:
             self._authoritative_amount(self._field("get_payment_status", response, "amount_paise")),
             self._authoritative_currency(self._field("get_payment_status", response, "currency")),
             str(self._field("get_payment_status", response, "provider_reference")),
+            extract_provider_occurred_at(response),
         )
 
     async def create_beneficiary(self, *, bank_details: Mapping[str, str], idempotency_key: str) -> Beneficiary:
@@ -778,6 +892,7 @@ class ConfiguredRestPaymentProvider:
             str(self._field(operation, response, "idempotency_key")),
             str(self._field(operation, response, "provider_beneficiary_id")),
             str(self._field(operation, response, "provider_reference")),
+            extract_provider_occurred_at(response),
         )
 
     async def cancel_payout(self, provider_payout_id: str) -> str:
@@ -895,8 +1010,11 @@ class SgPay24PaymentProvider:
     _payout_status_path = "/api/check-payout-status"
     _v1_payout_host = "api.sgpay24.in"
     _v1_payout_path = "/v1/payout"
-    _PAID_STATUS_NAMES = frozenset({"complete", "completed", "success", "paid"})
-    _FAILED_STATUS_NAMES = frozenset({"failed", "cancelled", "canceled", "expired"})
+    _PAID_STATUS_NAMES = frozenset({
+        "complete", "completed", "success", "succeeded", "paid", "credited",
+    })
+    _DEFAULT_NOTIFY_URL = "https://api.chakri.casino/api/payments/webhooks/sgpay24"
+    _FAILED_STATUS_NAMES = frozenset({"failed", "cancelled", "canceled", "expired", "rejected"})
     _PENDING_STATUS_NAMES = frozenset({"pending", "processing"})
 
     def __init__(self, environ: Mapping[str, str]):
@@ -920,6 +1038,14 @@ class SgPay24PaymentProvider:
             raise ProviderConfigurationError("SGPAY24_TIMEOUT_SECONDS must be between 3 and 30")
         configured_return = str(self._env.get("PAYMENT_RETURN_URL", "")).strip()
         self._return_contract = self._validated_return_url(configured_return)
+        self._payout_redirect = str(self._env.get("SGPAY24_PAYOUT_REDIRECT_URL") or "").strip()
+        if self._payout_redirect:
+            try:
+                self._validated_return_url(self._payout_redirect)
+            except ProviderConfigurationError as exc:
+                raise ProviderConfigurationError(
+                    "SGPAY24_PAYOUT_REDIRECT_URL must be a public HTTPS URL",
+                ) from exc
 
     @staticmethod
     def _valid_email(value: str) -> bool:
@@ -1013,6 +1139,39 @@ class SgPay24PaymentProvider:
             raise ProviderRequestError("Payment return URL is outside the approved return path")
         return urllib.parse.urlunsplit(parsed)
 
+    def _approved_return_url(self) -> str:
+        scheme, host, path = self._return_contract
+        return urllib.parse.urlunsplit((scheme, host, path, "", ""))
+
+    def _payout_redirect_url(self, requested: str = "") -> str:
+        """Return a docs-required redirect_url that cannot open-redirect.
+
+        Caller-supplied URLs must match PAYMENT_RETURN_URL. A dedicated
+        SGPAY24_PAYOUT_REDIRECT_URL is operator-configured and validated at
+        init as a public HTTPS URL. Otherwise use the approved return URL.
+        https://chakri.casino/chips/withdraw is only used when that URL is
+        already the configured return contract.
+        """
+        requested = str(requested or "").strip()
+        if requested:
+            return self._safe_return_url(requested)
+        if self._payout_redirect:
+            return self._payout_redirect
+        return self._approved_return_url()
+
+    @classmethod
+    def _map_payout_status(cls, raw_status: Any) -> str:
+        try:
+            code = cls._status_code(raw_status)
+            return {1: "PAID", 2: "FAILED", 0: "PROCESSING"}[code]
+        except ProviderRequestError:
+            status_raw = str(raw_status or "").upper()
+            if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE"}:
+                return "PAID"
+            if status_raw in {"FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED"}:
+                return "FAILED"
+            return "PROCESSING"
+
     @staticmethod
     def _safe_checkout_url(value: Any) -> str:
         text = str(value or "").strip()
@@ -1028,6 +1187,13 @@ class SgPay24PaymentProvider:
         ):
             raise ProviderRequestError("Provider checkout URL is unsafe")
         return text
+
+    def _notify_callback_url(self) -> str:
+        return (
+            str(self._env.get("SGPAY24_NOTIFY_URL") or "").strip()
+            or str(self._env.get("SGPAY24_CALLBACK_URL") or "").strip()
+            or self._DEFAULT_NOTIFY_URL
+        )
 
     def _customer(self, customer: Optional[Mapping[str, Any]]) -> tuple[str, str, str]:
         source = customer or {}
@@ -1136,6 +1302,7 @@ class SgPay24PaymentProvider:
         order_id = self._order_id(deposit_id)
         name, email, phone = self._customer(customer)
         expected_paise = int(amount_paise)
+        notify_url = self._notify_callback_url()
         response = await self._request_json(self._create_path, {
             "merchant_id": self._merchant_id,
             "order_id": order_id,
@@ -1144,6 +1311,8 @@ class SgPay24PaymentProvider:
             "email": email,
             "phone": phone,
             "redirect_url": self._safe_return_url(return_url),
+            "callback_url": notify_url,
+            "notify_url": notify_url,
             "api_token": self._api_token,
             "remark": f"Chakri chips {order_id[:24]}",
         })
@@ -1200,10 +1369,14 @@ class SgPay24PaymentProvider:
             if expected_amount_paise is not None and amount_paise != expected_amount_paise:
                 raise ProviderRequestError("Provider status amount did not match the order")
         utr = str(response.get("utr") or "").strip().upper()
-        if status == "PAID" and not re.fullmatch(r"[A-Za-z0-9_-]{4,80}", utr):
-            raise ProviderRequestError("Provider success status omitted a valid UTR")
-        reference = utr or (f"sgpay24:{order_id}:failed" if status == "FAILED" else None)
-        return DepositStatus(status, amount_paise, "INR", reference)
+        if re.fullmatch(r"[A-Za-z0-9_-]{4,80}", utr):
+            reference = utr
+        else:
+            reference = f"sgpay24:{order_id}:failed" if status == "FAILED" else None
+        return DepositStatus(
+            status, amount_paise, "INR", reference,
+            extract_provider_occurred_at(response),
+        )
 
     def _payout_endpoint(self) -> str:
         extra = str(self._env.get("SGPAY24_PAYOUT_PATH") or "").strip()
@@ -1229,9 +1402,14 @@ class SgPay24PaymentProvider:
         body = {
             "amount": self._amount_in_rupees(amount_paise),
             "currency": "INR",
-            "account_number": payload.get("account_number") or "",
-            "ifsc_code": payload.get("ifsc_code") or payload.get("ifsc") or "",
-            "beneficiary_name": payload.get("beneficiary_name") or payload.get("name") or "",
+            "account_number": payload.get("account") or payload.get("account_number") or "",
+            "ifsc_code": payload.get("ifsc_no") or payload.get("ifsc_code") or payload.get("ifsc") or "",
+            "beneficiary_name": (
+                payload.get("benifeciryname")
+                or payload.get("beneficiary_name")
+                or payload.get("name")
+                or ""
+            ),
             "mode": payload.get("mode") or "IMPS",
             "reference_id": payload.get("reference_id") or payload.get("order_id") or "",
         }
@@ -1293,9 +1471,11 @@ class SgPay24PaymentProvider:
             raise ProviderRequestError("Payout amount is invalid")
         withdrawal_id = str(kwargs.get("withdrawal_id") or "")
         order_id = self._order_id(withdrawal_id or kwargs.get("idempotency_key") or "payout")
-        account_number = str(kwargs.get("account_number") or "").strip()
-        ifsc = str(kwargs.get("ifsc_code") or "").strip()
-        upi = str(kwargs.get("payout_identifier") or "").strip()
+        account_number = str(kwargs.get("account_number") or kwargs.get("account") or "").strip()
+        ifsc = str(
+            kwargs.get("ifsc_code") or kwargs.get("ifsc_no") or kwargs.get("ifsc") or ""
+        ).strip()
+        upi = str(kwargs.get("payout_identifier") or kwargs.get("upi_id") or "").strip()
         if not account_number and not upi:
             raise ProviderRequestError("Payout needs a bank account or UPI id")
         phone = re.sub(r"\D", "", str(kwargs.get("phone") or ""))
@@ -1306,37 +1486,45 @@ class SgPay24PaymentProvider:
         email = str(kwargs.get("email") or "").strip().lower()
         if not self._valid_email(email):
             email = self._fallback_email
+        holder = str(
+            kwargs.get("account_holder_name")
+            or kwargs.get("benifeciryname")
+            or kwargs.get("beneficiary_name")
+            or "Player"
+        ).strip()[:80]
+        # Merchant payout docs (createPayoutRequest): mid, api_token, order_id,
+        # amount, account, ifsc_no, bank_name, benifeciryname, email, phone,
+        # redirect_url, remark. Webhook URL is dashboard-configured, not per-request.
         payload = {
+            "mid": self._merchant_id,
             "merchant_id": self._merchant_id,
+            "api_token": self._api_token,
             "order_id": order_id,
             "amount": self._amount_in_rupees(amount_paise),
-            "name": str(kwargs.get("account_holder_name") or "Player")[:80],
+            "benifeciryname": holder,
             "email": email,
             "phone": phone,
-            "api_token": self._api_token,
+            "redirect_url": self._payout_redirect_url(
+                str(kwargs.get("return_url") or kwargs.get("redirect_url") or ""),
+            ),
             "remark": f"Chakri payout {order_id[:24]}",
         }
         if account_number:
-            payload["account_number"] = account_number
-        if ifsc:
-            payload["ifsc"] = ifsc
-            payload["ifsc_code"] = ifsc
+            bank_name = str(kwargs.get("bank_name") or "").strip()
+            if not bank_name:
+                raise ProviderRequestError("Payout needs a bank name")
+            if not ifsc:
+                raise ProviderRequestError("Payout needs an IFSC code")
+            payload["account"] = account_number
+            payload["ifsc_no"] = ifsc
+            payload["bank_name"] = bank_name
         if upi:
             payload["upi_id"] = upi
-        bank_name = str(kwargs.get("bank_name") or "").strip()
-        if bank_name:
-            payload["bank_name"] = bank_name
-        # Aliases from the marketing v1/payout contract. Extra query fields are
-        # ignored by a healthy parser; they may unblock a Node destructure 500.
-        payload["beneficiary_name"] = payload["name"]
-        payload["reference_id"] = order_id
-        payload["currency"] = "INR"
-        payload["mode"] = "UPI" if upi and not account_number else "IMPS"
         if self._payout_api_kind() == "v1":
             response = await self._submit_payout_v1(payload, amount_paise=amount_paise)
         else:
-            # Live collections use root.sgpay24.com. createPayoutRequest ignores
-            # JSON bodies ("All fields are required") and only reads query fields.
+            # Live createPayoutRequest ignores JSON bodies ("All fields are required")
+            # and only reads query-string fields. Keep that transport; send docs keys.
             response = await self._request_json(self._payout_endpoint(), payload, as_query=True)
         data = response.get("data") if isinstance(response.get("data"), Mapping) else response
         if not isinstance(data, Mapping):
@@ -1344,13 +1532,10 @@ class SgPay24PaymentProvider:
         provider_id = str(
             data.get("payout_id") or data.get("transaction_id") or data.get("order_id") or order_id
         )
-        status_raw = str(data.get("status") or response.get("status") or "PROCESSING").upper()
-        if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED"}:
-            mapped = "PAID"
-        elif status_raw in {"FAILED", "REJECTED", "CANCELLED"}:
-            mapped = "FAILED"
-        else:
-            mapped = "PROCESSING"
+        raw_status = data.get("status")
+        if raw_status is None:
+            raw_status = response.get("status")
+        mapped = self._map_payout_status(raw_status)
         return PayoutSubmission(provider_payout_id=provider_id, status=mapped)
 
     async def get_payout_status(self, provider_payout_id: str) -> PayoutStatus:
@@ -1360,17 +1545,7 @@ class SgPay24PaymentProvider:
             "order_id": order_id,
             "api_token": self._api_token,
         })
-        try:
-            code = self._status_code(response.get("status"))
-            mapped = {1: "PAID", 2: "FAILED", 0: "PROCESSING"}[code]
-        except ProviderRequestError:
-            status_raw = str(response.get("status") or "").upper()
-            if status_raw in {"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE"}:
-                mapped = "PAID"
-            elif status_raw in {"FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED"}:
-                mapped = "FAILED"
-            else:
-                mapped = "PROCESSING"
+        mapped = self._map_payout_status(response.get("status"))
         amount_value = response.get("amount")
         amount_paise = self._amount_to_paise(amount_value) if amount_value is not None else None
         return PayoutStatus(
@@ -1381,6 +1556,7 @@ class SgPay24PaymentProvider:
             idempotency_key=None,
             provider_beneficiary_id=None,
             provider_reference=str(response.get("utr") or order_id),
+            occurred_at=extract_provider_occurred_at(response),
         )
 
     async def cancel_payout(self, _provider_payout_id: str) -> str:
@@ -1429,10 +1605,16 @@ class SgPay24PaymentProvider:
             raise WebhookVerificationError("Webhook status is invalid")
         utr = str(payload.get("utr") or "").strip()
         if payout_like:
-            event_type = "payout.failed" if status_code == 2 else "payout.paid"
+            if status_code == 2:
+                event_type = "payout.failed"
+            elif status_code == 1:
+                event_type = "payout.paid"
+            else:
+                event_type = "payout.processing"
         else:
             event_type = "deposit.failed" if status_code == 2 else "deposit.paid"
         notice_key = f"{order_id}:{transaction_id}:{status_code}:{utr}:{event_type}"
+        occurred = extract_provider_occurred_at(payload)
         return ProviderEvent(
             event_id=f"sgpay24-notice:{hashlib.sha256(notice_key.encode()).hexdigest()[:40]}",
             event_type=event_type,
@@ -1440,7 +1622,7 @@ class SgPay24PaymentProvider:
             amount_paise=amount_paise,
             currency="INR",
             provider_reference=utr or None,
-            occurred_at=None,
+            occurred_at=datetime_to_iso_utc(occurred),
             data={
                 "requires_authenticated_status_lookup": True,
                 "transaction_id": transaction_id,

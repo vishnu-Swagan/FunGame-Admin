@@ -4,17 +4,16 @@ import { Toaster } from "@/components/ui/sonner";
 import IosInstallHint from "@/components/IosInstallHint";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
-import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_PATH } from "@/lib/adminConsole";
+import { IS_ADMIN_CONSOLE, ADMIN_LOGIN_LEGACY_PATH } from "@/lib/adminConsole";
 import { LEGACY_CHIP_REQUESTS_ENABLED } from "@/lib/featureFlags";
-import { ADMIN_PERMISSIONS, PortalPublicOnly, PublicOnly, RequireAuth, RequireActive, RequireAdmin, RequirePartner, RequirePermission } from "@/components/RouteGuards";
+import { ADMIN_PERMISSIONS, PortalPublicOnly, PublicOnly, RequireAuth, RequireActive, RequirePartner, RequirePermission } from "@/components/RouteGuards";
 import { LoadingScreen } from "@/components/common";
 import AppShell from "@/components/AppShell";
 
 // Auth
-import Welcome from "@/pages/auth/Welcome";
-import Register from "@/pages/auth/Register";
+import FrontPage from "@/pages/auth/FrontPage";
+import CasinoEntry from "@/pages/app/CasinoEntry";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
-import Login from "@/pages/auth/Login";
 import AdminLogin from "@/pages/auth/AdminLogin";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
 import {
@@ -37,8 +36,6 @@ import OnboardingReview from "@/pages/onboarding/OnboardingReview";
 import OnboardingPending from "@/pages/onboarding/OnboardingPending";
 
 // App
-import Home from "@/pages/app/Home";
-import Games from "@/pages/app/Games";
 import GameDetail from "@/pages/app/GameDetail";
 import SearchPage from "@/pages/app/SearchPage";
 import { Favorites, Recent } from "@/pages/app/FavoritesRecent";
@@ -52,6 +49,7 @@ import BonusMission from "@/pages/app/BonusMission";
 import ReferralRewards from "@/pages/app/ReferralRewards";
 import Support from "@/pages/app/Support";
 import ResponsiblePlay from "@/pages/app/ResponsiblePlay";
+import { LegalRouterPage } from "@/pages/legal/LegalPages";
 import GamePlay from "@/pages/play/GamePlay";
 import SevenUpDownCabinet from "@/pages/play/cabinet/SevenUpDownCabinet";
 import KenoCabinet from "@/pages/play/cabinet/KenoCabinet";
@@ -65,7 +63,6 @@ import { Maintenance, Offline, UpdateRequired } from "@/pages/system/SystemScree
 import AccountClosed from "@/pages/system/AccountClosed";
 
 // Admin
-import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminChipRequests from "@/pages/admin/AdminChipRequests";
@@ -74,6 +71,7 @@ import AdminAnnouncements from "@/pages/admin/AdminAnnouncements";
 import AdminSettings from "@/pages/admin/AdminSettings";
 import AdminDistributors from "@/pages/admin/AdminDistributors";
 import AdminCommission from "@/pages/admin/AdminCommission";
+import AdminFreeCash from "@/pages/admin/AdminFreeCash";
 import AdminSupport from "@/pages/admin/AdminSupport";
 import AdminCompliance from "@/pages/admin/AdminCompliance";
 import {
@@ -85,6 +83,7 @@ import {
   AdminWalletLedger,
   AdminWithdrawals,
 } from "@/pages/admin/AdminPaymentPages";
+import AdminPlayHistory from "@/pages/admin/AdminPlayHistory";
 import AdminPaymentHub from "@/pages/admin/AdminPaymentHub";
 import AdminPromotions from "@/pages/admin/AdminPromotions";
 import { AdminMonitoring, AdminSecurityAudit } from "@/pages/admin/AdminOperationsPages";
@@ -103,7 +102,7 @@ import PartnerPasswordChange from "@/pages/partner/PartnerPasswordChange";
 function OnboardingRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" replace />;
+  if (!user) return <Navigate to="/" replace />;
   if (user.role === "ADMIN" || user.status === "ACTIVE") return <Navigate to={routeForUser(user)} replace />;
   return children;
 }
@@ -124,16 +123,34 @@ function LegacyPathRedirect({ from, to, emptyTo }) {
   return <Navigate to={`${destination}${location.search}${location.hash}`} replace />;
 }
 
+/** Retire multi-page auth/lobby hops onto the single frontpage, keeping useful query. */
+function FrontDoorRedirect({ auth }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  if (auth && !params.get("auth")) params.set("auth", auth);
+  const search = params.toString();
+  return <Navigate to={{ pathname: "/", search: search ? `?${search}` : "" }} replace />;
+}
+
+function VerifyEmailRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("email_verify", "skip");
+  return <Navigate to={{ pathname: "/", search: `?${params.toString()}` }} replace />;
+}
+
+
 function AdminConsoleApp() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Toaster position="top-center" theme="dark" richColors closeButton />
         <Routes>
-          <Route path={ADMIN_LOGIN_PATH} caseSensitive element={<PortalPublicOnly role="ADMIN"><AdminLogin role="ADMIN" /></PortalPublicOnly>} />
+          <Route path="/" element={<Navigate to="/Admin" replace />} />
+          <Route path={ADMIN_LOGIN_LEGACY_PATH} caseSensitive element={<Navigate to="/Admin" replace />} />
           <Route path="/distributor/login" caseSensitive element={<PortalPublicOnly role="DISTRIBUTOR"><AdminLogin role="DISTRIBUTOR" /></PortalPublicOnly>} />
           <Route path="/distributor/change-password" caseSensitive element={<RequirePartner allowPasswordChange><PartnerPasswordChange /></RequirePartner>} />
-          <Route path="/Admin" caseSensitive element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+          <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
@@ -154,11 +171,13 @@ function AdminConsoleApp() {
             <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
             <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
             <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="promotions" element={<RequirePermission permission={ADMIN_PERMISSIONS.PROMOTIONS_VIEW}><AdminPromotions /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
+            <Route path="free-cash" element={<AdminFreeCash />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
@@ -179,8 +198,8 @@ function AdminConsoleApp() {
           </Route>
           <Route path="/admin" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
           <Route path="/admin/*" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
-          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
+          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
+          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
           <Route path="/partner" caseSensitive element={<LegacyPathRedirect from="/partner" to="/distributor" />} />
           <Route path="/partner/*" caseSensitive element={<LegacyPathRedirect from="/partner" to="/distributor" />} />
           <Route path="*" element={<Navigate to="/Admin/dashboard" replace />} />
@@ -226,14 +245,15 @@ function PlayerApp() {
           <Route path="/welcome" element={<PublicOnly><Welcome /></PublicOnly>} />
           <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
           <Route path="/verify" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
-          <Route path="/verify-email" element={<PublicOnly><VerifyEmail /></PublicOnly>} />
-          <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+          <Route path="/verify-email" element={<VerifyEmailRedirect />} />
+          <Route path="/login" element={<FrontDoorRedirect auth="login" />} />
+          <Route path="/casino" element={<CasinoEntry />} />
           {/* Canonical, same-origin operator entries. Player login never stores
               an admin or distributor token. */}
-          <Route path={ADMIN_LOGIN_PATH} caseSensitive element={<PortalPublicOnly role="ADMIN"><AdminLogin role="ADMIN" /></PortalPublicOnly>} />
+          <Route path={ADMIN_LOGIN_LEGACY_PATH} caseSensitive element={<Navigate to="/Admin" replace />} />
           <Route path="/distributor/login" caseSensitive element={<PortalPublicOnly role="DISTRIBUTOR"><AdminLogin role="DISTRIBUTOR" /></PortalPublicOnly>} />
           <Route path="/distributor/change-password" caseSensitive element={<RequirePartner allowPasswordChange><PartnerPasswordChange /></RequirePartner>} />
-          <Route path="/Admin" caseSensitive element={<RequireAdmin><AdminLayout /></RequireAdmin>}>
+          <Route path="/Admin" caseSensitive element={<AdminFrontPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="players" element={<AdminUsers />} />
@@ -254,11 +274,13 @@ function PlayerApp() {
             <Route path="withdrawals" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminWithdrawals /></RequirePermission>} />
             <Route path="payment-events" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENTS_VIEW}><AdminPaymentEvents /></RequirePermission>} />
             <Route path="wallet-ledger" element={<RequirePermission permission={ADMIN_PERMISSIONS.LEDGER_VIEW}><AdminWalletLedger /></RequirePermission>} />
+            <Route path="play-history" element={<AdminPlayHistory />} />
             <Route path="payment-audit" element={<RequirePermission permission={ADMIN_PERMISSIONS.AUDIT_VIEW}><AdminPaymentAudit /></RequirePermission>} />
             <Route path="payment-settings" element={<RequirePermission permission={ADMIN_PERMISSIONS.PAYMENT_SETTINGS_WRITE}><AdminPaymentSettings /></RequirePermission>} />
             <Route path="promotions" element={<RequirePermission permission={ADMIN_PERMISSIONS.PROMOTIONS_VIEW}><AdminPromotions /></RequirePermission>} />
             <Route path="distributors" element={<RequirePermission permission={ADMIN_PERMISSIONS.DISTRIBUTORS_VIEW}><AdminDistributors /></RequirePermission>} />
             <Route path="commission" element={<AdminCommission />} />
+            <Route path="free-cash" element={<AdminFreeCash />} />
             <Route path="payouts" element={<Navigate to="/Admin/commission" replace />} />
             <Route path="compliance" element={<AdminCompliance />} />
             <Route path="support" element={<AdminSupport />} />
@@ -268,9 +290,18 @@ function PlayerApp() {
           </Route>
           <Route path="/admin" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
           <Route path="/admin/*" caseSensitive element={<LegacyPathRedirect from="/admin" to="/Admin" />} />
-          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin/login" />} />
-          <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
+          <Route path="/gk-admin-portal" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
+          <Route path="/gk-admin-portal/*" caseSensitive element={<LegacyPathRedirect from="/gk-admin-portal" to="/Admin" emptyTo="/Admin" />} />
+          <Route path="/forgot-password" element={<FrontDoorRedirect auth="forgot" />} />
+
+          {/* Public company / legal pages (readable without an account). */}
+          <Route path="/about" element={<LegalRouterPage />} />
+          <Route path="/terms" element={<LegalRouterPage />} />
+          <Route path="/privacy" element={<LegalRouterPage />} />
+          <Route path="/cookies" element={<LegalRouterPage />} />
+          <Route path="/contact" element={<LegalRouterPage />} />
+          <Route path="/fair-play" element={<LegalRouterPage />} />
+          <Route path="/responsible-gaming" element={<LegalRouterPage />} />
 
           {/* Onboarding */}
           <Route path="/onboarding/profile" element={<OnboardingRoute><OnboardingProfile /></OnboardingRoute>} />
@@ -279,8 +310,8 @@ function PlayerApp() {
 
           {/* Player app (ACTIVE only) */}
           <Route element={<RequireActive><AppShell /></RequireActive>}>
-            <Route path="/home" element={<Home />} />
-            <Route path="/games" element={<Games />} />
+            <Route path="/home" element={<Navigate to="/" replace />} />
+            <Route path="/games" element={<Navigate to="/?tab=games" replace />} />
             {/* Direct launch URL requested by the operator. caseSensitive keeps
                 the normal lowercase /games/aviator detail page intact. */}
             <Route

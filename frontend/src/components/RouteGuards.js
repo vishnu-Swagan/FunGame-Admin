@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { routeForUser } from "@/lib/api";
+import { guestPlayAuthPath } from "@/lib/frontDoor";
 import { ADMIN_LOGIN_PATH, DISTRIBUTOR_LOGIN_PATH, IS_ADMIN_CONSOLE } from "@/lib/adminConsole";
 import { LoadingScreen } from "@/components/common";
 import { ADMIN_PERMISSIONS, hasPermission, isActiveAdmin } from "@/lib/adminPermissions";
@@ -28,14 +29,15 @@ export function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" state={{ from: location }} replace />;
+  if (!user) return <Navigate to={guestPlayAuthPath()} state={{ from: location }} replace />;
   return children;
 }
 
 export function RequireActive({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/welcome" replace />;
+  if (!user) return <Navigate to={guestPlayAuthPath()} state={{ from: location }} replace />;
   if (user.role !== "PLAYER" || user.status !== "ACTIVE") return <Navigate to={routeForUser(user)} replace />;
   return children;
 }

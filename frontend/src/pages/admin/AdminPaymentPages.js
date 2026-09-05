@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageTransition, EmptyState, formatChips } from "@/components/common";
 import { adminPayments } from "@/lib/paymentApi";
 import { errMsg } from "@/lib/api";
-import { formatInrPaise } from "@/lib/walletUtils";
+import { formatInrPaise, formatPaymentTime, paymentDisplayAt } from "@/lib/walletUtils";
 import { PaymentStatus } from "@/pages/app/wallet/WalletBits";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_PERMISSIONS, hasPermission } from "@/components/RouteGuards";
@@ -23,9 +23,7 @@ function valueOf(item, ...keys) {
 }
 
 function when(value) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  return formatPaymentTime(value);
 }
 
 function useAdminRows(loader) {

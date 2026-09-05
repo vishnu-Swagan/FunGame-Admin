@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { setHaptics, setMuted } from "@/lib/sound";
 import { toast } from "sonner";
 import {
-  Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, LogOut, ChevronRight,
+  Shield, HeartPulse, Settings as SettingsIcon, Megaphone, Bell, Heart, Clock, History, LogOut, ChevronRight,
   LayoutDashboard, Volume2, Music, Vibrate, Accessibility, Contrast, KeyRound, MessagesSquare,
   Download, CheckCircle2, HandCoins, Landmark, Pencil, Save, X, Search, Camera, Upload, LoaderCircle, FileText, Smartphone,
 } from "lucide-react";
@@ -507,7 +507,7 @@ export function Profile() {
         variant="outline"
         onClick={() => {
           logout();
-          navigate("/welcome");
+          navigate("/");
           toast.success("Logged out");
         }}
         className="w-full h-12 rounded-xl border-destructive/40 bg-destructive/10 text-red-400 hover:bg-destructive/20 hover:text-red-300"

@@ -89,7 +89,7 @@ self.addEventListener('fetch', (event) => {
   if (req.mode === 'navigate') {
     // Aviator is its own embedded build. It must never replace the cached React
     // shell at '/', and its versioned assets are managed independently.
-    if (url.pathname.startsWith('/aviator-live/') || url.pathname.startsWith('/chicken-road-live/')) return;
+    if (url.pathname.startsWith('/aviator-live/')) return;
     event.respondWith(
       fetch(req)
         .then(async (response) => {
@@ -111,7 +111,7 @@ self.addEventListener('fetch', (event) => {
 
   // Media uses byte-range requests and fixed-name sub-app assets must update as
   // one coordinated build. Leave both entirely to the network/browser cache.
-  if (req.headers.has('range') || url.pathname.startsWith('/aviator-live/') || url.pathname.startsWith('/chicken-road-live/') || !isRuntimeCacheable(url.pathname)) return;
+  if (req.headers.has('range') || url.pathname.startsWith('/aviator-live/') || !isRuntimeCacheable(url.pathname)) return;
 
   // Hashed build assets can be served immediately, then refreshed in the
   // background. Activation prunes files absent from the current build manifest.

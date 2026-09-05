@@ -142,7 +142,7 @@ test("registration uses globally neutral phone and country guidance", async () =
 
   expect(container.querySelector('label[for="reg-contact"]')?.textContent).toBe("Mobile number (enter with +country code)");
   expect(container.querySelector("#reg-contact")?.placeholder).toBe("Enter with +country code");
-  expect(container.querySelector("#reg-country")?.value).toBe("");
+  expect(container.querySelector("#reg-country")?.value).toBe("IN");
   expect(container.querySelector("#reg-country option")?.textContent).toBe("Select your country");
   expect(container.querySelectorAll("#reg-country option").length).toBeGreaterThan(200);
   expect(container.querySelector("#reg-contact")?.outerHTML).not.toMatch(/\+91/);
@@ -155,7 +155,6 @@ test("manual-review registration submits both contacts and confirmed password wi
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "New Player");
-  change(container.querySelector("#reg-login-id"), "Lucky.Player_7");
   change(container.querySelector("#reg-contact"), "+91 98765-43210");
   change(container.querySelector("#reg-email"), "New.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -170,7 +169,7 @@ test("manual-review registration submits both contacts and confirmed password wi
     identifier: "+919876543210",
     phone: "+919876543210",
     email: "new.player@example.com",
-    username: "Lucky.Player_7",
+    username: "p919876543210",
     full_name: "New Player",
     date_of_birth: "1990-05-20",
     country: "IN",
@@ -181,16 +180,13 @@ test("manual-review registration submits both contacts and confirmed password wi
     password: "Strong-Password-9",
     password_confirmation: "Strong-Password-9",
   }));
-  expect(mockNavigate).toHaveBeenCalledWith("/login", {
-    state: { registrationSubmitted: true },
-  });
+  expect(mockNavigate).toHaveBeenCalledWith("/?auth=login&registered=1");
   await act(async () => root.unmount());
 });
 
 test("mismatched passwords are rejected before the registration API call", async () => {
   const { container, root } = await renderRegister();
   change(container.querySelector("#reg-name"), "Review Player");
-  change(container.querySelector("#reg-login-id"), "Review_Player");
   change(container.querySelector("#reg-contact"), "+919999888877");
   change(container.querySelector("#reg-email"), "review@example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -215,8 +211,10 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   };
   mockPost.mockResolvedValue({ data: { destination_masked: "+44******23", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
+  expect(container.querySelector('[data-testid="register-verification-copy"]')?.textContent).toMatch(/one SMS code/i);
+  expect(container.textContent).toMatch(/Virtual chips have no cash value/);
+  expect(container.textContent).not.toMatch(/email code/i);
   change(container.querySelector("#reg-name"), "OTP Player");
-  change(container.querySelector("#reg-login-id"), "OTP.Player");
   change(container.querySelector("#reg-contact"), "+44 7700 900123");
   change(container.querySelector("#reg-email"), "Optional@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -232,20 +230,19 @@ test("the retained phone-OTP mode still sends no pre-verification password", asy
   await act(async () => root.unmount());
 });
 
-test("a real submit-button click posts the live dual-verification payload", async () => {
+test("a real submit-button click posts the phone-OTP payload with a generated Login ID", async () => {
   mockCapabilities = {
     registration_enabled: true,
     email_registration: false,
     phone_registration: true,
     verification_required: true,
-    email_verification_required: true,
+    email_verification_required: false,
     registration_mode: "PHONE_OTP",
   };
   mockPost.mockResolvedValue({ data: { destination_masked: "+91******10", resend_after_seconds: 30 } });
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Live Player");
-  change(container.querySelector("#reg-login-id"), "Live.Player");
   change(container.querySelector("#reg-contact"), "+91 (98765).43210");
   change(container.querySelector("#reg-email"), "Live.Player@Example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -259,7 +256,7 @@ test("a real submit-button click posts the live dual-verification payload", asyn
     identifier: "+919876543210",
     phone: "+919876543210",
     email: "live.player@example.com",
-    username: "Live.Player",
+    username: "p919876543210",
     full_name: "Live Player",
     date_of_birth: "1990-05-20",
     country: "IN",
@@ -284,13 +281,12 @@ test("an invalid required email is explained inline and focused without posting"
     email_registration: false,
     phone_registration: true,
     verification_required: true,
-    email_verification_required: true,
+    email_verification_required: false,
     registration_mode: "PHONE_OTP",
   };
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Live Player");
-  change(container.querySelector("#reg-login-id"), "Live.Player");
   change(container.querySelector("#reg-contact"), "+919876543210");
   change(container.querySelector("#reg-email"), "not-an-email");
   change(container.querySelector("#reg-dob"), "1990-05-20");
@@ -316,10 +312,9 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
   const { container, root } = await renderRegister();
 
   change(container.querySelector("#reg-name"), "Terms Player");
-  change(container.querySelector("#reg-login-id"), "Terms.Player");
   change(container.querySelector("#reg-contact"), "+919876543210");
+  change(container.querySelector("#reg-email"), "terms@example.com");
   change(container.querySelector("#reg-dob"), "1990-05-20");
-  changeSelect(container.querySelector("#reg-country"), "IN");
   expect(container.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
   await clickPrimarySubmit(container);
 

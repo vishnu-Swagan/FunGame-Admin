@@ -95,6 +95,11 @@ export function isValidE164Phone(identifier) {
   return /^\+[1-9]\d{7,14}$/.test(normalizeContactIdentifier("PHONE", identifier));
 }
 
+export function loginIdFromPhone(phone) {
+  const digits = String(normalizeContactIdentifier("PHONE", phone) || "").replace(/\D/g, "");
+  return (`p${digits}`).slice(0, 32);
+}
+
 export function verificationChannelState(capabilities, channel, issuedChallenge = false) {
   const deliveryAvailable = contactVerificationChannelAvailable(capabilities, channel);
   return {
@@ -105,7 +110,20 @@ export function verificationChannelState(capabilities, channel, issuedChallenge 
 }
 
 export function loginVerificationRecovery(capabilities, detailChannel, identifier) {
-  const channel = normalizeContactChannel(detailChannel, identifier);
+  // A leftover EMAIL channel must not hide a stored mobile number. Existing
+  // players typically type a Login ID; the server now returns the E.164 phone.
+  const channel = isValidE164Phone(identifier)
+    ? "PHONE"
+    : normalizeContactChannel(detailChannel, identifier);
+  // PHONE_OTP signup/login never uses email OTP, even if leftover CONTACT_NOT_VERIFIED
+  // details still name the email channel.
+  if (
+    channel === "EMAIL"
+    && capabilities?.registration_mode !== "ADMIN_REVIEW"
+    && capabilities?.email_verification_required !== true
+  ) {
+    return null;
+  }
   if (!contactVerificationChannelAvailable(capabilities, channel)) return null;
   const contact = normalizeContactIdentifier(channel, identifier);
   return {

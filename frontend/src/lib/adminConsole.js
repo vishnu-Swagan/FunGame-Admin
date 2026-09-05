@@ -50,10 +50,18 @@ export const IS_ADMIN_CONSOLE =
 // remain lowercase `/admin/*`; changing those would break the existing service
 // contract. All legacy browser entries are canonicalised in App.js.
 export const ADMIN_ROOT_PATH = "/Admin";
-export const ADMIN_LOGIN_PATH = "/Admin/login";
+/** Same-origin CRM front door on chakri.casino (crm.chakri.casino is retired). */
+export const ADMIN_LOGIN_PATH = "/Admin";
 export const ADMIN_LOGOUT_PATH = ADMIN_LOGIN_PATH;
+/** Legacy login URL; App redirects it to ADMIN_LOGIN_PATH. */
+export const ADMIN_LOGIN_LEGACY_PATH = "/Admin/login";
 export const DISTRIBUTOR_ROOT_PATH = "/distributor";
 export const DISTRIBUTOR_LOGIN_PATH = "/distributor/login";
+
+/** Admin sign-in destination (always the /Admin front door). */
+export function adminLoginPathForConsole(_isAdminConsole = IS_ADMIN_CONSOLE) {
+  return ADMIN_LOGIN_PATH;
+}
 
 function hasPathPrefix(pathname, prefix) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -66,7 +74,13 @@ function isDistributorBrowserPath(pathname) {
 /** Return the exact branded admin path for a supported browser entry. */
 export function canonicalAdminPathForBrowserPath(pathname) {
   const path = String(pathname || "");
+  // Collapse the retired login URL onto the /Admin front door before other
+  // /Admin/* prefix handling, so bookmarks and host redirects stay consistent.
+  if (path === ADMIN_LOGIN_LEGACY_PATH || path === `${ADMIN_LOGIN_LEGACY_PATH}/`) {
+    return ADMIN_LOGIN_PATH;
+  }
   if (hasPathPrefix(path, ADMIN_ROOT_PATH)) return path;
+  if (path === "/admin/login" || path === "/admin/login/") return ADMIN_LOGIN_PATH;
   if (hasPathPrefix(path, "/admin")) {
     return `${ADMIN_ROOT_PATH}${path.slice("/admin".length)}`;
   }
@@ -88,10 +102,9 @@ export function canonicalAdminUrlForLocation(locationLike) {
 
   const pathname = String(locationLike?.pathname || "");
   const requestedAdminPath = canonicalAdminPathForBrowserPath(pathname);
-  // crm.chakri.casino was a dedicated operator bundle. Its root and unknown
-  // routes otherwise fall through to /Admin/dashboard inside the SPA, after
-  // this startup guard has run. Preserve its explicit distributor routes, but
-  // canonicalize every other entry to the branded admin login.
+  // Retired crm.chakri.casino (and other legacy hosts): send bookmarks to the
+  // live same-origin Admin front door on chakri.casino. Distributor routes stay
+  // untouched. Path mapping prefers /Admin over the legacy /Admin/login URL.
   const canonicalPath = requestedAdminPath || (
     dedicatedLegacyAdminHosts.has(hostname) && !isDistributorBrowserPath(pathname)
       ? ADMIN_LOGIN_PATH
@@ -123,7 +136,9 @@ export function loginPathForBrowserPath(pathname, isAdminConsole = IS_ADMIN_CONS
   const path = String(pathname || "");
   if (canonicalAdminPathForBrowserPath(path)) return ADMIN_LOGIN_PATH;
   if (isDistributorBrowserPath(path)) return DISTRIBUTOR_LOGIN_PATH;
-  return isAdminConsole ? ADMIN_LOGIN_PATH : "/login";
+  // IS_ADMIN_CONSOLE builds (retired dedicated host / staging flag) still land
+  // on the Admin front door rather than the player auth panel.
+  return isAdminConsole ? ADMIN_LOGIN_PATH : "/?auth=login";
 }
 
 // A newly opened console has no remembered failover host. Route it to the
