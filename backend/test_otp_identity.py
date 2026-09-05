@@ -42,6 +42,7 @@ import routes_compliance
 import routes_player
 from models import (
     AgeVerify,
+    AdminCreateUser,
     AdminVerificationRequest,
     AdminExclusion,
     AdminUserAction,
@@ -350,6 +351,55 @@ async def main():
             )),
             400, 'OTP_INVALID',
         )
+
+        # Accounts whose credentials are issued directly by an administrator
+        # have no player-owned contact to receive a login OTP. They authenticate
+        # with the issued Login ID and password even when ordinary player login
+        # verification is enabled.
+        operator_admin = {
+            'id': 'operator-demo-admin', 'role': 'ADMIN', 'status': 'ACTIVE',
+            'email': 'operator@example.com',
+        }
+        operator_account = await routes_admin.admin_create_user(
+            AdminCreateUser(full_name='Operator Demo', starting_chips=0),
+            operator_admin,
+        )
+        operator_user = await database.users.find_one({
+            'username': operator_account['username'],
+        })
+        assert operator_user['registration_source'] == 'OPERATOR'
+        assert operator_user['login_verification_exempt'] is True
+        assert operator_user['email_verified'] is False
+        operator_login = await routes_auth.login(LoginRequest(
+            identifier=operator_account['username'],
+            password=operator_account['password'],
+            login_surface='PLAYER',
+        ))
+        assert operator_login['access_token']
+        assert 'requires_otp' not in operator_login
+        assert 'login_verification_exempt' not in operator_login['user']
+        assert await database.otp_challenges.count_documents({
+            'user_id': operator_user['id'],
+            'purpose': otp_service.LOGIN_VERIFICATION,
+        }) == 0
+
+        # Accounts created before the explicit marker shipped are recognized by
+        # their immutable provisioning actor, so the live demo needs no database
+        # edit or replacement account.
+        await database.users.update_one({'id': operator_user['id']}, {'$unset': {
+            'registration_source': '',
+            'activation_mode': '',
+            'login_verification_exempt': '',
+            'email_verified': '',
+            'contact_verified': '',
+        }})
+        legacy_operator_login = await routes_auth.login(LoginRequest(
+            identifier=operator_account['username'].lower(),
+            password=operator_account['password'],
+            login_surface='PLAYER',
+        ))
+        assert legacy_operator_login['access_token']
+        assert 'requires_otp' not in legacy_operator_login
 
         # An administrator-issued temporary password grants exactly one
         # recovery session without a player OTP. It exposes only the forced

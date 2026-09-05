@@ -151,7 +151,8 @@ def public_user(user: dict) -> dict:
         'mobile_reviewed_by', 'mobile_review_note', 'mobile_review_phone_snapshot',
         'admin_step_up_password_verified_at', 'admin_step_up_session_id',
         'mfa_verified_at', 'reauthenticated_at', 'admin_step_up_completed_at',
-        'login_otp_bypass_once', 'password_reset_by_admin_id',
+        'login_otp_bypass_once', 'login_verification_exempt',
+        'password_reset_by_admin_id',
     ):
         public.pop(key, None)
     # Phone registrations and provisional manual applications carry unique

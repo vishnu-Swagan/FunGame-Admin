@@ -1554,7 +1554,8 @@ async def admin_reset_password(user_id: str, body: AdminSetPassword, admin: dict
 async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require_admin)):
     """Create a player account directly. The server issues the Login ID
     (GK + 7 digits) and password (7 CAPITAL letters). The account is ACTIVE and
-    pre-verified; the player logs in with the credentials the admin hands them."""
+    operator-authorized; the player logs in with the credentials the admin
+    hands them without relying on an unowned contact-address OTP."""
     await _require_distributor_identity_ready()
     # Allocate a unique GK Login ID.
     username = None
@@ -1583,7 +1584,13 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'email': email_normalized, 'email_normalized': email_normalized,
         'username': username, 'username_key': username.casefold(),
         'password_hash': hash_password(password),
-        'role': 'PLAYER', 'status': 'ACTIVE', 'email_verified': True,
+        'role': 'PLAYER', 'status': 'ACTIVE',
+        'registration_source': 'OPERATOR',
+        'activation_mode': 'OPERATOR_PROVISIONED',
+        'login_verification_exempt': True,
+        # An address supplied or synthesized by an operator is account metadata,
+        # not proof that the player owns the mailbox.
+        'email_verified': False, 'contact_verified': False,
         'display_name': body.full_name, 'full_name': body.full_name,
         'country': None, 'date_of_birth': None, 'phone': None,
         'avatar': deterministic_avatar_key(email_normalized),

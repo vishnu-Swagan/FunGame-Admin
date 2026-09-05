@@ -111,6 +111,25 @@ def _player_login_otp_required() -> bool:
     return _environment_flag('PLAYER_LOGIN_OTP_REQUIRED')
 
 
+def _operator_provisioned_player(user: dict) -> bool:
+    """Identify players whose credentials were issued directly by an admin.
+
+    These accounts have no player-owned phone or email to receive a login OTP.
+    The explicit exemption is written on new records; ``provisioned_by`` keeps
+    already-created operator accounts usable without a risky data migration.
+    Self-service registrations can never inherit the exemption.
+    """
+    return bool(
+        user.get('role') == 'PLAYER'
+        and user.get('registration_source') != 'SELF_SERVICE'
+        and (
+            user.get('login_verification_exempt') is True
+            or user.get('registration_source') == 'OPERATOR'
+            or bool(user.get('provisioned_by'))
+        )
+    )
+
+
 def _player_login_otp_identity(
     user: dict, *, delivery_required: bool = True,
     requested_channel: str | None = None,
@@ -1846,7 +1865,9 @@ async def login(body: LoginRequest):
     phone_self_service = False
     manual_review_account = False
     legacy_operator_repair = False
+    operator_provisioned = False
     if user.get('role') == 'PLAYER':
+        operator_provisioned = _operator_provisioned_player(user)
         phone_self_service = bool(
             user.get('registration_source') == 'SELF_SERVICE'
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
@@ -1872,16 +1893,23 @@ async def login(body: LoginRequest):
                 'code': 'ACCOUNT_PENDING_REVIEW',
                 'message': 'Your registration is pending administrator approval.',
             })
-        primary = None if phone_self_service else contact_identity
-        if primary is None:
-            try:
-                primary = normalize_identity(
-                    user.get('phone') if phone_self_service
-                    else user.get('primary_identity') or user.get('email')
-                )
-            except ValueError:
-                primary = None
-        player_contact_verified = bool(primary and _identity_is_verified(user, primary))
+        primary = None
+        if operator_provisioned:
+            # The administrator issued the Login ID and password specifically
+            # for direct access. A synthetic account email is not a deliverable
+            # contact and must never strand this login in contact recovery.
+            player_contact_verified = True
+        else:
+            primary = None if phone_self_service else contact_identity
+            if primary is None:
+                try:
+                    primary = normalize_identity(
+                        user.get('phone') if phone_self_service
+                        else user.get('primary_identity') or user.get('email')
+                    )
+                except ValueError:
+                    primary = None
+            player_contact_verified = bool(primary and _identity_is_verified(user, primary))
         # In the temporary ADMIN_REVIEW mode an explicit operator decision,
         # not an OTP, is the activation gate. Contact flags deliberately stay
         # false so the UI and future verification migration remain truthful.
@@ -1918,6 +1946,7 @@ async def login(body: LoginRequest):
     if (
         user.get('role') == 'PLAYER'
         and _player_login_otp_required()
+        and not operator_provisioned
         and not temporary_access_recovery
     ):
         try:
