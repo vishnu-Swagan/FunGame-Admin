@@ -38,6 +38,7 @@ import routes_game_settlement
 import routes_payments
 import routes_payment_hub
 import routes_promotions
+import operator_rail
 import financial_wallet
 import game_wallet
 import promotions
