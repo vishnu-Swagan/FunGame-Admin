@@ -392,7 +392,11 @@ body.crm-admin-active [role="dialog"] textarea {
 
 /* Filled action buttons keep their own contrasting foregrounds. */
 :is(.crm-admin, body.crm-admin-active) [class~="bg-primary"] {
+  background-color: var(--crm-accent) !important;
   color: #182235 !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class~="bg-primary"]:hover:not(:disabled) {
+  background-color: var(--crm-accent-hover) !important;
 }
 :is(.crm-admin, body.crm-admin-active) :is([class~="bg-destructive"], [class~="bg-[#b13a46]"], [class~="bg-[#a82f42]"]) {
   background-color: var(--danger) !important;
