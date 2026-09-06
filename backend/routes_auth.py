@@ -41,7 +41,6 @@ from auth_utils import (
 from otp_service import (
     OtpConfigurationError,
     OtpError,
-    LOGIN_VERIFICATION,
     RESET_PASSWORD,
     VERIFY_CONTACT,
     Identity,
@@ -104,61 +103,6 @@ def _environment_flag(name: str) -> bool:
     return (os.environ.get(name) or '').strip().lower() in {
         '1', 'true', 'yes', 'on',
     }
-
-
-def _player_login_otp_required() -> bool:
-    """Return the operator-controlled player login verification policy."""
-    return _environment_flag('PLAYER_LOGIN_OTP_REQUIRED')
-
-
-def _operator_provisioned_player(user: dict) -> bool:
-    """Identify players whose credentials were issued directly by an admin.
-
-    These accounts have no player-owned phone or email to receive a login OTP.
-    The explicit exemption is written on new records; ``provisioned_by`` keeps
-    already-created operator accounts usable without a risky data migration.
-    Self-service registrations can never inherit the exemption.
-    """
-    return bool(
-        user.get('role') == 'PLAYER'
-        and user.get('registration_source') != 'SELF_SERVICE'
-        and (
-            user.get('login_verification_exempt') is True
-            or user.get('registration_source') == 'OPERATOR'
-            or bool(user.get('provisioned_by'))
-        )
-    )
-
-
-def _player_login_otp_identity(
-    user: dict, *, delivery_required: bool = True,
-    requested_channel: str | None = None,
-) -> Identity:
-    """Choose a deliverable player contact without exposing it to the client.
-
-    Mobile is preferred because new accounts prove it during activation. Older
-    active accounts may use a verified email when SMS is unavailable. A
-    manually reviewed account can establish mobile ownership at login; the
-    successful OTP is then recorded as mobile verification.
-    """
-    candidates = [
-        ('SMS', user.get('phone_normalized') or user.get('phone')),
-        ('EMAIL', user.get('email_normalized') or user.get('email')),
-    ]
-    for channel, value in candidates:
-        if requested_channel and channel != requested_channel:
-            continue
-        if not value or (delivery_required and not delivery_adapter_ready(channel)):
-            continue
-        try:
-            identity = normalize_identity(value)
-        except ValueError:
-            continue
-        if identity.channel != channel:
-            continue
-        if channel == 'SMS' or user.get('email_verified') is True:
-            return identity
-    raise OtpConfigurationError('No verified player login OTP channel is available')
 
 
 def _policy_config_error(message: str) -> HTTPException:
@@ -930,8 +874,6 @@ async def authentication_capabilities():
     otp_storage_ready = await registration_storage_ready()
     email_otp_ready = otp_storage_ready and delivery_adapter_ready('EMAIL')
     phone_otp_ready = otp_storage_ready and delivery_adapter_ready('SMS')
-    login_otp_required = _player_login_otp_required()
-    login_otp_ready = phone_otp_ready or email_otp_ready
     email_required = _registration_email_otp_required()
     otp_registration_ready = (
         otp_storage_ready
@@ -950,8 +892,8 @@ async def authentication_capabilities():
             'phone_contact_verification': phone_otp_ready,
             'email_password_reset': email_otp_ready,
             'phone_password_reset': phone_otp_ready,
-            'player_login_verification_required': login_otp_required,
-            'player_login_verification_available': login_otp_ready,
+            'player_login_verification_required': False,
+            'player_login_verification_available': False,
             'verification_required': False,
             'manual_admin_review': True,
             'registration_mode': ADMIN_REVIEW_ACTIVATION_MODE,
@@ -967,13 +909,11 @@ async def authentication_capabilities():
         'email_verification_required': email_required,
         'email_contact_verification': email_otp_ready,
         'phone_contact_verification': phone_otp_ready,
-        # Legacy verified-email accounts may use email for recovery and as the
-        # login-OTP fallback when mobile delivery is unavailable. It is never
-        # the activation gate for phone-registration accounts.
+        # Verified contacts remain available for password recovery.
         'email_password_reset': email_otp_ready,
         'phone_password_reset': phone_otp_ready,
-        'player_login_verification_required': login_otp_required,
-        'player_login_verification_available': login_otp_ready,
+        'player_login_verification_required': False,
+        'player_login_verification_available': False,
         'verification_required': True,
         'registration_mode': PHONE_OTP_ACTIVATION_MODE,
     }
@@ -1796,27 +1736,6 @@ async def login(body: LoginRequest):
         body.password,
         user.get('password_hash', DUMMY_PASSWORD_HASH) if user else DUMMY_PASSWORD_HASH,
     )
-    phone_self_service_identity_ok = True
-    if (user
-            and user.get('role') == 'PLAYER'
-            and user.get('registration_source') == 'SELF_SERVICE'
-            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
-        # The optional email collected during sign-up is profile data only. It
-        # must not silently become a login identifier without its own ownership
-        # proof. Phone-OTP accounts may authenticate with the exact verified
-        # mobile number or their explicitly chosen Login ID.
-        phone_self_service_identity_ok = bool(
-            (
-                contact_identity
-                and contact_identity.channel == 'SMS'
-                and contact_identity.value == user.get('phone_normalized')
-            )
-            or (
-                contact_identity is None
-                and user.get('username_key')
-                and user.get('username_key') == ident.casefold()
-            )
-        )
     locked_until = _as_utc(user.get('locked_until')) if user else None
     if user and locked_until and locked_until <= now:
         await db.users.update_one({'id': user['id']}, {
@@ -1828,7 +1747,7 @@ async def login(body: LoginRequest):
         locked_until = None
     if user and locked_until and locked_until > now:
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
-    if not user or not password_ok or not phone_self_service_identity_ok:
+    if not user or not password_ok:
         if user:
             updated = await db.users.find_one_and_update(
                 {'id': user['id']},
@@ -1861,191 +1780,65 @@ async def login(body: LoginRequest):
                 'code': 'DISTRIBUTOR_LOGIN_DISABLED',
                 'message': 'This partner login is disabled. Please contact the operator.',
             })
-    player_contact_verified = False
-    phone_self_service = False
-    manual_review_account = False
-    legacy_operator_repair = False
-    operator_provisioned = False
+    # Player login is password-only. Contact verification belongs to signup
+    # and recovery, and never gates an already-active player's login.
+    profile_repair = False
     if user.get('role') == 'PLAYER':
-        operator_provisioned = _operator_provisioned_player(user)
-        phone_self_service = bool(
-            user.get('registration_source') == 'SELF_SERVICE'
-            and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
-        )
-        if phone_self_service:
-            user = await _repair_phone_otp_email_pending(user)
-        manual_review_account = bool(
-            user.get('registration_source') == 'SELF_SERVICE'
-            and user.get('activation_mode') == ADMIN_REVIEW_ACTIVATION_MODE
-        )
-        if manual_review_account and user.get('status') != 'ACTIVE':
-            if user.get('status') == 'REJECTED':
-                raise HTTPException(status_code=403, detail={
-                    'code': 'ACCOUNT_REVIEW_REJECTED',
-                    'message': 'Your registration was not approved. Contact support for help.',
-                })
-            if user.get('status') == 'SUSPENDED':
-                raise HTTPException(status_code=403, detail={
-                    'code': 'ACCOUNT_SUSPENDED',
-                    'message': 'Your account is suspended. Contact support.',
-                })
+        user = await _repair_phone_otp_email_pending(user)
+        if user.get('status') == 'SUSPENDED':
+            raise HTTPException(status_code=403, detail={
+                'code': 'ACCOUNT_SUSPENDED',
+                'message': 'Your account is suspended. Contact support.',
+            })
+        if user.get('status') == 'REJECTED':
+            raise HTTPException(status_code=403, detail={
+                'code': 'ACCOUNT_REVIEW_REJECTED',
+                'message': 'Your registration was not approved. Contact support for help.',
+            })
+        if _self_service_needs_profile(user) and user.get('activation_mode') != ADMIN_REVIEW_ACTIVATION_MODE:
+            try:
+                primary = normalize_identity(user.get('primary_identity') or user.get('email'))
+                profile_repair = _identity_is_verified(user, primary)
+            except ValueError:
+                pass
+        if user.get('status') not in {'ACTIVE', 'VERIFIED'} and not profile_repair:
             raise HTTPException(status_code=403, detail={
                 'code': 'ACCOUNT_PENDING_REVIEW',
-                'message': 'Your registration is pending administrator approval.',
+                'message': 'Finish registration or contact an administrator to activate your account.',
             })
-        primary = None
-        if operator_provisioned:
-            # The administrator issued the Login ID and password specifically
-            # for direct access. A synthetic account email is not a deliverable
-            # contact and must never strand this login in contact recovery.
-            player_contact_verified = True
-        else:
-            primary = None if phone_self_service else contact_identity
-            if primary is None:
-                try:
-                    primary = normalize_identity(
-                        user.get('phone') if phone_self_service
-                        else user.get('primary_identity') or user.get('email')
-                    )
-                except ValueError:
-                    primary = None
-            player_contact_verified = bool(primary and _identity_is_verified(user, primary))
-        # In the temporary ADMIN_REVIEW mode an explicit operator decision,
-        # not an OTP, is the activation gate. Contact flags deliberately stay
-        # false so the UI and future verification migration remain truthful.
-        if manual_review_account:
-            player_contact_verified = bool(
-                user.get('manual_contact_reviewed') is True
-                and user.get('contact_verification_status') == ADMIN_REVIEW_APPROVED
-            )
-        if (not player_contact_verified
-                and _legacy_operator_contact_repair_allowed(user, primary)):
-            player_contact_verified = True
-            legacy_operator_repair = True
-        if not player_contact_verified:
-            # A correct password has already been proved. Always return the
-            # deliverable contact (mobile first) so Login ID / email logins
-            # can request the SMS that actually belongs to this account.
-            raise HTTPException(
-                status_code=403,
-                detail=_contact_not_verified_detail(user, primary),
-            )
 
     telesign_sign_in = None
     if user.get('role') == 'PLAYER':
         telesign_sign_in = await _telesign_sign_in_screen(user)
 
     session_id = str(uuid.uuid4())
-    login_otp_challenge = None
-    login_otp_identity = None
-    temporary_access_recovery = bool(
-        user.get('role') == 'PLAYER'
-        and user.get('password_change_required') is True
-        and user.get('login_otp_bypass_once') is True
-    )
-    if (
-        user.get('role') == 'PLAYER'
-        and _player_login_otp_required()
-        and not operator_provisioned
-        and not temporary_access_recovery
-    ):
-        try:
-            login_otp_identity = _player_login_otp_identity(user)
-            login_otp_challenge = await issue_challenge(
-                user, login_otp_identity, LOGIN_VERIFICATION,
-            )
-        except OtpError as exc:
-            _raise_otp(exc)
-        await db.otp_challenges.update_one(
-            {
-                'id': login_otp_challenge['challenge_id'],
-                'user_id': user['id'],
-                'purpose': LOGIN_VERIFICATION,
-                'active': True,
-            },
-            {'$set': {'login_session_id': session_id}},
-        )
-
     login_updates = {
         'active_session_id': session_id,
         'password_failed_attempts': 0,
+        'last_login_at': _now().isoformat(),
     }
-    if login_otp_challenge:
-        login_updates['pending_login_at'] = _now().isoformat()
-    else:
-        login_updates['last_login_at'] = _now().isoformat()
     if telesign_sign_in:
         login_updates['telesign_last_sign_in'] = {
             **telesign_sign_in,
             'screened_at': _now().isoformat(),
         }
-    if _self_service_needs_profile(user) and player_contact_verified:
-        # Repair accounts verified before the profile state transition shipped.
-        login_updates['status'] = 'VERIFIED'
-        login_updates['contact_verified'] = True
-    if legacy_operator_repair:
-        repaired_at = _now().isoformat()
-        login_updates.update({
-            primary.verified_field: True,
-            'contact_verified': True,
-            'contact_verified_at': repaired_at,
-            'primary_identity': primary.value,
-            'primary_identity_channel': 'PHONE' if primary.channel == 'SMS' else 'EMAIL',
-            'contact_verification_repaired_at': repaired_at,
-            'contact_verification_repair': 'LEGACY_OPERATOR_ACTIVE',
-        })
-    login_query = {'id': user['id']}
-    if user.get('role') == 'PLAYER' and phone_self_service:
-        # A concurrent admin/edit must not let a stale password check mint a
-        # session after the verified-phone state changed.
-        login_query.update({
-            'registration_source': 'SELF_SERVICE',
-            'activation_mode': PHONE_OTP_ACTIVATION_MODE,
-            'phone_verified': True,
-            'contact_verified': True,
-        })
-        login_updates['email_verification_required'] = False
-    elif user.get('role') == 'PLAYER' and manual_review_account:
-        # Prevent a concurrent suspension/rejection from minting a session
-        # after the password check but before the write.
-        login_query.update({
-            'role': 'PLAYER',
-            'status': 'ACTIVE',
-            'registration_source': 'SELF_SERVICE',
-            'activation_mode': ADMIN_REVIEW_ACTIVATION_MODE,
-            'manual_contact_reviewed': True,
-            'contact_verification_status': ADMIN_REVIEW_APPROVED,
-        })
-    elif legacy_operator_repair:
-        # The compatibility repair is itself a CAS: a concurrent explicit
-        # verification decision or account-state change must win, never be
-        # overwritten by a stale legacy login.
-        login_query.update({
-            'role': 'PLAYER',
-            'status': 'ACTIVE',
-            'registration_source': {'$ne': 'SELF_SERVICE'},
-            'contact_verified': {'$exists': False},
-            'email_verified': {'$exists': False},
-            'phone_verified': {'$exists': False},
-        })
-    elif user.get('role') == 'DISTRIBUTOR':
-        # Credential resets revoke the previous session and replace the hash.
-        # Bind the eventual session write to the exact state whose password was
-        # checked so an in-flight old-password request cannot win afterwards.
-        login_query.update({
-            'role': 'DISTRIBUTOR',
-            'status': 'ACTIVE',
-            'password_hash': user.get('password_hash'),
-            'active_session_id': user.get('active_session_id'),
-        })
+    if profile_repair:
+        login_updates.update({'status': 'VERIFIED', 'contact_verified': True})
+
+    # Bind the session to the account/password that were checked, so a
+    # concurrent suspension or credential reset wins over an in-flight login.
+    login_query = {
+        'id': user['id'],
+        'role': user.get('role'),
+        'status': user.get('status'),
+        'password_hash': user.get('password_hash'),
+    }
+    if user.get('role') == 'DISTRIBUTOR':
+        login_query['active_session_id'] = user.get('active_session_id')
     login_unsets = {'locked_until': ''}
-    if temporary_access_recovery:
-        # The bypass is attached to the one temporary-password session only.
-        # Every later login returns to the normal player OTP policy.
-        login_unsets['login_otp_bypass_once'] = ''
+    if user.get('role') == 'PLAYER':
+        login_unsets.update({'pending_login_at': '', 'login_otp_bypass_once': ''})
     if user.get('role') == 'ADMIN':
-        # A completed step-up belongs to one exact signed-in session. A newer
-        # login must never inherit the previous device's short trust window.
         login_unsets.update({
             'mfa_verified_at': '',
             'reauthenticated_at': '',
@@ -2053,23 +1846,12 @@ async def login(body: LoginRequest):
             'admin_step_up_password_verified_at': '',
             'admin_step_up_session_id': '',
         })
-    authenticated_user = user
     user = await db.users.find_one_and_update(
         login_query,
         {'$set': login_updates, '$unset': login_unsets},
         return_document=ReturnDocument.AFTER,
     )
     if not user:
-        if manual_review_account:
-            raise HTTPException(status_code=403, detail={
-                'code': 'ACCOUNT_PENDING_REVIEW',
-                'message': 'Your account is not currently approved for login.',
-            })
-        if legacy_operator_repair or phone_self_service:
-            raise HTTPException(
-                status_code=403,
-                detail=_contact_not_verified_detail(authenticated_user, primary),
-            )
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':
         current_dist = await db.distributors.find_one({
@@ -2087,22 +1869,6 @@ async def login(body: LoginRequest):
                 'code': 'DISTRIBUTOR_LOGIN_DISABLED',
                 'message': 'This partner login is disabled. Please contact the operator.',
             })
-    if login_otp_challenge:
-        response = {
-            'requires_otp': True,
-            'challenge_id': login_otp_challenge['challenge_id'],
-            'verification_id': login_otp_challenge['challenge_id'],
-            'destination_masked': login_otp_challenge.get(
-                'destination_masked', masked_destination(login_otp_identity),
-            ),
-            'resend_after_seconds': login_otp_challenge.get(
-                'resend_after_seconds', 60,
-            ),
-            'message': 'Enter the verification code sent to your account contact.',
-        }
-        if login_otp_challenge.get('dev_code'):
-            response['dev_code'] = login_otp_challenge['dev_code']
-        return response
     user = await maybe_upgrade_legacy_avatar(user)
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {'access_token': token, 'user': public_user(user)}
@@ -2110,96 +1876,11 @@ async def login(body: LoginRequest):
 
 @router.post('/login/verify-otp')
 async def verify_login_otp(body: AuthenticatedOtpVerify):
-    """Finish a password-verified player login with a one-use OTP."""
-    challenge = await db.otp_challenges.find_one({
-        'id': body.challenge_id,
-        'purpose': LOGIN_VERIFICATION,
-        'active': True,
-        'status': 'PENDING',
+    """Retire outstanding login challenges without accepting an OTP login."""
+    raise HTTPException(status_code=410, detail={
+        'code': 'LOGIN_OTP_REMOVED',
+        'message': 'Log in with your identifier and password. Login codes are no longer used.',
     })
-    session_id = str((challenge or {}).get('login_session_id') or '')
-    user = await db.users.find_one({
-        'id': (challenge or {}).get('user_id'),
-        'role': 'PLAYER',
-        'status': {'$nin': ['PENDING', 'REJECTED', 'SUSPENDED']},
-        'active_session_id': session_id,
-    }) if challenge and session_id else None
-    if not user:
-        _raise_otp(OtpError(
-            'OTP_INVALID', 'The login verification code is invalid or expired.',
-        ))
-    try:
-        identity = _player_login_otp_identity(
-            user,
-            delivery_required=False,
-            requested_channel=challenge.get('channel'),
-        )
-        prepared = await prepare_challenge_verification(
-            identity,
-            body.code.strip(),
-            LOGIN_VERIFICATION,
-            challenge_id=body.challenge_id,
-        )
-    except OtpError as exc:
-        _raise_public_code_error(
-            exc, 'The login verification code is invalid or expired.',
-        )
-
-    async def commit_login_verification(session):
-        verified = await consume_prepared_challenge(
-            prepared,
-            identity,
-            body.code.strip(),
-            LOGIN_VERIFICATION,
-            database=db,
-            session=session,
-        )
-        if verified.get('user_id') != user.get('id'):
-            raise OtpError(
-                'OTP_INVALID', 'The login verification code is invalid or expired.',
-            )
-        kwargs = {'session': session} if session is not None else {}
-        set_fields = {
-            'last_login_at': _now().isoformat(),
-            'login_otp_verified_at': _now().isoformat(),
-            'password_failed_attempts': 0,
-        }
-        if identity.channel == 'SMS':
-            set_fields.update({
-                'phone_verified': True,
-                'contact_verified': True,
-                'contact_verified_at': _now().isoformat(),
-            })
-        updated = await db.users.find_one_and_update(
-            {
-                'id': user['id'],
-                'role': 'PLAYER',
-                'status': user.get('status'),
-                'active_session_id': session_id,
-            },
-            {
-                '$set': set_fields,
-                '$unset': {'pending_login_at': '', 'locked_until': ''},
-            },
-            return_document=ReturnDocument.AFTER,
-            **kwargs,
-        )
-        if not updated:
-            raise OtpError(
-                'OTP_INVALID', 'The login verification code is invalid or expired.',
-            )
-        return updated
-
-    try:
-        user = await _run_auth_transaction(commit_login_verification)
-    except OtpError as exc:
-        _raise_public_code_error(
-            exc, 'The login verification code is invalid or expired.',
-        )
-    await report_delivery_completion(prepared, body.code.strip(), database=db)
-    user = await maybe_upgrade_legacy_avatar(user)
-    token = create_access_token(user['id'], user['role'], session_id=session_id)
-    return {'access_token': token, 'user': public_user(user)}
 
 
 @router.post('/logout')

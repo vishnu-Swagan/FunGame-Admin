@@ -182,48 +182,23 @@ test("an email next_verification step is ignored after phone OTP", async () => {
   await act(async () => root.unmount());
 });
 
-test("login recovery resends SMS to the stored mobile after a Login ID login", async () => {
+test("login errors never trigger a contact OTP or redirect to verification", async () => {
   mockPost.mockRejectedValueOnce({ response: { data: { detail: {
     code: "CONTACT_NOT_VERIFIED",
-    channel: "PHONE",
-    identifier: "+919876543210",
-    login_id: "Lobby.Player",
-    message: "Verify your contact method before logging in.",
+    message: "Old server response",
   } } } });
-  mockGet.mockResolvedValue({ data: {
-    registration_enabled: true,
-    phone_registration: true,
-    email_registration: false,
-    phone_contact_verification: true,
-    email_contact_verification: true,
-    verification_required: true,
-    email_verification_required: false,
-    registration_mode: "PHONE_OTP",
-  } });
-  mockPost.mockResolvedValueOnce({ data: {
-    challenge_id: "login-phone-challenge",
-    verification_id: "login-phone-challenge",
-    destination_masked: "+91******10",
-    resend_after_seconds: 60,
-  } });
   const { container, root } = await render(Login);
   change(container.querySelector("#identifier"), "Lobby.Player");
   change(container.querySelector("#password"), "Lobby-Player-9");
   await submit(container.querySelector("form"));
 
-  expect(mockPost).toHaveBeenCalledWith("/auth/resend-otp", expect.objectContaining({
-    channel: "PHONE",
-    identifier: "+919876543210",
-    phone: "+919876543210",
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(mockPost).toHaveBeenCalledWith("/auth/login", expect.objectContaining({
+    identifier: "Lobby.Player", password: "Lobby-Player-9",
   }));
-  expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
-    state: expect.objectContaining({
-      channel: "PHONE",
-      identifier: "+919876543210",
-      challengeId: "login-phone-challenge",
-      loginId: "Lobby.Player",
-    }),
-  }));
+  expect(mockGet).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="login-otp-form"]')).toBeNull();
   await act(async () => root.unmount());
 });
 
@@ -256,37 +231,22 @@ test("login recovery does not send PHONE_OTP players into email OTP", async () =
   await act(async () => root.unmount());
 });
 
-test("a password-verified player completes login with the issued OTP challenge", async () => {
-  mockPost
-    .mockResolvedValueOnce({ data: {
-      requires_otp: true,
-      challenge_id: "login-verification-challenge",
-      destination_masked: "+91******10",
-      resend_after_seconds: 60,
-      message: "Enter the verification code sent to your account contact.",
-    } })
-    .mockResolvedValueOnce({ data: {
-      access_token: "verified-player-token",
-      user: { id: "player-otp", role: "PLAYER", status: "ACTIVE" },
-    } });
+test("a player logs in with a password and can open OTP password recovery", async () => {
+  mockCapabilities = { phone_password_reset: false, email_password_reset: false };
+  mockPost.mockResolvedValueOnce({ data: {
+    access_token: "player-token",
+    user: { id: "player-1", role: "PLAYER", status: "ACTIVE", phone_verified: false },
+  } });
   const { container, root } = await render(Login);
   change(container.querySelector("#identifier"), "+919876543210");
   change(container.querySelector("#password"), "Strong-Password-9");
   await submit(container.querySelector("form"));
 
-  expect(container.querySelector('[data-testid="login-otp-form"]')).not.toBeNull();
-  expect(mockLogin).not.toHaveBeenCalled();
-  change(container.querySelector('[data-testid="login-otp-input"]'), "123456");
-  await submit(container.querySelector('[data-testid="login-otp-form"]'));
-
-  expect(mockPost).toHaveBeenNthCalledWith(2, "/auth/login/verify-otp", {
-    challenge_id: "login-verification-challenge",
-    code: "123456",
-  });
-  expect(mockLogin).toHaveBeenCalledWith(
-    "verified-player-token",
-    expect.objectContaining({ id: "player-otp" }),
-  );
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[data-testid="login-otp-form"]')).toBeNull();
+  expect(mockLogin).toHaveBeenCalledWith("player-token", expect.objectContaining({ id: "player-1" }));
+  await act(async () => container.querySelector('[data-testid="login-forgot-link"]').click());
+  expect(mockNavigate).toHaveBeenLastCalledWith("/?auth=forgot");
   await act(async () => root.unmount());
 });
 

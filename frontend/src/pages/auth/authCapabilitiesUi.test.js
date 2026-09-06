@@ -109,8 +109,8 @@ test("registration clearly labels manual approval without claiming an OTP", () =
   const loginIdentifier = login.querySelector('#identifier');
   expect(loginIdentifier.placeholder).toBe("Email, mobile with +country code, or your Login ID");
   expect(loginIdentifier.placeholder).not.toMatch(/\+91|GK Login ID/i);
-  expect(login.querySelector('[data-testid="login-forgot-link"]')).toBeNull();
-  expect(login.querySelector('[data-testid="login-manual-recovery-note"]')).not.toBeNull();
+  expect(login.querySelector('[data-testid="login-forgot-link"]')).not.toBeNull();
+  expect(login.querySelector('[data-testid="login-manual-recovery-note"]')).toBeNull();
 });
 
 test("registration stays fail-closed without rendering the removed unavailable banner", () => {

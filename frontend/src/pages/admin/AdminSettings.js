@@ -118,16 +118,15 @@ export default function AdminSettings() {
             <p className="text-sm font-semibold flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" /> Account OTP policy
             </p>
-            <p className="text-xs text-white/55 mt-1">Live readiness for registration, login verification, contact checks, and password recovery.</p>
+            <p className="text-xs text-white/55 mt-1">Player login uses a password. OTP is available for password recovery and contact checks.</p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${authCapabilities?.player_login_verification_required && authCapabilities?.player_login_verification_available ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-amber-300/30 bg-amber-300/10 text-amber-200"}`}>
-            {authCapabilities?.player_login_verification_required && authCapabilities?.player_login_verification_available ? "Login OTP enforced" : "Check required"}
+          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
+            Password-only login
           </span>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {[
             ["Mobile signup verification", authCapabilities?.phone_registration],
-            ["Player login verification", authCapabilities?.player_login_verification_required && authCapabilities?.player_login_verification_available],
             ["Mobile password recovery", authCapabilities?.phone_password_reset],
             ["Email password recovery", authCapabilities?.email_password_reset],
           ].map(([label, ready]) => (
@@ -139,7 +138,7 @@ export default function AdminSettings() {
             </div>
           ))}
         </div>
-        <p className="text-[11px] leading-relaxed text-white/45">Player password resets are available from Players → Reset access. They revoke sessions and codes, allow one recovery login without OTP, and force an immediate password change.</p>
+        <p className="text-[11px] leading-relaxed text-white/45">Forgot password uses a reset code to set a new password. Players → Reset access provides administrator-assisted recovery and requires a password change.</p>
       </div>
 
       {/* Telesign */}
