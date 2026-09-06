@@ -27,8 +27,8 @@ def bad(msg):
 # phase order: BETTING -> REVEAL (animation) -> RESULT, then next round
 #
 # Most legacy tables retain their full-minute betting window. Every shortened
-# table opts out explicitly below: Teen Patti and Poker use 30-second betting
-# windows, Keno and Andar Bahar divide a one-minute broadcast round, and Pappu
+# table opts out explicitly below: Teen Patti uses a 30-second betting window
+# and Poker uses 15 seconds. Keno and Andar Bahar divide a one-minute round, and Pappu
 # Pictures keeps its fast portrait cadence. Keeping all three durations here
 # means the API, client animation and epoch round number come from one
 # server-owned schedule.
@@ -90,12 +90,12 @@ LIVE_GAMES = {
     "fun-target":        {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "pick"},
     "super-golden-wheel": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
     "checker":           {"bet": BET_SECONDS, "reveal": 4, "result": 3, "kind": "sides"},
-    # The card-duel tables accept bets for exactly 30 seconds. The extra time is
+    # Teen Patti accepts bets for 30 seconds and Poker for 15. The extra time is
     # moved into the settled-result hold so their historical 78s/80s cycle
     # lengths (and therefore epoch-derived round IDs) remain continuous across
     # deployment. Deal animations still use their original 12s/14s windows.
     "teen-patti":        {"bet": 30, "reveal": 12, "result": 36, "kind": "sides"},
-    "poker":             {"bet": 30, "reveal": 14, "result": 36, "kind": "sides"},
+    "poker":             {"bet": 15, "reveal": 14, "result": 51, "kind": "sides"},
     "no-hold":           {"bet": BET_SECONDS, "reveal": 8, "result": 5, "kind": "stake"},
     "champion-poker":    {"bet": BET_SECONDS, "reveal": 14, "result": 6, "kind": "stake"},
     # One visible 60-second broadcast round: bets close at 00:30, leaving a

@@ -11,17 +11,17 @@ from live_engines import (
 
 
 @pytest.mark.parametrize(
-    ("slug", "reveal_seconds", "result_seconds", "round_seconds"),
+    ("slug", "bet_seconds", "reveal_seconds", "result_seconds", "round_seconds"),
     (
-        ("teen-patti", 12, 36, 78),
-        ("poker", 14, 36, 80),
+        ("teen-patti", 30, 12, 36, 78),
+        ("poker", 15, 14, 51, 80),
     ),
 )
-def test_card_duel_betting_window_is_exactly_thirty_seconds(
-    slug, reveal_seconds, result_seconds, round_seconds
+def test_card_duel_betting_window_matches_each_table_contract(
+    slug, bet_seconds, reveal_seconds, result_seconds, round_seconds
 ):
     assert LIVE_GAMES[slug] == {
-        "bet": 30,
+        "bet": bet_seconds,
         "reveal": reveal_seconds,
         "result": result_seconds,
         "kind": "sides",
@@ -30,28 +30,28 @@ def test_card_duel_betting_window_is_exactly_thirty_seconds(
 
 
 @pytest.mark.parametrize(
-    ("slug", "reveal_seconds", "result_seconds", "round_seconds"),
+    ("slug", "bet_seconds", "reveal_seconds", "result_seconds", "round_seconds"),
     (
-        ("teen-patti", 12, 36, 78),
-        ("poker", 14, 36, 80),
+        ("teen-patti", 30, 12, 36, 78),
+        ("poker", 15, 14, 51, 80),
     ),
 )
 def test_card_duel_clock_switches_phase_at_server_owned_boundaries(
-    slug, reveal_seconds, result_seconds, round_seconds
+    slug, bet_seconds, reveal_seconds, result_seconds, round_seconds
 ):
     cfg = LIVE_GAMES[slug]
 
     def clock(now):
         return fixed_cycle_clock(now, cfg["bet"], cfg["reveal"], cfg["result"])
 
-    reveal_end = 30 + reveal_seconds
+    reveal_end = bet_seconds + reveal_seconds
 
-    assert clock(29.99)[1:3] == ("BETTING", 0.01)
-    assert clock(30.00)[1:3] == ("REVEAL", float(reveal_seconds))
+    assert clock(bet_seconds - 0.01)[1:3] == ("BETTING", 0.01)
+    assert clock(bet_seconds)[1:3] == ("REVEAL", float(reveal_seconds))
     assert clock(reveal_end - 0.01)[1:3] == ("REVEAL", 0.01)
     assert clock(reveal_end)[1:3] == ("RESULT", float(result_seconds))
     assert clock(round_seconds - 0.01)[1:3] == ("RESULT", 0.01)
-    assert clock(round_seconds)[:3] == (1, "BETTING", 30.0)
+    assert clock(round_seconds)[:3] == (1, "BETTING", float(bet_seconds))
 
 
 @pytest.mark.parametrize(
@@ -77,10 +77,11 @@ def test_card_duel_round_ids_remain_continuous_across_timing_release(
 
 
 @pytest.mark.parametrize("slug", ("teen-patti", "poker"))
-def test_card_duel_server_mutations_lock_before_thirty_second_boundary(slug):
+def test_card_duel_server_mutations_lock_before_each_table_betting_boundary(slug):
     cfg = LIVE_GAMES[slug]
 
-    for now, expected in ((29.59, True), (29.60, False), (29.99, False), (30.0, False)):
+    for offset, expected in ((-0.41, True), (-0.40, False), (-0.01, False), (0, False), (1, False)):
+        now = cfg["bet"] + offset
         round_number, phase, seconds_left, *_ = fixed_cycle_clock(
             now, cfg["bet"], cfg["reveal"], cfg["result"]
         )
