@@ -1,57 +1,58 @@
 .crm-admin,
-.crm-login-page {
+.crm-login-page,
+body.crm-admin-active {
   color-scheme: light;
-  --canvas: #f2f3f5;
-  --surface: #fcfcfb;
-  --surface-muted: #f0f1f3;
-  --surface-strong: #e5e7eb;
-  --ink: #15171c;
-  --ink-soft: #5e636c;
-  --ink-faint: #858b95;
-  --line: #dcdfe4;
-  --line-strong: #c6cad2;
+  --canvas: #edf1f5;
+  --surface: #ffffff;
+  --surface-muted: #f0f3f7;
+  --surface-strong: #e1e7ef;
+  --ink: #182235;
+  --ink-soft: #445168;
+  --ink-faint: #566277;
+  --line: #cbd3df;
+  --line-strong: #7d8ba0;
   --crm-accent: hsl(var(--chakri-primary-hsl, 43 92% 56%));
-  --crm-accent-hover: hsl(38 78% 42%);
-  --crm-accent-soft: hsl(43 70% 92%);
-  --crm-accent-ink: hsl(36 70% 24%);
+  --crm-accent-hover: #dba820;
+  --crm-accent-soft: #fff3d6;
+  --crm-accent-ink: #80500b;
   --sidebar: #0d1118;
   --sidebar-elevated: #151b25;
   --sidebar-line: #272d38;
   --sidebar-text: #eef3f8;
-  --sidebar-muted: #91a0b1;
-  --success: #19745a;
-  --success-soft: #e3f3ed;
-  --warning: #9a650c;
-  --warning-soft: #f8efd9;
-  --danger: #b13a46;
-  --danger-soft: #f8e7e9;
-  --info: #2d63c8;
-  --info-soft: #e8effb;
+  --sidebar-muted: #adbed3;
+  --success: #166047;
+  --success-soft: #e5f4ed;
+  --warning: #80500b;
+  --warning-soft: #fff3d6;
+  --danger: #9f2439;
+  --danger-soft: #fbe9ed;
+  --info: #194f91;
+  --info-soft: #e8f0fc;
   --radius-card: 12px;
   --radius-control: 8px;
   --shadow-panel: 0 1px 2px rgb(18 22 29 / 4%), 0 12px 30px rgb(18 22 29 / 5.5%);
   --background: 220 13% 95%;
   --foreground: 224 14% 10%;
-  --card: 60 14% 99%;
+  --card: 0 0% 100%;
   --card-foreground: 224 14% 10%;
-  --popover: 60 14% 99%;
+  --popover: 0 0% 100%;
   --popover-foreground: 224 14% 10%;
   --primary: var(--chakri-primary-hsl, 43 92% 56%);
   --primary-foreground: 222 55% 8%;
   --secondary: 220 10% 94%;
   --secondary-foreground: 224 14% 10%;
   --muted: 220 10% 94%;
-  --muted-foreground: 218 7% 39%;
+  --muted-foreground: 219 19% 34%;
   --accent: 43 70% 92%;
   --accent-foreground: 36 70% 24%;
-  --destructive: 354 51% 46%;
+  --destructive: 350 63% 38%;
   --destructive-foreground: 0 0% 100%;
-  --border: 220 11% 88%;
-  --input: 220 11% 79%;
-  --ring: var(--chakri-primary-hsl, 43 92% 56%);
-  --cyan: 219 63% 48%;
-  --emerald: 161 64% 28%;
-  --magenta: 354 51% 46%;
+  --border: 216 24% 84%;
+  --input: 216 16% 56%;
+  --ring: 213 71% 33%;
+  --cyan: 213 71% 33%;
+  --emerald: 160 63% 23%;
+  --magenta: 350 63% 38%;
   min-height: 100dvh;
   background: var(--canvas);
   color: var(--ink);
@@ -61,25 +62,23 @@
 }
 
 body.crm-admin-active {
-  background: #f2f3f5 !important;
-  color: #15171c;
+  background: var(--canvas) !important;
+  color: var(--ink);
   font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
 
 body.crm-admin-active [data-radix-popper-content-wrapper] > div,
 body.crm-admin-active [role="dialog"] {
-  border-color: #dcdfe4 !important;
-  background: #fcfcfb !important;
-  color: #15171c !important;
+  border-color: var(--line) !important;
+  background: var(--surface) !important;
+  color: var(--ink) !important;
 }
 
-body.crm-admin-active [role="dialog"] [class*="text-white/"] { color: #5e636c !important; }
 body.crm-admin-active [role="dialog"] input,
-body.crm-admin-active [role="dialog"] textarea,
-body.crm-admin-active [data-radix-popper-content-wrapper] button {
-  border-color: #c6cad2 !important;
-  background-color: #fcfcfb !important;
-  color: #15171c !important;
+body.crm-admin-active [role="dialog"] textarea {
+  border-color: var(--line-strong) !important;
+  background-color: var(--surface) !important;
+  color: var(--ink) !important;
 }
 
 .crm-admin *,
@@ -108,7 +107,7 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
 .crm-admin svg { flex: 0 0 auto; }
 
 .crm-admin :focus-visible {
-  outline: 3px solid rgb(45 99 200 / 28%);
+  outline: 2px solid var(--info);
   outline-offset: 2px;
 }
 
@@ -179,7 +178,7 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
 }
 
 .nav-group { display: grid; gap: 3px; }
-.nav-group-label { padding: 0 9px 7px; color: #748598; font-size: 9.5px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+.nav-group-label { padding: 0 9px 7px; color: var(--sidebar-muted); font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
 
 .nav-link {
   position: relative;
@@ -334,12 +333,93 @@ body.crm-admin-active [data-radix-popper-content-wrapper] button {
 
 .crm-admin input::placeholder,
 .crm-admin textarea::placeholder { color: var(--ink-faint); }
-.crm-admin table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: 11px; }
+.crm-admin table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: 12px; }
 .crm-admin thead { background: var(--surface-muted); }
-.crm-admin th { height: 37px; padding: 7px 13px; border-color: var(--line) !important; color: var(--ink-faint) !important; font-size: 9px; font-weight: 720; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
-.crm-admin td { height: 55px; padding: 8px 13px; border-color: var(--line) !important; color: #283647; vertical-align: middle; }
-.crm-admin tbody tr:hover { background: #f7f9fc !important; }
+.crm-admin th { height: 39px; padding: 7px 13px; border-color: var(--line) !important; color: var(--ink-soft) !important; font-size: 10.5px; font-weight: 720; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.crm-admin td { height: 55px; padding: 8px 13px; border-color: var(--line) !important; color: var(--ink); vertical-align: middle; }
+.crm-admin tbody tr { background: var(--surface); }
+.crm-admin tbody tr:nth-child(even) { background: #f7f9fc; }
+.crm-admin tbody tr:hover { background: #eaf0f8 !important; }
 .crm-admin [data-radix-popper-content-wrapper] { color: var(--ink); }
+
+/* Legacy screens use pale casino colours. Give those semantic roles opaque
+   light-theme colours, including menus and dialogs portalled outside the shell. */
+:is(.crm-admin, body.crm-admin-active) [class*="text-white/"] {
+  color: var(--ink-soft) !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class~="text-white"] {
+  color: var(--ink) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class~="text-primary"], [class*="text-primary/"]) {
+  color: var(--crm-accent-ink) !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class*="text-amber-"] {
+  color: var(--warning) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="text-emerald-"], [class~="text-[hsl(var(--emerald))]"]) {
+  color: var(--success) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="text-red-"], [class*="text-rose-"], [class~="text-[hsl(var(--magenta))]"]) {
+  color: var(--danger) !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class*="text-sky-"] {
+  color: var(--info) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="bg-amber-"], [class*="bg-primary/"]) {
+  background-color: var(--warning-soft) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="bg-emerald-400/"], [class*="bg-emerald-500/"], [class*="bg-[hsl(var(--emerald)/"]) {
+  background-color: var(--success-soft) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="bg-destructive/"], [class*="bg-red-400/"], [class*="bg-[hsl(var(--magenta)/"]) {
+  background-color: var(--danger-soft) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="bg-sky-300/"], [class*="bg-sky-400/"]) {
+  background-color: var(--info-soft) !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="border-amber-"], [class*="border-primary/"]) {
+  border-color: #be943e !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="border-emerald-"], [class*="border-[hsl(var(--emerald)/"]) {
+  border-color: #729e89 !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class*="border-destructive/"], [class*="border-red-"], [class*="border-[hsl(var(--magenta)/"]) {
+  border-color: #c6808d !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class*="border-sky-"] {
+  border-color: #8aaacf !important;
+}
+
+/* Filled action buttons keep their own contrasting foregrounds. */
+:is(.crm-admin, body.crm-admin-active) [class~="bg-primary"] {
+  color: #182235 !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class~="bg-destructive"], [class~="bg-[#b13a46]"], [class~="bg-[#a82f42]"]) {
+  background-color: var(--danger) !important;
+  color: #ffffff !important;
+}
+:is(.crm-admin, body.crm-admin-active) :is([class~="bg-[hsl(var(--emerald))]"], [class~="bg-[#19745a]"]) {
+  background-color: var(--success) !important;
+  color: #ffffff !important;
+}
+:is(.crm-admin, body.crm-admin-active) [class~="bg-[#111827]"] {
+  color: #ffffff !important;
+}
+:is(.crm-admin, body.crm-admin-active) button:hover:not(:disabled) {
+  filter: brightness(.96);
+}
+:is(.crm-admin, body.crm-admin-active) :is(input, textarea)::placeholder {
+  color: var(--ink-faint);
+  opacity: 1;
+}
+:is(.crm-admin, body.crm-admin-active) :focus-visible {
+  outline: 2px solid var(--info) !important;
+  outline-offset: 2px;
+}
+.crm-admin .crm-filter-tabs button.active,
+.crm-admin [aria-pressed="true"][class*="bg-primary/"] {
+  box-shadow: inset 0 0 0 1px #be943e;
+}
 
 .crm-page-stack { display: grid; gap: 18px; }
 .crm-page-header { display: flex; min-height: 58px; align-items: flex-end; justify-content: space-between; gap: 24px; }
