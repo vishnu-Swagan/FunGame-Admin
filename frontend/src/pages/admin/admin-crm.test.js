@@ -5,10 +5,10 @@ const crmCss = fs.readFileSync(path.join(__dirname, "admin-crm.css"), "utf8");
 const login = fs.readFileSync(path.join(__dirname, "../auth/AdminLogin.js"), "utf8");
 const layout = fs.readFileSync(path.join(__dirname, "AdminLayout.js"), "utf8");
 
-test("CRM primary is Chakri gold with the player-app dark foreground", () => {
+test("CRM keeps gold primary actions with a dark foreground and a contrasting focus ring", () => {
   expect(crmCss).toContain("--primary: var(--chakri-primary-hsl, 43 92% 56%)");
   expect(crmCss).toContain("--primary-foreground: 222 55% 8%");
-  expect(crmCss).toContain("--ring: var(--chakri-primary-hsl, 43 92% 56%)");
+  expect(crmCss).toContain("--ring: 213 71% 33%");
   expect(crmCss).not.toContain("351 56% 42%");
   expect(crmCss).not.toContain("--crm-accent: #a82f42");
 });
