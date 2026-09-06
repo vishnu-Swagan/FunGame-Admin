@@ -39,6 +39,7 @@ import telesign_service
 import revenue
 import commission
 import payouts
+from player_presence import player_login_stats
 from game_access import assert_admin_status_change_allowed
 from otp_service import (
     ADMIN_STEP_UP,
@@ -756,6 +757,12 @@ async def _recent_cash_movement(operator_deposit_match: dict, operator_withdrawa
 async def _oldest_created_at(collection, match: dict, field: str = 'created_at'):
     row = await collection.find(match, {'_id': 0, field: 1}).sort(field, 1).limit(1).to_list(1)
     return row[0].get(field) if row else None
+
+
+@router.get('/player-login-stats')
+async def live_player_login_stats(response: Response, admin: dict = Depends(require_admin)):
+    response.headers['Cache-Control'] = 'no-store'
+    return await player_login_stats(db)
 
 
 @router.get('/dashboard')

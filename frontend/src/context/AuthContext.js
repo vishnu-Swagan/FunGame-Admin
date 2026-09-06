@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { startPlayerPresence } from "@/lib/playerPresence";
 
 const AuthContext = createContext(null);
 
@@ -41,6 +42,12 @@ export function AuthProvider({ children }) {
     refreshUser();
     refreshConfig();
   }, [refreshUser, refreshConfig]);
+
+  // Only current player sessions announce presence; admin browsing never does.
+  useEffect(() => {
+    if (user?.role !== "PLAYER" || !["ACTIVE", "VERIFIED"].includes(user?.status)) return;
+    return startPlayerPresence();
+  }, [user?.id, user?.role, user?.status]);
 
   // Apply accessibility body classes from user settings
   useEffect(() => {

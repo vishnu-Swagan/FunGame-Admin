@@ -34,7 +34,7 @@ def serialize_doc(doc):
     if isinstance(doc, list):
         return [serialize_doc(d) for d in doc]
     if isinstance(doc, dict):
-        return {k: serialize_doc(v) for k, v in doc.items() if k not in ('_id', 'password_hash', 'verification_code_hash', 'reset_code_hash')}
+        return {k: serialize_doc(v) for k, v in doc.items() if k not in ('_id', 'password_hash', 'verification_code_hash', 'reset_code_hash', 'presence_session_id')}
     if isinstance(doc, (datetime, date)):
         return doc.isoformat()
     return doc
