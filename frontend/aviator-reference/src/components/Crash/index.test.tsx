@@ -1,6 +1,7 @@
 import React from "react";
 import fs from "fs";
 import path from "path";
+import { compileString } from "sass";
 import { act, render } from "@testing-library/react";
 import Context from "../../context";
 import CrashStage, { flightCurveValue, flightGeometryFor, interpolateVisualProgress } from ".";
@@ -119,6 +120,39 @@ test("an authoritative round renders immediately without a WebGL startup delay",
   expect(container.querySelector(".native-flight-visual")).not.toBeNull();
   expect(container.querySelector(".multiplier")?.textContent).toBe("87.40x");
   expect(container.querySelector(".round-state")?.textContent).toContain("#90");
+});
+
+test("the compiled stylesheet reveals the native flight layer through the round lifecycle", () => {
+  const style = document.createElement("style");
+  style.textContent = compileString(fs.readFileSync(path.resolve(__dirname, "crash.scss"), "utf8")).css;
+  document.head.appendChild(style);
+  const { container, rerender, unmount } = render(
+    <Context.Provider value={value()}><CrashStage /></Context.Provider>,
+  );
+
+  try {
+    expect(container.querySelector(".native-flight-visual")).toBeNull();
+    for (const GameState of ["BET", "PLAYING", "GAMEEND", "BET"]) {
+      rerender(
+        <Context.Provider value={value({ GameState, time: 5000, latestRoundNumber: 91 })}>
+          <CrashStage />
+        </Context.Provider>,
+      );
+      const layer = container.querySelector(".native-flight-visual")!;
+      expect(window.getComputedStyle(layer).visibility).toBe("visible");
+      expect(window.getComputedStyle(layer).opacity).toBe("1");
+      for (const selector of [".plane", ".aircraft-propeller"]) {
+        expect(window.getComputedStyle(container.querySelector(selector)!).opacity)
+          .toBe(GameState === "BET" ? "0" : "1");
+      }
+      if (GameState !== "BET") {
+        expect(window.getComputedStyle(container.querySelector(".curve-line")!).stroke).toBe("#ff2436");
+      }
+    }
+  } finally {
+    unmount();
+    style.remove();
+  }
 });
 
 test("decorative rays and glow stay scoped to the flight stage", () => {
