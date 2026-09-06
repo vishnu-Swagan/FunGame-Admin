@@ -228,7 +228,7 @@
   pointer-events: none;
 }
 
-.space-box.fallback-visual-ready .fallback-flight-visual {
+.space-box.native-visual-ready .native-flight-visual {
   opacity: 1;
   visibility: visible;
   pointer-events: none;
@@ -406,12 +406,7 @@
 }
 
 .plane {
-  position: absolute;
-  left: 4%;
-  bottom: 4%;
-  z-index: 7;
-  width: clamp(116px, 18.5%, 220px);
-  height: auto;
+  // SVG geometry owns sizing so the aircraft, tail and propeller scale together.
   opacity: 0;
   transform-origin: 10% 52%;
   transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 80ms linear;
@@ -425,8 +420,18 @@
     animation: aviatorEscape 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
   }
 
+}
+
+.aircraft-propeller {
+  opacity: 0;
+  transform-origin: 0 0;
+  fill: #ff2436;
+
+  &.visible {
+    opacity: 1;
+  }
+
   .propeller-hub {
-    fill: #ff2436;
     stroke: #080a0d;
     stroke-width: 2;
     vector-effect: non-scaling-stroke;

@@ -41,3 +41,5 @@ jobs:
           CI: true
       - name: Build frontend
         run: yarn build
+      - name: Run Aviator rendering tests
+        run: CI=true npm --prefix aviator-reference test -- --watchAll=false --runInBand
