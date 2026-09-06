@@ -1,6 +1,8 @@
 """Live stats are admin-only and tied to fresh, non-revoked player sessions."""
 import os
+import importlib.util
 import unittest
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -110,8 +112,15 @@ class PlayerPresenceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.post('/auth/heartbeat', headers={'Authorization': f'Bearer {token}'})).status_code, 401)
 
     async def test_presence_session_is_not_in_public_profile(self):
-        from db import serialize_doc
         public = auth_utils.public_user(self.player('private'))
         self.assertNotIn('presence_session_id', public)
         self.assertNotIn('active_session_id', public)
-        self.assertNotIn('presence_session_id', serialize_doc(self.player('private')))
+        # Other legacy suites install a minimal db module in sys.modules.
+        # Load the real serializer independently, without querying its client.
+        spec = importlib.util.spec_from_file_location('presence_db_serializer', Path(__file__).with_name('db.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            self.assertNotIn('presence_session_id', module.serialize_doc(self.player('private')))
+        finally:
+            module.client.close()

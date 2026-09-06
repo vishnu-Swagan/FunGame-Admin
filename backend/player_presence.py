@@ -39,9 +39,9 @@ async def player_login_stats(database, *, now=None):
         database.users.count_documents(players),
         database.users.count_documents(online),
         database.users.count_documents({**players, 'last_login_at': {'$gte': yesterday, '$lte': current}}),
-        database.users.find(online, projection).sort('last_seen_at', -1).to_list(PLAYER_LIST_LIMIT),
+        database.users.find(online, projection).sort('last_seen_at', -1).limit(PLAYER_LIST_LIMIT).to_list(PLAYER_LIST_LIMIT),
         database.users.find({**players, 'last_login_at': {'$type': 'string', '$lte': current}}, projection)
-            .sort('last_login_at', -1).to_list(PLAYER_LIST_LIMIT),
+            .sort('last_login_at', -1).limit(PLAYER_LIST_LIMIT).to_list(PLAYER_LIST_LIMIT),
     )
 
     def public_row(user):
