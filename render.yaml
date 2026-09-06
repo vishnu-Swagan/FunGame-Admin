@@ -55,7 +55,7 @@ services:
       - key: OTP_SMS_ADAPTER
         sync: false                                  # preserve the existing Telesign delivery setting
       - key: PLAYER_LOGIN_OTP_REQUIRED
-        value: "true"                                # every normal player login completes with a fresh OTP
+        value: "false"                               # player login is password-only; OTP remains for recovery
       - key: TELESIGN_CUSTOMER_ID
         sync: false                                  # Telesign account credential; configure in Render before enabling
       - key: TELESIGN_API_KEY

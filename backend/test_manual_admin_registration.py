@@ -324,6 +324,35 @@ async def main():
     active = await database.users.find_one({'id': player['id']})
     assert await auth_utils.require_active_player(active) is active
 
+    # Both the reported VERIFIED row and accounts without contact OTP use a
+    # password-only login once active. Login must not invent ownership flags.
+    for verification in (
+        {'contact_verification_status': 'VERIFIED', 'contact_verified': True, 'phone_verified': True},
+        {'contact_verification_status': 'ADMIN_APPROVED', 'contact_verified': False, 'phone_verified': False},
+        {'contact_verification_status': 'PENDING', 'contact_verified': False, 'phone_verified': False},
+    ):
+        await database.users.update_one({'id': player['id']}, {'$set': verification})
+        password_login = await routes_auth.login(LoginRequest(
+            identifier='royal.player_9', password='Strong-Password-9',
+        ))
+        assert password_login['access_token']
+        assert 'requires_otp' not in password_login
+        stored = await database.users.find_one({'id': player['id']})
+        assert all(stored[field] == value for field, value in verification.items())
+    assert await database.otp_challenges.count_documents({
+        'user_id': player['id'], 'purpose': otp_service.LOGIN_VERIFICATION,
+    }) == 0
+    for account_status, error_code in (
+        ('SUSPENDED', 'ACCOUNT_SUSPENDED'),
+        ('REJECTED', 'ACCOUNT_REVIEW_REJECTED'),
+        ('PENDING', 'ACCOUNT_PENDING_REVIEW'),
+    ):
+        await database.users.update_one({'id': player['id']}, {'$set': {'status': account_status}})
+        await expect_http_error(routes_auth.login(LoginRequest(
+            identifier='royal.player_9', password='Strong-Password-9',
+        )), 403, error_code)
+    await database.users.update_one({'id': player['id']}, {'$set': {'status': 'ACTIVE'}})
+
     # Rejecting releases the provisional guard for a fresh application, while
     # the stale rejected row can no longer override that newer pending request.
     stale_values = {

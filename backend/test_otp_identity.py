@@ -307,11 +307,12 @@ async def main():
         password='Attacker-Planted-9',
     )), 401)
     assert planted_password.detail == routes_auth.INVALID_LOGIN_MESSAGE
-    unverified_email_login = await expect_http_error(routes_auth.login(LoginRequest(
+    email_login = await routes_auth.login(LoginRequest(
         identifier='player@example.com', email='player@example.com',
         password='Victim-Owned-Password-9',
-    )), 401)
-    assert unverified_email_login.detail == routes_auth.INVALID_LOGIN_MESSAGE
+    ))
+    assert email_login['access_token']
+    assert email_login['user']['email_verified'] is False
     login = await routes_auth.login(LoginRequest(
         identifier='+919100000001', phone='+919100000001',
         password='Victim-Owned-Password-9',
@@ -319,37 +320,28 @@ async def main():
     assert login['access_token']
     assert 'active_session_id' not in login['user']
 
-    # When the operator enables player login verification, a correct password
-    # establishes only a pending session. The one-use code is required before
-    # an access token is minted, and replaying it is rejected.
+    # Stale deployment flags cannot re-enable login OTP. Recovery OTP is
+    # independent and remains exercised below.
     os.environ['PLAYER_LOGIN_OTP_REQUIRED'] = 'true'
     try:
-        otp_login = await routes_auth.login(LoginRequest(
+        password_login = await routes_auth.login(LoginRequest(
             identifier='+919100000001', phone='+919100000001',
             password='Victim-Owned-Password-9',
         ))
-        assert otp_login['requires_otp'] is True
-        assert 'access_token' not in otp_login
-        assert otp_login['destination_masked']
-        assert otp_login['dev_code']
-        completed_login = await routes_auth.verify_login_otp(
-            AuthenticatedOtpVerify(
-                challenge_id=otp_login['challenge_id'],
-                code=otp_login['dev_code'],
-            ),
-        )
-        assert completed_login['access_token']
-        consumed_login_code = await database.otp_challenges.find_one({
-            'id': otp_login['challenge_id'],
-        })
-        assert consumed_login_code['active'] is False
-        assert consumed_login_code['status'] == 'VERIFIED'
+        assert password_login['access_token']
+        assert 'requires_otp' not in password_login
+        assert await database.otp_challenges.count_documents({
+            'purpose': otp_service.LOGIN_VERIFICATION,
+        }) == 0
+        capabilities = await routes_auth.authentication_capabilities()
+        assert capabilities['player_login_verification_required'] is False
+        assert capabilities['player_login_verification_available'] is False
+        assert capabilities['phone_password_reset'] is True
         await expect_http_error(
             routes_auth.verify_login_otp(AuthenticatedOtpVerify(
-                challenge_id=otp_login['challenge_id'],
-                code=otp_login['dev_code'],
+                challenge_id='retired-login-challenge', code='123456',
             )),
-            400, 'OTP_INVALID',
+            410, 'LOGIN_OTP_REMOVED',
         )
 
         # Accounts whose credentials are issued directly by an administrator
@@ -421,11 +413,8 @@ async def main():
             identifier='+919100000001', phone='+919100000001',
             password='Victim-Owned-Password-9',
         ))
-        assert next_login['requires_otp'] is True
-        await database.otp_challenges.update_one(
-            {'id': next_login['challenge_id']},
-            {'$set': {'active': False, 'status': 'TEST_CLEANUP'}},
-        )
+        assert next_login['access_token']
+        assert 'requires_otp' not in next_login
         await database.users.update_one({'id': player['id']}, {
             '$set': {'password_change_required': False},
         })
@@ -468,9 +457,9 @@ async def main():
     ))
     assert operator_login['access_token']
     operator_row = await database.users.find_one({'id': 'legacy-operator-active'})
-    assert operator_row['email_verified'] is True
-    assert operator_row['contact_verified'] is True
-    assert operator_row['contact_verification_repair'] == 'LEGACY_OPERATOR_ACTIVE'
+    assert 'email_verified' not in operator_row
+    assert 'contact_verified' not in operator_row
+    assert 'contact_verification_repair' not in operator_row
 
     for legacy_id, email, extra in (
         ('legacy-self-service-active', 'legacy-self@example.com', {
@@ -486,11 +475,13 @@ async def main():
             'password_hash': auth_utils.hash_password('Legacy-Denied-Password-9'),
             **extra,
         })
-        denied = await expect_http_error(routes_auth.login(LoginRequest(
+        password_login = await routes_auth.login(LoginRequest(
             identifier=email, email=email, password='Legacy-Denied-Password-9',
-        )), 403, 'CONTACT_NOT_VERIFIED')
-        assert denied.detail['identifier'] == email
-        assert denied.detail['channel'] == 'EMAIL'
+        ))
+        assert password_login['access_token']
+        stored = await database.users.find_one({'id': legacy_id})
+        assert not stored.get('email_verified')
+        assert not stored.get('contact_verified')
 
     await database.users.insert_one({
         'id': 'legacy-repair-race', 'role': 'PLAYER', 'status': 'ACTIVE',
@@ -503,9 +494,9 @@ async def main():
 
     async def explicit_verification_wins(collection, query, update, *args, **kwargs):
         if (query.get('id') == 'legacy-repair-race'
-                and query.get('contact_verified') == {'$exists': False}):
+                and query.get('status') == 'ACTIVE'):
             await database.users.update_one(
-                {'id': 'legacy-repair-race'}, {'$set': {'email_verified': False}},
+                {'id': 'legacy-repair-race'}, {'$set': {'status': 'SUSPENDED'}},
             )
         return await original_login_update(collection, query, update, *args, **kwargs)
 
@@ -514,11 +505,12 @@ async def main():
         await expect_http_error(routes_auth.login(LoginRequest(
             identifier='legacy-race@example.com', email='legacy-race@example.com',
             password='Legacy-Race-Password-9',
-        )), 403, 'CONTACT_NOT_VERIFIED')
+        )), 401)
     finally:
         users_collection_type.find_one_and_update = original_login_update
     raced_legacy = await database.users.find_one({'id': 'legacy-repair-race'})
-    assert raced_legacy['email_verified'] is False
+    assert raced_legacy['status'] == 'SUSPENDED'
+    assert not raced_legacy.get('active_session_id')
     assert not raced_legacy.get('contact_verified')
 
     # Login ID is the usual existing-user subject. The 403 must name the
@@ -542,10 +534,7 @@ async def main():
     login_id_blocked = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='Lobby.Player', email='Lobby.Player',
         password='Lobby-Player-9',
-    )), 403, 'CONTACT_NOT_VERIFIED')
-    assert login_id_blocked.detail['channel'] == 'PHONE'
-    assert login_id_blocked.detail['identifier'] == '+919100000321'
-    assert login_id_blocked.detail['login_id'] == 'Lobby.Player'
+    )), 403, 'ACCOUNT_PENDING_REVIEW')
     login_id_resend = await routes_auth.resend_verification(ResendVerificationRequest(
         channel='PHONE', identifier='Lobby.Player',
     ))

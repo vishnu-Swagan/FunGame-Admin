@@ -509,10 +509,7 @@ async def main():
     login_unverified = await expect_http_error(routes_auth.login(LoginRequest(
         identifier='Existing.Player', email='Existing.Player',
         password='Existing-Player-9',
-    )), 403, 'CONTACT_NOT_VERIFIED')
-    assert login_unverified.detail['channel'] == 'PHONE'
-    assert login_unverified.detail['identifier'] == existing_phone
-    assert login_unverified.detail['login_id'] == 'Existing.Player'
+    )), 403, 'ACCOUNT_PENDING_REVIEW')
     assert await database.otp_challenges.count_documents({
         'user_id': 'existing-login-otp',
     }) == 0
