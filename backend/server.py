@@ -145,6 +145,8 @@ async def _retire_nocash_wording_migration():
 
 
 async def _core_indexes():
+    await db.users.create_index([('role', 1), ('status', 1), ('last_seen_at', -1)])
+    await db.users.create_index([('role', 1), ('last_login_at', -1)])
     await operator_rail.ensure_hosted_indexes()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.

@@ -140,7 +140,7 @@ def public_user(user: dict) -> dict:
     from db import serialize_doc
     public = serialize_doc(user)
     for key in (
-        'active_session_id', 'email_normalized', 'phone_normalized',
+        'active_session_id', 'presence_session_id', 'email_normalized', 'phone_normalized',
         'username_key', 'previous_email', 'password_failed_attempts',
         'locked_until', 'telesign_onboarding', 'telesign_last_sign_in',
         'password_provisioned_at', 'password_provisioned_by',

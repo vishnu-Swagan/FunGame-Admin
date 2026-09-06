@@ -12,6 +12,7 @@ import {
 import { api, errMsg } from "@/lib/api";
 import { registrationReview } from "@/lib/adminRegistrationReview";
 import { PageTransition, UserStatusBadge, EmptyState, formatChips, timeAgo, AvatarBadge } from "@/components/common";
+import AdminPlayerLoginStats from "./AdminPlayerLoginStats";
 
 const FILTERS = ["PENDING", "ACTIVE", "SUSPENDED", "REJECTED", "ALL"];
 
@@ -31,6 +32,7 @@ export default function AdminUsers() {
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [temporaryPasswordConfirmation, setTemporaryPasswordConfirmation] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [showLoginStats, setShowLoginStats] = useState(false);
 
   const load = useCallback(async (f) => {
     setLoading(true);
@@ -160,8 +162,15 @@ export default function AdminUsers() {
           <h1>Players</h1>
           <p>Internal player management, wallet visibility, gaming activity, security, and audit history.</p>
         </div>
-        <div className="crm-page-actions"><span className="source-badge"><span className="source-indicator" />Live service</span></div>
+        <div className="crm-page-actions">
+          <Button variant="outline" aria-expanded={showLoginStats} aria-controls="player-login-stats" onClick={() => setShowLoginStats((shown) => !shown)}>
+            <Users size={15} /> {showLoginStats ? "Hide login stats" : "Live login stats"}
+          </Button>
+          <span className="source-badge"><span className="source-indicator" />Live service</span>
+        </div>
       </div>
+
+      {showLoginStats && <div id="player-login-stats"><AdminPlayerLoginStats /></div>}
 
       <div className="crm-filter-bar">
         <label className="crm-search-control">

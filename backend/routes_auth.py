@@ -1883,6 +1883,25 @@ async def verify_login_otp(body: AuthenticatedOtpVerify):
     })
 
 
+@router.post('/heartbeat')
+async def player_heartbeat(user: dict = Depends(get_current_user)):
+    """Only a current, playable player session may announce its own presence."""
+    if user.get('role') != 'PLAYER' or user.get('status') not in ('ACTIVE', 'VERIFIED'):
+        raise HTTPException(status_code=403, detail='Active player access required')
+    sid = user.get('active_session_id')
+    if not sid or str(sid).startswith('revoked-'):
+        raise HTTPException(status_code=401, detail='Please log in again')
+    seen = _now().isoformat()
+    updated = await db.users.update_one(
+        {'id': user['id'], 'role': 'PLAYER', 'status': {'$in': ['ACTIVE', 'VERIFIED']},
+         'active_session_id': sid},
+        {'$set': {'last_seen_at': seen, 'presence_session_id': sid}},
+    )
+    if not updated.matched_count:
+        raise HTTPException(status_code=401, detail='Session changed. Please log in again.')
+    return {'last_seen_at': seen}
+
+
 @router.post('/logout')
 async def logout(user: dict = Depends(get_current_user)):
     await db.users.update_one(
