@@ -342,12 +342,14 @@ async def main():
     assert claim_two_row['username'] == 'Shared.Player.2'
     assert claim_two_row['username_key'] == 'shared.player.2'
 
-    # Optional email is unverified profile data, never an alternative login
-    # identity for an account whose ownership was proved only by phone OTP.
-    await expect_http_error(routes_auth.login(LoginRequest(
+    # An active account can use its stored email and password without a
+    # separate login OTP. This does not claim that the email is verified.
+    email_login = await routes_auth.login(LoginRequest(
         identifier='new.player@example.com', email='new.player@example.com',
         password='Verified-Password-9',
-    )), 401)
+    ))
+    assert email_login['access_token']
+    assert email_login['user']['email_verified'] is False
 
     # Existing profile/settings/chip-request features remain available to the
     # newly activated account and preserve a zero starting balance.

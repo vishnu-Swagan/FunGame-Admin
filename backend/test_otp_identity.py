@@ -339,7 +339,7 @@ async def main():
         assert capabilities['phone_password_reset'] is True
         await expect_http_error(
             routes_auth.verify_login_otp(AuthenticatedOtpVerify(
-                challenge_id='retired-login-challenge', code='123456',
+                challenge_id='00000000-0000-0000-0000-000000000001', code='123456',
             )),
             410, 'LOGIN_OTP_REMOVED',
         )
@@ -393,9 +393,8 @@ async def main():
         assert legacy_operator_login['access_token']
         assert 'requires_otp' not in legacy_operator_login
 
-        # An administrator-issued temporary password grants exactly one
-        # recovery session without a player OTP. It exposes only the forced
-        # password-change flag and returns to the OTP policy immediately.
+        # Administrator recovery still requires a password change. The retired
+        # one-use OTP bypass is cleaned up and later login stays password-only.
         await database.users.update_one({'id': player['id']}, {'$set': {
             'password_change_required': True,
             'login_otp_bypass_once': True,
@@ -440,10 +439,8 @@ async def main():
     repaired = await database.users.find_one({'id': 'legacy-contact-verified'})
     assert repaired['status'] == 'VERIFIED' and repaired['contact_verified'] is True
 
-    # Historical operator-provisioned ACTIVE players can still log in when the
-    # verification columns did not exist yet. The successful password check
-    # repairs the missing flags once; self-service or explicitly-false rows
-    # remain fail-closed.
+    # All ACTIVE players can log in without contact OTP. A password check
+    # must not fabricate verified-contact flags for legacy accounts.
     await database.users.insert_one({
         'id': 'legacy-operator-active', 'role': 'PLAYER', 'status': 'ACTIVE',
         'email': 'legacy-operator@example.com',
