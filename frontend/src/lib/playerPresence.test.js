@@ -11,13 +11,19 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
+async function settle() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 test("sends current-session heartbeats, pauses hidden tabs and stops on cleanup", async () => {
   const stop = startPlayerPresence();
   expect(api.post).toHaveBeenCalledWith("/auth/heartbeat", {}, { timeout: 10000, __noFailover: true });
-  await Promise.resolve();
+  await settle();
   jest.advanceTimersByTime(30000);
   expect(api.post).toHaveBeenCalledTimes(2);
-  await Promise.resolve();
+  await settle();
   Object.defineProperty(document, "visibilityState", { value: "hidden" });
   jest.advanceTimersByTime(60000);
   expect(api.post).toHaveBeenCalledTimes(2);
@@ -25,7 +31,7 @@ test("sends current-session heartbeats, pauses hidden tabs and stops on cleanup"
   document.dispatchEvent(new Event("visibilitychange"));
   expect(api.post).toHaveBeenCalledTimes(3);
   stop();
-  await Promise.resolve();
+  await settle();
   jest.advanceTimersByTime(60000);
   document.dispatchEvent(new Event("visibilitychange"));
   expect(api.post).toHaveBeenCalledTimes(3);
@@ -38,7 +44,7 @@ test("slow requests do not overlap and delivery errors are safe", async () => {
   jest.advanceTimersByTime(60000);
   expect(api.post).toHaveBeenCalledTimes(1);
   reject(new Error("offline"));
-  await Promise.resolve();
+  await settle();
   jest.advanceTimersByTime(30000);
   expect(api.post).toHaveBeenCalledTimes(2);
   stop();

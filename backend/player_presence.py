@@ -11,7 +11,7 @@ def _is_online(user, since, now):
     sid = user.get('active_session_id')
     return bool(
         user.get('status') in ('ACTIVE', 'VERIFIED')
-        and sid and not sid.startswith('revoked-')
+        and isinstance(sid, str) and sid and not sid.startswith('revoked-')
         and sid == user.get('presence_session_id')
         and since <= seen <= now
     )
