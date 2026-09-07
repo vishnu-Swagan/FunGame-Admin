@@ -32,6 +32,7 @@ import routes_payments as routes  # noqa: E402
 from payment_providers import (  # noqa: E402
     DepositSession,
     DepositStatus,
+    PayoutStatus,
     PayoutSubmission,
     ProviderConfigurationError,
     ProviderRequestError,
@@ -1621,6 +1622,163 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Internal server error", stored["payout_error"])
         self.assertNotIn("SGPAY24_API_TOKEN", json.dumps(detail))
         self.assertNotIn("api_token", json.dumps(detail).lower())
+
+
+
+class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import sgpay_payout
+        self.sgpay_payout = sgpay_payout
+        self.db = AsyncMongoMockClient()["operator_payout_reconcile"]
+        self.request = {
+            "id": "wd-reconcile-1",
+            "user_id": "player-1",
+            "kind": "WITHDRAWAL",
+            "chips": 1000,
+            "amount_paise": 100000,
+            "status": "APPROVED",
+            "payout_status": "PROCESSING",
+            "payout_ref": "wd-reconcile-1",
+            "created_at": datetime.now(timezone.utc),
+        }
+        await self.db.operator_payment_requests.insert_one(dict(self.request))
+
+    async def test_reconcile_processing_to_paid_stores_utr_and_advances_status(self):
+        class FakeProvider:
+            async def get_payout_status(self, provider_payout_id):
+                self.seen = provider_payout_id
+                return PayoutStatus(
+                    status="PAID",
+                    amount_paise=100000,
+                    currency="INR",
+                    withdrawal_id="wd-reconcile-1",
+                    idempotency_key=None,
+                    provider_beneficiary_id=None,
+                    provider_reference="UTR123456789012",
+                )
+
+        provider = FakeProvider()
+        with patch.object(self.sgpay_payout, "db", self.db):
+            result = await self.sgpay_payout.reconcile_operator_payout(
+                "wd-reconcile-1", provider, actor="test",
+            )
+        self.assertEqual(result["payout_status"], "PAID")
+        self.assertEqual(result["status"], "PAID")
+        self.assertEqual(result["provider_reference"], "UTR123456789012")
+        self.assertEqual(provider.seen, "wd-reconcile-1")
+        stored = await self.db.operator_payment_requests.find_one({"id": "wd-reconcile-1"})
+        self.assertEqual(stored["payout_status"], "PAID")
+        self.assertEqual(stored["status"], "PAID")
+        self.assertEqual(stored["provider_reference"], "UTR123456789012")
+        self.assertIsNone(stored.get("payout_error"))
+        self.assertIsNone(stored.get("next_payout_reconcile_at"))
+
+    async def test_reconcile_processing_to_failed_keeps_chips_reserved(self):
+        class FakeProvider:
+            async def get_payout_status(self, provider_payout_id):
+                return PayoutStatus(
+                    status="FAILED",
+                    amount_paise=100000,
+                    currency="INR",
+                    withdrawal_id="wd-reconcile-1",
+                    idempotency_key=None,
+                    provider_beneficiary_id=None,
+                    provider_reference=None,
+                )
+
+        with patch.object(self.sgpay_payout, "db", self.db):
+            result = await self.sgpay_payout.reconcile_operator_payout(
+                "wd-reconcile-1", FakeProvider(), actor="test",
+            )
+        self.assertEqual(result["payout_status"], "FAILED")
+        stored = await self.db.operator_payment_requests.find_one({"id": "wd-reconcile-1"})
+        self.assertEqual(stored["payout_status"], "FAILED")
+        # Approve already debited chips; FAILED must not invent a refund — status stays APPROVED for retry.
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertIn("FAILED", stored["payout_error"])
+
+    async def test_reconcile_still_processing_schedules_backoff(self):
+        class FakeProvider:
+            async def get_payout_status(self, provider_payout_id):
+                return PayoutStatus(
+                    status="PROCESSING",
+                    amount_paise=100000,
+                    currency="INR",
+                    withdrawal_id="wd-reconcile-1",
+                    idempotency_key=None,
+                    provider_beneficiary_id=None,
+                    provider_reference=None,
+                )
+
+        with patch.object(self.sgpay_payout, "db", self.db):
+            result = await self.sgpay_payout.reconcile_operator_payout(
+                "wd-reconcile-1", FakeProvider(), actor="test",
+            )
+        self.assertEqual(result["payout_status"], "PROCESSING")
+        stored = await self.db.operator_payment_requests.find_one({"id": "wd-reconcile-1"})
+        self.assertEqual(stored["payout_status"], "PROCESSING")
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertIsNotNone(stored.get("next_payout_reconcile_at"))
+        self.assertEqual(stored.get("payout_reconcile_attempts"), 1)
+
+    async def test_batch_settles_due_processing_rows(self):
+        class FakeProvider:
+            async def get_payout_status(self, provider_payout_id):
+                return PayoutStatus(
+                    status="PAID",
+                    amount_paise=100000,
+                    currency="INR",
+                    withdrawal_id=provider_payout_id,
+                    idempotency_key=None,
+                    provider_beneficiary_id=None,
+                    provider_reference="UTR999",
+                )
+
+        with (
+            patch.object(self.sgpay_payout, "db", self.db),
+            patch.object(self.sgpay_payout, "payouts_enabled", return_value=True),
+        ):
+            summary = await self.sgpay_payout.reconcile_operator_payout_batch(
+                FakeProvider(), limit=10,
+            )
+        self.assertEqual(summary["checked"], 1)
+        self.assertEqual(summary["updated"], 1)
+        self.assertEqual(summary["errors"], 0)
+        stored = await self.db.operator_payment_requests.find_one({"id": "wd-reconcile-1"})
+        self.assertEqual(stored["payout_status"], "PAID")
+
+    async def test_send_operator_payout_schedules_reconcile_when_processing(self):
+        class FakeProvider:
+            async def submit_payout(self, **kwargs):
+                return PayoutSubmission(provider_payout_id="wd-reconcile-1", status="PROCESSING")
+
+        await self.db.users.insert_one({
+            "id": "player-1", "phone": "9876543210", "email": "player@example.com",
+        })
+        with (
+            patch.object(self.sgpay_payout, "db", self.db),
+            patch.object(self.sgpay_payout, "load_payout_method", new=AsyncMock(return_value={"id": "m1"})),
+            patch.object(self.sgpay_payout, "_decrypt_method", new=AsyncMock(return_value={
+                "account_holder_name": "Player",
+                "account_number": "1234567890",
+                "ifsc_code": "HDFC0001234",
+                "payout_identifier": "",
+                "bank_name": "HDFC",
+            })),
+            patch("payment_providers.load_payment_provider", return_value=FakeProvider()),
+            patch("wager.chips_to_paise", return_value=100000),
+        ):
+            request = {
+                "id": "wd-new-1", "user_id": "player-1", "chips": 1000,
+                "kind": "WITHDRAWAL", "status": "APPROVED",
+            }
+            await self.db.operator_payment_requests.insert_one(dict(request))
+            result = await self.sgpay_payout.send_operator_payout(request, actor="admin")
+        self.assertEqual(result["payout_status"], "PROCESSING")
+        stored = await self.db.operator_payment_requests.find_one({"id": "wd-new-1"})
+        self.assertEqual(stored["payout_status"], "PROCESSING")
+        self.assertIsNotNone(stored.get("next_payout_reconcile_at"))
+
 
 
 if __name__ == "__main__":
