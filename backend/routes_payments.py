@@ -1095,6 +1095,27 @@ async def admin_retry_operator_payout(
     }
 
 
+@admin_router.post("/payments/operator-requests/{request_id}/sync-payout")
+async def admin_sync_operator_payout(
+    request_id: str, admin: dict = Depends(payments_view),
+):
+    """One-shot SgPay check-payout-status poll for an operator withdrawal."""
+    from db import db
+    import sgpay_payout
+    row = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    if not row or row.get("kind") != "WITHDRAWAL":
+        raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
+    result = await sgpay_payout.reconcile_operator_payout(
+        request_id, actor=f"admin-sync:{admin.get('id') or 'admin'}",
+    )
+    refreshed = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
+    return {
+        "message": "Payout status synced.",
+        "payout": result,
+        "withdrawal": operator_rail.as_admin_withdrawal(refreshed or row),
+    }
+
+
 @admin_router.post("/withdrawals/{withdrawal_id}/approve")
 async def admin_approve_withdrawal(
     withdrawal_id: str, body: AdminNote,

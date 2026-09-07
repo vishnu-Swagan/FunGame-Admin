@@ -98,36 +98,54 @@ async def _aviator_keepalive():
 
 
 async def _financial_worker():
-    """Leader-only financial and hosted-UPI reconciliation loops."""
+    """Leader-only financial, hosted-UPI, and SgPay payout reconciliation loops."""
+    import sgpay_payout
     last_reconciliation = 0.0
     last_upi_reconciliation = 0.0
+    last_payout_reconciliation = 0.0
     while True:
         try:
             status = financial_wallet.financial_status()
             financial_live = bool(status['ready'] and status['features']['real_money'])
             # Turning off checkout intake must not strand already-paid orders.
             upi_live = await operator_rail.hosted_upi_reconciliation_needed()
-            if financial_live or upi_live:
+            # Merchant cannot set a payout callback — poll regardless of wallet flags.
+            payout_live = sgpay_payout.payouts_enabled()
+            if financial_live or upi_live or payout_live:
                 leader = await financial_wallet.acquire_financial_worker_lease(
                     f'financial-{_WORKER_ID}', ttl_seconds=45,
                 )
                 if leader:
                     current = time.monotonic()
                     provider = load_payment_provider()
-                    outbox = await financial_wallet.process_outbox_batch(
-                        provider, limit=10,
-                        include_payouts=status['features']['automatic_withdrawals'],
-                    )
-                    if any(outbox.values()):
-                        logger.info('financial outbox result: %s', outbox)
-                    current = time.monotonic()
-                    if current - last_reconciliation >= 60:
-                        result = await financial_wallet.reconcile_financial_records(
-                            provider, limit=50,
+                    if upi_live and current - last_upi_reconciliation >= 8:
+                        upi_result = await operator_rail.reconcile_hosted_batch(
+                            provider, limit=25,
                         )
-                        last_reconciliation = current
-                        if any(result.values()):
-                            logger.info('financial reconciliation result: %s', result)
+                        last_upi_reconciliation = current
+                        if upi_result.get('updated') or upi_result.get('errors'):
+                            logger.info('hosted UPI reconciliation result: %s', upi_result)
+                    if payout_live and current - last_payout_reconciliation >= 8:
+                        payout_result = await sgpay_payout.reconcile_operator_payout_batch(
+                            provider, limit=25,
+                        )
+                        last_payout_reconciliation = current
+                        if payout_result.get('updated') or payout_result.get('errors'):
+                            logger.info('operator payout reconciliation result: %s', payout_result)
+                    if financial_live:
+                        outbox = await financial_wallet.process_outbox_batch(
+                            provider, limit=10,
+                            include_payouts=status['features']['automatic_withdrawals'],
+                        )
+                        if any(outbox.values()):
+                            logger.info('financial outbox result: %s', outbox)
+                        if current - last_reconciliation >= 60:
+                            result = await financial_wallet.reconcile_financial_records(
+                                provider, limit=50,
+                            )
+                            last_reconciliation = current
+                            if any(result.values()):
+                                logger.info('financial reconciliation result: %s', result)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - worker retries; money remains held
