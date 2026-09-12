@@ -55,6 +55,7 @@ AUTOMATIC = "AUTOMATIC"
 # drift from route validation.
 DEPOSIT_REQUEST_MAX_PAISE = 1_000_000_000
 WITHDRAWAL_REQUEST_MAX_CHIPS = 10_000_000
+WITHDRAWAL_DAILY_MAX_PAISE = 50_000
 
 # This must be changed in code only after every playable game's stake, payout,
 # refund, and rollback paths have passed source-provenance certification.
@@ -476,7 +477,12 @@ def _effective_withdrawal_chip_bounds(
     effective_minimum = (
         (lower_bound + conversion_step - 1) // conversion_step
     ) * conversion_step
-    public_maximum = min(int(maximum_chips), WITHDRAWAL_REQUEST_MAX_CHIPS)
+    currency_cap_chips = (
+        WITHDRAWAL_DAILY_MAX_PAISE * chips_per_inr // paise_per_inr
+    )
+    public_maximum = min(
+        int(maximum_chips), WITHDRAWAL_REQUEST_MAX_CHIPS, currency_cap_chips,
+    )
     effective_maximum = (public_maximum // conversion_step) * conversion_step
     if effective_minimum > effective_maximum:
         raise ProviderConfigurationError(
@@ -541,13 +547,13 @@ def public_money_config(
     withdrawals = None
     if flags["withdrawals"]:
         withdrawal_minimum = _bounded_config_int(
-            "MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000, env,
+            "MIN_WITHDRAWAL_PAISE", 10_000, 10_000, 100_000_000_000, env,
         )
         withdrawal_minimum_chips = _bounded_config_int(
-            "MIN_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000, env,
+            "MIN_WITHDRAWAL_CHIPS", 100, 1, 1_000_000_000, env,
         )
         withdrawal_maximum_chips = _bounded_config_int(
-            "MAX_WITHDRAWAL_CHIPS", 1_000_000, 1, 1_000_000_000, env,
+            "MAX_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000, env,
         )
         effective_minimum, effective_maximum = _effective_withdrawal_chip_bounds(
             rate=rate,
@@ -1004,9 +1010,9 @@ def _configuration_errors(environ: Optional[Mapping[str, str]] = None) -> list[s
         ])
     if flags["withdrawals"]:
         limit_settings.extend([
-            ("MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000),
-            ("MIN_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000),
-            ("MAX_WITHDRAWAL_CHIPS", 1_000_000, 1, 1_000_000_000),
+            ("MIN_WITHDRAWAL_PAISE", 10_000, 10_000, 100_000_000_000),
+            ("MIN_WITHDRAWAL_CHIPS", 100, 1, 1_000_000_000),
+            ("MAX_WITHDRAWAL_CHIPS", 500, 1, 1_000_000_000),
         ])
     for setting, default, minimum, maximum in limit_settings:
         try:
@@ -1475,6 +1481,7 @@ async def wallet_public(user_id: str) -> dict[str, int]:
             remaining = 0
         return {
             "available_chips": legacy,
+            "source_separated": False,
             "cash_chips": 0,
             "bonus_chips": legacy,
             "held_chips": 0,
@@ -1492,6 +1499,7 @@ async def wallet_public(user_id: str) -> dict[str, int]:
         remaining = 0
     return {
         "available_chips": int(user.get("chip_balance", cash + bonus)),
+        "source_separated": True,
         "cash_chips": cash,
         "bonus_chips": bonus,
         "held_chips": held,
@@ -2285,6 +2293,12 @@ async def _credit_deposit(
             }},
             upsert=True, **kwargs,
         )
+        import bonus_policy
+        await bonus_policy.on_deposit_credited(
+            current["user_id"], current["id"],
+            amount_paise=int(current["amount_paise"]),
+            chips=int(current["chips"]), session=session,
+        )
         await db.deposit_orders.update_one(
             {"id": current["id"], "status": {"$ne": "CREDITED"}},
             {"$set": {
@@ -2431,8 +2445,8 @@ async def create_withdrawal(
         return existing
 
     minimum, maximum = _runtime_config_range(
-        "MIN_WITHDRAWAL_CHIPS", 500,
-        "MAX_WITHDRAWAL_CHIPS", 1_000_000,
+        "MIN_WITHDRAWAL_CHIPS", 100,
+        "MAX_WITHDRAWAL_CHIPS", 500,
         1_000_000_000,
     )
     if not minimum <= chips <= maximum:
@@ -2442,7 +2456,7 @@ async def create_withdrawal(
     rate = conversion_snapshot()
     amount_paise = chips_to_paise(chips, rate)
     minimum_paise = _runtime_config_int(
-        "MIN_WITHDRAWAL_PAISE", 100_000, 100_000, 100_000_000_000,
+        "MIN_WITHDRAWAL_PAISE", 10_000, 10_000, 100_000_000_000,
     )
     if amount_paise < minimum_paise:
         whole, fraction = divmod(minimum_paise, 100)
@@ -2473,6 +2487,15 @@ async def create_withdrawal(
                 raise FinancialError("IDEMPOTENCY_CONFLICT", "Withdrawal request conflicts.", 409)
             return duplicate
         await assert_withdrawal_not_held(user_id, session=session)
+        import bonus_policy
+        try:
+            await bonus_policy.reserve_daily_withdrawal(
+                user_id, withdrawal_id, amount_paise, session=session,
+            )
+        except bonus_policy.BonusPolicyError as exc:
+            raise FinancialError(
+                exc.code, exc.message, exc.status_code, details=exc.meta,
+            ) from exc
         # This write serializes creation against soft-deactivation. A plain
         # pre-transaction read could snapshot an account after deactivation had
         # already won the race.
@@ -2595,6 +2618,11 @@ async def _release_withdrawal(
             "admin_note": reason, "resolved_by": actor, "resolved_at": now(), "updated_at": now(),
         }},
         **kwargs,
+    )
+    import bonus_policy
+    await bonus_policy.release_daily_withdrawal(
+        str(withdrawal["user_id"]), str(withdrawal["id"]),
+        int(withdrawal.get("amount_paise", 0)), session=session,
     )
     updated = await db.withdrawal_requests.find_one(
         {"id": withdrawal["id"]}, {"_id": 0}, **kwargs,

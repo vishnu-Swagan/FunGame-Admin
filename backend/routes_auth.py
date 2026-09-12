@@ -16,6 +16,7 @@ from pymongo.errors import DuplicateKeyError
 from db import db, serialize_doc
 import crm
 import compliance
+import bonus_policy
 import telesign_service
 from avatar_service import deterministic_avatar_key
 from models import (
@@ -1122,6 +1123,7 @@ async def _register_phone_otp(
             'high_contrast': False,
         },
         'created_at': created_at,
+        **bonus_policy.signup_user_fields(),
     }
     acceptance_record = _policy_acceptance_record(user, policy_acceptance)
     _apply_policy_acceptance_to_user(user, acceptance_record)
@@ -1154,13 +1156,12 @@ async def _register_phone_otp(
             user['id'], None, actor='self-registration-phone-otp', session=session,
         )
         if body.invite_code:
-            import promotions
             try:
-                await promotions.attach_player_referral(
+                await bonus_policy.attach_referral(
                     user['id'], body.invite_code, jurisdiction=country_code,
                     consented_at=created_at, session=session,
                 )
-            except promotions.PromotionError as exc:
+            except bonus_policy.BonusPolicyError as exc:
                 raise HTTPException(status_code=422, detail={
                     'code': exc.code, 'message': exc.message,
                 }) from exc
@@ -1346,6 +1347,7 @@ async def _register_for_admin_review(
         # onboarding submission required before it appears in the admin queue.
         'submitted_at': created_at,
         'created_at': created_at,
+        **bonus_policy.signup_user_fields(),
     }
     acceptance_record = _policy_acceptance_record(user, policy_acceptance)
     _apply_policy_acceptance_to_user(user, acceptance_record)
@@ -1369,13 +1371,12 @@ async def _register_for_admin_review(
             user_id, None, actor='self-registration-admin-review', session=session,
         )
         if body.invite_code:
-            import promotions
             try:
-                await promotions.attach_player_referral(
+                await bonus_policy.attach_referral(
                     user_id, body.invite_code, jurisdiction=country_code,
                     consented_at=created_at, session=session,
                 )
-            except promotions.PromotionError as exc:
+            except bonus_policy.BonusPolicyError as exc:
                 raise HTTPException(status_code=422, detail={
                     'code': exc.code, 'message': exc.message,
                 }) from exc
@@ -1638,6 +1639,9 @@ async def verify_contact(body: VerifyEmailRequest):
         if not updated:
             raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
         if updated.get('status') == 'ACTIVE':
+            await bonus_policy.grant_signup_bonus(
+                updated['id'], source='SELF_SERVICE_PHONE_OTP', session=session,
+            )
             import promotions
             await promotions.record_referral_event(
                 updated['id'], 'REGISTRATION_VERIFIED',
@@ -1646,6 +1650,7 @@ async def verify_contact(body: VerifyEmailRequest):
                 metadata={'verification_method': updated.get('approved_by')},
                 session=session,
             )
+            updated = await db.users.find_one({'id': updated['id']}, **kwargs)
         return updated
 
     try:

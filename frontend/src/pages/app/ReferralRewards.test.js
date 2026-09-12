@@ -97,6 +97,29 @@ test("100 percent remains unclaimable until the server verifies eligibility", as
   await act(async () => root.unmount());
 });
 
+test("automatic referral rewards show direct and second-level real-chip rates", async () => {
+  mockReferral.mockResolvedValue({
+    ...SUMMARY,
+    automatic_rewards: true,
+    direct_percent: 10,
+    direct_cap_chips: 500,
+    second_level_percent: 5,
+  });
+  mockTasks.mockResolvedValue([{
+    id: "credit-1", task_key: "LEVEL_1_FIRST_DEPOSIT", status: "CLAIMED",
+    reward_type: "REAL_CHIPS", reward_chips: 100,
+  }]);
+  const { container, root } = await renderPage();
+
+  expect(container.querySelector('[data-testid="automatic-referral-rates"]')).not.toBeNull();
+  expect(container.textContent).toContain("10%");
+  expect(container.textContent).toContain("5%");
+  expect(container.textContent).toContain("100 real chips");
+  expect(container.textContent).toContain("No claim step is required");
+  expect(container.querySelector('[data-testid="claim-referral-button"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
 test("server-eligible rejected relationship supports an accessible appeal with error and retry", async () => {
   const rejectedTask = {
     id: "task-appeal", referral_id: "referral-appeal-1", task_key: "FIRST_VERIFIED_DEPOSIT",

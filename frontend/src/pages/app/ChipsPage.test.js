@@ -79,6 +79,7 @@ jest.mock("lucide-react", () => ({
   Gift: () => null,
   CirclePause: () => null,
   ArrowRight: () => null,
+  Sparkles: () => null,
 }), { virtual: true });
 
 jest.mock("@/components/common", () => ({
@@ -106,6 +107,7 @@ jest.mock("@/components/ui/input", () => ({ Input: (props) => <input {...props} 
 const READY_WALLET = {
   wallet: {
     available_chips: 50000,
+    source_separated: true,
     cash_chips: 50000,
     bonus_chips: 0,
     held_chips: 0,
@@ -121,10 +123,10 @@ const READY_WALLET = {
     checkout_hosts: ["pay.example"],
     deposits: { minimum_paise: 10000, maximum_paise: 100000000 },
     withdrawals: {
-      minimum_paise: 100000,
-      maximum_paise: 100000000,
-      minimum_chips: 1000,
-      maximum_chips: 1000000,
+      minimum_paise: 10000,
+      maximum_paise: 50000,
+      minimum_chips: 100,
+      maximum_chips: 500,
       exact_chip_conversion_required: true,
     },
   },
@@ -197,8 +199,8 @@ test("normalizes server-owned financial limits and rejects unsafe checkout URLs"
   expect(publicFinancialConfig(READY_WALLET)).toMatchObject({
     chipsPerInr: 1,
     minDepositPaise: 10000,
-    minWithdrawalPaise: 100000,
-    minWithdrawalChips: 1000,
+    minWithdrawalPaise: 10000,
+    minWithdrawalChips: 100,
   });
   expect(safeHostedCheckoutUrl("https://pay.example/checkout/1", ["pay.example"])).toBe("https://pay.example/checkout/1");
   expect(safeHostedCheckoutUrl("https://pay.example/checkout/1")).toBeNull();
@@ -208,6 +210,31 @@ test("normalizes server-owned financial limits and rejects unsafe checkout URLs"
   expect(safeHostedCheckoutUrl("https://user:secret@pay.example/checkout/1", ["pay.example"])).toBeNull();
   expect(safeHostedCheckoutUrl("https://pay.example:8443/checkout/1", ["pay.example"])).toBeNull();
   expect(safeHostedCheckoutUrl("https://pay.example:443/checkout/1", ["pay.example"])).toBe("https://pay.example/checkout/1");
+});
+
+test("shows the exact first-deposit match and projected playing chips", async () => {
+  mockWallet.mockResolvedValue({
+    ...READY_WALLET,
+    bonus_policy: {
+      participating: true,
+      conversion: { remaining_playing_chips: 0 },
+      first_deposit_offer: {
+        eligible: true,
+        claimed: false,
+        minimum_paise: 10000,
+        maximum_paise: 500000,
+        maximum_bonus_chips: 5000,
+      },
+    },
+  });
+  const { container, root } = await renderPage();
+
+  expect(container.querySelector('[data-testid="first-deposit-bonus-banner"]')).not.toBeNull();
+  expect(container.textContent).toContain("₹100 gets 100 extra");
+  expect(container.querySelector('[data-testid="projected-deposit-bonus"]').textContent).toContain("+1000");
+  change(container.querySelector('[data-testid="deposit-amount"]'), "5000");
+  expect(container.querySelector('[data-testid="projected-deposit-bonus"]').textContent).toContain("+5000");
+  await act(async () => root.unmount());
 });
 
 test("promotion offer eligibility fails closed outside the disclosed 1 to 720 hour finality range", () => {
@@ -407,18 +434,18 @@ test("Deposit remains fail-closed when the server publishes no checkout hosts", 
   await act(async () => root.unmount());
 });
 
-test("withdrawal uses the selected masked bank account and the server ₹1,000 minimum", async () => {
+test("withdrawal uses the selected masked bank account and the server ₹100 minimum", async () => {
   mockPathname = "/wallet/withdraw";
   const { container, root } = await renderPage();
   expect(container.textContent).toContain("Minimum withdrawal:");
-  expect(container.textContent).toContain("₹1,000");
+  expect(container.textContent).toContain("₹100");
   expect(container.querySelector('[data-testid="withdrawal-bank-account"]').value).toBe("bank-1");
 
-  change(container.querySelector('[data-testid="withdrawal-amount"]'), "1000");
+  change(container.querySelector('[data-testid="withdrawal-amount"]'), "500");
   await submit(container.querySelector('[data-testid="withdrawal-form"]'));
 
-  expect(mockFinancialIntentKey).toHaveBeenCalledWith("withdrawal", "player-1", "amount_chips=1000&bank=bank-1");
-  expect(mockCreateWithdrawal).toHaveBeenCalledWith(1000, "bank-1", "withdrawal-key");
+  expect(mockFinancialIntentKey).toHaveBeenCalledWith("withdrawal", "player-1", "amount_chips=500&bank=bank-1");
+  expect(mockCreateWithdrawal).toHaveBeenCalledWith(500, "bank-1", "withdrawal-key");
   expect(mockClearFinancialIntent).toHaveBeenCalledWith("withdrawal", "player-1", "withdrawal-key");
   expect(mockNavigate).toHaveBeenCalledWith("/wallet/activity", { replace: true });
   await act(async () => root.unmount());
@@ -430,17 +457,18 @@ test("withdrawal exceeding cleared cash shows a structured split instead of subm
     ...READY_WALLET,
     wallet: {
       ...READY_WALLET.wallet,
-      withdrawable_chips: 500,
+      withdrawable_chips: 300,
       restricted_bonus_chips: 300,
       active_mission: { id: "mission-1", campaign_id: "gold-mission", campaign_version: 2, title: "Gold mission", status: "ACTIVE", forfeit_allowed: true, progress: { percent: 25 } },
     },
   });
   const { container, root } = await renderPage();
+  change(container.querySelector('[data-testid="withdrawal-amount"]'), "500");
   await submit(container.querySelector('[data-testid="withdrawal-form"]'));
 
   expect(mockCreateWithdrawal).not.toHaveBeenCalled();
   expect(container.querySelector('[data-testid="withdrawal-balance-explanation"]')).not.toBeNull();
-  expect(container.textContent).toContain("500 is currently withdrawable");
+  expect(container.textContent).toContain("300 is currently withdrawable");
   expect(container.textContent).toContain("Restricted bonus");
   expect(container.textContent).toContain("Gold mission");
   expect(container.textContent).toContain("Campaign gold-mission · version 2");

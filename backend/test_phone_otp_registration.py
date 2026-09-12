@@ -351,8 +351,8 @@ async def main():
     assert email_login['access_token']
     assert email_login['user']['email_verified'] is False
 
-    # Existing profile/settings/chip-request features remain available to the
-    # newly activated account and preserve a zero starting balance.
+    # Existing profile/settings/chip-request features remain available and the
+    # newly activated self-service account receives its playing-chip grant.
     profile_result = await routes_player.update_profile(
         PlayerProfileUpdate(display_name='Lucky New Player', avatar='crown'),
         user=player,
@@ -373,7 +373,7 @@ async def main():
     assert chip['request']['status'] == 'PENDING'
     assert chip['request']['user_phone'] == '+919876543210'
     assert chip['request']['user_email'] == 'new.player@example.com'
-    assert (await database.users.find_one({'id': player['id']}))['chip_balance'] == 0
+    assert (await database.users.find_one({'id': player['id']}))['chip_balance'] == 1_000
 
     listed = await routes_admin.list_users(
         status='ACTIVE', admin={'id': 'admin-1', 'role': 'ADMIN', 'status': 'ACTIVE'},

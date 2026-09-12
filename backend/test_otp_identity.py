@@ -955,7 +955,7 @@ async def main():
     )
     assert await database.chip_transactions.count_documents({
         'user_id': 'approval-user',
-        'ref': 'account-approval:approval-user',
+        'ref': 'signup-bonus:approval-user',
     }) == 1
 
     # Play-chip operation remains backward-compatible. If real-money mode is

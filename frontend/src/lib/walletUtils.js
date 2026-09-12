@@ -34,6 +34,7 @@ export function normalizeWallet(payload, fallbackAvailable = 0) {
     : (Number(explicitBonus) || 0);
   return {
     available_chips: Number(available) || 0,
+    source_separated: source.source_separated === true,
     // Unknown legacy chips are playable but never presented as cleared cash.
     // Withdrawal eligibility must always arrive as an explicit server field.
     cash_chips: Number(explicitCash ?? 0) || 0,
@@ -45,6 +46,7 @@ export function normalizeWallet(payload, fallbackAvailable = 0) {
     pending_reward_chips: Number(source.pending_reward_chips ?? source.pending_reward ?? 0) || 0,
     active_mission: source.active_mission || payload?.active_mission || null,
     withdrawal_eligibility: source.withdrawal_eligibility || payload?.withdrawal_eligibility || null,
+    bonus_policy: payload?.bonus_policy || source.bonus_policy || null,
   };
 }
 

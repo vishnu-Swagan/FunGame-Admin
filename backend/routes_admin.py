@@ -59,13 +59,14 @@ from otp_service import (
     require_otp_indexes,
 )
 from avatar_service import deterministic_avatar_key
+import bonus_policy
 import os
 from pymongo import ReturnDocument
 
 logger = logging.getLogger('admin')
 router = APIRouter(prefix='/admin', tags=['admin'])
 
-WELCOME_BONUS = 1000
+WELCOME_BONUS = bonus_policy.SIGNUP_BONUS_CHIPS
 ADMIN_REVIEW_ACTIVATION_MODE = 'ADMIN_REVIEW'
 ADMIN_REVIEW_PENDING = 'ADMIN_REVIEW_PENDING'
 ADMIN_REVIEW_APPROVED = 'ADMIN_APPROVED'
@@ -1304,6 +1305,8 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
             'approved_at': approved_at,
             'approved_by': admin['id'],
         }
+        if not was_approved_before:
+            approval_updates.update(bonus_policy.signup_user_fields())
         requested_username = user.get('requested_username')
         if requested_username:
             try:
@@ -1380,9 +1383,8 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 session=session,
             )
         if not was_approved_before:
-            await _credit_chips(
-                user_id, WELCOME_BONUS, 'Welcome promotional balance from account approval',
-                ref=f'account-approval:{user_id}', session=session,
+            await bonus_policy.grant_signup_bonus(
+                user_id, source='SELF_SERVICE_ADMIN_REVIEW', session=session,
             )
             await _notify(
                 user_id, 'Account approved!',
@@ -1700,6 +1702,7 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
         'accepted_terms': True,
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'signup_request_id': request_id,
+        **bonus_policy.signup_user_fields(),
     }
     async def commit(session):
         kwargs = {'session': session} if session is not None else {}
@@ -1733,17 +1736,9 @@ async def approve_signup_request(request_id: str, body: AdminSignupApprove, admi
                 actor=admin['id'], session=session,
             )
             user['referral_code'] = current.get('referral_code')
-            try:
-                import free_cash
-                await free_cash.on_player_registered(user, current.get('device_id'))
-            except Exception:
-                pass
-            if body.starting_chips > 0:
-                await _credit_chips(
-                    user['id'], body.starting_chips,
-                    'Welcome promotional balance from account provisioning',
-                    session=session,
-                )
+            await bonus_policy.grant_signup_bonus(
+                user['id'], source='LEGACY_SIGNUP_ADMIN_APPROVAL', session=session,
+            )
             await _notify(
                 user['id'], 'Welcome to Chakri.Casino!',
                 f'Your account is ready. Log in with your assigned Login ID "{username}".',

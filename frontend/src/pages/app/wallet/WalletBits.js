@@ -18,8 +18,8 @@ export function PaymentStatus({ status, playerFriendly = false }) {
 
 export function WalletBalanceCard({ wallet }) {
   const items = [
-    { label: "Withdrawable cash", value: wallet.withdrawable_chips, icon: Banknote, accent: "text-emerald-300" },
-    { label: "Restricted bonus", value: wallet.restricted_bonus_chips, icon: LockKeyhole, accent: "text-fuchsia-300" },
+    { label: "Real chips · withdrawable", value: wallet.withdrawable_chips, icon: Banknote, accent: "text-emerald-300" },
+    { label: "Playing chips · bonus", value: wallet.restricted_bonus_chips, icon: LockKeyhole, accent: "text-fuchsia-300" },
     { label: "Withdrawal hold", value: wallet.held_withdrawal_chips, icon: Hourglass, accent: "text-sky-300" },
     { label: "Pending reward", value: wallet.pending_reward_chips, icon: Gift, accent: "text-primary" },
   ];

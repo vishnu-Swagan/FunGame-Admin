@@ -41,6 +41,7 @@ import routes_promotions
 import operator_rail
 import financial_wallet
 import game_wallet
+import bonus_policy
 import promotions
 from payment_hub import service as payment_hub_service
 from payment_providers import ProviderConfigurationError, load_payment_provider
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 # Registration is harmless while certification/runtime flags are false. The
 # adapter itself fails closed and never mutates a wallet in the current build.
 game_wallet.install()
+bonus_policy.install_ledger_observer()
 promotions.install_ledger_observer()
 
 
@@ -166,6 +168,7 @@ async def _core_indexes():
     await db.users.create_index([('role', 1), ('status', 1), ('last_seen_at', -1)])
     await db.users.create_index([('role', 1), ('last_login_at', -1)])
     await operator_rail.ensure_hosted_indexes()
+    await bonus_policy.prepare()
     await db.game_rounds.create_index([('user_id', 1), ('slug', 1), ('created_at', -1)])
     # Live "winners feed": recent settled wins per game (payout>0), newest first.
     await db.game_rounds.create_index([('slug', 1), ('settled_at', -1)])
