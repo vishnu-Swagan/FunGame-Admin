@@ -10,8 +10,9 @@ export default function SiteFooter({ signedIn = false }) {
         <div>
           <BrandWordmark logoClassName="h-auto w-[min(72vw,220px)]" />
           <p className="mt-3 text-xs leading-relaxed text-white/55">
-            {OPERATOR.productName} is a virtual-chip entertainment product of {OPERATOR.legalName},
-            a UK company. Chips are for play on this service only and have no cash value.
+            {OPERATOR.productName} is a digital entertainment product of {OPERATOR.legalName},
+            a UK company. Playing Chips are non-withdrawable bonus chips. Eligible Real Chips
+            are withdrawable through your wallet, subject to the displayed terms and limits.
           </p>
         </div>
 

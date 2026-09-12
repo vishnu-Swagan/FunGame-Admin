@@ -16,10 +16,11 @@ import PlayerLobby from "@/pages/app/PlayerLobby";
 import LoginForm from "@/pages/auth/forms/LoginForm";
 import RegisterForm from "@/pages/auth/forms/RegisterForm";
 import ForgotPasswordForm from "@/pages/auth/forms/ForgotPasswordForm";
+import { NewPlayerOffersPopup, NewPlayerOffersSpotlight } from "@/components/promotions/NewPlayerOffers";
 
 const BASE_FEATURES = [
   { icon: Gamepad2, title: "Premium digital games", text: "Enter the live game lobby and explore the available tables and arcade titles." },
-  { icon: Coins, title: "Virtual play chips", text: "Request play chips from an operator and follow the approval status from your profile." },
+  { icon: Coins, title: "Two clear balances", text: "Playing Chips power gameplay; converted rewards and referral earnings appear separately as withdrawable Real Chips." },
 ];
 
 /**
@@ -95,7 +96,7 @@ function LoggedOutFront({ panel, registrationSubmitted, onSwitchPanel }) {
   return (
     <div className="App fg-noise min-h-dvh bg-background relative overflow-hidden" data-testid="frontpage">
       <div className="fg-aurora absolute top-0 left-0 right-0 h-[220px] pointer-events-none" />
-      <div className="relative z-[2] mx-auto max-w-[430px] px-6 min-h-dvh flex flex-col justify-between py-10">
+      <div className={`relative z-[2] mx-auto ${showHero ? "max-w-[760px]" : "max-w-[430px]"} px-6 min-h-dvh flex flex-col justify-between py-10`}>
         <div className="pt-10">
           <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
             <BrandWordmark logoClassName="h-auto w-[min(88vw,380px)]" className="mb-5" />
@@ -110,25 +111,31 @@ function LoggedOutFront({ panel, registrationSubmitted, onSwitchPanel }) {
           </motion.div>
 
           {showHero && (
-            <div className="mt-8 space-y-3">
-              {features.map(({ icon: Icon, title, text }, i) => (
-                <motion.div
-                  key={title}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35, delay: 0.12 + i * 0.08 }}
-                  className="flex items-start gap-3 rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4"
-                >
-                  <div className="h-9 w-9 shrink-0 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
-                    <Icon className="h-4 w-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold">{title}</p>
-                    <p className="text-xs text-white/60 mt-0.5">{text}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            <>
+              <div className="mt-8">
+                <NewPlayerOffersSpotlight />
+              </div>
+              <div className="mt-5 space-y-3">
+                {features.map(({ icon: Icon, title, text }, i) => (
+                  <motion.div
+                    key={title}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: 0.12 + i * 0.08 }}
+                    className="flex items-start gap-3 rounded-2xl bg-card/55 backdrop-blur-md border border-white/10 p-4"
+                  >
+                    <div className="h-9 w-9 shrink-0 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
+                      <Icon className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">{title}</p>
+                      <p className="text-xs text-white/60 mt-0.5">{text}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+              <NewPlayerOffersPopup />
+            </>
           )}
 
           {!showHero && (
