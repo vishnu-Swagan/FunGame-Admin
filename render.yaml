@@ -1,13 +1,13 @@
 # Render Blueprint for the existing production services.
 #
-# Auto-deploy is on for the linked main branch (On Commit). Keep Blueprint Auto
-# Sync reviewed: a sync with autoDeployTrigger off would disable the dashboard
-# setting. Service names stay historical so a sync updates production in place.
+# The API deploys only after main's CI passes. Keep Blueprint Auto Sync reviewed
+# so it cannot undo this release gate. Service names stay historical so a sync
+# updates production in place. The static site's existing trigger is unchanged.
 services:
   - type: web
     name: fungame-api
     runtime: docker
-    autoDeployTrigger: commit
+    autoDeployTrigger: checksPass
     branch: main
     # Preserve the live production capacity. A Blueprint sync treats this as an
     # instruction, so declaring free here would attempt an unsafe downgrade.
