@@ -15,7 +15,7 @@ export const OPERATOR = {
   productUrl: "https://chakri.casino",
 };
 
-export const AGE_AND_CHIPS = "VIRTUAL CHIPS ONLY · NO CASH VALUE · 18+ · PLAY RESPONSIBLY";
+export const AGE_AND_CHIPS = "18+ · PLAY RESPONSIBLY · BONUS AND WITHDRAWAL TERMS APPLY";
 
 export function footerNav(signedIn) {
   return {
@@ -39,6 +39,7 @@ export function footerNav(signedIn) {
       { to: "/fair-play", label: "Fair play" },
     ],
     Legal: [
+      { to: "/legal/bonuses", label: "Bonus terms" },
       { to: "/terms", label: "Terms of use" },
       { to: "/privacy", label: "Privacy" },
       { to: "/cookies", label: "Cookies" },

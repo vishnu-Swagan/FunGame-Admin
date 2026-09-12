@@ -13,6 +13,7 @@ import { sfx } from "@/lib/sound";
 import FreeCash, { FreeCashFab } from "@/components/promo/FreeCash";
 import WagerBonusOverlay from "@/components/promo/WagerBonusOverlay";
 import { promoApi } from "@/lib/promoApi";
+import { NewPlayerOffersPopup, NewPlayerOffersSpotlight } from "@/components/promotions/NewPlayerOffers";
 
 const CATEGORY_ORDER = ["Cards", "Slots", "Wheel", "Numbers", "Dice", "Crash", "Board"];
 
@@ -137,6 +138,7 @@ export default function PlayerLobby() {
   const [promo, setPromo] = useState(null);
   const [freeCashOpen, setFreeCashOpen] = useState(false);
   const [overlay, setOverlay] = useState(null);
+  const [offerPopupEnabled, setOfferPopupEnabled] = useState(false);
   const [lobbyCat, setLobbyCat] = useState("All");
   useEffect(() => {
     let cancelled = false;
@@ -147,8 +149,13 @@ export default function PlayerLobby() {
       if (data?.wager?.overlay && !shown) {
         setOverlay(data.wager.overlay);
         sessionStorage.setItem("chakri-overlay-shown", data.wager.overlay.id || "1");
+        setOfferPopupEnabled(false);
+      } else {
+        setOfferPopupEnabled(true);
       }
-    }).catch(() => {});
+    }).catch(() => {
+      if (!cancelled) setOfferPopupEnabled(true);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -163,6 +170,7 @@ export default function PlayerLobby() {
 
       {/* Live floor ticker */}
       <LiveActivityBar slug="chakri-lobby" />
+      <NewPlayerOffersSpotlight signedIn />
       {promo?.wager?.bonus && (
         <section className="rounded-2xl border border-emerald-400/25 bg-emerald-950/40 p-4" data-testid="home-cash-guarantee">
           <div className="flex items-center justify-between">
@@ -303,7 +311,8 @@ export default function PlayerLobby() {
       )}
       <FreeCashFab onClick={() => setFreeCashOpen(true)} remainingPaise={promo?.free_cash?.remaining_paise} />
       <FreeCash open={freeCashOpen} onClose={() => setFreeCashOpen(false)} initial={promo?.free_cash} />
-      <WagerBonusOverlay overlay={overlay} onClose={() => setOverlay(null)} />
+      <WagerBonusOverlay overlay={overlay} onClose={() => { setOverlay(null); setOfferPopupEnabled(true); }} />
+      <NewPlayerOffersPopup signedIn surface="lobby" enabled={offerPopupEnabled && !freeCashOpen} />
     </PageTransition>
   );
 }

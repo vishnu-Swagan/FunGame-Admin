@@ -33,7 +33,7 @@ const LEGAL_AND_COMPANY_LINKS = [
   ["fair-play", "Fair play", "/fair-play"],
 ];
 
-test("site footer lists industrial-standard legal links and virtual-chip disclaimer", () => {
+test("site footer lists legal links and explains separate playing and real chips", () => {
   const { container, root } = renderFooter();
 
   const footer = container.querySelector('[data-testid="site-footer"]');
@@ -48,7 +48,8 @@ test("site footer lists industrial-standard legal links and virtual-chip disclai
 
   const disclaimer = footer.querySelector('[data-testid="site-footer-disclaimer"]');
   expect(disclaimer).not.toBeNull();
-  expect(disclaimer.textContent).toMatch(/NO CASH VALUE/);
+  expect(disclaimer.textContent).toMatch(/BONUS AND WITHDRAWAL TERMS APPLY/);
+  expect(footer.textContent).toContain("Playing Chips are non-withdrawable bonus chips.");
   expect(disclaimer.textContent).toBe(AGE_AND_CHIPS);
 
   expect(footer.textContent).toContain(OPERATOR.legalName);

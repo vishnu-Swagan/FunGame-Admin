@@ -385,6 +385,13 @@ export const LEGAL_DOCUMENTS = Object.freeze({
       "How optional offers, wagering missions, referral rewards, expiry, claims, and bonus restrictions work."
     ),
     sections: [
+      section("welcome-offers", "Current signup, deposit and referral offers", [
+        "New player accounts receive 1,000 Playing Chips. Playing Chips are non-withdrawable bonus value, held separately from withdrawable Real Chips.",
+        "Each settled bonus chip wagered unlocks up to one remaining Playing Chip as a Real Chip. Only value remaining in the bonus balance can convert; cancelled or void wagers do not qualify.",
+        "Once an eligible account has no remaining Playing Chips, it can receive one 100% deposit match on a deposit of ₹100–₹5,000. ₹100 adds 100 bonus Playing Chips; ₹5,000 adds 5,000. Deposits outside this range do not qualify. The wallet shows account eligibility and whether the match has already been used.",
+        "A direct referrer receives 10% of the referred player's first successful deposit, capped at 500 Real Chips. Their referrer receives 5% of that same first deposit as a second-level reward. Subsequent deposits do not earn these referral rewards. Rewards are added automatically as Real Chips after qualifying payment confirmation.",
+        "Total withdrawal requests are limited to ₹500 per player per calendar day in Asia/Kolkata time, subject to available withdrawable Real Chips and the account's displayed payment requirements.",
+      ]),
       section("optional", "Optional participation", [
         "A deposit offer or reward mission is optional. Players must be able to continue without a bonus where a bonus is presented during payment.",
         "The offer review must show the campaign and terms version, eligible player and territory, deposit amount, reward, wagering target, game contribution rates, maximum qualifying stake, expiry, claim process, and withdrawal consequence before acceptance.",

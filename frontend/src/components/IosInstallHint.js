@@ -42,6 +42,9 @@ const isGameRoute = (pathname) =>
 
 const shouldAutoOffer = (pathname) => ["/", "/welcome", "/home", "/games"].includes(pathname);
 
+const hasCompetingOfferPopup = () =>
+  typeof document !== "undefined" && document.documentElement.dataset.chakriOffersSurface === "true";
+
 const wasRecentlyDismissed = () => {
   try {
     const value = localStorage.getItem(STORAGE_KEY);
@@ -78,7 +81,7 @@ export default function IosInstallHint() {
     const onBeforeInstallPrompt = (event) => {
       event.preventDefault();
       setDeferredPrompt(event);
-      if (!wasRecentlyDismissed() && shouldAutoOffer(window.location.pathname)) {
+      if (!wasRecentlyDismissed() && !hasCompetingOfferPopup() && shouldAutoOffer(window.location.pathname)) {
         setShow(true);
       }
     };
@@ -115,14 +118,16 @@ export default function IosInstallHint() {
       return undefined;
     }
 
-    if (wasRecentlyDismissed() || !shouldAutoOffer(location.pathname)) return undefined;
+    if (wasRecentlyDismissed() || hasCompetingOfferPopup() || !shouldAutoOffer(location.pathname)) return undefined;
 
     // A Chromium prompt can be captured on login or a live-game route. Offer it
     // when the player next reaches Home/Games instead of losing the one event.
     const delay = deferredPrompt ? 250 : 1600;
     // Browsers without native install prompting still receive accurate manual
     // guidance (Safari steps, or a clear Chrome/Edge compatibility message).
-    const timer = window.setTimeout(() => setShow(true), delay);
+    const timer = window.setTimeout(() => {
+      if (!hasCompetingOfferPopup()) setShow(true);
+    }, delay);
     return () => window.clearTimeout(timer);
   }, [deferredPrompt, installed, location.pathname]);
 
