@@ -18,6 +18,8 @@ jobs:
           python-version: "3.11"
       - name: Install backend test dependencies
         run: python -m pip install -r requirements-test.txt
+      - name: Reject undefined names in live game code
+        run: python -m ruff check --select F821 routes_live.py server.py game_engines.py
       - name: Run backend tests
         run: python -m pytest
 

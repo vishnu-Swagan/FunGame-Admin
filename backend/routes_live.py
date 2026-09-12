@@ -23,9 +23,10 @@ from auth_utils import require_active_player
 from ledger import credit_chips, debit_chips, InsufficientChips
 import ledger
 from game_engines import (
-    MIN_BET, MAX_BET, AVIATOR_GROWTH, KENO_PAYTABLE,
+    MIN_BET, MAX_BET, AVIATOR_GROWTH, AVIATOR_FAIRNESS_VERSION, KENO_PAYTABLE,
     aviator_crash_point, aviator_multiplier, aviator_return_factor, aviator_time_for,
     aviator_multiplier_hundredths, aviator_payout_chips,
+    aviator_commitment, aviator_commitment_payload, aviator_factor_text,
 )
 from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
@@ -76,7 +77,8 @@ class BetRef(BaseModel):
     bet_id: str
 
 
-async def _av_create_round(round_number: int, start_ts: float):
+def _av_round_document(round_number: int, start_ts: float):
+    """Build a round without persistence, also exercised by the readiness probe."""
     server_seed = secrets.token_hex(32)
     verification_factor = aviator_return_factor()
     fairness_version = AVIATOR_FAIRNESS_VERSION
@@ -84,7 +86,7 @@ async def _av_create_round(round_number: int, start_ts: float):
     crash = aviator_crash_point(server_seed, verification_factor)
     fly_start = start_ts + AV_BETTING
     crash_at = fly_start + aviator_time_for(crash)
-    doc = {
+    return {
         'round_number': round_number, 'betting_start': start_ts, 'fly_start': fly_start,
         'crash_point': crash, 'crash_at': crash_at, 'ends_at': crash_at + AV_RESULT,
         'status': 'OPEN', 'created_at': _now_iso(),
@@ -93,6 +95,10 @@ async def _av_create_round(round_number: int, start_ts: float):
         'server_seed': server_seed, 'server_seed_hash': server_seed_hash,
         'verification_factor': verification_factor, 'fairness_version': fairness_version,
     }
+
+
+async def _av_create_round(round_number: int, start_ts: float):
+    doc = _av_round_document(round_number, start_ts)
     try:
         await db.aviator_rounds.insert_one(dict(doc))
         return doc
@@ -259,7 +265,17 @@ def _av_phase(r, now):
 @router.get('/live/aviator/state')
 async def aviator_state(user: dict = Depends(require_active_player)):
     await require_playable_game('aviator')
-    r = await advance_aviator()
+    try:
+        r = await advance_aviator()
+    except Exception as exc:
+        logger.exception('Aviator live round unavailable')
+        # A handled error passes through CORS, unlike an unhandled 500. Clients
+        # can retry without seeing a misleading cross-origin/network failure.
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'AVIATOR_UNAVAILABLE', 'message': 'Live round temporarily unavailable.'},
+            headers={'Retry-After': '2'},
+        ) from exc
     now = time.time()
     phase, t = _av_phase(r, now)
     rn = r['round_number']

@@ -87,6 +87,26 @@ which read as "the button doesn't work".
 
 ## Checking which build is live
 
+### Aviator release checks
+
+The API's Render auto-deploy setting must be **After CI Checks Pass**, matching
+`autoDeployTrigger: checksPass` in `render.yaml`. Do not manually deploy a
+revision with failing checks. CI rejects undefined names in the live game code
+and exercises real round creation, rollover, duplicate creation, state responses,
+and both fairness-proof versions against an isolated database.
+
+`GET /api/health` now builds (but never persists) a sample round using the same
+function as live creation. `AVIATOR_NOT_READY` / HTTP 503 means the live-round
+runtime cannot construct a round; configuration failure also returns 503. A
+healthy response includes `aviator_ready: true`. This is a construction probe,
+not a guarantee that the background loop and every player request are healthy.
+
+After deployment, verify the live commit in Render, a healthy API response,
+and at least two advancing rounds in the authenticated game **without betting**.
+Check the application logs for repeated `aviator keepalive` warnings or state
+endpoint 5xx responses. Investigate failures instead of clearing browser data:
+a backend failure can appear as a CORS/reconnecting error in the browser.
+
 ```
 curl https://chakri-casino-api.onrender.com/api/
 ```

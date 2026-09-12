@@ -142,7 +142,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response,
             {
-                "status": "ok", "gameplay_ready": True,
+                "status": "ok", "gameplay_ready": True, "aviator_ready": True,
                 "crm_ready": True, "financial_ready": True,
                 "promotion_core_ready": False,
             },
@@ -172,6 +172,29 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.detail["code"], "GAMEPLAY_NOT_READY")
         database.command.assert_awaited_once_with("ping")
         transaction_probe.assert_awaited_once_with()
+
+    async def test_health_rejects_missing_live_round_import_and_recovers(self):
+        database = self._database()
+        with (
+            patch.object(server, 'db', database),
+            patch.object(server, '_prepare_gameplay_core', new_callable=AsyncMock),
+            patch.object(server, '_require_crm_readiness', new_callable=AsyncMock),
+            patch.object(server.financial_wallet, 'financial_status', return_value={'ready': False}),
+            patch.object(server.financial_wallet, 'financial_flags_requested', return_value=False),
+            patch.dict(os.environ, {'AVIATOR_RETURN_FACTOR': '0.8'}),
+        ):
+            # Reproduce the production bug in the real function's namespace.
+            namespace = dict(vars(server.routes_live))
+            with patch.dict(vars(server.routes_live), namespace):
+                del server.routes_live.AVIATOR_FAIRNESS_VERSION
+                with self.assertRaises(HTTPException) as raised:
+                    await server.health()
+            self.assertEqual(raised.exception.status_code, 503)
+            self.assertEqual(raised.exception.detail['code'], 'AVIATOR_NOT_READY')
+            self.assertNotIn('AVIATOR_FAIRNESS_VERSION', str(raised.exception.detail))
+            database.command.assert_not_awaited()
+            recovered = await server.health()
+            self.assertTrue(recovered['aviator_ready'])
 
     async def test_health_returns_503_when_crm_identity_indexes_are_unavailable(self):
         database = self._database()

@@ -382,6 +382,16 @@ async def health():
             status_code=503, detail='Aviator configuration unavailable'
         ) from exc
     try:
+        # Exercise the exact live-round construction path, not just its config.
+        # Nothing is persisted, settled, returned, or written to a wallet.
+        routes_live._av_round_document(0, 0.0)
+    except Exception as exc:
+        logger.error('Aviator runtime readiness failed: %s', type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'AVIATOR_NOT_READY', 'message': 'Live round services are not ready.'},
+        ) from exc
+    try:
         await db.command('ping')
         if not _GAMEPLAY_READY:
             await _prepare_gameplay_core()
@@ -433,6 +443,7 @@ async def health():
     return {
         'status': 'ok',
         'gameplay_ready': True,
+        'aviator_ready': True,
         'crm_ready': True,
         'financial_ready': bool(financial['ready']),
         'promotion_core_ready': bool(promotions.promotion_core_status()['ready']),
