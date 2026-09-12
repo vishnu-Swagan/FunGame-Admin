@@ -1,10 +1,4 @@
-"""Source-aware bridge between gameplay and the financial wallet.
-
-This module is certification-ready but dormant. It can move wallet source
-buckets only when the compile-time readiness assertion and the explicit runtime
-integration flag are both true. The current repository deliberately leaves the
-compile-time assertion false.
-"""
+"""Source-aware bridge between gameplay and the financial wallet."""
 from __future__ import annotations
 
 import os
@@ -14,6 +8,7 @@ from typing import Any, Iterable, Mapping
 from db import db
 import financial_wallet as finance
 import ledger
+import bonus_policy
 from pymongo.errors import DuplicateKeyError
 
 
@@ -22,6 +17,17 @@ SOURCE_POLICY_VERSION = "game-wallet-source-v1"
 
 
 def integration_enabled() -> bool:
+    # New-player dual currency has its own reviewed, narrowly-scoped readiness
+    # latch.  The broader payments-v2 rollout may remain disabled while the
+    # established operator rail still keeps cash and playing chips separated.
+    return bool(
+        finance.GAME_WALLET_INTEGRATION_READY
+        and (legacy_integration_enabled() or bonus_policy.wallet_source_enabled())
+    )
+
+
+def legacy_integration_enabled() -> bool:
+    """Retain the certified payments-v2 activation path for existing users."""
     return bool(
         finance.GAME_WALLET_INTEGRATION_READY
         and finance.financial_status().get("ready", False)
@@ -240,19 +246,31 @@ class SourceWalletAdapter:
         self, *, event_id: str, user_id: str, amount: int, kind: str,
         ref: str | None, game: str | None, session=None,
     ) -> Mapping[str, Any] | None:
-        if not integration_enabled() or kind != ledger.STAKE:
+        if not integration_enabled() or kind not in {ledger.STAKE, ledger.WITHDRAWAL}:
+            return None
+        legacy_enabled = legacy_integration_enabled()
+        participant = await bonus_policy.user_participates(user_id, session=session)
+        if not legacy_enabled and not participant:
+            return None
+        if kind == ledger.WITHDRAWAL and not participant:
             return None
         _require_transaction(session)
         account = await finance._ensure_wallet_account(user_id, session=session)
         await _assert_wallet_mirror(user_id, account, session=session)
-        bonus = min(int(amount), int(account.get("available_bonus_chips", 0)))
-        cash = int(amount) - bonus
-        if game == "rummy" and bonus:
-            raise finance.FinancialError(
-                "RESTRICTED_BONUS_P2P_NOT_ALLOWED",
-                "Restricted bonus chips cannot fund peer-to-peer Rummy stakes.",
-                409,
-            )
+        if kind == ledger.WITHDRAWAL:
+            bonus = 0
+            cash = int(amount)
+            operation_kind = "OPERATOR_WITHDRAWAL_DEBIT"
+        else:
+            bonus = min(int(amount), int(account.get("available_bonus_chips", 0)))
+            cash = int(amount) - bonus
+            operation_kind = "GAME_STAKE"
+            if game == "rummy" and bonus:
+                raise finance.FinancialError(
+                    "RESTRICTED_BONUS_P2P_NOT_ALLOWED",
+                    "Restricted bonus chips cannot fund peer-to-peer Rummy stakes.",
+                    409,
+                )
         if cash > int(account.get("available_cash_chips", 0)):
             raise finance.FinancialError(
                 "INSUFFICIENT_GAME_WALLET_CHIPS",
@@ -268,8 +286,9 @@ class SourceWalletAdapter:
             user_id, bonus, session=session,
         ) if bonus else []
         movement = await finance.apply_wallet_movement(
-            user_id=user_id, kind="GAME_STAKE", source_key=f"game-stake:{event_id}",
-            idempotency_key=f"game-stake:{event_id}", deltas=deltas,
+            user_id=user_id, kind=operation_kind,
+            source_key=f"{operation_kind.lower()}:{event_id}",
+            idempotency_key=f"{operation_kind.lower()}:{event_id}", deltas=deltas,
             mirror_user_delta=0,
             metadata={
                 "ledger_event_id": event_id, "game": game, "game_ref": ref,
@@ -289,14 +308,35 @@ class SourceWalletAdapter:
         self, *, event_id: str, user_id: str, amount: int, kind: str,
         ref: str | None, source_refs: Iterable[str], game: str | None, session=None,
     ) -> Mapping[str, Any] | None:
-        if not integration_enabled() or kind not in {ledger.PAYOUT, ledger.REFUND, ledger.BONUS}:
+        if not integration_enabled() or kind not in {
+            ledger.DEPOSIT, ledger.PAYOUT, ledger.REFUND, ledger.BONUS,
+        }:
+            return None
+        legacy_enabled = legacy_integration_enabled()
+        participant = await bonus_policy.user_participates(user_id, session=session)
+        if not legacy_enabled and not participant:
+            return None
+        if kind == ledger.DEPOSIT and not participant:
             return None
         _require_transaction(session)
         account = await finance._ensure_wallet_account(user_id, session=session)
         await _assert_wallet_mirror(user_id, account, session=session)
-        if kind == ledger.BONUS:
+        if kind == ledger.DEPOSIT:
+            cash, bonus = int(amount), 0
+            operation_kind = "OPERATOR_DEPOSIT_CREDIT"
+            bonus_lot_changes = None
+            source_bonus_lots = []
+        elif kind == ledger.BONUS:
             cash, bonus = 0, int(amount)
-            operation_kind = "GAME_BONUS_CREDIT"
+            if participant and str(ref or "").startswith("signup-bonus:"):
+                operation_kind = "SIGNUP_BONUS_CREDIT"
+                bonus_source_type = "SIGNUP_BONUS"
+            elif participant and str(ref or "").startswith("first-deposit-bonus:"):
+                operation_kind = "FIRST_DEPOSIT_BONUS_CREDIT"
+                bonus_source_type = "FIRST_DEPOSIT_MATCH"
+            else:
+                operation_kind = "GAME_BONUS_CREDIT"
+                bonus_source_type = "RESTRICTED_BONUS"
             bonus_lot_changes = None
             source_bonus_lots: list[dict[str, Any]] = []
         else:
@@ -358,6 +398,7 @@ class SourceWalletAdapter:
                 "aggregate_source_owners": bool(kind == ledger.PAYOUT and game == "rummy"),
                 "bonus_lot_rounding": "PROPORTIONAL_FLOOR_REMAINDER_TO_EARLIEST_LOT",
                 "cash_chips": cash, "bonus_chips": bonus,
+                **({"bonus_source_type": bonus_source_type} if kind == ledger.BONUS else {}),
             },
             bonus_lot_changes=bonus_lot_changes,
             session=session,

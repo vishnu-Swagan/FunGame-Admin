@@ -19,6 +19,7 @@ os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "promotions_import")
 
 import financial_wallet as finance  # noqa: E402
+import bonus_policy  # noqa: E402
 import game_wallet  # noqa: E402
 import ledger  # noqa: E402
 import promotions  # noqa: E402
@@ -110,11 +111,12 @@ class PromotionDomainTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.client = AsyncMongoMockClient()
         self.db = self.client["promotion_domain_test"]
-        self.old_db = (promotions.db, finance.db, ledger.db, compliance.db)
+        self.old_db = (promotions.db, finance.db, ledger.db, compliance.db, bonus_policy.db)
         promotions.db = self.db
         finance.db = self.db
         ledger.db = self.db
         compliance.db = self.db
+        bonus_policy.db = self.db
         self.old_game_ready = finance.GAME_WALLET_INTEGRATION_READY
         self.old_financial_ready = finance._READY
         self.old_promotion_ready = promotions._PROMOTION_CORE_READY
@@ -171,7 +173,7 @@ class PromotionDomainTests(unittest.IsolatedAsyncioTestCase):
         finance._READY = self.old_financial_ready
         promotions._PROMOTION_CORE_READY = self.old_promotion_ready
         promotions._PROMOTION_CORE_ERRORS = self.old_promotion_errors
-        promotions.db, finance.db, ledger.db, compliance.db = self.old_db
+        promotions.db, finance.db, ledger.db, compliance.db, bonus_policy.db = self.old_db
 
     async def activate_campaign(self, campaign_type="WAGER", campaign_id=None, spec=None):
         campaign_id = campaign_id or ("wager-main" if campaign_type == "WAGER" else "referral-main")
@@ -1407,7 +1409,7 @@ class PromotionDomainTests(unittest.IsolatedAsyncioTestCase):
             user_id="player-1", kind="TEST_CLEARED_CASH_SEED",
             source_key="test-cleared-cash-seed:withdrawal-claim",
             idempotency_key="test-cleared-cash-seed:withdrawal-claim",
-            deltas={"available_cash_chips": 1_000}, mirror_user_delta=1_000,
+            deltas={"available_cash_chips": 500}, mirror_user_delta=500,
             metadata={"test_case": "concurrent_withdrawal_and_claim"},
         )
         payout_method_id = "withdrawal-claim-payout-method"
@@ -1422,7 +1424,7 @@ class PromotionDomainTests(unittest.IsolatedAsyncioTestCase):
         provider = type("PromotionWithdrawalProvider", (), {"name": "test-provider"})()
         withdrawal, claim = await asyncio.gather(
             finance.create_withdrawal(
-                "player-1", 1_000, payout_method_id,
+                "player-1", 500, payout_method_id,
                 "withdrawal-concurrent-with-claim", provider,
             ),
             promotions.claim_mission(
@@ -1435,7 +1437,7 @@ class PromotionDomainTests(unittest.IsolatedAsyncioTestCase):
         user = await self.db.users.find_one({"id": "player-1"})
         self.assertEqual(wallet["available_cash_chips"], 100)
         self.assertEqual(wallet["available_bonus_chips"], 50)
-        self.assertEqual(wallet["held_cash_chips"], 1_000)
+        self.assertEqual(wallet["held_cash_chips"], 500)
         self.assertEqual(user["chip_balance"], 150)
         self.assertEqual(
             user["chip_balance"],

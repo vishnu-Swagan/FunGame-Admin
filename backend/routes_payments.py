@@ -18,6 +18,7 @@ from auth_utils import get_current_user, require_recent_admin_step_up
 from db import db
 import financial_wallet as finance
 import operator_rail
+import bonus_policy
 from payment_providers import (
     MAX_WEBHOOK_BODY_BYTES,
     DepositStatus,
@@ -408,6 +409,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
     operator = operator_rail.operator_status()
     try:
         used_daily = await operator_rail.used_buy_paise_today(user["id"])
+        withdrawal_daily = await bonus_policy.daily_withdrawal_state(user["id"])
         daily_cap = int(operator["limits"]["max_daily_deposit_paise"])
         operator = {
             **operator,
@@ -415,6 +417,8 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
                 **operator["limits"],
                 "used_daily_deposit_paise": used_daily,
                 "remaining_daily_deposit_paise": max(0, daily_cap - used_daily),
+                "used_daily_withdrawal_paise": withdrawal_daily["used_paise"],
+                "remaining_daily_withdrawal_paise": withdrawal_daily["remaining_paise"],
             },
         }
     except Exception:
@@ -430,6 +434,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         promo = None
         free_cash_state = None
     wallet = await finance.wallet_public(user["id"])
+    bonus_state = await bonus_policy.public_state(user["id"])
     try:
         import promotions
         promotion_projection = await promotions.wallet_promotion_projection(user["id"])
@@ -466,6 +471,7 @@ async def payment_wallet(user: dict = Depends(require_payment_reader)):
         "wallet": wallet,
         "money_config": money_config,
         "promo": promo,
+        "bonus_policy": bonus_state,
         "free_cash": free_cash_state,
         "financial": {
             "ready": bool(internal["ready"] and config_ready),

@@ -14,6 +14,7 @@ test("formats integer paise as INR", () => {
 test("normalizes wallet balance aliases while preserving split balances", () => {
   expect(normalizeWallet({ wallet: { available_chips: 90, cash_chips: 70, bonus_chips: 20, held_chips: 10, withdrawable_chips: 60 } })).toEqual({
     available_chips: 90,
+    source_separated: false,
     cash_chips: 70,
     bonus_chips: 20,
     restricted_bonus_chips: 20,
@@ -23,6 +24,7 @@ test("normalizes wallet balance aliases while preserving split balances", () => 
     pending_reward_chips: 0,
     active_mission: null,
     withdrawal_eligibility: null,
+    bonus_policy: null,
   });
   expect(normalizeWallet({}, 25)).toEqual(expect.objectContaining({
     available_chips: 25,

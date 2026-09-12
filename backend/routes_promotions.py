@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import compliance
+import bonus_policy
 from auth_utils import get_current_user, require_recent_admin_step_up
 import promotions
 
@@ -249,6 +250,8 @@ async def forfeit_mission(
 
 @router.get("/referrals/me")
 async def my_referrals(user: dict = Depends(require_promotion_reader)):
+    if bonus_policy.program_enabled():
+        return await bonus_policy.referral_summary(user["id"])
     try:
         return await promotions.referral_summary(user["id"])
     except promotions.PromotionError as exc:
@@ -257,6 +260,9 @@ async def my_referrals(user: dict = Depends(require_promotion_reader)):
 
 @router.get("/referrals/tasks")
 async def my_referral_tasks(user: dict = Depends(require_promotion_reader)):
+    if bonus_policy.program_enabled():
+        summary = await bonus_policy.referral_summary(user["id"])
+        return {"tasks": summary["tasks"], "rewards": summary["rewards"]}
     try:
         summary = await promotions.referral_summary(user["id"])
         return {"tasks": summary["tasks"], "rewards": summary["rewards"]}
@@ -269,6 +275,11 @@ async def claim_referrals(
     idempotency_key: str = Header(default="", alias="Idempotency-Key"),
     user: dict = Depends(require_promotion_reader),
 ):
+    if bonus_policy.program_enabled():
+        raise HTTPException(status_code=409, detail={
+            "code": "REFERRAL_REWARDS_AUTOMATIC",
+            "message": "Referral rewards are credited automatically as real chips.",
+        })
     try:
         return await promotions.claim_referral_rewards(user["id"], idempotency_key)
     except promotions.PromotionError as exc:

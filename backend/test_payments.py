@@ -103,9 +103,9 @@ os.environ.update({
     "CHIP_RATE_VERSION": "test-v1",
     "MIN_DEPOSIT_PAISE": "10000",
     "MAX_DEPOSIT_PAISE": "1000000",
-    "MIN_WITHDRAWAL_PAISE": "100000",
-    "MIN_WITHDRAWAL_CHIPS": "10",
-    "MAX_WITHDRAWAL_CHIPS": "1000000",
+    "MIN_WITHDRAWAL_PAISE": "10000",
+    "MIN_WITHDRAWAL_CHIPS": "100",
+    "MAX_WITHDRAWAL_CHIPS": "500",
 })
 
 client = AsyncMongoMockClient()
@@ -445,7 +445,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             account_number="123456789012", ifsc_code="ABCD0123456",
         )
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1_000, method["id"],
+            "player-1", 500, method["id"],
             "withdraw-before-provider-identity-conflict", self.provider,
         )
         order, _ = await finance.create_deposit(
@@ -478,7 +478,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(stored_withdrawal["status"], "PAUSED_FOR_HOLD")
         wallet_during_hold = await finance.wallet_public("player-1")
-        self.assertEqual(wallet_during_hold["held_chips"], 1_000)
+        self.assertEqual(wallet_during_hold["held_chips"], 500)
         self.assertEqual(wallet_during_hold, wallet_before_conflict)
         self.assertEqual(
             await db.wallet_operations.count_documents({}),
@@ -665,7 +665,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "AUTOMATIC", "super-admin", "Enable certified provider flow", self.provider,
         )
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1_000, method["id"],
+            "player-1", 500, method["id"],
             "withdraw-hold-after-automatic-claim", self.provider,
         )
         claimed = await finance.claim_automatic_withdrawal(withdrawal["id"])
@@ -976,9 +976,9 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         dto = finance.payout_method_dto(stored)
         self.assertEqual(dto["account_number_masked"], "•••• 9012")
 
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-idem-bank", self.provider,
+            "player-1", 500, method["id"], "withdraw-idem-bank", self.provider,
         )
         with self.assertRaises(finance.FinancialError) as in_use:
             await finance.deactivate_payout_method("player-1", method["id"])
@@ -991,7 +991,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inactive["status"], "INACTIVE")
         with self.assertRaises(finance.FinancialError) as inactive_method:
             await finance.create_withdrawal(
-                "player-1", 1000, method["id"], "withdraw-inactive-bank", self.provider,
+                "player-1", 500, method["id"], "withdraw-inactive-bank", self.provider,
             )
         self.assertEqual(inactive_method.exception.code, "BANK_DETAILS_NOT_FOUND")
         reactivated = await finance.create_payout_method(
@@ -1008,7 +1008,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "action": "PAYOUT_METHOD_REACTIVATED",
         }), 1)
 
-    async def test_withdrawal_currency_floor_is_one_thousand_inr_across_rates(self):
+    async def test_withdrawal_currency_floor_is_one_hundred_inr_across_rates(self):
         await seed_cash("player-1", 600_000)
         method = await finance.create_payout_method(
             "player-1", account_holder_name="Test Player", bank_name="Test Bank",
@@ -1016,11 +1016,13 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         original_rate = os.environ["CHIPS_PER_INR"]
         original_minimum = os.environ["MIN_WITHDRAWAL_PAISE"]
-        os.environ["MIN_WITHDRAWAL_PAISE"] = "100000"
+        original_maximum_chips = os.environ["MAX_WITHDRAWAL_CHIPS"]
+        os.environ["MIN_WITHDRAWAL_PAISE"] = "10000"
+        os.environ["MAX_WITHDRAWAL_CHIPS"] = "1000000"
         try:
             for rate, below_chips, boundary_chips in (
-                (100, 99_999, 100_000),
-                (200, 199_998, 200_000),
+                (100, 9_999, 10_000),
+                (200, 19_998, 20_000),
             ):
                 with self.subTest(chips_per_inr=rate):
                     os.environ["CHIPS_PER_INR"] = str(rate)
@@ -1030,17 +1032,18 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
                             f"withdraw-below-floor-{rate}", self.provider,
                         )
                     self.assertEqual(below.exception.code, "WITHDRAWAL_LIMIT")
-                    self.assertIn("₹1,000", below.exception.message)
+                    self.assertIn("₹100", below.exception.message)
 
                     accepted = await finance.create_withdrawal(
                         "player-1", boundary_chips, method["id"],
                         f"withdraw-at-floor-{rate}", self.provider,
                     )
-                    self.assertEqual(accepted["amount_paise"], 100_000)
+                    self.assertEqual(accepted["amount_paise"], 10_000)
                     self.assertEqual(accepted["status"], "PENDING_ADMIN")
         finally:
             os.environ["CHIPS_PER_INR"] = original_rate
             os.environ["MIN_WITHDRAWAL_PAISE"] = original_minimum
+            os.environ["MAX_WITHDRAWAL_CHIPS"] = original_maximum_chips
 
     async def test_wallet_exposes_safe_server_derived_money_config(self):
         names = (
@@ -1054,9 +1057,9 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "CHIP_RATE_VERSION": "public-config-test",
             "MIN_DEPOSIT_PAISE": "25000",
             "MAX_DEPOSIT_PAISE": "500000",
-            "MIN_WITHDRAWAL_PAISE": "100000",
+            "MIN_WITHDRAWAL_PAISE": "10000",
             "MIN_WITHDRAWAL_CHIPS": "100",
-            "MAX_WITHDRAWAL_CHIPS": "750000",
+            "MAX_WITHDRAWAL_CHIPS": "125000",
         })
         try:
             response = await routes.payment_wallet(user=self.user)
@@ -1076,10 +1079,10 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "maximum_paise": 500_000,
         })
         self.assertEqual(config["withdrawals"], {
-            "minimum_paise": 100_000,
-            "maximum_paise": 300_000,
-            "minimum_chips": 250_000,
-            "maximum_chips": 750_000,
+            "minimum_paise": 10_000,
+            "maximum_paise": 50_000,
+            "minimum_chips": 25_000,
+            "maximum_chips": 125_000,
             "exact_chip_conversion_required": True,
         })
         serialized = json.dumps(config, sort_keys=True)
@@ -1128,7 +1131,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             "CHIPS_PER_INR": "2",
             "MIN_DEPOSIT_PAISE": "10000",
             "MAX_DEPOSIT_PAISE": "100000000000",
-            "MIN_WITHDRAWAL_PAISE": "100000",
+            "MIN_WITHDRAWAL_PAISE": "10000",
             "MIN_WITHDRAWAL_CHIPS": "500",
             "MAX_WITHDRAWAL_CHIPS": "1000000000",
         })
@@ -1139,7 +1142,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             config["withdrawals"]["maximum_chips"],
-            finance.WITHDRAWAL_REQUEST_MAX_CHIPS,
+            1_000,
         )
 
         one_chip = dict(env)
@@ -1156,7 +1159,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         impossible = dict(env)
         impossible.update({
             "CHIPS_PER_INR": "2000",
-            "MAX_WITHDRAWAL_CHIPS": "1000000",
+            "MAX_WITHDRAWAL_CHIPS": "100000",
         })
         with self.assertRaises(ProviderConfigurationError):
             finance.public_money_config(impossible)
@@ -1201,28 +1204,28 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             for error in finance._configuration_errors(paused_deposits)
         ))
 
-    async def test_default_withdrawal_currency_floor_is_one_thousand_inr(self):
+    async def test_default_withdrawal_currency_floor_is_one_hundred_inr(self):
         env = dict(os.environ)
         env.pop("MIN_WITHDRAWAL_PAISE", None)
         config = finance.public_money_config(env)
-        self.assertEqual(config["withdrawals"]["minimum_paise"], 100_000)
+        self.assertEqual(config["withdrawals"]["minimum_paise"], 10_000)
 
     async def test_withdrawal_currency_floor_cannot_be_lowered_by_configuration(self):
         env = dict(os.environ)
-        env["MIN_WITHDRAWAL_PAISE"] = "99999"
+        env["MIN_WITHDRAWAL_PAISE"] = "9999"
         with self.assertRaises(ProviderConfigurationError):
             finance.public_money_config(env)
         self.assertTrue(any(
-            "MIN_WITHDRAWAL_PAISE must be between 100000" in error
+            "MIN_WITHDRAWAL_PAISE must be between 10000" in error
             for error in finance._configuration_errors(env)
         ))
 
         original = os.environ["MIN_WITHDRAWAL_PAISE"]
-        os.environ["MIN_WITHDRAWAL_PAISE"] = "99999"
+        os.environ["MIN_WITHDRAWAL_PAISE"] = "9999"
         try:
             with self.assertRaises(finance.FinancialError) as changed:
                 await finance.create_withdrawal(
-                    "player-1", 1000, "not-reached", "withdraw-floor-override", self.provider,
+                    "player-1", 500, "not-reached", "withdraw-floor-override", self.provider,
                 )
             self.assertEqual(changed.exception.code, "FINANCIAL_CONFIGURATION_CHANGED")
         finally:
@@ -1242,13 +1245,13 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_manual_withdrawal_never_calls_provider_and_finalizes_once(self):
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         method = await finance.create_payout_method(
             "player-1", account_holder_name="Test Player", bank_name="Test Bank",
             account_number="123456789012", ifsc_code="ABCD0123456",
         )
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-idem-manual", self.provider,
+            "player-1", 500, method["id"], "withdraw-idem-manual", self.provider,
         )
         self.assertEqual(withdrawal["status"], "PENDING_ADMIN")
         approved = await finance.approve_withdrawal(withdrawal["id"], "admin-1")
@@ -1273,14 +1276,14 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         }), 1)
 
     async def test_automatic_mode_requires_risk_and_pause_stops_submission(self):
-        await seed_cash("player-1", 2000)
+        await seed_cash("player-1", 500)
         method = await finance.create_payout_method(
             "player-1", account_holder_name="Test Player", bank_name="Test Bank",
             account_number="123456789012", ifsc_code="ABCD0123456",
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable tested provider", self.provider)
         held_for_review = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-risk-review", self.provider,
+            "player-1", 250, method["id"], "withdraw-risk-review", self.provider,
         )
         self.assertEqual(held_for_review["status"], "PENDING_ADMIN")
         self.assertEqual(held_for_review["withdrawal_mode"], "MANUAL")
@@ -1290,7 +1293,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
         automatic = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-auto-safe", self.provider,
+            "player-1", 250, method["id"], "withdraw-auto-safe", self.provider,
         )
         self.assertEqual((automatic["status"], automatic["withdrawal_mode"]), ("APPROVED", "AUTOMATIC"))
         with self.assertRaises(finance.FinancialError) as manual_race:
@@ -1315,7 +1318,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await finance.wallet_public("player-1"))["held_chips"], 0)
 
     async def test_stale_outbox_lease_is_reclaimed_idempotently(self):
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         await db.users.update_one(
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
@@ -1325,7 +1328,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable tested provider", self.provider)
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-stale-outbox", self.provider,
+            "player-1", 500, method["id"], "withdraw-stale-outbox", self.provider,
         )
         await db.financial_outbox.update_one(
             {"aggregate_id": withdrawal["id"]},
@@ -1387,7 +1390,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(stored["lease_until"])
 
     async def test_uncertain_automatic_payout_reference_can_be_recovered_and_reconciled(self):
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         await db.users.update_one(
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
@@ -1397,7 +1400,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable tested provider", self.provider)
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-unknown-result", self.provider,
+            "player-1", 500, method["id"], "withdraw-unknown-result", self.provider,
         )
         self.provider.submit_failures = 1
         result = await finance.process_outbox_batch(self.provider)
@@ -1426,20 +1429,20 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.deposit_orders.count_documents({}), 1)
         self.assertEqual(len({row[0]["id"] for row in deposits}), 1)
 
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         method = await finance.create_payout_method(
             "player-1", account_holder_name="Test Player", bank_name="Test Bank",
             account_number="123456789012", ifsc_code="ABCD0123456",
         )
         withdrawals = await asyncio.gather(*[
             finance.create_withdrawal(
-                "player-1", 1000, method["id"], "withdraw-idem-concurrent", self.provider,
+                "player-1", 500, method["id"], "withdraw-idem-concurrent", self.provider,
             ) for _ in range(8)
         ])
         self.assertEqual(await db.withdrawal_requests.count_documents({}), 1)
         self.assertEqual(len({row["id"] for row in withdrawals}), 1)
         wallet = await finance.wallet_public("player-1")
-        self.assertEqual((wallet["cash_chips"], wallet["held_chips"]), (0, 1000))
+        self.assertEqual((wallet["cash_chips"], wallet["held_chips"]), (0, 500))
 
     async def test_player_deposit_limits_block_excess_pending_purchases(self):
         await db.player_limits.insert_one({
@@ -1545,17 +1548,17 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual((replay["id"], replay["chips"]), (deposit["id"], 100))
 
-            await seed_cash("player-1", 2000)
+            await seed_cash("player-1", 500)
             method = await finance.create_payout_method(
                 "player-1", account_holder_name="Test Player", bank_name="Test Bank",
                 account_number="123456789012", ifsc_code="ABCD0123456",
             )
             withdrawal = await finance.create_withdrawal(
-                "player-1", 2000, method["id"], "withdraw-rate-snapshot", self.provider,
+                "player-1", 500, method["id"], "withdraw-rate-snapshot", self.provider,
             )
             os.environ["CHIPS_PER_INR"] = "3"
             replay_withdrawal = await finance.create_withdrawal(
-                "player-1", 2000, method["id"], "withdraw-rate-snapshot", self.provider,
+                "player-1", 500, method["id"], "withdraw-rate-snapshot", self.provider,
             )
             self.assertEqual(
                 (replay_withdrawal["id"], replay_withdrawal["amount_paise"]),
@@ -1565,7 +1568,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             os.environ["CHIPS_PER_INR"] = original_rate
 
     async def test_mode_pause_between_claim_and_provider_call_blocks_submission(self):
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         await db.users.update_one(
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
@@ -1575,7 +1578,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable provider", self.provider)
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-pause-race", self.provider,
+            "player-1", 500, method["id"], "withdraw-pause-race", self.provider,
         )
         original_create_beneficiary = self.provider.create_beneficiary
 
@@ -1598,7 +1601,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
             await finance.create_deposit(
                 "player-1", 10000, f"deposit-starvation-{index}", self.provider,
             )
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         await db.users.update_one(
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
@@ -1608,14 +1611,14 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable provider", self.provider)
         await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-starvation", self.provider,
+            "player-1", 500, method["id"], "withdraw-starvation", self.provider,
         )
         await finance.process_outbox_batch(self.provider)
         result = await finance.reconcile_financial_records(self.provider, limit=1)
         self.assertEqual((result["checked_deposits"], result["checked_withdrawals"]), (1, 1))
 
     async def test_recovered_foreign_payout_id_cannot_finalize_hold(self):
-        await seed_cash("player-1", 1000)
+        await seed_cash("player-1", 500)
         await db.users.update_one(
             {"id": "player-1"}, {"$set": {"financial_risk_status": "ELIGIBLE"}},
         )
@@ -1625,7 +1628,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         )
         await finance.set_withdrawal_mode("AUTOMATIC", "super-1", "Enable provider", self.provider)
         withdrawal = await finance.create_withdrawal(
-            "player-1", 1000, method["id"], "withdraw-foreign-ref", self.provider,
+            "player-1", 500, method["id"], "withdraw-foreign-ref", self.provider,
         )
         self.provider.submit_failures = 1
         await finance.process_outbox_batch(self.provider)
@@ -1643,7 +1646,7 @@ class FinancialCoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(finance.FinancialError) as mismatch:
             await finance.reconcile_withdrawal(withdrawal["id"], self.provider, actor="admin-1")
         self.assertEqual(mismatch.exception.code, "PAYOUT_BINDING_MISMATCH")
-        self.assertEqual((await finance.wallet_public("player-1"))["held_chips"], 1000)
+        self.assertEqual((await finance.wallet_public("player-1"))["held_chips"], 500)
 
     async def test_stale_precheckout_reservation_expires_and_releases(self):
         await db.player_limits.insert_one({
@@ -2074,7 +2077,7 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
             ifsc_code="ABCD0123456",
         )
         withdraw = await routes.create_operator_withdrawal(
-            routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id=method["id"]),
+            routes.OperatorWithdrawalCreate(amount_chips=500, bank_detail_id=method["id"]),
             user=self.user,
         )
         self.assertEqual(withdraw["withdrawal"]["status"], "PENDING")
@@ -2090,7 +2093,7 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(paid["request"]["status"], "APPROVED")
         user = await db.users.find_one({"id": self.user["id"]})
-        self.assertEqual(user["chip_balance"], 5000)
+        self.assertEqual(user["chip_balance"], 5500)
 
     async def test_operator_reject_does_not_move_chips(self):
         buy = await routes.create_operator_deposit(
@@ -2108,7 +2111,7 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
     async def test_operator_withdrawal_requires_bank_and_balance(self):
         with self.assertRaises(HTTPException) as missing_bank:
             await routes.create_operator_withdrawal(
-                routes.OperatorWithdrawalCreate(amount_chips=1000, bank_detail_id="missing-bank-id"),
+                routes.OperatorWithdrawalCreate(amount_chips=500, bank_detail_id="missing-bank-id"),
                 user=self.user,
             )
         self.assertEqual(missing_bank.exception.status_code, 400)
@@ -2120,9 +2123,12 @@ class OperatorRailTests(unittest.IsolatedAsyncioTestCase):
             account_number="123456789012",
             ifsc_code="ABCD0123456",
         )
+        await db.users.update_one(
+            {"id": self.user["id"]}, {"$set": {"chip_balance": 50}},
+        )
         with self.assertRaises(HTTPException) as too_much:
             await routes.create_operator_withdrawal(
-                routes.OperatorWithdrawalCreate(amount_chips=9000, bank_detail_id=method["id"]),
+                routes.OperatorWithdrawalCreate(amount_chips=500, bank_detail_id=method["id"]),
                 user=self.user,
             )
         self.assertEqual(too_much.exception.status_code, 409)

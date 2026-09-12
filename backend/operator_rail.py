@@ -24,6 +24,7 @@ from pymongo.errors import DuplicateKeyError
 import compliance
 import ledger
 import financial_wallet as finance
+import bonus_policy
 from ledger import InsufficientChips
 from db import client, db
 from payment_providers import (
@@ -55,9 +56,10 @@ OPERATOR_LIMITS = {
     "chips_per_inr": 1,
     "min_deposit_paise": 10_000,
     "max_deposit_paise": 20_000_000,
-    "min_withdrawal_paise": 100_000,
-    "min_withdrawal_chips": 1_000,
-    "max_withdrawal_chips": 1_000_000,
+    "min_withdrawal_paise": 10_000,
+    "max_withdrawal_paise": bonus_policy.DAILY_WITHDRAWAL_LIMIT_PAISE,
+    "min_withdrawal_chips": 100,
+    "max_withdrawal_chips": 500,
 }
 _PROVIDER_REFERENCE_RE = re.compile(r"^[A-Z0-9_-]{4,80}$")
 _HOSTED_PAID_STATUSES = frozenset({
@@ -100,6 +102,10 @@ _BUY_CAP_STATUSES = (
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _session_kwargs(session) -> dict[str, Any]:
+    return {"session": session} if session is not None else {}
 
 
 def as_utc(value) -> datetime | None:
@@ -315,6 +321,7 @@ def operator_status() -> dict[str, Any]:
                 hosted_upi_chips_per_inr() if hosted_ready else OPERATOR_LIMITS["chips_per_inr"]
             ),
             "max_daily_deposit_paise": hosted_upi_daily_limit_paise(),
+            "max_daily_withdrawal_paise": bonus_policy.DAILY_WITHDRAWAL_LIMIT_PAISE,
         },
     }
 
@@ -471,6 +478,7 @@ def _require_amount(kind: str, amount_paise: int, chips: int | None = None) -> t
     else:
         if (
             paise < OPERATOR_LIMITS["min_withdrawal_paise"]
+            or paise > OPERATOR_LIMITS["max_withdrawal_paise"]
             or resolved_chips < OPERATOR_LIMITS["min_withdrawal_chips"]
             or resolved_chips > OPERATOR_LIMITS["max_withdrawal_chips"]
         ):
@@ -513,10 +521,20 @@ async def create_request(
         bank_name = method.get("bank_name")
         account_masked = method.get("account_number_masked")
         user_row = await db.users.find_one({"id": user["id"]}, {"_id": 0, "chip_balance": 1})
-        if int((user_row or {}).get("chip_balance") or 0) < resolved_chips:
+        source_account = await db.wallet_accounts.find_one(
+            {"user_id": user["id"]}, {"_id": 0, "available_cash_chips": 1},
+        )
+        participant = await bonus_policy.user_participates(user["id"])
+        withdrawable = (
+            int(source_account.get("available_cash_chips", 0))
+            if source_account else
+            0 if participant else int((user_row or {}).get("chip_balance") or 0)
+        )
+        if withdrawable < resolved_chips:
             raise HTTPException(status_code=409, detail={
                 "code": "OPERATOR_BALANCE_INSUFFICIENT",
-                "message": "You do not have enough chips for this withdrawal.",
+                "message": "You do not have enough real chips for this withdrawal.",
+                "withdrawable_chips": withdrawable,
             })
     row = {
         "id": str(uuid.uuid4()),
@@ -533,7 +551,24 @@ async def create_request(
         "source": ADMIN_SOURCE,
         "created_at": utcnow(),
     }
-    await db[COLLECTION].insert_one(row)
+    if kind == "WITHDRAWAL":
+        async def reserve_and_insert(session):
+            kwargs = _session_kwargs(session)
+            try:
+                daily = await bonus_policy.reserve_daily_withdrawal(
+                    user["id"], row["id"], paise, session=session,
+                )
+            except bonus_policy.BonusPolicyError as exc:
+                raise HTTPException(status_code=exc.status_code, detail={
+                    "code": exc.code, "message": exc.message, **exc.meta,
+                }) from exc
+            stored = {**row, "withdrawal_day": daily["withdrawal_day"]}
+            await db[COLLECTION].insert_one(stored, **kwargs)
+            return stored
+
+        row = await _run_hosted_transaction(reserve_and_insert)
+    else:
+        await db[COLLECTION].insert_one(row)
     row.pop("_id", None)
     return request_dto(row)
 
@@ -1047,6 +1082,11 @@ async def settle_hosted_deposit(
             "Verified UPI chip purchase",
             ref=f"upi-chip:{request_id}", kind=ledger.DEPOSIT, session=session,
         )
+        await bonus_policy.on_deposit_credited(
+            current["user_id"], request_id,
+            amount_paise=int(current["amount_paise"]),
+            chips=int(current["chips"]), session=session,
+        )
         import wager
         await wager.open_deposit_bucket(
             current["user_id"], int(current["chips"]), request_id, session=session,
@@ -1064,7 +1104,10 @@ async def settle_hosted_deposit(
             }},
             **kwargs,
         )
-        return {"id": request_id, "status": "CREDITED", "duplicate": False}
+        return {
+            "id": request_id, "user_id": current["user_id"],
+            "status": "CREDITED", "duplicate": False,
+        }
 
     try:
         result = await _run_hosted_transaction(work)
@@ -1075,13 +1118,6 @@ async def settle_hosted_deposit(
         )
         return {"id": request_id, "status": "RECONCILIATION_REQUIRED"}
     if result.get("status") == "CREDITED" and not result.get("duplicate"):
-        try:
-            import free_cash
-            row = await db[COLLECTION].find_one({"id": request_id}, {"_id": 0, "user_id": 1})
-            if row:
-                await free_cash.on_friend_deposit(row["user_id"], request_id)
-        except Exception:
-            logging.getLogger("operator_rail").exception("free-cash deposit reward failed for %s", request_id)
         try:
             import wager
             overlay = await wager.overlay_for_deposit(result.get("user_id") or (await db[COLLECTION].find_one({"id": request_id}) or {}).get("user_id"), request_id)
@@ -1165,39 +1201,61 @@ async def settle_admin_review_deposit(
             return {"id": request_id, "status": existing_status, "duplicate": True, "terminal": True}
         return {"id": request_id, "status": existing_status or "PENDING"}
     claimed.pop("_id", None)
-    try:
-        await ledger.credit_chips(
-            claimed["user_id"], int(claimed["chips"]),
-            "Admin-reviewed chip purchase",
-            ref=f"operator-deposit:{claimed['id']}",
-            kind=ledger.DEPOSIT,
+
+    async def credit_and_resolve(session):
+        kwargs = _session_kwargs(session)
+        processing = await db[COLLECTION].find_one(
+            {"id": request_id, "status": "PROCESSING"}, {"_id": 0}, **kwargs,
         )
+        if not processing:
+            raise HTTPException(status_code=409, detail={
+                "code": "OPERATOR_REQUEST_RESOLVED",
+                "message": "This request was already resolved.",
+            })
+        await ledger.credit_chips(
+            processing["user_id"], int(processing["chips"]),
+            "Admin-reviewed chip purchase",
+            ref=f"operator-deposit:{processing['id']}",
+            kind=ledger.DEPOSIT, session=session,
+        )
+        await bonus_policy.on_deposit_credited(
+            processing["user_id"], processing["id"],
+            amount_paise=int(processing["amount_paise"]),
+            chips=int(processing["chips"]), session=session,
+        )
+        import wager
+        await wager.open_deposit_bucket(
+            processing["user_id"], int(processing["chips"]), processing["id"],
+            session=session,
+        )
+        updated = await db[COLLECTION].find_one_and_update(
+            {"id": request_id, "status": "PROCESSING"},
+            {"$set": {
+                "status": "APPROVED",
+                "provider_reference": reference,
+                "resolved_at": utcnow(),
+                "resolved_by": actor,
+                "last_error": None,
+                "updated_at": utcnow(),
+                **provider_occurred_update(authoritative, current),
+            }},
+            return_document=ReturnDocument.AFTER, **kwargs,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail={
+                "code": "OPERATOR_REQUEST_RESOLVED",
+                "message": "This request was already resolved.",
+            })
+        return updated
+
+    try:
+        await _run_hosted_transaction(credit_and_resolve)
     except Exception:
         await db[COLLECTION].update_one(
             {"id": request_id, "status": "PROCESSING"},
             {"$set": {"status": "PENDING", "updated_at": utcnow()}},
         )
         raise
-    try:
-        import wager
-        await wager.open_deposit_bucket(claimed["user_id"], int(claimed["chips"]), claimed["id"])
-    except Exception:
-        logging.getLogger("operator_rail").exception(
-            "wager overlay failed for admin-review deposit %s", request_id,
-        )
-    await db[COLLECTION].find_one_and_update(
-        {"id": request_id, "status": "PROCESSING"},
-        {"$set": {
-            "status": "APPROVED",
-            "provider_reference": reference,
-            "resolved_at": utcnow(),
-            "resolved_by": actor,
-            "last_error": None,
-            "updated_at": utcnow(),
-            **provider_occurred_update(authoritative, current),
-        }},
-        return_document=ReturnDocument.AFTER,
-    )
     return {"id": request_id, "status": "APPROVED", "duplicate": False}
 
 
@@ -1519,46 +1577,83 @@ async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve:
         raise HTTPException(status_code=409, detail={"code": "OPERATOR_REQUEST_RESOLVED", "message": "This request was already resolved."})
     claimed.pop("_id", None)
     status = "APPROVED" if approve else "REJECTED"
-    try:
-        if approve and claimed.get("kind") == "DEPOSIT":
+
+    async def apply_resolution(session):
+        kwargs = _session_kwargs(session)
+        processing = await db[COLLECTION].find_one(
+            {"id": request_id, "status": "PROCESSING"}, {"_id": 0}, **kwargs,
+        )
+        if not processing:
+            raise HTTPException(status_code=409, detail={
+                "code": "OPERATOR_REQUEST_RESOLVED",
+                "message": "This request was already resolved.",
+            })
+        if approve and processing.get("kind") == "DEPOSIT":
             await ledger.credit_chips(
-                claimed["user_id"], int(claimed["chips"]),
+                processing["user_id"], int(processing["chips"]),
                 note or "Admin-reviewed chip purchase",
-                ref=f"operator-deposit:{claimed['id']}",
-                kind=ledger.DEPOSIT,
+                ref=f"operator-deposit:{processing['id']}",
+                kind=ledger.DEPOSIT, session=session,
+            )
+            await bonus_policy.on_deposit_credited(
+                processing["user_id"], processing["id"],
+                amount_paise=int(processing["amount_paise"]),
+                chips=int(processing["chips"]), session=session,
             )
             import wager
-            await wager.open_deposit_bucket(claimed["user_id"], int(claimed["chips"]), claimed["id"])
-        if approve and claimed.get("kind") == "WITHDRAWAL":
-            await ledger.debit_chips(
-                claimed["user_id"], int(claimed["chips"]),
-                note or "Admin-reviewed withdrawal",
-                ref=f"operator-withdrawal:{claimed['id']}",
-                kind=ledger.WITHDRAWAL,
+            await wager.open_deposit_bucket(
+                processing["user_id"], int(processing["chips"]), processing["id"],
+                session=session,
             )
+        if approve and processing.get("kind") == "WITHDRAWAL":
+            await ledger.debit_chips(
+                processing["user_id"], int(processing["chips"]),
+                note or "Admin-reviewed withdrawal",
+                ref=f"operator-withdrawal:{processing['id']}",
+                kind=ledger.WITHDRAWAL, session=session,
+            )
+        if not approve and processing.get("kind") == "WITHDRAWAL":
+            await bonus_policy.release_daily_withdrawal(
+                str(processing["user_id"]), str(processing["id"]),
+                int(processing.get("amount_paise", 0)), session=session,
+            )
+        updated = await db[COLLECTION].find_one_and_update(
+            {"id": request_id, "status": "PROCESSING"},
+            {"$set": {
+                "status": status,
+                "admin_note": str(note or "")[:500],
+                "resolved_at": utcnow(),
+                "resolved_by": admin.get("id"),
+            }},
+            return_document=ReturnDocument.AFTER, **kwargs,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail={
+                "code": "OPERATOR_REQUEST_RESOLVED",
+                "message": "This request was already resolved.",
+            })
+        updated.pop("_id", None)
+        return updated
+
+    try:
+        updated = await _run_hosted_transaction(apply_resolution)
     except InsufficientChips as exc:
         await db[COLLECTION].update_one({"id": request_id, "status": "PROCESSING"}, {"$set": {"status": "PENDING"}})
         raise HTTPException(status_code=409, detail={
             "code": "OPERATOR_BALANCE_INSUFFICIENT",
-            "message": "The player does not have enough chips for this withdrawal.",
+            "message": "The player does not have enough real chips for this withdrawal.",
+        }) from exc
+    except finance.FinancialError as exc:
+        await db[COLLECTION].update_one(
+            {"id": request_id, "status": "PROCESSING"},
+            {"$set": {"status": "PENDING"}},
+        )
+        raise HTTPException(status_code=exc.status_code, detail={
+            "code": exc.code, "message": exc.message,
         }) from exc
     except Exception:
         await db[COLLECTION].update_one({"id": request_id, "status": "PROCESSING"}, {"$set": {"status": "PENDING"}})
         raise
-    updated = await db[COLLECTION].find_one_and_update(
-        {"id": request_id, "status": "PROCESSING"},
-        {"$set": {
-            "status": status,
-            "admin_note": str(note or "")[:500],
-            "resolved_at": utcnow(),
-            "resolved_by": admin.get("id"),
-        }},
-        return_document=ReturnDocument.AFTER,
-    )
-    if updated:
-        updated.pop("_id", None)
-    else:
-        updated = {**claimed, "status": status}
     if approve and claimed.get("kind") == "WITHDRAWAL":
         try:
             import sgpay_payout

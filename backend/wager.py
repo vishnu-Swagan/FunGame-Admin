@@ -120,6 +120,11 @@ async def require_clear_for_withdrawal(user_id: str, session=None) -> None:
 async def open_deposit_bucket(
     user_id: str, chips: int, source_id: str, *, session=None,
 ) -> dict[str, Any]:
+    import bonus_policy
+    if await bonus_policy.user_participates(user_id, session=session):
+        # Cash deposits are already real chips under the dual-currency policy.
+        # Only playing chips require settled wager conversion.
+        return {"bucket": None, "bonus": None, "policy": bonus_policy.POLICY_VERSION}
     settings = await get_settings()
     required = max(0, int(round(int(chips) * float(settings["deposit_wager_multiplier"]))))
     doc = {

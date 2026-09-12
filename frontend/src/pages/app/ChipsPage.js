@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowDownToLine, ArrowUpFromLine, CircleAlert, History, Landmark, LockKeyhole } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, CircleAlert, History, Landmark, LockKeyhole, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +16,8 @@ import { PaymentRow, PlayRow, WalletBalanceCard } from "@/pages/app/wallet/Walle
 import { MissionCard, OfferReview } from "@/components/promotions";
 import { isPlayTransaction, playSummary } from "@/lib/historyUtils";
 
-const QUICK_BUY_AMOUNTS = [1000, 5000, 10000, 50000, 100000, 200000];
-const QUICK_WITHDRAW_AMOUNTS = [1000, 2500, 5000, 10000];
+const QUICK_BUY_AMOUNTS = [100, 500, 1000, 5000];
+const QUICK_WITHDRAW_AMOUNTS = [100, 200, 300, 500];
 
 function positiveInteger(...values) {
   const value = values.find((candidate) => Number.isSafeInteger(Number(candidate)) && Number(candidate) > 0);
@@ -82,12 +82,25 @@ export function publicFinancialConfig(payload) {
       ? Number(remainingDailyRaw)
       : null
   );
+  const maxDailyWithdrawalPaise = positiveInteger(
+    operatorLimits.max_daily_withdrawal_paise,
+    limits.max_daily_withdrawal_paise,
+    published.max_daily_withdrawal_paise,
+  );
+  const remainingWithdrawalRaw = operatorLimits.remaining_daily_withdrawal_paise ?? limits.remaining_daily_withdrawal_paise;
+  const remainingDailyWithdrawalPaise = (
+    Number.isSafeInteger(Number(remainingWithdrawalRaw)) && Number(remainingWithdrawalRaw) >= 0
+      ? Number(remainingWithdrawalRaw)
+      : null
+  );
   return {
     chipsPerInr,
     minDepositPaise,
     maxDepositPaise,
     maxDailyDepositPaise,
     remainingDailyDepositPaise,
+    maxDailyWithdrawalPaise,
+    remainingDailyWithdrawalPaise,
     minWithdrawalChips,
     maxWithdrawalChips,
     minWithdrawalPaise,
@@ -155,7 +168,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const [selectedOfferId, setSelectedOfferId] = useState("");
   const [bonusAccepted, setBonusAccepted] = useState(false);
   const [buyAmount, setBuyAmount] = useState("1000");
-  const [withdrawAmount, setWithdrawAmount] = useState("1000");
+  const [withdrawAmount, setWithdrawAmount] = useState("100");
   const [bankAccountId, setBankAccountId] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -244,6 +257,15 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   const withdrawPaise = rupeesToPaise(withdrawAmount);
   const withdrawNumerator = withdrawPaise && config.chipsPerInr ? withdrawPaise * config.chipsPerInr : 0;
   const withdrawChips = withdrawNumerator && withdrawNumerator % 100 === 0 ? withdrawNumerator / 100 : null;
+  const bonusOffer = wallet.bonus_policy?.first_deposit_offer || null;
+  const projectedDepositBonus = (
+    bonusOffer?.eligible
+    && buyPaise >= Number(bonusOffer.minimum_paise || 0)
+    && buyPaise <= Number(bonusOffer.maximum_paise || 0)
+  ) ? Math.min(
+      Math.floor(buyPaise / 100),
+      Number(bonusOffer.maximum_bonus_chips || 0),
+    ) : 0;
 
   useEffect(() => {
     let active = true;
@@ -357,7 +379,11 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
     if (!withdrawChips || withdrawChips < config.minWithdrawalChips || withdrawChips > config.maxWithdrawalChips) {
       return toast.error("Choose an INR amount that converts to an eligible wallet amount.");
     }
-    const availableForWithdraw = hostedWithdrawAvailable ? wallet.withdrawable_chips : wallet.available_chips;
+    const availableForWithdraw = (
+      wallet.source_separated || wallet.bonus_policy?.participating
+        ? wallet.withdrawable_chips
+        : wallet.available_chips
+    );
     if (withdrawChips > availableForWithdraw) {
       setWithdrawalIssue({
         code: "WITHDRAWABLE_CASH_EXCEEDED",
@@ -406,6 +432,18 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         <p className="mt-1 text-sm text-white/50">Deposit securely, withdraw eligible cash, and follow every payment status.</p>
       </div>
       <WalletBalanceCard wallet={wallet} />
+      {wallet.bonus_policy?.participating && bonusOffer && !bonusOffer.claimed && (
+        <section className="overflow-hidden rounded-2xl border border-primary/35 bg-primary/10 p-4" data-testid="first-deposit-bonus-banner" aria-label="First deposit bonus offer">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20"><Sparkles className="h-5 w-5" /></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2"><p className="font-extrabold">100% first deposit bonus</p><span className="motion-safe:animate-pulse rounded-full bg-primary px-2 py-1 text-[9px] font-black uppercase tracking-[.16em] text-primary-foreground">{bonusOffer.eligible ? "Live now" : "Unlock next"}</span></div>
+              <p className="mt-1 text-xs leading-relaxed text-white/65">Deposit from ₹100 to ₹5,000 and receive the same number of playing chips—₹100 gets 100 extra, up to 5,000. Available once after your current playing chips are finished.</p>
+              {!bonusOffer.eligible && <p className="mt-2 text-[11px] font-semibold text-primary">Play through {formatChips(wallet.bonus_policy?.conversion?.remaining_playing_chips || 0)} remaining playing chips to unlock this offer.</p>}
+            </div>
+          </div>
+        </section>
+      )}
       {wallet.active_mission && <MissionCard mission={wallet.active_mission} onOpen={() => navigate(`/bonus-mission/${encodeURIComponent(wallet.active_mission.id || wallet.active_mission.mission_id)}`)} />}
 
       <div className="rounded-2xl border border-primary/25 bg-primary/8 p-4 text-xs leading-relaxed text-white/65">
@@ -425,7 +463,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
             {!loading && (!buyFeatureAvailable || !buyConfigured) && <AvailabilityNotice text={buyFeatureAvailable ? "Payment limits are not yet available from the secure server." : "Deposits are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_BUY_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => setBuyAmount(String(value))} disabled={!buyFeatureAvailable || !buyConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${buyAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
             <Input data-testid="deposit-amount" aria-label="Amount in INR" type="text" inputMode="decimal" value={buyAmount} onChange={(event) => setBuyAmount(event.target.value)} disabled={!buyFeatureAvailable || !buyConfigured} className="h-12 rounded-xl border-white/12 bg-white/5 tabular-nums" />
-            <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><span className="text-white/45">Player balance credit</span><strong className="tabular-nums text-primary">{formatChips(buyChips)}</strong></div>
+            <div className="space-y-2 rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="text-white/45">Real chips from deposit</span><strong className="tabular-nums text-primary">{formatChips(buyChips)}</strong></div>{projectedDepositBonus > 0 && <div className="flex items-center justify-between border-t border-white/8 pt-2" data-testid="projected-deposit-bonus"><span className="font-semibold text-white/65">100% extra playing chips</span><strong className="tabular-nums text-fuchsia-200">+{formatChips(projectedDepositBonus)}</strong></div>}</div>
             <OfferReview offers={offers} selectedOfferId={selectedOfferId} onSelect={setSelectedOfferId} accepted={bonusAccepted} onAcceptedChange={setBonusAccepted} depositPaise={buyPaise} />
             <Button data-testid="deposit-submit" type="submit" disabled={busy === "buy" || !buyFeatureAvailable || !buyConfigured || Boolean(selectedOffer && (!bonusAccepted || !selectedOfferEligible))} className="h-12 w-full rounded-xl text-base font-bold">{busy === "buy" ? "Processing securely…" : selectedOffer ? "Accept bonus and continue" : hostedUpiBuyAvailable ? "Pay securely with UPI" : operatorBuyAvailable && !hostedBuyAvailable ? "Submit deposit request" : "Continue to payment"}</Button>
           </form>
@@ -433,7 +471,7 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
 
         <TabsContent value="withdraw" className="mt-4">
           <form onSubmit={withdraw} className="space-y-4 rounded-2xl border border-primary/25 bg-card/55 p-4" data-testid="withdrawal-form">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>. Admin approves, then SgPay pays your saved method.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><ArrowUpFromLine className="h-5 w-5 text-primary" /></div><div><p className="font-semibold">Withdraw to your bank</p><p className="mt-1 text-xs leading-relaxed text-white/50">Minimum withdrawal: <strong className="text-white/75">{config.minWithdrawalPaise ? formatInrPaise(config.minWithdrawalPaise) : "set by the secure server"}</strong>. Daily request maximum: <strong className="text-white/75">{formatInrPaise(config.maxDailyWithdrawalPaise || 50000)}</strong>{config.remainingDailyWithdrawalPaise == null ? "." : ` · ${formatInrPaise(config.remainingDailyWithdrawalPaise)} remaining today.`} Admin approves, then SgPay pays your saved method.</p></div></div>
             {wallet.wager_remaining_chips > 0 && <AvailabilityNotice text={`Wager ₹${((wallet.wager_remaining_chips || 0) / (config.chipsPerInr || 1)).toLocaleString("en-IN")} more from deposits before you can request a withdrawal.`} />}
             {!loading && (!withdrawalFeatureAvailable || !withdrawalConfigured) && <AvailabilityNotice text={withdrawalFeatureAvailable ? "Withdrawal limits are not yet available from the secure server." : "Withdrawals are temporarily unavailable."} />}
             <div className="grid grid-cols-4 gap-2">{QUICK_WITHDRAW_AMOUNTS.map((value) => <button key={value} type="button" onClick={() => { setWithdrawAmount(String(value)); setWithdrawalIssue(null); }} disabled={!withdrawalFeatureAvailable || !withdrawalConfigured} className={`min-h-11 rounded-xl border text-xs font-bold tabular-nums disabled:opacity-40 ${withdrawAmount === String(value) ? "border-primary/55 bg-primary/15 text-primary" : "border-white/10 bg-white/5 text-white/65"}`}>₹{value.toLocaleString("en-IN")}</button>)}</div>
