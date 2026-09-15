@@ -22,8 +22,10 @@ import routes_blackjack as route  # noqa: E402
 
 
 class _Result:
-    def __init__(self, modified=0):
+    def __init__(self, modified=0, upserted_id=None):
         self.modified_count = modified
+        self.matched_count = modified
+        self.upserted_id = upserted_id
 
 
 def _matches(doc, query):
@@ -46,6 +48,8 @@ def _matches(doc, query):
                 return False
             if '$nin' in expected and actual in expected['$nin']:
                 return False
+            if '$in' in expected and actual not in expected['$in']:
+                return False
             if '$ne' in expected and actual == expected['$ne']:
                 return False
         elif actual != expected:
@@ -65,8 +69,8 @@ class _Cursor:
         self.rows = self.rows[:limit]
         return self
 
-    async def to_list(self, limit):
-        return self.rows[:limit]
+    async def to_list(self, length=None):
+        return self.rows[:length]
 
 
 class _Collection:
@@ -91,7 +95,7 @@ class _Collection:
                 return copy.deepcopy(row)
         return None
 
-    def find(self, query, projection=None):
+    def find(self, query, projection=None, session=None, **kwargs):
         return _Cursor([row for row in self.rows if _matches(row, query)])
 
     async def find_one_and_update(self, query, update, return_document=None, session=None, **kwargs):
@@ -127,6 +131,14 @@ class _Collection:
                 for key in update.get('$unset', {}):
                     row.pop(key, None)
                 return _Result(1)
+        if upsert:
+            row = {key: value for key, value in query.items() if not key.startswith('$')}
+            row.update(copy.deepcopy(update.get('$setOnInsert', {})))
+            row.update(copy.deepcopy(update.get('$set', {})))
+            for key, value in update.get('$inc', {}).items():
+                row[key] = row.get(key, 0) + value
+            self.rows.append(row)
+            return _Result(upserted_id=row.get('_id') or row.get('id'))
         return _Result()
 
     async def insert_one(self, document, session=None, **kwargs):

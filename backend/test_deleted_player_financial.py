@@ -104,6 +104,107 @@ class DeletedAccountMoneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order["status"], "CREATED")
         self.assertIsNone(order["provider_order_id"])
         self.assertEqual(self.provider.deposit_calls, 0)
+        result = await core.finance.reconcile_deposit(order["id"], self.provider)
+        self.assertEqual(result["status"], "FAILED")
+        closed = await core.db.deposit_orders.find_one({"id": order["id"]})
+        self.assertEqual(closed["limit_reservation_status"], "RELEASED")
+        self.assertEqual(closed["last_error"], "ACCOUNT_DELETED_BEFORE_CHECKOUT")
+        self.assertEqual(self.provider.deposit_calls, 0)
+
+    async def test_deleted_sgpay_deposit_recovers_lost_provider_id_without_new_checkout(self):
+        gateway = upi.RecordingSgPay24Gateway()
+        create_at_provider = gateway.create_deposit_order
+
+        async def accepted_but_response_lost(**kwargs):
+            await create_at_provider(**kwargs)
+            raise TimeoutError("accepted response lost")
+
+        with patch.object(gateway, "create_deposit_order", side_effect=accepted_but_response_lost):
+            with self.assertRaises(core.finance.FinancialError):
+                await core.finance.create_deposit(self.user["id"], 10000, "lost-provider-response", gateway)
+        order = await core.db.deposit_orders.find_one({"idempotency_key": "lost-provider-response"})
+        self.assertIsNone(order["provider_order_id"])
+        self.assertIsNotNone(order["checkout_authorized_at"])
+        await core.db.deposit_orders.update_one(
+            {"id": order["id"]}, {"$set": {"created_at": core.finance.now() - timedelta(hours=2)}},
+        )
+        await self.delete()
+        gateway.status = upi.DepositStatus("PAID", 10000, "INR", "RECOVEREDSGPAY12345")
+        checkout = AsyncMock(side_effect=AssertionError("deleted account must not submit checkout"))
+        with patch.object(gateway, "create_deposit_order", checkout):
+            first = await core.finance.reconcile_deposit(order["id"], gateway)
+            again = await core.finance.reconcile_deposit(order["id"], gateway)
+            for key in ("lost-provider-response", "new-deleted-intake"):
+                with self.assertRaises(HTTPException) as blocked:
+                    await core.finance.create_deposit(self.user["id"], 10000, key, gateway)
+                self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        self.assertEqual(first["status"], "CREDITED")
+        self.assertTrue(again["duplicate"])
+        checkout.assert_not_awaited()
+        self.assertEqual(len(gateway.create_calls), 1)
+        self.assertEqual(gateway.status_calls[0], (order["id"], 10000))
+        stored = await core.db.deposit_orders.find_one({"id": order["id"]})
+        self.assertEqual(stored["provider_order_id"], order["id"])
+        self.assertIsNone(stored["checkout_url"])
+        user = await core.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual((user["status"], user["chip_balance"]), ("DELETED", 1100))
+        self.assertEqual(await core.db.wallet_operations.count_documents({"kind": "DEPOSIT_CREDIT"}), 1)
+
+    async def test_deleted_generic_missing_id_is_retained_and_later_batch_progresses(self):
+        missing, _ = await core.finance.create_deposit(
+            self.user["id"], 10000, "generic-unknown-provider-id", self.provider,
+        )
+        later, _ = await core.finance.create_deposit(
+            self.user["id"], 10000, "generic-later-issued-deposit", self.provider,
+        )
+        stamp = core.finance.now()
+        await core.db.deposit_orders.update_one({"id": missing["id"]}, {"$set": {
+            "status": "CREATED", "provider_order_id": None, "checkout_url": None,
+            "created_at": stamp - timedelta(hours=2), "next_reconcile_at": stamp - timedelta(hours=1),
+        }})
+        await core.db.deposit_orders.update_one(
+            {"id": later["id"]}, {"$set": {"next_reconcile_at": stamp}},
+        )
+        await self.delete()
+        self.provider.payment_status = "PAID"
+        checkout = AsyncMock(side_effect=AssertionError("uncertain order must not be recreated"))
+        with patch.object(self.provider, "create_deposit_order", checkout):
+            first = await core.finance.reconcile_financial_records(self.provider, limit=1)
+            second = await core.finance.reconcile_financial_records(self.provider, limit=1)
+        self.assertEqual((first["checked"], first["review_required"]), (1, 1))
+        self.assertEqual((second["checked"], second["repaired"]), (1, 1))
+        checkout.assert_not_awaited()
+        retained = await core.db.deposit_orders.find_one({"id": missing["id"]})
+        self.assertEqual((retained["status"], retained["limit_reservation_status"]), ("CREATED", "HELD"))
+        self.assertEqual(retained["reconciliation_error_code"], "DEPOSIT_REFERENCE_RECOVERY_REQUIRED")
+        self.assertIsNone(retained["provider_order_id"])
+        self.assertGreater(core.finance._parse_optional_datetime(retained["next_reconcile_at"]), stamp)
+
+    async def test_deletion_during_checkout_recovery_does_not_abort_batch(self):
+        missing, _ = await core.finance.create_deposit(
+            self.user["id"], 10000, "deletion-mid-recovery", self.provider,
+        )
+        later, _ = await core.finance.create_deposit(
+            self.user["id"], 10000, "issued-after-missing", self.provider,
+        )
+        await core.db.deposit_orders.update_one({"id": missing["id"]}, {"$set": {
+            "status": "CREATED", "provider_order_id": None, "checkout_url": None,
+        }})
+        recover_checkout = core.finance._ensure_deposit_checkout
+
+        async def delete_before_recovery(order, provider):
+            await self.delete()
+            return await recover_checkout(order, provider)
+
+        self.provider.payment_status = "PAID"
+        with patch.object(core.finance, "_ensure_deposit_checkout", side_effect=delete_before_recovery):
+            batch = await core.finance.reconcile_financial_records(self.provider, limit=2)
+        self.assertEqual((batch["checked"], batch["review_required"], batch["repaired"]), (2, 1, 1))
+        retained = await core.db.deposit_orders.find_one({"id": missing["id"]})
+        self.assertEqual(retained["reconciliation_error_code"], "ACCOUNT_DELETED")
+        self.assertEqual(retained["status"], "CREATED")
+        self.assertEqual((await core.db.deposit_orders.find_one({"id": later["id"]}))["status"], "CREDITED")
+        self.assertEqual(self.provider.deposit_calls, 2)
 
     async def test_preexisting_paid_deposit_still_credits_once_after_deletion(self):
         order, _ = await core.finance.create_deposit(self.user["id"], 10000, "before-delete-deposit", self.provider)

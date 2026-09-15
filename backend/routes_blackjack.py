@@ -622,6 +622,16 @@ async def resolve_deleted_player_hand(user_id):
                     })
             outcome = 'SETTLED'
         elif g and g.get('status') in {'insurance', 'player_turn'}:
+            if (not g.get('id') or not isinstance(g.get('shoe'), list)
+                    or not isinstance(g.get('dealer'), list) or len(g['dealer']) != 2
+                    or not isinstance(g.get('hands'), list) or not g['hands']
+                    or any(not isinstance(hand.get('cards'), list) or len(hand['cards']) < 2
+                           or not isinstance(hand.get('bet'), int) or hand['bet'] <= 0
+                           for hand in g['hands'])):
+                raise HTTPException(status_code=409, detail={
+                    'code': 'BLACKJACK_HAND_REVIEW_REQUIRED',
+                    'message': 'The retained Blackjack hand needs settlement review.',
+                })
             was_insurance = g['status'] == 'insurance'
             for hand in g['hands']:
                 hand['done'] = True
