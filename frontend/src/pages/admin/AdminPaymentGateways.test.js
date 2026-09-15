@@ -118,10 +118,37 @@ test("shows the enabled SgPay24 hosted rail as a live read-only payment method",
   expect(card).not.toBeNull();
   expect(card.textContent).toContain("SgPay24");
   expect(card.textContent).toContain("Deposits enabled");
-  expect(card.textContent).toContain("Withdrawals not provided");
+  expect(card.textContent).toContain("Withdrawals disabled");
+  expect(card.textContent).not.toContain("Withdrawals enabled");
+  expect(Array.from(card.querySelectorAll(".gateway-hosted-flags .is-disabled"))
+    .some((flag) => flag.textContent === "Withdrawals disabled")).toBe(true);
   expect(card.textContent).toContain("Read only");
   expect(container.querySelector('[data-testid="hosted-provider-webhook-sgpay24"] input').value)
     .toBe("https://api.chakri.casino/api/payments/webhooks/sgpay24");
+  expect(card.querySelector('[data-testid="save-gateway-sgpay24"]')).toBeNull();
+  await act(async () => root.unmount());
+});
+
+test("shows hosted withdrawals as enabled only with admin approval", async () => {
+  adminPayments.hubStatus.mockResolvedValue({
+    admin: true,
+    payments_v2: false,
+    hosted_provider: {
+      code: "sgpay24", display_name: "SgPay24", category: "EWALLET",
+      provider_type: "HOSTED_UPI", configured: true, live: true,
+      deposits_enabled: true, withdrawals_enabled: true, withdrawal_mode: "ADMIN_REVIEW",
+      availability_code: "AVAILABLE", read_only: true,
+      webhook_url: "https://api.chakri.casino/api/payments/webhooks/sgpay24",
+      payout_webhook_url: "https://api.chakri.casino/api/payments/webhooks/sgpay24/payout",
+    },
+  });
+  const { container, root } = await renderPage();
+  const card = container.querySelector('[data-testid="hosted-provider-sgpay24"]');
+  expect(card.textContent).toContain("Withdrawals enabled — admin approval");
+  expect(card.textContent).not.toContain("Withdrawals disabled");
+  expect(card.textContent).not.toMatch(/automatic|auto.approv/i);
+  expect(Array.from(card.querySelectorAll(".gateway-hosted-flags .is-enabled"))
+    .some((flag) => flag.textContent === "Withdrawals enabled — admin approval")).toBe(true);
   expect(card.querySelector('[data-testid="save-gateway-sgpay24"]')).toBeNull();
   await act(async () => root.unmount());
 });

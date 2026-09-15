@@ -125,8 +125,8 @@ async def _financial_worker():
             financial_live = bool(status['ready'] and status['features']['real_money'])
             # Turning off checkout intake must not strand already-paid orders.
             upi_live = await operator_rail.hosted_upi_reconciliation_needed()
-            # Merchant cannot set a payout callback — poll regardless of wallet flags.
-            payout_live = sgpay_payout.payouts_enabled()
+            # Disabling new payouts must not strand already-issued transfers.
+            payout_live = await sgpay_payout.operator_payout_reconciliation_needed()
             if financial_live or upi_live or payout_live:
                 leader = await financial_wallet.acquire_financial_worker_lease(
                     f'financial-{_WORKER_ID}', ttl_seconds=45,

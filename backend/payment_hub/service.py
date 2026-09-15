@@ -106,6 +106,7 @@ def feature_status() -> dict[str, Any]:
         # it visible in the same admin status response without synthesizing a
         # mutable V2 gateway or exposing provider credentials.
         from operator_rail import operator_status
+        from sgpay_payout import payouts_enabled
 
         operator = operator_status()
         hosted_provider = {
@@ -116,9 +117,14 @@ def feature_status() -> dict[str, Any]:
             "configured": True,
             "live": bool(operator.get("hosted_checkout") and operator.get("deposits_enabled")),
             "deposits_enabled": bool(operator.get("deposits_enabled")),
-            # Withdrawals on the operator rail are admin-reviewed and are not
-            # handled by the SgPay24 hosted checkout provider.
-            "withdrawals_enabled": False,
+            "withdrawals_enabled": bool(
+                v1_provider_code == "sgpay24" and operator.get("withdrawals_enabled") and payouts_enabled()
+            ),
+            "withdrawal_mode": "ADMIN_REVIEW",
+            "payout_webhook_url": (
+                f"{base_url}/api/payments/webhooks/sgpay24/payout"
+                if base_url and v1_provider_code == "sgpay24" else None
+            ),
             "availability_code": operator.get("availability_code") or "UPI_PROVIDER_NOT_READY",
             "webhook_url": v1_webhook_url,
             "read_only": True,

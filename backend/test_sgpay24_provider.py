@@ -1449,7 +1449,7 @@ class SgPay24PayoutContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, PayoutSubmission("po-1", "PROCESSING"))
         path, payload = request_json.await_args.args
         self.assertEqual(path, "/api/createPayoutRequest")
-        self.assertEqual(request_json.await_args.kwargs.get("as_query"), True)
+        self.assertFalse(request_json.await_args.kwargs.get("as_query", False))
         self.assertEqual(payload["mid"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
         self.assertEqual(payload["merchant_id"], PROVIDER_ENV["SGPAY24_MERCHANT_ID"])
         self.assertEqual(payload["api_token"], PROVIDER_ENV["SGPAY24_API_TOKEN"])
@@ -1578,13 +1578,59 @@ class SgPay24PayoutContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.event_type, "payout.failed")
         self.assertEqual(event.data["notice_kind"], "payout")
 
+    async def test_status_requires_exact_merchant_and_order(self):
+        gateway = provider()
+        valid = {"order_id": "wd-12345678", "merchant_id": gateway.merchant_id, "status": 1}
+        for change in ({"order_id": "other-order"}, {"merchant_id": "MEROTHER"},
+                       {"order_id": None}, {"merchant_id": None}, {"currency": "USD"}):
+            with self.subTest(change=change), patch.object(gateway, "_request_json", new=AsyncMock(return_value={**valid, **change})):
+                with self.assertRaises(ProviderRequestError):
+                    await gateway.get_payout_status("wd-12345678")
+
+    async def test_documented_status_without_optional_amount_or_currency(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock(return_value={
+            "merchant_id": gateway.merchant_id, "order_id": "wd-12345678", "status": 1, "utr": "UTR123",
+        })):
+            actual = await gateway.get_payout_status("wd-12345678")
+        self.assertIsNone(actual.amount_paise)
+        self.assertIsNone(actual.currency)
+        self.assertEqual(actual.provider_merchant_id, gateway.merchant_id)
+        self.assertEqual(actual.withdrawal_id, "wd-12345678")
+
+    async def test_create_response_identity_mismatch_is_ambiguous_error(self):
+        gateway = provider()
+        valid = {"payout_id": 15, "order_id": "wd-12345678", "amount": 1000, "status": 0}
+        for change in ({"order_id": "wrong-order"}, {"amount": 999}, {"merchant_id": "MEROTHER"}, {"currency": "USD"}):
+            with self.subTest(change=change), patch.object(gateway, "_request_json", new=AsyncMock(return_value={"data": {**valid, **change}})):
+                with self.assertRaises(ProviderRequestError):
+                    await gateway.submit_payout(**self._payout_kwargs())
+
+    async def test_create_missing_provider_id_does_not_fabricate_one(self):
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock(return_value={"data": {"order_id": "wd-12345678", "status": 0}})):
+            actual = await gateway.submit_payout(**self._payout_kwargs())
+        self.assertIsNone(actual.provider_payout_id)
+
+    async def test_upi_only_requires_bank_for_root_but_preserves_explicit_v1(self):
+        kwargs = self._payout_kwargs(account_number="", ifsc_code="", bank_name="", payout_identifier="player@upi")
+        gateway = provider()
+        with patch.object(gateway, "_request_json", new=AsyncMock()) as request:
+            with self.assertRaises(ProviderRequestError):
+                await gateway.submit_payout(**kwargs)
+        request.assert_not_awaited()
+        legacy = provider({"SGPAY24_PAYOUT_API": "v1"})
+        with patch.object(legacy, "_submit_payout_v1", new=AsyncMock(return_value={"order_id": "wd-12345678", "payout_id": 15})) as request:
+            await legacy.submit_payout(**kwargs)
+        self.assertEqual(request.await_args.args[0]["upi_id"], "player@upi")
+
 
 class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
-    async def test_payout_502_message_includes_provider_error(self):
+    async def test_ambiguous_payout_does_not_leak_provider_error_or_suggest_retry(self):
         import sgpay_payout
         request = {
             "id": "wd-toast-1", "user_id": "player-1", "chips": 1000,
-            "payout_status": "FAILED",
+            "kind": "WITHDRAWAL", "status": "APPROVED", "amount_paise": 100000,
         }
         fake = AsyncMongoMockClient()["payout_toast"]
         await fake.operator_payment_requests.insert_one(request)
@@ -1593,6 +1639,10 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
         })
 
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
+            def validate_payout(self, **kwargs):
+                pass
             async def submit_payout(self, **kwargs):
                 raise ProviderRequestError("SgPay payout failed (500): Internal server error")
 
@@ -1609,17 +1659,15 @@ class SgPayPayoutToastTests(unittest.IsolatedAsyncioTestCase):
             patch("payment_providers.load_payment_provider", return_value=FakeProvider()),
         ):
             with self.assertRaises(HTTPException) as caught:
-                await sgpay_payout.send_operator_payout(request, actor="admin", retry=True)
-        self.assertEqual(caught.exception.status_code, 502)
+                await sgpay_payout.send_operator_payout(request, actor="admin")
+        self.assertEqual(caught.exception.status_code, 503)
         detail = caught.exception.detail
-        self.assertEqual(detail["code"], "SGPAY_PAYOUT_FAILED")
-        self.assertEqual(
-            detail["message"],
-            "SgPay did not accept the payout: SgPay payout failed (500): Internal server error. Funds remain reserved; retry from Admin.",
-        )
-        self.assertIn("Internal server error", detail["error"])
+        self.assertEqual(detail["code"], "PAYOUT_SUBMISSION_UNKNOWN")
+        self.assertIn("without resending", detail["message"])
+        self.assertNotIn("Internal server error", json.dumps(detail))
         stored = await fake.operator_payment_requests.find_one({"id": "wd-toast-1"})
-        self.assertIn("Internal server error", stored["payout_error"])
+        self.assertEqual(stored["payout_status"], "SUBMISSION_UNKNOWN")
+        self.assertNotIn("Internal server error", stored["payout_error"])
         self.assertNotIn("SGPAY24_API_TOKEN", json.dumps(detail))
         self.assertNotIn("api_token", json.dumps(detail).lower())
 
@@ -1645,6 +1693,8 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconcile_processing_to_paid_stores_utr_and_advances_status(self):
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
             async def get_payout_status(self, provider_payout_id):
                 self.seen = provider_payout_id
                 return PayoutStatus(
@@ -1655,6 +1705,7 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
                     idempotency_key=None,
                     provider_beneficiary_id=None,
                     provider_reference="UTR123456789012",
+                    provider_merchant_id="MERTEST123",
                 )
 
         provider = FakeProvider()
@@ -1675,6 +1726,8 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconcile_processing_to_failed_keeps_chips_reserved(self):
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
             async def get_payout_status(self, provider_payout_id):
                 return PayoutStatus(
                     status="FAILED",
@@ -1684,6 +1737,7 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
                     idempotency_key=None,
                     provider_beneficiary_id=None,
                     provider_reference=None,
+                    provider_merchant_id="MERTEST123",
                 )
 
         with patch.object(self.sgpay_payout, "db", self.db):
@@ -1693,12 +1747,14 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["payout_status"], "FAILED")
         stored = await self.db.operator_payment_requests.find_one({"id": "wd-reconcile-1"})
         self.assertEqual(stored["payout_status"], "FAILED")
-        # Approve already debited chips; FAILED must not invent a refund — status stays APPROVED for retry.
+        # Approve already debited chips; FAILED stays APPROVED for manual review, never resubmission.
         self.assertEqual(stored["status"], "APPROVED")
         self.assertIn("FAILED", stored["payout_error"])
 
     async def test_reconcile_still_processing_schedules_backoff(self):
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
             async def get_payout_status(self, provider_payout_id):
                 return PayoutStatus(
                     status="PROCESSING",
@@ -1708,6 +1764,7 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
                     idempotency_key=None,
                     provider_beneficiary_id=None,
                     provider_reference=None,
+                    provider_merchant_id="MERTEST123",
                 )
 
         with patch.object(self.sgpay_payout, "db", self.db):
@@ -1723,6 +1780,8 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_settles_due_processing_rows(self):
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
             async def get_payout_status(self, provider_payout_id):
                 return PayoutStatus(
                     status="PAID",
@@ -1732,6 +1791,7 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
                     idempotency_key=None,
                     provider_beneficiary_id=None,
                     provider_reference="UTR999",
+                    provider_merchant_id="MERTEST123",
                 )
 
         with (
@@ -1749,6 +1809,10 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_operator_payout_schedules_reconcile_when_processing(self):
         class FakeProvider:
+            name = "sgpay24"
+            merchant_id = "MERTEST123"
+            def validate_payout(self, **kwargs):
+                pass
             async def submit_payout(self, **kwargs):
                 return PayoutSubmission(provider_payout_id="wd-reconcile-1", status="PROCESSING")
 
@@ -1770,7 +1834,7 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
         ):
             request = {
                 "id": "wd-new-1", "user_id": "player-1", "chips": 1000,
-                "kind": "WITHDRAWAL", "status": "APPROVED",
+                "kind": "WITHDRAWAL", "status": "APPROVED", "amount_paise": 100000,
             }
             await self.db.operator_payment_requests.insert_one(dict(request))
             result = await self.sgpay_payout.send_operator_payout(request, actor="admin")
@@ -1779,6 +1843,260 @@ class OperatorPayoutReconcileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["payout_status"], "PROCESSING")
         self.assertIsNotNone(stored.get("next_payout_reconcile_at"))
 
+
+
+class OperatorPayoutSafetyTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import sgpay_payout
+        self.payout = sgpay_payout
+        self.db = AsyncMongoMockClient()["sgpay_payout_safety"]
+        self.gateway = provider()
+        self.row = {
+            "id": "withdrawal-safety-1", "user_id": "player-1", "kind": "WITHDRAWAL",
+            "status": "APPROVED", "amount_paise": 10000, "chips": 100, "bank_detail_id": "method-1",
+        }
+        await self.db.operator_payment_requests.insert_one(dict(self.row))
+        await self.db.users.insert_one({"id": "player-1", "phone": "9876543210", "email": "player@example.com"})
+        await self.db.payout_methods.insert_one({"id": "method-1", "user_id": "player-1", "status": "ACTIVE", "encrypted": "test-ciphertext"})
+        self.details = {
+            "account_holder_name": "Test Player", "account_number": "12345678901",
+            "ifsc_code": "HDFC0000001", "bank_name": "HDFC", "payout_identifier": "",
+        }
+        for patcher in (
+            patch.object(self.payout, "db", self.db),
+            patch.object(self.payout, "_decrypt_method", new=AsyncMock(return_value=self.details)),
+            patch("payment_providers.load_payment_provider", return_value=self.gateway),
+            patch.object(self.payout, "payouts_enabled", return_value=True),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    async def stored(self):
+        return await self.db.operator_payment_requests.find_one({"id": self.row["id"]})
+
+    def status(self, **overrides):
+        return {"merchant_id": self.gateway.merchant_id, "order_id": self.row["id"], "status": 1, "utr": "UTR-SAFETY", **overrides}
+
+    async def issued(self, **overrides):
+        await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {
+            "payout_status": "PROCESSING", "payout_provider": "sgpay24",
+            "payout_merchant_order_id": self.row["id"], "payout_provider_id": "15", "payout_ref": "15", **overrides,
+        }})
+
+    async def test_concurrent_submission_claim_sends_once_and_stores_both_ids(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def submit(**kwargs):
+            entered.set()
+            await release.wait()
+            return PayoutSubmission("15", "PROCESSING")
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(side_effect=submit)) as send:
+            first = asyncio.create_task(self.payout.send_operator_payout(self.row, actor="admin-one"))
+            await entered.wait()
+            second = await self.payout.send_operator_payout(self.row, actor="admin-two")
+            release.set()
+            await first
+        send.assert_awaited_once()
+        self.assertTrue(second["duplicate"])
+        stored = await self.stored()
+        self.assertEqual(stored["payout_merchant_order_id"], self.row["id"])
+        self.assertEqual(stored["payout_provider_id"], "15")
+        self.assertEqual(stored["payout_method_snapshot"]["id"], "method-1")
+        self.assertNotIn("account_number", stored["payout_method_snapshot"])
+
+    async def test_status_uses_merchant_order_not_numeric_provider_id(self):
+        await self.issued()
+        with patch.object(self.gateway, "_request_json", new=AsyncMock(return_value=self.status())) as request:
+            result = await self.payout.reconcile_operator_payout(self.row["id"])
+        self.assertEqual(request.await_args.args[1]["order_id"], self.row["id"])
+        self.assertEqual(result["status"], "PAID")
+        self.assertEqual(await self.db.chip_transactions.count_documents({}), 0)
+
+    async def test_timeout_then_retry_reconciles_without_resubmitting(self):
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(side_effect=TimeoutError("secret-bank-token"))) as send:
+            with self.assertRaises(HTTPException) as caught:
+                await self.payout.send_operator_payout(self.row, actor="admin")
+            self.assertEqual(caught.exception.detail["code"], "PAYOUT_SUBMISSION_UNKNOWN")
+            self.assertEqual((await self.stored())["payout_status"], "SUBMISSION_UNKNOWN")
+            with patch.object(self.gateway, "_request_json", new=AsyncMock(return_value=self.status())):
+                result = await self.payout.send_operator_payout(self.row, actor="admin", retry=True)
+        send.assert_awaited_once()
+        self.assertEqual(result["status"], "PAID")
+
+    async def test_legacy_failed_and_blank_retries_only_query_status(self):
+        for old_status in ("FAILED", None):
+            with self.subTest(old_status=old_status):
+                await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"status": "APPROVED", "payout_status": old_status}})
+                with patch.object(self.gateway, "submit_payout", new=AsyncMock()) as send, patch.object(
+                    self.gateway, "_request_json", new=AsyncMock(return_value=self.status(status=0)),
+                ):
+                    await self.payout.send_operator_payout(self.row, actor="admin", retry=True)
+                send.assert_not_awaited()
+
+    async def test_deleted_exact_method_does_not_fall_back(self):
+        await self.db.payout_methods.update_one({"id": "method-1"}, {"$set": {"status": "DELETED"}})
+        await self.db.payout_methods.insert_one({"id": "another-method", "user_id": "player-1", "status": "ACTIVE"})
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock()) as send:
+            with self.assertRaises(HTTPException) as caught:
+                await self.payout.send_operator_payout(self.row, actor="admin")
+        self.assertEqual(caught.exception.detail["code"], "PAYOUT_METHOD_MISSING")
+        send.assert_not_awaited()
+        self.assertEqual((await self.stored())["payout_status"], "PREPARATION_FAILED")
+
+    async def test_preparation_failure_can_retry_same_exact_method(self):
+        await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"payout_status": "PREPARATION_FAILED"}})
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(return_value=PayoutSubmission("15"))) as send:
+            result = await self.payout.send_operator_payout(self.row, actor="admin", retry=True)
+        send.assert_awaited_once()
+        self.assertEqual(result["payout_status"], "PROCESSING")
+
+    async def test_upi_only_preparation_gives_safe_bank_required_message_without_send(self):
+        self.details.update(account_number="", ifsc_code="", bank_name="", payout_identifier="player@upi")
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock()) as send:
+            with self.assertRaises(HTTPException) as caught:
+                await self.payout.send_operator_payout(self.row, actor="admin")
+        send.assert_not_awaited()
+        self.assertEqual(caught.exception.detail["code"], "PAYOUT_BANK_ACCOUNT_REQUIRED")
+        stored = await self.stored()
+        self.assertEqual(stored["payout_status"], "PREPARATION_FAILED")
+        self.assertIn("saved bank account", stored["payout_error"])
+        self.assertIsNone(stored.get("payout_submission_claim_id"))
+
+    async def test_disabled_intake_still_reports_existing_obligations(self):
+        await self.issued()
+        with patch.object(self.payout, "payouts_enabled", return_value=False):
+            self.assertTrue(await self.payout.operator_payout_reconciliation_needed())
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"payout_provider": "unrelated-provider"}})
+            self.assertFalse(await self.payout.operator_payout_reconciliation_needed())
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"payout_provider": "sgpay24", "payout_status": "FAILED", "payout_failure_confirmed": True}})
+            self.assertFalse(await self.payout.operator_payout_reconciliation_needed())
+
+    async def test_disabled_intake_blocks_new_send(self):
+        with patch.object(self.payout, "payouts_enabled", return_value=False), patch.object(self.gateway, "submit_payout", new=AsyncMock()) as send:
+            with self.assertRaises(HTTPException) as caught:
+                await self.payout.send_operator_payout(self.row, actor="admin")
+        send.assert_not_awaited()
+        self.assertEqual(caught.exception.detail["code"], "SGPAY_PAYOUT_DISABLED")
+        stored = await self.stored()
+        self.assertEqual(stored["status"], "APPROVED")
+        self.assertEqual(stored["payout_status"], "PREPARATION_FAILED")
+        self.assertIsNone(stored.get("payout_submission_claim_id"))
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(return_value=PayoutSubmission("15"))) as retry_send:
+            result = await self.payout.send_operator_payout(stored, actor="admin", retry=True)
+        retry_send.assert_awaited_once()
+        self.assertEqual(result["payout_status"], "PROCESSING")
+
+    async def test_disabled_intake_cas_does_not_overwrite_concurrent_submission(self):
+        from types import SimpleNamespace
+        collection = self.db.operator_payment_requests
+        original_read = collection.find_one
+        async def read_before_concurrent_claim(*args, **kwargs):
+            row = await original_read(*args, **kwargs)
+            # Simulate another worker's atomic claim after this call's initial read.
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {
+                "payout_status": "SUBMITTING", "payout_submission_claim_id": "other-claim",
+            }})
+            return row
+        with patch.object(self.payout, "db", SimpleNamespace(operator_payment_requests=collection)), patch.object(
+            collection, "find_one", side_effect=read_before_concurrent_claim,
+        ), patch.object(
+            self.payout, "payouts_enabled", return_value=False,
+        ), patch.object(
+            self.gateway, "submit_payout", new=AsyncMock(),
+        ) as send:
+            with self.assertRaises(HTTPException):
+                await self.payout.send_operator_payout(self.row, actor="admin")
+        send.assert_not_awaited()
+        stored = await self.stored()
+        self.assertEqual(stored["payout_status"], "SUBMITTING")
+        self.assertEqual(stored["payout_submission_claim_id"], "other-claim")
+
+    async def test_late_create_response_retains_receipt_without_reversing_paid(self):
+        async def submit(**kwargs):
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"status": "PAID", "payout_status": "PAID"}})
+            return PayoutSubmission("15", "PROCESSING")
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(side_effect=submit)):
+            result = await self.payout.send_operator_payout(self.row, actor="admin")
+        self.assertEqual(result["status"], "PAID")
+        self.assertEqual(result["payout_status"], "PAID")
+        self.assertEqual(result["provider_ref"], "15")
+
+    async def test_creation_paid_is_not_authoritative_settlement(self):
+        with patch.object(self.gateway, "submit_payout", new=AsyncMock(return_value=PayoutSubmission("15", "PAID"))):
+            result = await self.payout.send_operator_payout(self.row, actor="admin")
+        self.assertEqual(result["status"], "APPROVED")
+        self.assertEqual(result["payout_status"], "PROCESSING")
+        self.assertIsNotNone((await self.stored())["next_payout_reconcile_at"])
+
+    async def test_optional_amount_currency_or_payout_id_mismatch_never_settles(self):
+        await self.issued()
+        for change in ({"amount": 101}, {"currency": "USD"}, {"payout_id": 16}):
+            with self.subTest(change=change), patch.object(self.gateway, "_request_json", new=AsyncMock(return_value=self.status(**change))):
+                with self.assertRaises(HTTPException):
+                    await self.payout.reconcile_operator_payout(self.row["id"])
+                self.assertEqual((await self.stored())["status"], "APPROVED")
+
+    async def test_changed_merchant_configuration_never_queries_different_account(self):
+        await self.issued(payout_merchant_id="MERORIGINAL")
+        with patch.object(self.gateway, "_request_json", new=AsyncMock(return_value=self.status())) as request:
+            with self.assertRaises(HTTPException):
+                await self.payout.reconcile_operator_payout(self.row["id"])
+        request.assert_not_awaited()
+        self.assertEqual((await self.stored())["status"], "APPROVED")
+
+    async def test_batch_error_schedules_and_does_not_starve_later_rows_with_intake_disabled(self):
+        await self.issued()
+        other = {**self.row, "id": "withdrawal-safety-2", "payout_status": "PROCESSING"}
+        await self.db.operator_payment_requests.insert_one(other)
+        async def status_http(path, payload):
+            if payload["order_id"] == self.row["id"]:
+                raise ProviderRequestError("unavailable")
+            return self.status(order_id=other["id"])
+        with patch.object(self.payout, "payouts_enabled", return_value=False), patch.object(
+            self.gateway, "_request_json", new=AsyncMock(side_effect=status_http),
+        ):
+            first = await self.payout.reconcile_operator_payout_batch(limit=1)
+            second = await self.payout.reconcile_operator_payout_batch(limit=1)
+        self.assertEqual(first["errors"], 1)
+        self.assertEqual(second["updated"], 1)
+        self.assertIsNotNone((await self.stored())["next_payout_reconcile_at"])
+        self.assertEqual((await self.db.operator_payment_requests.find_one({"id": other["id"]}))["status"], "PAID")
+
+    async def test_late_processing_read_cannot_reverse_concurrent_paid(self):
+        await self.issued()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def slow_status(path, payload):
+            entered.set()
+            await release.wait()
+            return self.status(status=0)
+        with patch.object(self.gateway, "_request_json", new=AsyncMock(side_effect=slow_status)):
+            slow = asyncio.create_task(self.payout.reconcile_operator_payout(self.row["id"]))
+            await entered.wait()
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"status": "PAID", "payout_status": "PAID"}})
+            release.set()
+            result = await slow
+        self.assertEqual(result["status"], "PAID")
+
+    async def test_late_processing_read_cannot_reverse_confirmed_failure(self):
+        await self.issued()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def slow_status(path, payload):
+            entered.set()
+            await release.wait()
+            return self.status(status=0)
+        with patch.object(self.gateway, "_request_json", new=AsyncMock(side_effect=slow_status)):
+            slow = asyncio.create_task(self.payout.reconcile_operator_payout(self.row["id"]))
+            await entered.wait()
+            await self.db.operator_payment_requests.update_one({"id": self.row["id"]}, {"$set": {"payout_status": "FAILED", "payout_failure_confirmed": True}})
+            release.set()
+            result = await slow
+        self.assertEqual(result["payout_status"], "FAILED")
+
+    async def test_legacy_payout_paid_normalizes_request_status_only_after_lookup(self):
+        await self.issued(payout_status="PAID")
+        with patch.object(self.gateway, "_request_json", new=AsyncMock(return_value=self.status())) as request:
+            result = await self.payout.reconcile_operator_payout(self.row["id"])
+        request.assert_awaited_once()
+        self.assertEqual(result["status"], "PAID")
 
 
 if __name__ == "__main__":

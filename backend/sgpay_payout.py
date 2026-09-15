@@ -1,7 +1,7 @@
-"""Send approved player withdrawals through SgPay24 to the saved payout method.
+"""Single-submit SGPay withdrawals; only authenticated status reads settle them.
 
-Merchant dashboards cannot set a payout callback URL, so PROCESSING payouts are
-settled by polling check-payout-status (mirrors hosted UPI deposit reconcile).
+Approval already debits chips. An ambiguous send is never replayed or refunded;
+polling and unsigned webhook notifications share the same bound status lookup.
 """
 from __future__ import annotations
 
@@ -9,40 +9,47 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 from db import db
 from fastapi import HTTPException
+from pymongo import ReturnDocument
 
 log = logging.getLogger("sgpay_payout")
-
-_OPEN_PAYOUT_STATUSES = frozenset({"PROCESSING", "SUBMITTED", "QUEUED", "PENDING"})
-_PAID_PROVIDER_STATUSES = frozenset({
-    "PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE", "CREDITED",
+_OPEN_PAYOUT_STATUSES = frozenset({
+    "SUBMITTING", "SUBMISSION_UNKNOWN", "PROCESSING", "SUBMITTED", "QUEUED", "PENDING",
 })
-_FAILED_PROVIDER_STATUSES = frozenset({
-    "FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED",
-})
-# Request-row terminal once SgPay confirms the bank/UPI transfer.
-_PAID_REQUEST_STATUS = "PAID"
+_PAID_PROVIDER_STATUSES = frozenset({"PAID", "SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE", "CREDITED"})
+_FAILED_PROVIDER_STATUSES = frozenset({"FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED"})
 
 
 def payouts_enabled() -> bool:
-    raw = (os.environ.get("SGPAY24_PAYOUTS_ENABLED") or "true").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return (os.environ.get("SGPAY24_PAYOUTS_ENABLED") or "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _now():
     return datetime.now(timezone.utc)
 
 
-def _paise_to_rupees_str(paise: int) -> str:
-    return f"{int(paise) / 100:.2f}"
-
-
 def _backoff_seconds(attempts: int) -> int:
-    """8s, 16s, 32s, 64s capped at 60s — same shape as hosted UPI reconcile."""
     return min(8 * (2 ** min(max(int(attempts), 0), 4)), 60)
+
+
+def _status_value(raw: Any) -> str:
+    return str(raw or "").strip().upper()
+
+
+def _error(code: str, message: str, status: int = 409) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _result(row: Mapping[str, Any], **extra) -> dict[str, Any]:
+    return {
+        "id": row.get("id"), "status": row.get("status"),
+        "payout_status": row.get("payout_status"),
+        "provider_ref": row.get("payout_provider_id") or row.get("payout_ref"),
+        "provider_reference": row.get("provider_reference"), **extra,
+    }
 
 
 async def _decrypt_method(method: Mapping[str, Any]) -> dict[str, str]:
@@ -58,322 +65,247 @@ async def _decrypt_method(method: Mapping[str, Any]) -> dict[str, str]:
 
 
 async def load_payout_method(user_id: str, method_id: str | None) -> dict[str, Any]:
-    query: dict[str, Any] = {"user_id": user_id}
-    if method_id:
-        query["$or"] = [{"id": method_id}, {"_id": method_id}]
-    method = await db.payout_methods.find_one(query)
-    if method is None:
-        method = await db.payout_methods.find_one({"user_id": user_id, "status": {"$ne": "DELETED"}})
-    if method is None:
-        # Operator-rail bank details collection used by /payments/bank-details
-        method = await db.bank_details.find_one({"user_id": user_id})
-    if method is None:
-        raise HTTPException(status_code=409, detail={
-            "code": "PAYOUT_METHOD_MISSING",
-            "message": "Player has no saved bank or UPI payout method.",
-        })
+    # Never replace the beneficiary approved for this request with another account.
+    method = await db.payout_methods.find_one({
+        "id": method_id, "user_id": user_id, "status": "ACTIVE",
+    }) if method_id else None
+    if not method:
+        raise _error("PAYOUT_METHOD_MISSING", "The exact saved payout method is unavailable. Review this withdrawal.")
     return method
 
 
-def _status_value(raw: Any) -> str:
-    return str(raw or "").strip().upper()
-
-
-async def send_operator_payout(
-    request: Mapping[str, Any],
-    *,
-    actor: str,
-    retry: bool = False,
-) -> dict[str, Any]:
-    """After Admin approves an operator withdrawal, push it to SgPay24."""
-    if not payouts_enabled():
-        raise HTTPException(status_code=503, detail={
-            "code": "SGPAY_PAYOUT_DISABLED",
-            "message": "SgPay payouts are turned off (SGPAY24_PAYOUTS_ENABLED).",
-        })
-    request_id = request.get("id")
-    existing = str(request.get("payout_status") or "")
-    if existing in {"PAID", "PROCESSING"} and not retry:
-        return {"id": request_id, "payout_status": existing, "provider_ref": request.get("payout_ref")}
-    if existing == "PAID":
-        return {"id": request_id, "payout_status": "PAID", "provider_ref": request.get("payout_ref")}
-
-    user_id = request["user_id"]
-    method_id = request.get("payout_method_id") or request.get("bank_account_id") or request.get("bank_detail_id")
-    method = await load_payout_method(user_id, method_id)
-    details = await _decrypt_method(method)
-
-    chips = int(request.get("chips") or 0)
-    from wager import chips_to_paise
-    paise = int(request.get("amount_paise") or chips_to_paise(chips))
-    idempotency = f"op-wd-{request_id}"
-
-    user = await db.users.find_one({"id": user_id}, {
-        "_id": 0, "email": 1, "email_normalized": 1, "phone": 1, "phone_normalized": 1,
-    }) or {}
-    phone = str(user.get("phone_normalized") or user.get("phone") or request.get("phone") or "")
-    email = str(user.get("email_normalized") or user.get("email") or request.get("user_email") or "")
-
-    from payment_providers import load_payment_provider
-    provider = load_payment_provider()
-    try:
-        submission = await provider.submit_payout(
-            withdrawal_id=str(request_id),
-            provider_beneficiary_id=str(method.get("id") or method_id or user_id),
-            amount_paise=paise,
-            currency="INR",
-            idempotency_key=idempotency,
-            account_holder_name=details["account_holder_name"],
-            account_number=details["account_number"],
-            ifsc_code=details["ifsc_code"],
-            payout_identifier=details["payout_identifier"],
-            bank_name=details["bank_name"],
-            phone=phone,
-            email=email,
-        )
-    except Exception as exc:
-        log.exception("SgPay payout failed for %s", request_id)
-        await db.operator_payment_requests.update_one(
-            {"id": request_id},
-            {"$setOnInsert": {
-                **dict(request),
-                "id": request_id,
-                "created_at": request.get("created_at") or _now(),
-            }, "$set": {
-                "payout_status": "FAILED",
-                "payout_error": str(exc)[:500],
-                "payout_updated_at": _now(),
-                "payout_actor": actor,
-            }},
-            upsert=True,
-        )
-        raise HTTPException(status_code=502, detail={
-            "code": "SGPAY_PAYOUT_FAILED",
-            "message": f"SgPay did not accept the payout: {str(exc)[:200]}. Funds remain reserved; retry from Admin.",
-            "error": str(exc)[:300],
-        }) from exc
-
-    provider_ref = getattr(submission, "provider_payout_id", None) or (submission.get("provider_payout_id") if isinstance(submission, dict) else None)
-    status = getattr(submission, "status", None) or (submission.get("status") if isinstance(submission, dict) else "PROCESSING")
-    status_text = str(status or "PROCESSING")
-    update: dict[str, Any] = {
-        "payout_status": status_text,
-        "payout_ref": provider_ref,
-        "payout_error": None,
-        "payout_updated_at": _now(),
-        "payout_actor": actor,
-        "payout_idempotency_key": idempotency,
+def _fresh_submission_query(request_id: str) -> dict[str, Any]:
+    return {
+        "id": request_id, "kind": "WITHDRAWAL", "status": "APPROVED",
+        "payout_status": {"$in": [None, "PREPARATION_FAILED"]},
+        "payout_submission_claim_id": None, "payout_submission_started_at": None,
+        "payout_provider_id": None, "payout_ref": None,
     }
-    # Merchant cannot configure a payout webhook — schedule status polling.
-    if status_text.upper() in _OPEN_PAYOUT_STATUSES:
-        update["next_payout_reconcile_at"] = _now() + timedelta(seconds=8)
-        update["payout_reconcile_attempts"] = 0
-    await db.operator_payment_requests.update_one(
-        {"id": request_id},
-        {"$set": update},
-    )
-    return {"id": request_id, "payout_status": status, "provider_ref": provider_ref}
 
 
-async def reconcile_operator_payout(
-    request_id: str,
-    provider=None,
-    *,
-    actor: str = "payout-reconciliation-job",
-) -> dict[str, Any]:
-    """Poll SgPay check-payout-status and settle one PROCESSING operator withdrawal.
-
-    Chips were already debited on Admin approve. FAILED leaves the request
-    APPROVED with payout_status FAILED so Admin can retry — never silent-refund.
-    """
-    row = await db.operator_payment_requests.find_one({"id": request_id}, {"_id": 0})
+async def send_operator_payout(request: Mapping[str, Any], *, actor: str, retry: bool = False) -> dict[str, Any]:
+    from payment_providers import PayoutBankAccountRequired, PayoutSubmission, load_payment_provider
+    request_id = str(request.get("id") or "")
+    row = await db.operator_payment_requests.find_one({"id": request_id, "kind": "WITHDRAWAL"})
     if not row:
-        raise HTTPException(status_code=404, detail={
-            "code": "OPERATOR_REQUEST_NOT_FOUND",
-            "message": "The request was not found.",
-        })
-    if str(row.get("kind") or "").upper() != "WITHDRAWAL":
-        raise HTTPException(status_code=409, detail={
-            "code": "PAYOUT_NOT_WITHDRAWAL",
-            "message": "Only withdrawals can be payout-reconciled.",
-        })
+        raise _error("OPERATOR_REQUEST_NOT_FOUND", "The withdrawal was not found.", 404)
+    if _status_value(row.get("status")) == "PAID":
+        return _result(row, duplicate=True)
+    if _status_value(row.get("status")) != "APPROVED":
+        raise _error("PAYOUT_NOT_APPROVED", "Only an approved withdrawal can be sent.")
+    state = _status_value(row.get("payout_status"))
+    issued = any(row.get(key) for key in (
+        "payout_submission_claim_id", "payout_submission_started_at", "payout_provider_id", "payout_ref",
+    )) or state not in {"", "PREPARATION_FAILED"}
+    # Legacy blank/FAILED rows may have lost the accepted response. Retry is a
+    # status check, never another transfer. Only a proven preflight failure retries.
+    if issued or (retry and state != "PREPARATION_FAILED"):
+        if state == "SUBMITTING":
+            return _result(row, duplicate=True, reconciliation_required=True)
+        return await reconcile_operator_payout(request_id, actor=actor)
+    if not payouts_enabled():
+        # Approval already debited chips. Persist proof that this fresh order
+        # never reached the provider so re-enabling intake permits one send.
+        # The same CAS as the submission claim cannot overwrite a concurrent send.
+        await db.operator_payment_requests.update_one(_fresh_submission_query(request_id), {"$set": {
+            "payout_status": "PREPARATION_FAILED", "payout_updated_at": _now(), "payout_actor": actor,
+            "payout_error": "New SGPay payouts are currently disabled. This payout was not sent.",
+        }})
+        raise _error("SGPAY_PAYOUT_DISABLED", "New SGPay payouts are currently disabled.", 503)
 
-    payout_status = _status_value(row.get("payout_status"))
-    if payout_status == "PAID" or _status_value(row.get("status")) == _PAID_REQUEST_STATUS:
-        return {
-            "id": request_id,
-            "payout_status": "PAID",
-            "status": row.get("status") or _PAID_REQUEST_STATUS,
-            "duplicate": True,
-        }
-    if payout_status not in _OPEN_PAYOUT_STATUSES and payout_status != "FAILED":
-        # FAILED rows are not auto-polled by the batch; sync endpoint may still
-        # re-check if Admin wants a fresh provider read after a flake.
-        if payout_status and payout_status not in {"FAILED", "SUBMITTED", "PROCESSING", "QUEUED", "PENDING"}:
-            return {
-                "id": request_id,
-                "payout_status": payout_status or None,
-                "status": row.get("status"),
-                "skipped": True,
-            }
-
-    if provider is None:
-        from payment_providers import load_payment_provider
-        provider = load_payment_provider()
-
-    order_id = str(row.get("payout_ref") or request_id)
     try:
+        method_id = row.get("payout_method_id") or row.get("bank_account_id") or row.get("bank_detail_id")
+        method = await load_payout_method(row["user_id"], method_id)
+        details = await _decrypt_method(method)
+        amount = int(row.get("amount_paise") or 0)
+        if amount <= 0:
+            raise ValueError("Missing committed withdrawal amount")
+        provider = load_payment_provider()
+        if provider.name != "sgpay24" or not getattr(provider, "merchant_id", None):
+            raise ValueError("Wrong payout provider")
+        user = await db.users.find_one({"id": row["user_id"]}, {
+            "email": 1, "email_normalized": 1, "phone": 1, "phone_normalized": 1,
+        }) or {}
+        kwargs = {
+            "withdrawal_id": request_id, "provider_beneficiary_id": str(method["id"]),
+            "amount_paise": amount, "currency": "INR", "idempotency_key": f"op-wd-{request_id}",
+            **details,
+            "phone": str(user.get("phone_normalized") or user.get("phone") or row.get("phone") or ""),
+            "email": str(user.get("email_normalized") or user.get("email") or row.get("user_email") or ""),
+        }
+        provider.validate_payout(**kwargs)
+    except Exception as exc:
+        message = ("SGPay payouts require a saved bank account, IFSC and bank name. This payout was not sent."
+                   if isinstance(exc, PayoutBankAccountRequired)
+                   else "Payout preparation failed; check the saved beneficiary and payout configuration.")
+        await db.operator_payment_requests.update_one(_fresh_submission_query(request_id), {"$set": {
+            "payout_status": "PREPARATION_FAILED", "payout_updated_at": _now(), "payout_actor": actor,
+            "payout_error": message,
+        }})
+        if isinstance(exc, PayoutBankAccountRequired):
+            raise _error("PAYOUT_BANK_ACCOUNT_REQUIRED", message) from exc
+        if isinstance(exc, HTTPException):
+            raise
+        raise _error("PAYOUT_PREPARATION_FAILED", "Payout was not sent. Check the saved beneficiary and payout configuration.") from exc
+
+    claim_id = str(uuid.uuid4())
+    claimed = await db.operator_payment_requests.find_one_and_update(
+        _fresh_submission_query(request_id), {"$set": {
+            "payout_status": "SUBMITTING", "payout_submission_claim_id": claim_id,
+            "payout_submission_started_at": _now(), "payout_merchant_order_id": request_id,
+            "payout_provider": "sgpay24", "payout_merchant_id": provider.merchant_id,
+            "payout_method_id": method["id"],
+            "payout_method_snapshot": dict(method), "payout_idempotency_key": kwargs["idempotency_key"],
+            "payout_actor": actor, "payout_error": None, "payout_updated_at": _now(),
+            # Allow the provider's bounded HTTP call to finish before normal polling.
+            "next_payout_reconcile_at": _now() + timedelta(seconds=60), "payout_reconcile_attempts": 0,
+        }}, return_document=ReturnDocument.AFTER,
+    )
+    if not claimed:
+        latest = await db.operator_payment_requests.find_one({"id": request_id}) or row
+        return _result(latest, duplicate=True, reconciliation_required=True)
+    claim_query = {
+        "id": request_id, "status": "APPROVED", "payout_submission_claim_id": claim_id,
+        "payout_status": {"$in": ["SUBMITTING", "SUBMISSION_UNKNOWN"]},
+    }
+    try:
+        submission = await provider.submit_payout(**kwargs)
+        if not isinstance(submission, PayoutSubmission):
+            raise ValueError("Invalid payout submission response")
+        # A webhook may have settled while create was in flight. Preserve its
+        # terminal state while retaining the receipt for the same claimed order.
+        if submission.provider_payout_id:
+            await db.operator_payment_requests.update_one({
+                "id": request_id, "payout_submission_claim_id": claim_id,
+                "payout_provider_id": None,
+            }, {"$set": {
+                "payout_provider_id": submission.provider_payout_id,
+                "payout_ref": submission.provider_payout_id,
+            }})
+        await db.operator_payment_requests.update_one(claim_query, {"$set": {
+            "payout_status": "PROCESSING", "payout_submission_status": submission.status,
+            "payout_error": None, "payout_updated_at": _now(),
+            "next_payout_reconcile_at": _now() + timedelta(seconds=8),
+        }})
+    except Exception as exc:
+        # Even HTTP errors can occur after provider acceptance. Durable claim is
+        # never released, and no raw provider response/beneficiary leaks into UI.
+        await db.operator_payment_requests.update_one(claim_query, {"$set": {
+            "payout_status": "SUBMISSION_UNKNOWN", "payout_updated_at": _now(),
+            "payout_error": "Submission outcome is unknown. Sync provider status; do not resend.",
+            "next_payout_reconcile_at": _now() + timedelta(seconds=8),
+        }})
+        log.warning("SGPay payout submission uncertain request_id=%s error=%s", request_id, type(exc).__name__)
+        raise _error("PAYOUT_SUBMISSION_UNKNOWN", "Submission outcome is unknown. Funds remain reserved; sync provider status without resending.", 503) from exc
+    latest = await db.operator_payment_requests.find_one({"id": request_id}) or claimed
+    return _result(latest)
+
+
+async def _schedule_reconciliation(row: Mapping[str, Any], actor: str, code: str) -> None:
+    attempts = int(row.get("payout_reconcile_attempts") or 0) + 1
+    await db.operator_payment_requests.update_one({
+        "id": row["id"], "status": "APPROVED", "payout_status": row.get("payout_status"),
+        "payout_failure_confirmed": {"$ne": True},
+    }, {"$set": {
+        "next_payout_reconcile_at": _now() + timedelta(seconds=_backoff_seconds(attempts)),
+        "payout_updated_at": _now(), "last_payout_reconcile_error": code, "payout_reconcile_actor": actor,
+    }, "$inc": {"payout_reconcile_attempts": 1}})
+
+
+async def reconcile_operator_payout(request_id: str, provider=None, *, actor: str = "payout-reconciliation-job") -> dict[str, Any]:
+    """Read status only. No transfer, refund, replay or trust in callback contents."""
+    from payment_providers import PayoutStatus, load_payment_provider
+    row = await db.operator_payment_requests.find_one({"id": request_id, "kind": "WITHDRAWAL"})
+    if not row:
+        raise _error("OPERATOR_REQUEST_NOT_FOUND", "The withdrawal was not found.", 404)
+    if _status_value(row.get("status")) == "PAID":
+        return _result(row, duplicate=True)
+    if _status_value(row.get("status")) != "APPROVED":
+        raise _error("PAYOUT_NOT_APPROVED", "Only approved withdrawals can be reconciled.")
+    if _status_value(row.get("payout_status")) == "PREPARATION_FAILED":
+        return _result(row, skipped=True)
+    order_id = str(row.get("payout_merchant_order_id") or request_id)
+    try:
+        provider = provider or load_payment_provider()
+        if (provider.name != "sgpay24" or row.get("payout_provider") not in (None, "sgpay24")
+                or row.get("payout_merchant_id") not in (None, provider.merchant_id) or order_id != request_id):
+            raise ValueError("Payout provider provenance mismatch")
         authoritative = await provider.get_payout_status(order_id)
     except Exception as exc:
-        log.warning("SgPay payout status lookup failed for %s: %s", request_id, type(exc).__name__)
-        attempts = int(row.get("payout_reconcile_attempts") or 0) + 1
-        await db.operator_payment_requests.update_one(
-            {"id": request_id},
-            {"$set": {
-                "next_payout_reconcile_at": _now() + timedelta(seconds=_backoff_seconds(attempts)),
-                "payout_updated_at": _now(),
-                "last_payout_reconcile_error": str(exc)[:300],
-                "payout_reconcile_actor": actor,
-            }, "$inc": {"payout_reconcile_attempts": 1}},
-        )
-        return {
-            "id": request_id,
-            "payout_status": payout_status or "PROCESSING",
-            "status": row.get("status"),
-            "error": type(exc).__name__,
-        }
-
-    mapped = _status_value(
-        getattr(authoritative, "status", None)
-        if not isinstance(authoritative, Mapping)
-        else authoritative.get("status")
+        await _schedule_reconciliation(row, actor, "PAYOUT_STATUS_UNAVAILABLE")
+        raise _error("PAYOUT_STATUS_UNAVAILABLE", "Provider status could not be confirmed. No transfer was resent.", 503) from exc
+    binding_valid = (
+        isinstance(authoritative, PayoutStatus)
+        and bool(getattr(provider, "merchant_id", None))
+        and authoritative.provider_merchant_id == provider.merchant_id
+        and authoritative.withdrawal_id == order_id
+        and (authoritative.amount_paise is None or authoritative.amount_paise == row.get("amount_paise"))
+        and (authoritative.currency is None or authoritative.currency == "INR")
+        and (not row.get("payout_provider_id") or not authoritative.provider_payout_id
+             or str(authoritative.provider_payout_id) == str(row["payout_provider_id"]))
     )
-    provider_reference = (
-        getattr(authoritative, "provider_reference", None)
-        if not isinstance(authoritative, Mapping)
-        else authoritative.get("provider_reference")
-    )
-    utr = str(provider_reference or "").strip() or None
-
-    if mapped in _PAID_PROVIDER_STATUSES or mapped == "PAID":
-        set_fields: dict[str, Any] = {
-            "payout_status": "PAID",
-            "payout_error": None,
-            "payout_updated_at": _now(),
-            "payout_reconcile_actor": actor,
-            "status": _PAID_REQUEST_STATUS,
-            "paid_at": _now(),
-            "next_payout_reconcile_at": None,
-        }
-        if utr:
-            set_fields["provider_reference"] = utr
-        await db.operator_payment_requests.update_one(
-            {
-                "id": request_id,
-                "payout_status": {"$in": list(_OPEN_PAYOUT_STATUSES | {"FAILED"})},
-            },
-            {"$set": set_fields},
-        )
-        refreshed = await db.operator_payment_requests.find_one({"id": request_id}, {"_id": 0})
-        log.info(
-            "operator payout reconcile request_id=%s result=PAID actor=%s",
-            request_id, actor,
-        )
-        return {
-            "id": request_id,
-            "payout_status": "PAID",
-            "status": (refreshed or {}).get("status") or _PAID_REQUEST_STATUS,
-            "provider_reference": utr,
-        }
-
-    if mapped in _FAILED_PROVIDER_STATUSES:
-        # Chips stay reserved (already debited on approve). Admin retries via
-        # /retry-payout — do not invent a silent refund.
-        error_text = f"Provider payout status: {mapped}"
-        await db.operator_payment_requests.update_one(
-            {
-                "id": request_id,
-                "payout_status": {"$in": list(_OPEN_PAYOUT_STATUSES)},
-            },
-            {"$set": {
-                "payout_status": "FAILED",
-                "payout_error": error_text[:500],
-                "payout_updated_at": _now(),
-                "payout_reconcile_actor": actor,
-                "next_payout_reconcile_at": None,
-            }},
-        )
-        log.info(
-            "operator payout reconcile request_id=%s result=FAILED actor=%s",
-            request_id, actor,
-        )
-        return {
-            "id": request_id,
-            "payout_status": "FAILED",
-            "status": row.get("status"),
-            "payout_error": error_text,
-        }
-
-    # Still PROCESSING / SUBMITTED / unknown — backoff and try again.
-    attempts = int(row.get("payout_reconcile_attempts") or 0) + 1
-    next_at = _now() + timedelta(seconds=_backoff_seconds(attempts))
-    await db.operator_payment_requests.update_one(
-        {"id": request_id, "payout_status": {"$in": list(_OPEN_PAYOUT_STATUSES)}},
-        {"$set": {
-            "payout_status": mapped if mapped in _OPEN_PAYOUT_STATUSES else "PROCESSING",
-            "next_payout_reconcile_at": next_at,
-            "payout_updated_at": _now(),
-            "payout_reconcile_actor": actor,
-            "payout_error": None,
-        }, "$inc": {"payout_reconcile_attempts": 1}},
-    )
-    return {
-        "id": request_id,
-        "payout_status": mapped if mapped in _OPEN_PAYOUT_STATUSES else "PROCESSING",
-        "status": row.get("status"),
-        "next_payout_reconcile_at": next_at.isoformat(),
+    if not binding_valid:
+        await _schedule_reconciliation(row, actor, "PAYOUT_STATUS_BINDING_MISMATCH")
+        raise _error("PAYOUT_STATUS_BINDING_MISMATCH", "Provider status did not match this withdrawal. Funds remain reserved.")
+    mapped = _status_value(authoritative.status)
+    fields: dict[str, Any] = {
+        "payout_provider": "sgpay24", "payout_merchant_id": provider.merchant_id,
+        "payout_merchant_order_id": order_id,
+        "payout_updated_at": _now(), "payout_reconcile_actor": actor, "last_payout_reconcile_error": None,
     }
+    if authoritative.provider_payout_id:
+        fields.update(payout_provider_id=str(authoritative.provider_payout_id), payout_ref=str(authoritative.provider_payout_id))
+    if authoritative.provider_reference:
+        fields["provider_reference"] = authoritative.provider_reference
+    if mapped in _PAID_PROVIDER_STATUSES:
+        fields.update(status="PAID", payout_status="PAID", paid_at=_now(), payout_error=None, next_payout_reconcile_at=None)
+    elif mapped in _FAILED_PROVIDER_STATUSES:
+        fields.update(payout_status="FAILED", payout_failure_confirmed=True,
+                      payout_error="Provider payout status: FAILED. Manual review required; do not resend.", next_payout_reconcile_at=None)
+    else:
+        # An older pending response cannot reverse a confirmed failure.
+        if row.get("payout_failure_confirmed"):
+            return _result(row, duplicate=True)
+        fields.update(payout_status="PROCESSING", payout_error=None,
+                      next_payout_reconcile_at=_now() + timedelta(seconds=_backoff_seconds(int(row.get("payout_reconcile_attempts") or 0) + 1)))
+    query = {"id": request_id, "status": "APPROVED"}
+    if fields["payout_status"] != "PAID":
+        query["payout_status"] = row.get("payout_status")
+        query["payout_reconcile_attempts"] = row.get("payout_reconcile_attempts")
+    await db.operator_payment_requests.update_one(query, {"$set": fields, "$inc": {"payout_reconcile_attempts": 1}})
+    latest = await db.operator_payment_requests.find_one({"id": request_id}) or row
+    return _result(latest)
 
 
-async def reconcile_operator_payout_batch(
-    provider=None, limit: int = 25,
-) -> dict[str, int]:
-    """Poll due PROCESSING/SUBMITTED operator withdrawals."""
-    if not payouts_enabled():
-        return {"checked": 0, "updated": 0, "errors": 0}
-    if provider is None:
-        from payment_providers import load_payment_provider
-        provider = load_payment_provider()
+def _due_reconciliation_query() -> dict[str, Any]:
+    return {"kind": "WITHDRAWAL", "status": "APPROVED", "payout_provider": {"$in": [None, "sgpay24"]}, "$and": [
+        {"$or": [
+            {"payout_status": {"$in": list(_OPEN_PAYOUT_STATUSES | {"PAID"}) + [None]}},
+            {"payout_status": "FAILED", "payout_failure_confirmed": {"$ne": True}},
+        ]},
+        {"$or": [{"next_payout_reconcile_at": None}, {"next_payout_reconcile_at": {"$lte": _now()}}]},
+    ]}
+
+
+async def operator_payout_reconciliation_needed() -> bool:
+    """Keep worker polling outstanding obligations when new intake is disabled."""
+    if payouts_enabled():
+        return True
+    return bool(await db.operator_payment_requests.find_one(_due_reconciliation_query(), {"id": 1}))
+
+
+async def reconcile_operator_payout_batch(provider=None, limit: int = 25) -> dict[str, int]:
+    """Reconcile issued/legacy uncertain payouts even when new payouts are disabled."""
     cap = max(1, min(int(limit), 100))
-    due = _now()
-    query = {
-        "kind": "WITHDRAWAL",
-        "payout_status": {"$in": list(_OPEN_PAYOUT_STATUSES)},
-        "$or": [
-            {"next_payout_reconcile_at": {"$exists": False}},
-            {"next_payout_reconcile_at": None},
-            {"next_payout_reconcile_at": {"$lte": due}},
-        ],
-    }
-    rows = await db.operator_payment_requests.find(
-        query, {"_id": 0, "id": 1},
-    ).sort("created_at", 1).limit(cap).to_list(cap)
+    query = _due_reconciliation_query()
+    rows = await db.operator_payment_requests.find(query, {"id": 1}).sort("next_payout_reconcile_at", 1).limit(cap).to_list(cap)
     updated = errors = 0
-    request_ids = [row["id"] for row in rows]
     for row in rows:
         try:
-            result = await reconcile_operator_payout(
-                row["id"], provider, actor="payout-reconciliation-job",
-            )
+            result = await reconcile_operator_payout(row["id"], provider)
             if result.get("payout_status") in {"PAID", "FAILED"} and not result.get("duplicate"):
                 updated += 1
-        except HTTPException:
+        except Exception as exc:
+            log.warning("Payout reconciliation deferred request_id=%s error=%s", row["id"], type(exc).__name__)
             errors += 1
-        except Exception:
-            log.exception("operator payout reconcile failed for %s", row.get("id"))
-            errors += 1
-    log.info(
-        "operator payout batch checked=%s updated=%s errors=%s ids=%s",
-        len(rows), updated, errors, request_ids,
-    )
     return {"checked": len(rows), "updated": updated, "errors": errors}

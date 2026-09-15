@@ -37,6 +37,23 @@ class ProviderConfigurationError(RuntimeError):
 class ProviderRequestError(RuntimeError):
     """The provider refused or could not complete a request."""
 
+    DIAGNOSTIC_CODES = frozenset({
+        "PROVIDER_REJECTED", "PROVIDER_AUTH_REJECTED", "PROVIDER_RATE_LIMITED",
+        "PROVIDER_UNAVAILABLE", "PROVIDER_AMOUNT_REJECTED",
+        "PROVIDER_PAYMENT_ROUTE_UNAVAILABLE", "PROVIDER_INVALID_RESPONSE",
+        "PROVIDER_CONNECTION_FAILED",
+    })
+
+    def __init__(self, message: str, *, diagnostic_code: str = "PROVIDER_REJECTED",
+                 http_status: int | None = None):
+        super().__init__(message)
+        self.diagnostic_code = (
+            diagnostic_code if diagnostic_code in self.DIAGNOSTIC_CODES else "PROVIDER_REJECTED"
+        )
+        self.http_status = (
+            http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        )
+
 
 class WebhookVerificationError(ValueError):
     pass
@@ -191,9 +208,13 @@ class Beneficiary:
     status: str = "CREATED"
 
 
+class PayoutBankAccountRequired(ProviderRequestError):
+    """The selected payout API documents bank transfers, not UPI-only payouts."""
+
+
 @dataclass(frozen=True)
 class PayoutSubmission:
-    provider_payout_id: str
+    provider_payout_id: Optional[str]
     status: str = "PROCESSING"
 
 
@@ -209,6 +230,8 @@ class PayoutStatus:
     provider_beneficiary_id: Optional[str]
     provider_reference: Optional[str]
     occurred_at: Optional[datetime] = None
+    provider_merchant_id: Optional[str] = None
+    provider_payout_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -1221,17 +1244,35 @@ class SgPay24PaymentProvider:
         return list(dict.fromkeys(addresses))
 
     @staticmethod
-    def _provider_error_message(status: int, raw: bytes) -> str:
-        text = ""
+    def _provider_error_code(status: int, raw: bytes) -> str:
+        # Provider bodies can echo API tokens and beneficiary details. Only a
+        # fixed category may leave this parser; never retain the response text.
+        if status in {401, 403}:
+            return "PROVIDER_AUTH_REJECTED"
+        if status == 429:
+            return "PROVIDER_RATE_LIMITED"
+        if status >= 500:
+            return "PROVIDER_UNAVAILABLE"
+        message = ""
         try:
-            parsed = json.loads(raw or b"{}")
+            parsed = json.loads(raw[:65536] or b"{}")
             if isinstance(parsed, Mapping):
-                text = str(parsed.get("msg") or parsed.get("message") or parsed.get("error") or "").strip()
-        except Exception:
-            text = ""
-        if text:
-            return f"SgPay payout failed ({status}): {text}"[:300]
-        return f"SgPay payout failed ({status}): Provider rejected withdrawal request."
+                message = " ".join(str(parsed.get(key) or "")[:500] for key in (
+                    "type", "msg", "message", "error",
+                )).lower()
+        except (ValueError, TypeError):
+            pass
+        if any(part in message for part in ("unauthorized", "invalid api token", "invalid credentials")):
+            return "PROVIDER_AUTH_REJECTED"
+        if "amount" in message and any(part in message for part in ("minimum", "maximum", "invalid", "limit")):
+            return "PROVIDER_AMOUNT_REJECTED"
+        if any(part in message for part in ("no available bank", "no active bank", "no payment route", "no available upi")):
+            return "PROVIDER_PAYMENT_ROUTE_UNAVAILABLE"
+        return "PROVIDER_REJECTED" if status >= 400 else "PROVIDER_INVALID_RESPONSE"
+
+    @classmethod
+    def _provider_error_message(cls, status: int, raw: bytes) -> str:
+        return f"SgPay request failed (HTTP {status}; {cls._provider_error_code(status, raw)})."
 
     async def _request_json(
         self, path: str, payload: Mapping[str, Any], *, as_query: bool = False,
@@ -1271,7 +1312,11 @@ class SgPay24PaymentProvider:
                 if 300 <= response.status < 400:
                     raise ProviderRequestError("Provider redirect was rejected")
                 if response.status >= 400:
-                    raise ProviderRequestError(self._provider_error_message(response.status, raw))
+                    raise ProviderRequestError(
+                        self._provider_error_message(response.status, raw),
+                        diagnostic_code=self._provider_error_code(response.status, raw),
+                        http_status=response.status,
+                    )
                 if len(raw) > 1024 * 1024:
                     raise ProviderRequestError("Provider response exceeded the configured limit")
                 parsed = json.loads(raw or b"{}")
@@ -1289,7 +1334,9 @@ class SgPay24PaymentProvider:
             OSError, ssl.SSLError, http.client.HTTPException, urllib.error.URLError,
             asyncio.TimeoutError, json.JSONDecodeError,
         ) as exc:
-            raise ProviderRequestError("Provider request failed") from exc
+            raise ProviderRequestError(
+                "Provider request failed", diagnostic_code="PROVIDER_CONNECTION_FAILED",
+            ) from exc
 
     async def create_deposit_order(
         self, *, deposit_id: str, amount_paise: int, currency: str,
@@ -1318,7 +1365,11 @@ class SgPay24PaymentProvider:
         })
         data = response.get("data")
         if not isinstance(data, Mapping):
-            raise ProviderRequestError("Provider response omitted payment data")
+            raise ProviderRequestError(
+                "Provider response omitted payment data",
+                diagnostic_code=self._provider_error_code(200, json.dumps(response).encode("utf-8")),
+                http_status=200,
+            )
         returned_order = self._order_id(data.get("order_id"))
         if returned_order != order_id or self._amount_to_paise(data.get("amount")) != expected_paise:
             raise ProviderRequestError("Provider checkout did not match the requested order")
@@ -1393,6 +1444,11 @@ class SgPay24PaymentProvider:
             return "v1"
         raise ProviderConfigurationError("SGPAY24_PAYOUT_API is not an approved payout API")
 
+    @property
+    def merchant_id(self) -> str:
+        """Non-secret merchant identity used to bind authenticated payout status."""
+        return self._merchant_id
+
     async def _submit_payout_v1(self, payload: Mapping[str, Any], *, amount_paise: int) -> Mapping[str, Any]:
         """Bearer JSON payout used only when SGPAY24_PAYOUT_API selects v1.
 
@@ -1462,7 +1518,7 @@ class SgPay24PaymentProvider:
         method_id = str(kwargs.get("payout_method_id") or kwargs.get("provider_beneficiary_id") or "local")
         return Beneficiary(provider_beneficiary_id=method_id, status="CREATED")
 
-    async def submit_payout(self, **kwargs) -> PayoutSubmission:
+    def _payout_payload(self, kwargs: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
         currency = str(kwargs.get("currency") or "INR").upper()
         if currency != "INR":
             raise ProviderRequestError("SgPay24 supports INR payouts only")
@@ -1476,6 +1532,8 @@ class SgPay24PaymentProvider:
             kwargs.get("ifsc_code") or kwargs.get("ifsc_no") or kwargs.get("ifsc") or ""
         ).strip()
         upi = str(kwargs.get("payout_identifier") or kwargs.get("upi_id") or "").strip()
+        if self._payout_api_kind() == "root" and not account_number:
+            raise PayoutBankAccountRequired("SGPay payouts require a saved bank account, IFSC and bank name.")
         if not account_number and not upi:
             raise ProviderRequestError("Payout needs a bank account or UPI id")
         phone = re.sub(r"\D", "", str(kwargs.get("phone") or ""))
@@ -1518,20 +1576,37 @@ class SgPay24PaymentProvider:
             payload["account"] = account_number
             payload["ifsc_no"] = ifsc
             payload["bank_name"] = bank_name
-        if upi:
+        if upi and self._payout_api_kind() == "v1":
             payload["upi_id"] = upi
+        return payload, amount_paise
+
+    def validate_payout(self, **kwargs) -> None:
+        """Validate before the caller commits an irreversible submission claim."""
+        self._payout_payload(kwargs)
+        self._payout_api_kind()
+
+    async def submit_payout(self, **kwargs) -> PayoutSubmission:
+        payload, amount_paise = self._payout_payload(kwargs)
+        order_id = str(payload["order_id"])
         if self._payout_api_kind() == "v1":
             response = await self._submit_payout_v1(payload, amount_paise=amount_paise)
         else:
-            # Live createPayoutRequest ignores JSON bodies ("All fields are required")
-            # and only reads query-string fields. Keep that transport; send docs keys.
-            response = await self._request_json(self._payout_endpoint(), payload, as_query=True)
+            # Current merchant contract is POST JSON. Never replay a failed or
+            # timed-out submission using another transport: it may be accepted.
+            response = await self._request_json(self._payout_endpoint(), payload)
         data = response.get("data") if isinstance(response.get("data"), Mapping) else response
         if not isinstance(data, Mapping):
             data = response
-        provider_id = str(
-            data.get("payout_id") or data.get("transaction_id") or data.get("order_id") or order_id
-        )
+        if str(data.get("order_id") or "").strip() != order_id:
+            raise ProviderRequestError("Provider payout submission did not match the merchant order")
+        if data.get("amount") is not None and self._amount_to_paise(data["amount"]) != amount_paise:
+            raise ProviderRequestError("Provider payout submission amount did not match")
+        returned_merchant = data.get("merchant_id", response.get("merchant_id"))
+        if returned_merchant is not None and str(returned_merchant).strip() != self._merchant_id:
+            raise ProviderRequestError("Provider payout submission merchant did not match")
+        if data.get("currency") is not None and str(data["currency"]).strip().upper() != "INR":
+            raise ProviderRequestError("Provider payout submission currency did not match")
+        provider_id = str(data.get("payout_id") or data.get("transaction_id") or "").strip() or None
         raw_status = data.get("status")
         if raw_status is None:
             raw_status = response.get("status")
@@ -1539,24 +1614,40 @@ class SgPay24PaymentProvider:
         return PayoutSubmission(provider_payout_id=provider_id, status=mapped)
 
     async def get_payout_status(self, provider_payout_id: str) -> PayoutStatus:
+        # The SGPay status API takes OUR merchant order_id, not its numeric
+        # payout_id. Callers persist these identities separately.
         order_id = self._order_id(provider_payout_id)
         response = await self._request_json(self._payout_status_path, {
             "merchant_id": self._merchant_id,
             "order_id": order_id,
             "api_token": self._api_token,
         })
-        mapped = self._map_payout_status(response.get("status"))
-        amount_value = response.get("amount")
+        data = response.get("data") if isinstance(response.get("data"), Mapping) else response
+        returned_order = str(data.get("order_id") or response.get("order_id") or "").strip()
+        returned_merchant = str(data.get("merchant_id") or response.get("merchant_id") or "").strip()
+        if returned_order != order_id or returned_merchant != self._merchant_id:
+            raise ProviderRequestError("Provider payout status did not match the merchant order")
+        if str(response.get("type") or "").strip().lower() == "unauthorized":
+            raise ProviderRequestError("Provider authentication was rejected")
+        raw_status = data.get("status") if data.get("status") is not None else response.get("status")
+        mapped = self._map_payout_status(raw_status)
+        amount_value = data.get("amount", response.get("amount"))
         amount_paise = self._amount_to_paise(amount_value) if amount_value is not None else None
+        raw_currency = data.get("currency", response.get("currency"))
+        currency = str(raw_currency).strip().upper() if raw_currency is not None else None
+        if currency is not None and currency != "INR":
+            raise ProviderRequestError("Provider payout currency did not match INR")
         return PayoutStatus(
             status=mapped,
             amount_paise=amount_paise,
-            currency="INR",
-            withdrawal_id=None,
+            currency=currency,
+            withdrawal_id=order_id,
             idempotency_key=None,
             provider_beneficiary_id=None,
-            provider_reference=str(response.get("utr") or order_id),
+            provider_reference=str(data.get("utr") or response.get("utr") or "").strip() or None,
             occurred_at=extract_provider_occurred_at(response),
+            provider_merchant_id=returned_merchant,
+            provider_payout_id=str(data.get("payout_id") or response.get("payout_id") or "").strip() or None,
         )
 
     async def cancel_payout(self, _provider_payout_id: str) -> str:
@@ -1594,6 +1685,8 @@ class SgPay24PaymentProvider:
             in {"payout", "withdrawal", "payout.paid", "payout.failed", "payout.processing"}
             or str(payload.get("type") or "").lower() in {"payout", "withdrawal"}
         )
+        if payout_like and payload.get("merchant_id") not in (None, "", self._merchant_id):
+            raise WebhookVerificationError("Webhook payout merchant is invalid")
         if not payout_like:
             if isinstance(transaction_id, bool) or not isinstance(transaction_id, int) or transaction_id <= 0:
                 raise WebhookVerificationError("Webhook transaction reference is invalid")

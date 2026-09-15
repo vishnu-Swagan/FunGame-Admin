@@ -364,6 +364,37 @@ kyc_review = _admin_dependency("KYC_REVIEW", step_up=True)
 withdrawal_holds_manage = _admin_dependency("WITHDRAWAL_HOLDS_MANAGE", step_up=True)
 
 
+def _operator_resolution_dependency(*, approve: bool):
+    active_admin = _admin_dependency(())
+
+    async def dependency(request_id: str, user: dict = Depends(get_current_user)):
+        await active_admin(user=user)
+        row = await db[operator_rail.COLLECTION].find_one(
+            {"id": request_id}, {"_id": 0, "kind": 1},
+        )
+        kind = (row or {}).get("kind")
+        if kind == "DEPOSIT":
+            # Manual deposit resolution can credit cash; use the established
+            # reconciliation permission and recent step-up, not read access.
+            return await payments_reconcile(user=user)
+        if kind == "WITHDRAWAL":
+            await withdrawals_approve(user=user)
+            if approve:
+                # Unlike financial-wallet approval, operator approval also
+                # sends the payout, so the payment-send guard is required.
+                await withdrawals_pay(user=user)
+            return user
+        raise HTTPException(status_code=404, detail={
+            "code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found.",
+        })
+
+    return dependency
+
+
+operator_request_approve = _operator_resolution_dependency(approve=True)
+operator_request_reject = _operator_resolution_dependency(approve=False)
+
+
 async def _financial_rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
     stamp = int(datetime.now(timezone.utc).timestamp())
     bucket = stamp // window_seconds
@@ -770,6 +801,83 @@ async def provider_webhook(provider_name: str, request: Request):
         ) from exc
 
 
+@router.post("/payments/webhooks/sgpay24/payout")
+async def sgpay24_payout_webhook(request: Request):
+    """Treat payout notices only as hints to query an existing payout's status.
+
+    This endpoint is independent of new-deposit and payout-send flags: turning
+    off intake must not strand an already-issued withdrawal. It never submits
+    or retries a payout, and cannot create a local withdrawal from a notice.
+    """
+    chunks: list[bytes] = []
+    body_size = 0
+    async for chunk in request.stream():
+        body_size += len(chunk)
+        if body_size > MAX_WEBHOOK_BODY_BYTES:
+            raise HTTPException(status_code=413, detail={
+                "code": "WEBHOOK_TOO_LARGE", "message": "Webhook body is too large.",
+            })
+        chunks.append(chunk)
+    raw_body = b"".join(chunks)
+    provider = _provider()
+    if provider.name != "sgpay24":
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        event = provider.verify_webhook(raw_body, request.headers)
+        payload = json.loads(raw_body)
+        # Payout IDs belong to SGPay; only the merchant order ID can identify
+        # our request. Never use the parser's legacy payout_id fallback here.
+        merchant_order_id = payload.get("order_id")
+        if (
+            not isinstance(merchant_order_id, str)
+            or merchant_order_id.strip() != event.object_id
+            or event.data.get("notice_kind") != "payout"
+            or not event.data.get("requires_authenticated_status_lookup")
+            or payload.get("provider") not in {None, "", "sgpay24"}
+            or (
+                payload.get("kind") not in (None, "")
+                and str(payload["kind"]).strip().upper() not in {"PAYOUT", "WITHDRAWAL"}
+            )
+        ):
+            raise WebhookVerificationError("Webhook is not a payout order notice")
+    except (WebhookVerificationError, ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=401, detail={
+            "code": "INVALID_WEBHOOK", "message": "Webhook verification failed.",
+        }) from exc
+
+    row = await db[operator_rail.COLLECTION].find_one({
+        "kind": "WITHDRAWAL",
+        "payout_provider": {"$in": [None, "", "sgpay24"]},
+        "provider": {"$in": [None, "", "sgpay24"]},
+        "$or": [
+            {"payout_merchant_order_id": event.object_id},
+            {"id": event.object_id, "payout_merchant_order_id": {"$in": [None, ""]}},
+        ],
+    }, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    import sgpay_payout
+    try:
+        result = await sgpay_payout.reconcile_operator_payout(
+            str(row["id"]), provider=provider, actor="sgpay24-payout-status-webhook",
+        )
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "PAYOUT_STATUS_UNAVAILABLE", "message": "Payout status could not be verified.",
+        }) from exc
+    if result.get("error"):
+        raise HTTPException(status_code=503, detail={
+            "code": "PAYOUT_STATUS_UNAVAILABLE", "message": "Payout status could not be verified.",
+        })
+    # Do not echo unsigned fields, customer information, or provider errors.
+    return {
+        "status": result.get("status"),
+        "payout_status": result.get("payout_status"),
+        "duplicate": bool(result.get("duplicate")),
+    }
+
+
 # ------------------------------------------------------------------- admin
 
 
@@ -1049,7 +1157,7 @@ async def update_withdrawal_mode(
 
 @admin_router.post("/payments/operator-requests/{request_id}/approve")
 async def admin_approve_operator_request(
-    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+    request_id: str, body: OperatorResolve, admin: dict = Depends(operator_request_approve),
 ):
     row = await operator_rail.resolve_request(
         request_id, admin, approve=True, note=body.note or body.reason or "",
@@ -1064,7 +1172,7 @@ async def admin_approve_operator_request(
 
 @admin_router.post("/payments/operator-requests/{request_id}/reject")
 async def admin_reject_operator_request(
-    request_id: str, body: OperatorResolve, admin: dict = Depends(payments_view),
+    request_id: str, body: OperatorResolve, admin: dict = Depends(operator_request_reject),
 ):
     reason = str(body.reason or body.note or "").strip()
     if len(reason) < 2:
@@ -1083,9 +1191,8 @@ async def admin_reject_operator_request(
 
 @admin_router.post("/payments/operator-requests/{request_id}/retry-payout")
 async def admin_retry_operator_payout(
-    request_id: str, admin: dict = Depends(payments_view),
+    request_id: str, admin: dict = Depends(withdrawals_pay),
 ):
-    from db import db
     row = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
     if not row or row.get("kind") != "WITHDRAWAL":
         raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
@@ -1103,17 +1210,27 @@ async def admin_retry_operator_payout(
 
 @admin_router.post("/payments/operator-requests/{request_id}/sync-payout")
 async def admin_sync_operator_payout(
-    request_id: str, admin: dict = Depends(payments_view),
+    request_id: str, admin: dict = Depends(payments_reconcile),
 ):
     """One-shot SgPay check-payout-status poll for an operator withdrawal."""
-    from db import db
     import sgpay_payout
     row = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
     if not row or row.get("kind") != "WITHDRAWAL":
         raise HTTPException(status_code=404, detail={"code": "OPERATOR_REQUEST_NOT_FOUND", "message": "The request was not found."})
-    result = await sgpay_payout.reconcile_operator_payout(
-        request_id, actor=f"admin-sync:{admin.get('id') or 'admin'}",
-    )
+    try:
+        result = await sgpay_payout.reconcile_operator_payout(
+            request_id, actor=f"admin-sync:{admin.get('id') or 'admin'}",
+        )
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "PAYOUT_STATUS_UNAVAILABLE",
+            "message": "Payout status could not be verified. No new payout was sent.",
+        }) from exc
+    if result.get("error"):
+        raise HTTPException(status_code=503, detail={
+            "code": "PAYOUT_STATUS_UNAVAILABLE",
+            "message": "Payout status could not be verified. No new payout was sent.",
+        })
     refreshed = await db[operator_rail.COLLECTION].find_one({"id": request_id}, {"_id": 0})
     return {
         "message": "Payout status synced.",

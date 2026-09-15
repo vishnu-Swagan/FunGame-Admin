@@ -429,6 +429,18 @@ def as_player_withdrawal(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _checkout_diagnostics(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    diagnostic = row.get("checkout_diagnostics") or {}
+    code = diagnostic.get("code") if isinstance(diagnostic, Mapping) else None
+    http_status = diagnostic.get("http_status") if isinstance(diagnostic, Mapping) else None
+    if isinstance(code, str) and (code in ProviderRequestError.DIAGNOSTIC_CODES or code == "PROVIDER_CONFIGURATION_INVALID"):
+        return {
+            "code": code,
+            "http_status": http_status if type(http_status) is int and 100 <= http_status <= 599 else None,
+        }
+    return None
+
+
 def as_admin_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
     dto = request_dto(row)
     return {
@@ -440,6 +452,7 @@ def as_admin_deposit(row: Mapping[str, Any]) -> dict[str, Any]:
         "admin_note": dto["admin_note"],
         "note": dto["note"],
         "last_error": dto.get("last_error") or row.get("last_error"),
+        "checkout_diagnostics": _checkout_diagnostics(row),
         "utr_required": dto["utr_required"],
     }
 
@@ -808,9 +821,16 @@ async def _ensure_hosted_checkout(
     except HTTPException:
         raise
     except (ProviderConfigurationError, ProviderRequestError) as exc:
+        diagnostics = {
+            "code": exc.diagnostic_code if isinstance(exc, ProviderRequestError) else "PROVIDER_CONFIGURATION_INVALID",
+            "http_status": exc.http_status if isinstance(exc, ProviderRequestError) else None,
+        }
         await db[COLLECTION].update_one(
             {"id": row["id"], "source": UPI_SOURCE, "status": "CREATED"},
-            {"$set": {"last_error": type(exc).__name__, "updated_at": utcnow()}},
+            {"$set": {
+                "last_error": type(exc).__name__, "checkout_diagnostics": diagnostics,
+                "updated_at": utcnow(),
+            }},
         )
         raise HTTPException(status_code=503, detail={
             "code": "UPI_CHECKOUT_UNAVAILABLE",
@@ -823,6 +843,7 @@ async def _ensure_hosted_checkout(
             "provider_order_id": checkout.provider_order_id,
             "checkout_url": checkout.checkout_url,
             "last_error": None,
+            "checkout_diagnostics": None,
             "next_reconcile_at": utcnow() + timedelta(seconds=8),
             "updated_at": utcnow(),
         }},
@@ -1626,7 +1647,7 @@ async def list_for_admin(kind: str, status: str | None = None) -> list[dict[str,
     if status:
         query["status"] = status.upper()
     rows = await db[COLLECTION].find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [request_dto(row) for row in rows]
+    return [{**request_dto(row), "checkout_diagnostics": _checkout_diagnostics(row)} for row in rows]
 
 
 async def resolve_request(request_id: str, admin: Mapping[str, Any], *, approve: bool, note: str = "") -> dict[str, Any]:
