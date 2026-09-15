@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import Register from "./Register";
+import { toast } from "sonner";
 
 const mockNavigate = jest.fn();
 const mockPost = jest.fn();
@@ -33,7 +34,7 @@ jest.mock("@/lib/legalPolicies", () => ({
 
 jest.mock("@/lib/api", () => ({
   api: { post: (...args) => mockPost(...args) },
-  errMsg: (error) => error?.message || "Request failed",
+  errMsg: (error) => error?.response?.data?.detail?.message || error?.message || "Request failed",
 }));
 
 jest.mock("sonner", () => ({
@@ -337,5 +338,62 @@ test("unchecked terms remain actionable and receive accessible feedback", async 
   expect(container.querySelector("#reg-terms-error")?.textContent).toBe("Please accept the account and play terms");
   expect(terms.getAttribute("aria-invalid")).toBe("true");
   expect(document.activeElement).toBe(terms);
+  await act(async () => root.unmount());
+});
+
+async function completePhoneSignup(container) {
+  change(container.querySelector("#reg-name"), "Signup Player");
+  change(container.querySelector("#reg-contact"), "+91 98765-43210");
+  change(container.querySelector("#reg-email"), "signup@example.com");
+  change(container.querySelector("#reg-dob"), "1990-05-20");
+  await act(async () => {
+    container.querySelector('[data-testid="register-terms-checkbox"]').click();
+    container.querySelector('[data-testid="register-privacy-checkbox"]').click();
+    await settle();
+  });
+  await clickPrimarySubmit(container);
+}
+
+test.each([429, 503])("a signup HTTP %s shows the error and does not open verification", async (status) => {
+  mockCapabilities = {
+    registration_enabled: true, phone_registration: true,
+    verification_required: true, registration_mode: "PHONE_OTP",
+  };
+  mockPost.mockRejectedValue({ response: {
+    status, data: { detail: { message: "SMS could not be requested. Please try again later." } },
+  } });
+  const { container, root } = await renderRegister();
+  await completePhoneSignup(container);
+
+  expect(mockPost).toHaveBeenCalledTimes(1);
+  expect(toast.error).toHaveBeenCalledWith("SMS could not be requested. Please try again later.");
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.info).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(container.querySelector("#reg-contact").value).toBe("+91 98765-43210");
+  expect(container.querySelector('[data-testid="auth-primary-submit-button"]').disabled).toBe(false);
+  await act(async () => root.unmount());
+});
+
+test("an opaque signup response confirms only the request, not SMS delivery", async () => {
+  mockCapabilities = {
+    registration_enabled: true, phone_registration: true,
+    verification_required: true, registration_mode: "PHONE_OTP",
+  };
+  mockPost.mockResolvedValue({ status: 202, data: {
+    message: "If this contact can be registered, a verification code has been sent.",
+    channel: "PHONE", challenge_id: "opaque-challenge", destination_masked: "+91******10",
+    resend_after_seconds: 60,
+  } });
+  const { container, root } = await renderRegister();
+  await completePhoneSignup(container);
+
+  expect(toast.info).toHaveBeenCalledWith("Verification code requested. Enter it if an SMS arrives.");
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(mockNavigate).toHaveBeenCalledWith("/verify", expect.objectContaining({
+    state: expect.objectContaining({
+      channel: "PHONE", identifier: "+919876543210", challengeId: "opaque-challenge", resendAfter: 60,
+    }),
+  }));
   await act(async () => root.unmount());
 });

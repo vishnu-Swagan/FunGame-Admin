@@ -1691,18 +1691,19 @@ async def verify_contact(body: VerifyEmailRequest):
 @router.post('/resend-otp', status_code=status.HTTP_202_ACCEPTED)
 async def resend_verification(body: ResendVerificationRequest):
     identity = await _resend_identity(body)
-    try:
-        await consume_persistent_limit(
-            'otp_issue:VERIFY_CONTACT', f'{identity.channel}:{identity.value}',
-            limit=5, window_seconds=3600,
-        )
-    except OtpError as exc:
-        # This limit is consumed identically before account lookup for known,
-        # verified, unverified and unknown identities.
-        _raise_otp(exc)
     user = await _find_identity_user(identity)
     if (not user or is_deleted_user(user) or user.get('role') != 'PLAYER'
             or _identity_is_verified(user, identity)):
+        # Preserve the existing opaque-response throttle for identities that
+        # cannot receive an activation code. Real sends reserve their cooldown
+        # slot and consume this same quota inside issue_challenge instead.
+        try:
+            await consume_persistent_limit(
+                'otp_issue:VERIFY_CONTACT', f'{identity.channel}:{identity.value}',
+                limit=5, window_seconds=3600,
+            )
+        except OtpError as exc:
+            _raise_otp(exc)
         return {'message': GENERIC_RESEND_MESSAGE, **_dummy_challenge(identity)}
     if (user.get('registration_source') == 'SELF_SERVICE'
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
@@ -1714,9 +1715,7 @@ async def resend_verification(body: ResendVerificationRequest):
                 'message': 'This account must begin verification by mobile OTP.',
             })
     try:
-        challenge = await issue_challenge(
-            user, identity, VERIFY_CONTACT, consume_limit=False,
-        )
+        challenge = await issue_challenge(user, identity, VERIFY_CONTACT)
     except OtpError as exc:
         # Never tell a known player that a new SMS was sent when the provider
         # rejected it. Unknown/verified contacts retain the opaque response

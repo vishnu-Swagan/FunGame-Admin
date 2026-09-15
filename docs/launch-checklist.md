@@ -1,5 +1,29 @@
 # Chakri.Casino staging and production launch checklist
 
+## Signup SMS maintenance release — 2026-09-16
+
+This is a narrow update to the existing React frontend and FastAPI backend on Render. It does not change SMS credentials, reopen deleted accounts, remove OTP verification, or change payment settings. No new service or subscription is required. Allow approximately 15–25 minutes for automated checks, deployment, and verification; SMS carrier delivery still requires a handset check.
+
+- [ ] 🤖 **Review and test the signup retry changes** — 5–10 minutes.
+
+  > Prompt: “Review the OTP changes and run the backend and frontend tests. Confirm cooldown clicks do not spend the five-attempt send allowance, actual provider attempts still do, existing valid codes survive a rejected resend, and deleted accounts remain closed. Use only mocked SMS delivery.”
+
+  **You'll know it worked when:** the security review and automated checks pass without sending a real OTP or modifying customer data.
+
+- [ ] 🤖 **Deploy the reviewed commit through the existing release process** — 5–10 minutes.
+
+  > Prompt: “Merge the tested signup-SMS release, wait for both Render deployments to succeed, and verify the same commit is deployed. The API's checked-in trigger is checksPass; the frontend's is commit. Preserve all live configuration. Use previous production commit d05c9e8dac8b19a33ab2344dd5671477a1ce3c73 as the application rollback target if needed.”
+
+  **You'll know it worked when:** both deployment records succeed, the public API is healthy, the browser can read the Retry-After countdown header, and the live signup page uses the updated requested-code wording. The header is the server's instruction for how long to wait before retrying.
+
+- [ ] 🤝 **Confirm receipt on an eligible signup number** — 2–5 minutes, plus any carrier delay.
+
+  > Prompt: “After release, observe the operator's one controlled signup attempt. Check only redacted delivery/status evidence if needed; never request, display, or log the OTP. Do not treat a provider's acceptance response as proof the handset received the message.”
+
+  **You'll know it worked when:** the user receives and verifies the code. A deleted account's number remains unavailable for fresh signup unless a separate account-reuse policy is approved. This release cannot guarantee delivery by the SMS provider or carrier.
+
+The older staging checklist below is a historical launch plan, not authority to change current production configuration during this maintenance release.
+
 Product: Chakri.Casino player web app, same-origin operator/distributor portal at <code>chakri.casino/Admin</code>, wallet-backed games, public policy centre, and an installable PWA.
 
 Detected stack: React 19 with CRACO as a Render static frontend, FastAPI on Python 3.11 as a Render Docker web service, and MongoDB as the authoritative user, game, wallet, and transaction ledger.

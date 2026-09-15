@@ -108,11 +108,14 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
         privacy_version: policies?.privacy?.version,
         ...(manualReview ? { password, password_confirmation: passwordConfirmation } : {}),
       });
-      toast.success(data?.message || (manualReview ? "Registration submitted for review" : "Verification code sent"));
       if (manualReview) {
+        toast.success(data?.message || "Registration submitted for review");
         goPanel(AUTH_PANELS.LOGIN, true);
         return;
       }
+      // Registration responses deliberately hide whether this contact exists.
+      // A successful request is not a receipt for delivery to the handset.
+      toast.info("Verification code requested. Enter it if an SMS arrives.");
       const verificationChannel = String(data?.channel || "PHONE").toUpperCase() === "EMAIL" ? "EMAIL" : "PHONE";
       const verificationIdentifier = verificationChannel === "EMAIL"
         ? email.trim().toLowerCase()
@@ -144,7 +147,7 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
           <p className="mt-1 text-sm text-white/65 leading-relaxed">
             {manualReview
               ? "Enter your details and create a password. An administrator will review your account before you can play."
-              : "Enter your name, mobile number, and email. We send one SMS code, then you create a password."}
+              : "Enter your name, mobile number, and email. Request one SMS code, then verify it to create a password."}
           </p>
         </div>
       )}
@@ -249,7 +252,7 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
         <p data-testid="register-verification-copy" className="text-[11px] text-white/45 leading-relaxed">
           {manualReview
             ? "No verification code is sent. Your email and mobile remain unverified until OTP verification is restored; an administrator must approve this account before login and play."
-            : "We send one SMS code to your mobile number. After you verify it, create a password. Email is collected for CRM and recovery, not as a second activation code."}
+            : "Request one SMS code for your mobile number. Verify the code before creating a password. Email is collected for CRM and recovery, not as a second activation code."}
         </p>
         <p className="text-[11px] text-white/45 leading-relaxed">Real-money play is available only to eligible adults in supported territories. Deposits, wagers, withdrawals, and bonus balances appear in wallet activity.</p>
         <Button data-testid="auth-primary-submit-button" type="submit" disabled={busy || capabilitiesLoading || policiesLoading || Boolean(policiesError) || !policies || !selectedChannelAvailable} className="w-full h-12 rounded-xl text-base font-bold">
@@ -257,9 +260,9 @@ export default function RegisterForm({ onSwitchPanel, showTitle = false }) {
           {capabilitiesLoading || policiesLoading
             ? "Checking availability…"
             : busy
-              ? (manualReview ? "Submitting…" : "Sending code…")
+              ? (manualReview ? "Submitting…" : "Requesting code…")
               : registrationAvailable
-                ? (manualReview ? "Create account for review" : "Send mobile verification code")
+                ? (manualReview ? "Create account for review" : "Request mobile verification code")
                 : "Registration temporarily unavailable"}
         </Button>
       </form>
