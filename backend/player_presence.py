@@ -22,7 +22,7 @@ async def player_login_stats(database, *, now=None):
     current = now.isoformat()
     since = (now - timedelta(seconds=ONLINE_WINDOW_SECONDS)).isoformat()
     yesterday = (now - timedelta(hours=24)).isoformat()
-    players = {'role': 'PLAYER'}
+    players = {'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}}
     online = {
         **players,
         'status': {'$in': ['ACTIVE', 'VERIFIED']},

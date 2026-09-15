@@ -47,7 +47,7 @@ class AdminAccountDeletionTests(unittest.IsolatedAsyncioTestCase):
         return row
 
     async def test_deletes_player_login_and_ephemeral_rows_but_retains_history(self):
-        player = await self._player()
+        player = await self._player(password_hash='old-secret', active_session_id='old-session')
         await self.database.otp_challenges.insert_one({'id': 'otp-1', 'user_id': player['id']})
         await self.database.notifications.insert_one({'id': 'notice-1', 'user_id': player['id']})
         await self.database.verification_requests.insert_one({'id': 'verify-1', 'user_id': player['id']})
@@ -70,11 +70,19 @@ class AdminAccountDeletionTests(unittest.IsolatedAsyncioTestCase):
         response = await routes_admin.delete_user_account(player['id'], self.admin)
 
         self.assertEqual(response['deleted_user_id'], player['id'])
-        self.assertIsNone(await self.database.users.find_one({'id': player['id']}))
+        tombstone = await self.database.users.find_one({'id': player['id']})
+        self.assertEqual(tombstone['status'], 'DELETED')
+        self.assertEqual(tombstone['deleted_by'], self.admin['id'])
+        self.assertEqual(tombstone['deletion_previous_status'], 'ACTIVE')
+        self.assertTrue(tombstone['deleted_at'])
+        self.assertEqual(tombstone['chip_balance'], 1000)
+        self.assertNotIn('password_hash', tombstone)
+        self.assertNotEqual(tombstone['active_session_id'], 'old-session')
         for collection in ('otp_challenges', 'notifications', 'verification_requests', 'chip_request_pending_counters'):
             self.assertEqual(await self.database[collection].count_documents({'user_id': player['id']}), 0)
         self.assertEqual(await self.database.avatar_uploads.count_documents({'_id': player['id']}), 0)
-        self.assertEqual(await self.database.login_id_reservations.count_documents({'owner_id': player['id']}), 0)
+        # Identity reservations remain linked to the retained financial owner.
+        self.assertEqual(await self.database.login_id_reservations.count_documents({'owner_id': player['id']}), 1)
         self.assertEqual(await self.database.login_id_reservations.count_documents({'owner_id': 'other-player'}), 1)
         attribution = await self.database.player_attribution.find_one({'user_id': player['id']})
         self.assertFalse(attribution['active'])
@@ -98,24 +106,75 @@ class AdminAccountDeletionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(caught.exception.status_code, 403)
             self.assertIsNotNone(await self.database.users.find_one({'id': target}))
 
-    async def test_refuses_financial_history_and_open_activity_without_mutation(self):
-        await self._player('financial-player', username='GK7654321')
-        await self.database.deposit_orders.insert_one({
-            'id': 'deposit-1', 'user_id': 'financial-player', 'status': 'CREDITED',
-        })
-        await self._player('active-player', username='GK1111111')
-        await self.database.aviator_bets.insert_one({
-            'id': 'bet-1', 'user_id': 'active-player', 'status': 'OPEN',
-        })
+    async def test_all_financial_history_balances_and_open_activity_allow_deletion(self):
+        await self._player('financial-player', username='GK7654321', chip_balance=99000)
+        rows = {
+            'deposit_orders': 'PENDING', 'withdrawal_requests': 'APPROVED',
+            'operator_payment_requests': 'PENDING', 'payout_methods': 'ACTIVE',
+            'aviator_bets': 'OPEN', 'live_bets': 'OPEN', 'game_rounds': 'OPEN',
+            'blackjack_games': 'playing', 'rummy_seats': 'ACTIVE',
+        }
+        for collection, status in rows.items():
+            await self.database[collection].insert_one({'id': collection, 'user_id': 'financial-player', 'status': status})
+        await self.database.chip_requests.insert_one({'id': 'chip-request', 'user_id': 'financial-player', 'status': 'PENDING'})
 
-        for target in ('financial-player', 'active-player'):
-            with self.assertRaises(HTTPException) as caught:
-                await routes_admin.delete_user_account(target, self.admin)
-            self.assertEqual(caught.exception.status_code, 409)
-            self.assertEqual(caught.exception.detail['code'], 'ACCOUNT_DELETE_BLOCKED')
-            stored = await self.database.users.find_one({'id': target})
-            self.assertEqual(stored['status'], 'ACTIVE')
-        self.assertEqual(await self.database.admin_audit.count_documents({}), 0)
+        result = await routes_admin.delete_user_account('financial-player', self.admin)
+
+        self.assertTrue(result['history_retained'])
+        self.assertTrue(result['reconciliation_required'])
+        self.assertIn('open Aviator bets', result['retained_activity'])
+        stored = await self.database.users.find_one({'id': 'financial-player'})
+        self.assertEqual(stored['status'], 'DELETED')
+        self.assertEqual(stored['chip_balance'], 99000)
+        for collection, status in rows.items():
+            row = await self.database[collection].find_one({'user_id': 'financial-player'})
+            self.assertEqual(row['status'], status, collection)
+        chip_request = await self.database.chip_requests.find_one({'id': 'chip-request'})
+        self.assertEqual(chip_request['status'], 'REJECTED')
+        self.assertEqual(await self.database.admin_audit.count_documents({'action': 'PLAYER_ACCOUNT_DELETED'}), 1)
+
+    async def test_every_registration_source_and_status_can_be_deleted(self):
+        for source in ('OPERATOR', 'SELF_SERVICE'):
+            for status in ('PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED', 'VERIFIED', 'PROFILE_SUBMITTED'):
+                user_id = f'{source}-{status}'
+                await self._player(user_id, username=user_id, status=status, registration_source=source)
+                result = await routes_admin.delete_user_account(user_id, self.admin)
+                self.assertEqual(result['deleted_user_id'], user_id)
+                self.assertEqual((await self.database.users.find_one({'id': user_id}))['status'], 'DELETED')
+
+    async def test_approved_deposit_is_terminal_but_approved_withdrawal_needs_reconciliation(self):
+        await self._player('deposit-player')
+        await self._player('withdrawal-player', username='withdrawal-player')
+        await self.database.operator_payment_requests.insert_many([
+            {'id': 'deposit', 'user_id': 'deposit-player', 'kind': 'DEPOSIT', 'status': 'APPROVED'},
+            {'id': 'withdrawal', 'user_id': 'withdrawal-player', 'kind': 'WITHDRAWAL', 'status': 'APPROVED'},
+        ])
+        deposit_result = await routes_admin.delete_user_account('deposit-player', self.admin)
+        self.assertFalse(deposit_result['reconciliation_required'])
+        withdrawal_result = await routes_admin.delete_user_account('withdrawal-player', self.admin)
+        self.assertIn('pending operator payments', withdrawal_result['retained_activity'])
+
+    async def test_repeat_deletion_is_idempotent_and_deleted_players_stay_out_of_lists(self):
+        await self._player('deleted-player', username='delete-me')
+        await self._player('kept-player', username='keep-me')
+        await routes_admin.delete_user_account('deleted-player', self.admin)
+        result = await routes_admin.delete_user_account('deleted-player', self.admin)
+        self.assertTrue(result['already_deleted'])
+        self.assertEqual(await self.database.admin_audit.count_documents({'action': 'PLAYER_ACCOUNT_DELETED'}), 1)
+        all_players = await routes_admin.list_users(status=None, admin=self.admin)
+        self.assertEqual([row['id'] for row in all_players['users']], ['kept-player'])
+        deleted_filter = await routes_admin.list_users(status='DELETED', admin=self.admin)
+        self.assertEqual(deleted_filter['users'], [])
+        self.assertEqual((await self.database.users.find_one({'id': 'kept-player'}))['status'], 'ACTIVE')
+
+    async def test_deleted_accounts_cannot_be_reapproved_or_have_credentials_reset(self):
+        await self._player()
+        await routes_admin.delete_user_account('player-1', self.admin)
+        with self.assertRaises(HTTPException) as caught:
+            await routes_admin.approve_user('player-1', None, self.admin)
+        self.assertEqual(caught.exception.status_code, 404)
+        with self.assertRaises(HTTPException):
+            routes_admin._require_player_credential_target(await self.database.users.find_one({'id': 'player-1'}))
 
 
 if __name__ == '__main__':

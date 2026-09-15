@@ -27,12 +27,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from fastapi import HTTPException
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 import compliance
 import ledger
 from db import db
+from player_account_state import account_is_deleted, lock_account_for_new_activity, require_available_account
 from payment_providers import (
     DepositStatus,
     PaymentProvider,
@@ -2000,6 +2002,7 @@ async def _ensure_deposit_checkout(
     order: Mapping[str, Any], provider: PaymentProvider,
 ) -> tuple[dict[str, Any], str]:
     """Finish or repair the DB/provider gap using a stable provider key."""
+    await require_available_account(db, order["user_id"])
     if order.get("provider") != provider.name:
         raise FinancialError(
             "PAYMENT_PROVIDER_MISMATCH", "This deposit belongs to another payment provider.", 409,
@@ -2008,6 +2011,17 @@ async def _ensure_deposit_checkout(
         return dict(order), str(order.get("checkout_url") or "")
     if order.get("provider_order_id") and order.get("checkout_url"):
         return dict(order), str(order["checkout_url"])
+
+    async def authorize_checkout(session):
+        await lock_account_for_new_activity(db, order["user_id"], session=session)
+        await db.deposit_orders.update_one(
+            {"id": order["id"], "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {"checkout_authorized_at": now()}}, **_session_kwargs(session),
+        )
+
+    # The external request may finish after deletion, but it must have a
+    # committed authorization that won the race before account closure.
+    await _run_transaction(authorize_checkout)
     return_url = os.environ.get(
         "PAYMENT_RETURN_URL", "http://localhost:3000/wallet/deposit/return",
     )
@@ -2067,6 +2081,7 @@ async def create_deposit(
     user_id: str, amount_paise: int, idempotency_key: str, provider: PaymentProvider,
     promotion_consent_id: Optional[str] = None,
 ) -> tuple[dict[str, Any], str]:
+    await require_available_account(db, user_id)
     idem = validate_idempotency_key(idempotency_key)
     amount = int(amount_paise)
     consent_id = str(promotion_consent_id or "").strip() or None
@@ -2105,6 +2120,7 @@ async def create_deposit(
         "chips": chips, "rate_snapshot": rate, "provider": provider.name,
         "provider_order_id": None, "provider_reference": None,
         "checkout_url": None, "status": "CREATED", "wallet_operation_id": None,
+        "checkout_authorization_required": True,
         "promotion_consent_id": consent_id, "promotion_mission_id": None,
         "promotion_activation_status": "PENDING" if consent_id else "NOT_SELECTED",
         "limit_reservation_status": "HELD",
@@ -2114,6 +2130,7 @@ async def create_deposit(
 
     async def reserve_and_insert(session):
         kwargs = _session_kwargs(session)
+        await lock_account_for_new_activity(db, user_id, session=session)
         duplicate = await db.deposit_orders.find_one(
             {"user_id": user_id, "idempotency_key": idem}, {"_id": 0}, **kwargs,
         )
@@ -2431,6 +2448,7 @@ async def create_withdrawal(
     user_id: str, amount_chips: int, payout_method_id: str,
     idempotency_key: str, provider: PaymentProvider,
 ) -> dict[str, Any]:
+    await require_available_account(db, user_id)
     idem = validate_idempotency_key(idempotency_key)
     chips = int(amount_chips)
     existing = await db.withdrawal_requests.find_one(
@@ -2476,6 +2494,7 @@ async def create_withdrawal(
 
     async def work(session):
         kwargs = _session_kwargs(session)
+        await lock_account_for_new_activity(db, user_id, session=session)
         duplicate = await db.withdrawal_requests.find_one(
             {"user_id": user_id, "idempotency_key": idem}, {"_id": 0}, **kwargs,
         )
@@ -3321,6 +3340,7 @@ async def process_outbox_batch(
 
 async def _close_unpaid_deposit(
     deposit_id: str, status: str, actor: str = "provider-webhook",
+    *, require_available_player: bool = False,
 ) -> dict[str, Any]:
     """Close an unpaid order and release its deposit-limit reservation."""
     if status not in {"FAILED", "EXPIRED"}:
@@ -3335,6 +3355,10 @@ async def _close_unpaid_deposit(
             raise FinancialError("DEPOSIT_NOT_FOUND", "Deposit order was not found.", 404)
         if current.get("status") in {"CREDITED", "REFUNDED", "REFUND_REVIEW_REQUIRED"}:
             return current
+        if require_available_player:
+            # Local reservation expiry must not race account deletion and
+            # discard a submission that now needs retained reconciliation.
+            await lock_account_for_new_activity(db, current["user_id"], session=session)
         await _touch_deposit_limit_lock(current["user_id"], session=session)
         await db.deposit_orders.update_one(
             {"id": deposit_id, "status": {"$nin": ["CREDITED", "REFUNDED"]}},
@@ -3619,6 +3643,105 @@ def _payout_status_is_bound(
     )
 
 
+async def _close_deleted_unissued_deposit(
+    order: Mapping[str, Any], *, actor: str,
+) -> dict[str, Any] | None:
+    """Release only a deleted player's proven never-submitted reservation."""
+    async def work(session):
+        kwargs = _session_kwargs(session)
+        user = await db.users.find_one({"id": order["user_id"]}, **kwargs)
+        if not account_is_deleted(user):
+            return None
+        # Authorization and account deletion contend on the same user row.
+        # Legacy rows without the explicit marker remain uncertain, not closed.
+        closed = await db.deposit_orders.find_one_and_update(
+            {
+                "id": order["id"], "provider": order["provider"], "status": "CREATED",
+                "checkout_authorization_required": True, "checkout_authorized_at": None,
+                "provider_order_id": {"$in": [None, ""]},
+                "checkout_url": {"$in": [None, ""]},
+                "provider_reference": {"$in": [None, ""]},
+                "wallet_operation_id": None,
+            },
+            {"$set": {
+                "status": "FAILED", "last_error": "ACCOUNT_DELETED_BEFORE_CHECKOUT",
+                "limit_reservation_status": "RELEASED", "limit_reservation_released_at": now(),
+                "updated_at": now(),
+            }},
+            return_document=ReturnDocument.AFTER, **kwargs,
+        )
+        if not closed:
+            return None
+        await _touch_deposit_limit_lock(order["user_id"], session=session)
+        await financial_audit(
+            actor, "DEPOSIT_FAILED", "DEPOSIT", order["id"],
+            metadata={"reason": "ACCOUNT_DELETED_BEFORE_CHECKOUT"},
+            session=session, audit_id=f"deposit:{order['id']}:failed",
+        )
+        return {"deposit_id": order["id"], "status": "FAILED", "terminal": True}
+
+    return await _run_transaction(work)
+
+
+async def _recover_deleted_deposit_reference(
+    order: Mapping[str, Any], provider: PaymentProvider, *, actor: str,
+) -> tuple[dict[str, Any], DepositStatus]:
+    # SGPay's existing adapter validates the merchant order id returned by its
+    # authenticated status endpoint. Other adapters assign unrelated provider
+    # ids and expose no read-only lookup by merchant/idempotency key. Replaying
+    # create_deposit_order could create a new payment after deletion, so defer.
+    if provider.name != "sgpay24":
+        raise FinancialError(
+            "DEPOSIT_REFERENCE_RECOVERY_REQUIRED",
+            "The existing provider payment reference requires reconciliation; no new checkout was created.",
+            409,
+        )
+    reference = str(order["id"])
+    authoritative = _require_deposit_status(await provider.get_payment_status(
+        reference, expected_amount_paise=int(order["amount_paise"]),
+    ))
+    if authoritative.amount_paise != int(order["amount_paise"]) or authoritative.currency != CURRENCY:
+        raise FinancialError(
+            "DEPOSIT_REFERENCE_RECOVERY_MISMATCH",
+            "Provider payment details do not match the retained deposit.", 409,
+        )
+
+    async def work(session):
+        kwargs = _session_kwargs(session)
+        recovered = await db.deposit_orders.find_one_and_update(
+            {
+                "id": order["id"], "provider": provider.name,
+                "provider_order_id": {"$in": [None, "", reference]},
+            },
+            {"$set": {
+                "provider_order_id": reference, "provider_order_id_recovered_at": now(),
+                "updated_at": now(),
+            }},
+            return_document=ReturnDocument.AFTER, **kwargs,
+        )
+        if not recovered:
+            raise FinancialError(
+                "PAYMENT_PROVIDER_REFERENCE_CONFLICT",
+                "Payment reference changed during reconciliation.", 409,
+            )
+        await financial_audit(
+            actor, "DEPOSIT_REFERENCE_RECOVERED", "DEPOSIT", order["id"],
+            metadata={"provider": provider.name, "provider_order_id": reference},
+            session=session, audit_id=f"deposit:{order['id']}:reference-recovered",
+        )
+        recovered.pop("_id", None)
+        return recovered
+
+    try:
+        recovered = await _run_transaction(work)
+    except DuplicateKeyError as exc:
+        raise FinancialError(
+            "PAYMENT_PROVIDER_REFERENCE_CONFLICT",
+            "Payment reference is already bound to another deposit.", 409,
+        ) from exc
+    return recovered, authoritative
+
+
 async def reconcile_deposit(
     deposit_id: str, provider: PaymentProvider, actor: str = "reconciliation-job",
 ) -> dict[str, Any]:
@@ -3627,45 +3750,65 @@ async def reconcile_deposit(
         raise FinancialError("DEPOSIT_NOT_FOUND", "Deposit order was not found.", 404)
     if order.get("provider") != provider.name:
         raise FinancialError("PAYMENT_PROVIDER_MISMATCH", "Deposit provider does not match.", 409)
-    if order.get("status") == "REFUNDED":
+    if order.get("status") == "REFUNDED" or (
+        order.get("status") == "FAILED" and order.get("last_error") == "ACCOUNT_DELETED_BEFORE_CHECKOUT"
+    ):
         return {"deposit_id": deposit_id, "status": order["status"], "terminal": True}
-    if not order.get("provider_order_id"):
-        ttl_seconds = _runtime_config_int(
-            "DEPOSIT_CHECKOUT_RESERVATION_TTL_SECONDS", 1800, 300, 86_400,
-        )
-        created_at = _parse_optional_datetime(order.get("created_at"))
-        if created_at and created_at <= now() - timedelta(seconds=ttl_seconds):
-            expired = await _close_unpaid_deposit(deposit_id, "EXPIRED", actor=actor)
-            return {"deposit_id": deposit_id, "status": expired.get("status", "EXPIRED")}
-        stored, _ = await _ensure_deposit_checkout(order, provider)
-        attempts = int(stored.get("reconcile_attempts", 0)) + 1
-        await db.deposit_orders.update_one(
-            {"id": deposit_id},
-            {"$set": {
-                "next_reconcile_at": now() + _reconciliation_delay(attempts),
-                "reconciled_at": now(), "updated_at": now(),
-            }, "$inc": {"reconcile_attempts": 1}},
-        )
-        return {"deposit_id": deposit_id, "status": stored.get("status", "PENDING")}
     try:
-        authoritative = _require_deposit_status(
-            await provider.get_payment_status(str(order["provider_order_id"])),
-        )
+        if not order.get("provider_order_id"):
+            user = await db.users.find_one({"id": order["user_id"]}, {"_id": 0})
+            if account_is_deleted(user):
+                closed = await _close_deleted_unissued_deposit(order, actor=actor)
+                if closed:
+                    return closed
+                # Never expire an uncertain pre-deletion submission just
+                # because the provider response/id was not persisted.
+                order, authoritative = await _recover_deleted_deposit_reference(order, provider, actor=actor)
+            else:
+                ttl_seconds = _runtime_config_int(
+                    "DEPOSIT_CHECKOUT_RESERVATION_TTL_SECONDS", 1800, 300, 86_400,
+                )
+                created_at = _parse_optional_datetime(order.get("created_at"))
+                if created_at and created_at <= now() - timedelta(seconds=ttl_seconds):
+                    expired = await _close_unpaid_deposit(
+                        deposit_id, "EXPIRED", actor=actor, require_available_player=True,
+                    )
+                    return {"deposit_id": deposit_id, "status": expired.get("status", "EXPIRED")}
+                stored, _ = await _ensure_deposit_checkout(order, provider)
+                attempts = int(stored.get("reconcile_attempts", 0)) + 1
+                await db.deposit_orders.update_one(
+                    {"id": deposit_id},
+                    {"$set": {
+                        "next_reconcile_at": now() + _reconciliation_delay(attempts),
+                        "reconciled_at": now(), "updated_at": now(),
+                    }, "$inc": {"reconcile_attempts": 1}},
+                )
+                return {"deposit_id": deposit_id, "status": stored.get("status", "PENDING")}
+        else:
+            authoritative = _require_deposit_status(
+                await provider.get_payment_status(str(order["provider_order_id"])),
+            )
         provider_status = str(authoritative.status).strip().upper()
     except Exception as exc:  # noqa: BLE001 - do not leak provider internals
+        error_code = exc.code if isinstance(exc, FinancialError) else type(exc).__name__
+        if isinstance(exc, HTTPException):
+            error_code = (exc.detail.get("code") if isinstance(exc.detail, dict) else None) or "PAYMENT_ACCOUNT_UNAVAILABLE"
         attempts = int(order.get("reconcile_attempts", 0)) + 1
         await db.deposit_orders.update_one(
             {"id": deposit_id},
             {"$set": {
                 "next_reconcile_at": now() + _reconciliation_delay(attempts),
-                "reconciliation_error_code": (
-                    exc.code if isinstance(exc, FinancialError) else type(exc).__name__
-                ),
+                "reconciliation_error_code": error_code,
                 "updated_at": now(),
             }, "$inc": {"reconcile_attempts": 1}},
         )
         if isinstance(exc, FinancialError):
             raise
+        if isinstance(exc, HTTPException):
+            raise FinancialError(
+                error_code, "The deposit is retained for reconciliation; new checkout is unavailable.",
+                exc.status_code,
+            ) from exc
         raise FinancialError(
             "PAYMENT_STATUS_UNAVAILABLE", "Deposit status could not be checked.", 503,
         ) from exc

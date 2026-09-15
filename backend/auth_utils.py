@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pymongo import ReturnDocument
 from avatar_service import legacy_avatar_upgrade_fields
+from player_account_state import account_is_deleted as is_deleted_user
 from db import db
 import compliance
 
@@ -186,7 +187,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail='Invalid session token')
     user = await db.users.find_one({'id': payload.get('sub')})
-    if not user:
+    if not user or is_deleted_user(user):
         raise HTTPException(status_code=401, detail='User not found')
     # Single active session per user: a newer login replaces the previous session.
     active_sid = user.get('active_session_id')
@@ -195,7 +196,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             'code': 'SESSION_REPLACED',
             'message': 'You were signed out because this Login ID was used on another device.',
         })
-    return await maybe_upgrade_legacy_avatar(user)
+    user = await maybe_upgrade_legacy_avatar(user)
+    if is_deleted_user(user):
+        raise HTTPException(status_code=401, detail='User not found')
+    return user
 
 
 async def maybe_upgrade_legacy_avatar(user: dict) -> dict:
@@ -209,6 +213,8 @@ async def maybe_upgrade_legacy_avatar(user: dict) -> dict:
                 {
                     'id': user['id'],
                     'role': 'PLAYER',
+                    'deleted_at': None,
+                    'status': {'$ne': 'DELETED'},
                     'avatar': user.get('avatar'),
                     'avatar_source': {'$ne': 'UPLOAD'},
                     'avatar_upload_id': {'$in': [None, '']},

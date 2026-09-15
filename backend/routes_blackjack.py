@@ -5,8 +5,9 @@ dealer plays -> settle. One active game per user, held in db.blackjack_games.
 Deck stays server-side. All chips move through the ledger.
 """
 import copy
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 from pymongo.errors import ConfigurationError, InvalidOperation, OperationFailure
@@ -18,8 +19,10 @@ import ledger
 from game_engines import MIN_BET, MAX_BET
 import blackjack as bj
 from game_access import require_playable_game
+from player_account_state import account_is_deleted
 
 router = APIRouter(tags=['blackjack'])
+logger = logging.getLogger('blackjack')
 
 
 TRANSACTIONS_UNAVAILABLE = {
@@ -585,6 +588,147 @@ async def _finalize(g, uid, ref, session):
         'user_id': uid, 'slug': 'blackjack', 'game_name': gname,
         'bet': g['total_staked'], 'payout': g['total_payout'], 'status': 'SETTLED',
         'outcome': _history_outcome(g),
+        **({'automatic_resolution': g['automatic_resolution']}
+           if g.get('automatic_resolution') else {}),
         'created_at': finalized_at, 'settled_at': finalized_at,
     }, **_session_kwargs(session))
     return True
+
+
+async def resolve_deleted_player_hand(user_id):
+    """Settle an inaccessible open hand without adding a new stake or choice.
+
+    All remaining player hands stand and unaccepted insurance is declined.
+    Dealer draws and payouts use the retained shoe and normal game rules. The
+    terminal tombstone is the durable job source; this transaction also marks
+    its completion, so retries and multiple workers cannot pay a hand twice.
+    """
+    async def resolve(session):
+        kwargs = _session_kwargs(session)
+        user = await db.users.find_one({'id': user_id}, **kwargs)
+        if not user or user.get('role') != 'PLAYER' or not account_is_deleted(user):
+            return {'resolved': False, 'status': 'NOT_DELETED'}
+        g = await _load(user_id, session=session)
+        resolved = False
+        outcome = 'NO_OPEN_HAND'
+        if g and g.get('status') == 'done':
+            if not g.get('finalized_at'):
+                # Never replay the ambiguous historical nontransactional
+                # finalizer: only durable settlement proof can acknowledge it.
+                if not await _acknowledge_legacy_finalization(g, session):
+                    raise HTTPException(status_code=409, detail={
+                        'code': 'LEGACY_HAND_REVIEW_REQUIRED',
+                        'message': 'A historical Blackjack hand needs settlement review.',
+                    })
+            outcome = 'SETTLED'
+        elif g and g.get('status') in {'insurance', 'player_turn'}:
+            if (not g.get('id') or not isinstance(g.get('shoe'), list)
+                    or not isinstance(g.get('dealer'), list) or len(g['dealer']) != 2
+                    or not isinstance(g.get('hands'), list) or not g['hands']
+                    or any(not isinstance(hand.get('cards'), list) or len(hand['cards']) < 2
+                           or not isinstance(hand.get('bet'), int) or hand['bet'] <= 0
+                           for hand in g['hands'])):
+                raise HTTPException(status_code=409, detail={
+                    'code': 'BLACKJACK_HAND_REVIEW_REQUIRED',
+                    'message': 'The retained Blackjack hand needs settlement review.',
+                })
+            was_insurance = g['status'] == 'insurance'
+            for hand in g['hands']:
+                hand['done'] = True
+            g['insurance_offered'] = False
+            g['automatic_resolution'] = {
+                'reason': 'ACCOUNT_DELETED',
+                'player_action': 'STAND_REMAINING_HANDS',
+                'insurance_action': 'DECLINE' if was_insurance else 'UNCHANGED',
+                'resolved_at': _now(),
+            }
+            _dealer_and_settle(g)
+            g['revision'] = int(g.get('revision', 0)) + 1
+            await _save(g, session=session)
+            resolved = await _finalize(g, user_id, g['id'], session=session)
+            outcome = 'SETTLED'
+        elif g and g.get('status') != 'idle':
+            raise HTTPException(status_code=409, detail={
+                'code': 'BLACKJACK_HAND_REVIEW_REQUIRED',
+                'message': 'The retained Blackjack hand needs settlement review.',
+            })
+
+        completed_at = _now()
+        await db.users.update_one({'id': user_id}, {
+            '$set': {
+                'blackjack_deletion_resolution_status': outcome,
+                'blackjack_deletion_resolution_completed_at': completed_at,
+                'blackjack_deletion_resolution_updated_at': completed_at,
+            },
+            '$unset': {
+                'blackjack_deletion_resolution_next_at': '',
+                'blackjack_deletion_resolution_last_error': '',
+            },
+        }, **kwargs)
+        return {'resolved': resolved, 'status': outcome, 'game_id': (g or {}).get('id')}
+
+    return await _run_transaction(resolve)
+
+
+async def reconcile_deleted_player_hands(limit=25):
+    """Bounded, retryable cleanup independent of player login and game flags."""
+    limit = max(1, min(int(limit), 100))
+    now = _now()
+    candidates = await db.users.find({
+        'role': 'PLAYER',
+        '$and': [
+            {'$or': [
+                {'status': 'DELETED'},
+                {'deleted_at': {'$exists': True, '$nin': [None, '']}},
+            ]},
+            {'blackjack_deletion_resolution_status': {'$nin': ['SETTLED', 'NO_OPEN_HAND']}},
+            {'$or': [
+                {'blackjack_deletion_resolution_next_at': {'$exists': False}},
+                {'blackjack_deletion_resolution_next_at': {'$lte': now}},
+            ]},
+        ],
+    }, {'_id': 0, 'id': 1}).sort([
+        ('blackjack_deletion_resolution_next_at', 1), ('deleted_at', 1),
+    ]).limit(limit).to_list(limit)
+    result = {'checked': 0, 'settled': 0, 'no_open_hand': 0, 'errors': 0}
+    for candidate in candidates:
+        user_id = candidate['id']
+        result['checked'] += 1
+        try:
+            resolution = await resolve_deleted_player_hand(user_id)
+            if resolution['status'] == 'SETTLED':
+                result['settled'] += 1
+            elif resolution['status'] == 'NO_OPEN_HAND':
+                result['no_open_hand'] += 1
+        except Exception as exc:
+            result['errors'] += 1
+            detail = getattr(exc, 'detail', None)
+            error_code = (detail.get('code') if isinstance(detail, dict) else None) or type(exc).__name__
+            failed_at = _now()
+            # A malformed/legacy hand remains intact and visible for review;
+            # backing off also prevents it from starving later batch entries.
+            next_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+            try:
+                await db.users.update_one({
+                    'id': user_id,
+                    'blackjack_deletion_resolution_status': {'$nin': ['SETTLED', 'NO_OPEN_HAND']},
+                }, {
+                    '$set': {
+                        'blackjack_deletion_resolution_status': 'REVIEW_REQUIRED',
+                        'blackjack_deletion_resolution_last_error': error_code,
+                        'blackjack_deletion_resolution_next_at': next_at,
+                        'blackjack_deletion_resolution_updated_at': failed_at,
+                    },
+                    '$inc': {'blackjack_deletion_resolution_failures': 1},
+                })
+                await db.admin_audit.insert_one({
+                    'id': str(uuid.uuid4()), 'actor_id': 'SYSTEM',
+                    'action': 'DELETED_PLAYER_BLACKJACK_RESOLUTION_FAILED',
+                    'target_type': 'PLAYER', 'target_id': user_id,
+                    'metadata': {'error_code': error_code, 'retry_at': next_at},
+                    'created_at': failed_at,
+                })
+            except Exception:
+                logger.exception('Could not record deleted-player Blackjack resolution retry for %s', user_id)
+            logger.warning('Deleted-player Blackjack resolution deferred for %s: %s', user_id, error_code)
+    return result

@@ -14,7 +14,7 @@ jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
   useSearchParams: () => [new URLSearchParams("status=ACTIVE"), mockSetSearchParams],
 }), { virtual: true });
-jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }));
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn(), info: jest.fn() } }));
 jest.mock("@/lib/api", () => ({
   api: { get: jest.fn(), post: jest.fn(), delete: jest.fn() },
   errMsg: (error) => error?.response?.data?.detail?.message || error?.message || "Request failed",
@@ -101,9 +101,9 @@ test("requires typed confirmation and permanently deletes the selected player", 
   await act(async () => root.unmount());
 });
 
-test("keeps the confirmation open when the backend blocks financial history", async () => {
+test("keeps the confirmation open when deletion fails", async () => {
   api.delete.mockRejectedValue({
-    response: { data: { detail: { message: "This player has deposit payment history." } } },
+    response: { data: { detail: { message: "Connection failed. Please retry." } } },
   });
   const { container, root } = await renderPage();
   await act(async () => {
@@ -117,8 +117,30 @@ test("keeps the confirmation open when the backend blocks financial history", as
     await settle();
   });
 
-  expect(toast.error).toHaveBeenCalledWith("This player has deposit payment history.");
+  expect(toast.error).toHaveBeenCalledWith("Connection failed. Please retry.");
   expect(document.body.textContent).toContain("Delete player account permanently?");
   expect(api.get).toHaveBeenCalledTimes(1);
+  await act(async () => root.unmount());
+});
+
+test("allows deletion with balances and retained activity and explains reconciliation", async () => {
+  api.get.mockResolvedValueOnce({ data: { users: [{ ...PLAYER, registration_source: "SELF_SERVICE", chip_balance: 25000 }] } });
+  api.delete.mockResolvedValue({ data: { message: "Player account deleted.", reconciliation_required: true } });
+  const { container, root } = await renderPage();
+  await act(async () => {
+    container.querySelector('[data-testid="admin-delete-user-button"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  expect(document.body.textContent).toContain("do not block deletion");
+  expect(document.body.textContent).toContain("does not cancel or refund a payment");
+  await act(async () => {
+    setInput(document.body.querySelector('[data-testid="admin-delete-user-confirmation-input"]'), "DELETE");
+    await settle();
+    document.body.querySelector('[data-testid="admin-delete-user-confirm-button"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  expect(api.delete).toHaveBeenCalledWith("/admin/users/operator-player-1");
+  expect(toast.info).toHaveBeenCalledWith("Existing payments or game activity remain in the records for reconciliation.");
+  expect(document.body.textContent).not.toContain("Delete player account permanently?");
   await act(async () => root.unmount());
 });

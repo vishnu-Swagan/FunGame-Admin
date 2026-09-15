@@ -93,7 +93,10 @@ export default function AdminUsers() {
     setBusyId(deleteTarget.id);
     try {
       const { data } = await api.delete(`/admin/users/${deleteTarget.id}`);
-      toast.success(data?.message || "Player account deleted permanently");
+      toast.success(data?.message || "Player account deleted");
+      if (data?.reconciliation_required) {
+        toast.info("Existing payments or game activity remain in the records for reconciliation.");
+      }
       setDeleteTarget(null);
       setDeleteConfirmation("");
       await load(filter);
@@ -442,7 +445,8 @@ export default function AdminUsers() {
               <span className="font-semibold text-white">
                 {deleteTarget?.display_name || deleteTarget?.username || deleteTarget?.email}
               </span>{" "}
-              will immediately lose login access. This cannot be undone. Historical game and audit records remain for reporting. Accounts with payment history or unfinished activity cannot be deleted.
+              will immediately lose login access and be removed from the player lists. This cannot be undone. Balances, payment history, saved bank details, and unfinished activity do not block deletion. Financial and game records remain for reporting and reconciliation; deleting an account does not cancel or refund a payment.
+              {" "}Unfinished Blackjack hands will automatically stand and settle using the existing cards; optional insurance will be declined.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">

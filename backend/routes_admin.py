@@ -171,6 +171,7 @@ async def _distributor_admin_view(distributor: dict, *, include_private=False) -
         'rate_bps': await crm.rate_on(distributor['id'], crm.now_iso()),
         'players': await db.users.count_documents({
             'distributor_id': distributor['id'], 'role': 'PLAYER',
+            'deleted_at': None, 'status': {'$ne': 'DELETED'},
         }),
         'login_configured': bool(distributor.get('user_id')),
         'login_username': distributor.get('login_username') or (
@@ -230,6 +231,7 @@ async def _distributor_export_metrics(distributor_ids: list[str]) -> tuple[dict,
     count_rows = await db.users.aggregate([
         {'$match': {
             'role': 'PLAYER',
+            'deleted_at': None, 'status': {'$ne': 'DELETED'},
             'distributor_id': {'$in': distributor_ids},
         }},
         {'$group': {'_id': '$distributor_id', 'count': {'$sum': 1}}},
@@ -602,6 +604,8 @@ def _require_player_credential_target(user: dict) -> None:
     operator endpoints therefore fail closed for every non-player role,
     including the caller's own administrator account.
     """
+    if user.get('deleted_at') or user.get('status') == 'DELETED':
+        raise HTTPException(status_code=404, detail='Player account has been deleted')
     if user.get('role') != 'PLAYER':
         raise HTTPException(status_code=403, detail={
             'code': 'CREDENTIAL_TARGET_FORBIDDEN',
@@ -630,7 +634,7 @@ def _directly_activated_self_service_account(user: dict) -> bool:
 # ---------- Dashboard ----------
 @router.get('/stats')
 async def stats(admin: dict = Depends(require_admin)):
-    total_users = await db.users.count_documents({'role': 'PLAYER'})
+    total_users = await db.users.count_documents({'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}})
     pending_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'PENDING'})
     active_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'ACTIVE'})
     suspended_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'SUSPENDED'})
@@ -777,7 +781,7 @@ async def dashboard(admin: dict = Depends(require_admin)):
     administrator may view it (parity with ``/admin/stats``). Privileged payment
     mutations continue to enforce Super Admin checks in their own routes.
     """
-    total_users = await db.users.count_documents({'role': 'PLAYER'})
+    total_users = await db.users.count_documents({'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}})
     active_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'ACTIVE'})
     pending_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'PENDING'})
     suspended_users = await db.users.count_documents({'role': 'PLAYER', 'status': 'SUSPENDED'})
@@ -959,98 +963,96 @@ ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
-async def _account_delete_blockers(user_id: str, *, session=None) -> list[str]:
-    """Return live or financial relationships that make deletion unsafe."""
+async def _account_delete_retained_activity(user_id: str, *, session=None) -> list[str]:
+    """Describe unfinished work retained for reconciliation, never block deletion."""
     kwargs = {'session': session} if session is not None else {}
     checks = (
-        ('an open Aviator bet', 'aviator_bets', {'user_id': user_id, 'status': 'OPEN'}),
-        ('an open live-game bet', 'live_bets', {'user_id': user_id, 'status': 'OPEN'}),
-        ('an open game bet', 'game_rounds', {'user_id': user_id, 'status': 'OPEN'}),
-        ('an unfinished Blackjack hand', 'blackjack_games', {
+        ('open Aviator bets', 'aviator_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('open live-game bets', 'live_bets', {'user_id': user_id, 'status': 'OPEN'}),
+        ('open game rounds', 'game_rounds', {'user_id': user_id, 'status': 'OPEN'}),
+        ('unfinished Blackjack hands', 'blackjack_games', {
             'user_id': user_id, 'status': {'$nin': ['done', 'idle']},
         }),
-        ('an active Rummy seat', 'rummy_seats', {
+        ('active Rummy seats', 'rummy_seats', {
             'user_id': user_id, 'status': {'$in': ['ACTIVE', 'RECONNECTING']},
         }),
-        ('a pending chip request', 'chip_requests', {
-            'user_id': user_id, 'status': 'PENDING',
+        ('pending deposits', 'deposit_orders', {
+            'user_id': user_id, 'status': {'$nin': ['CREDITED', 'FAILED', 'CANCELLED', 'EXPIRED']},
         }),
-        # Payment history is retained under the financial/audit retention
-        # model. Deleting its identity owner through this general CRM action
-        # would create an ambiguous financial record, so suspension is the
-        # correct operator action for these accounts.
-        ('deposit payment history', 'deposit_orders', {'user_id': user_id}),
-        ('withdrawal payment history', 'withdrawal_requests', {'user_id': user_id}),
-        ('operator payment history', 'operator_payment_requests', {'user_id': user_id}),
-        ('saved bank details', 'payout_methods', {'user_id': user_id}),
+        ('pending withdrawals', 'withdrawal_requests', {
+            'user_id': user_id, 'status': {'$nin': ['PAID', 'FAILED', 'REJECTED', 'CANCELLED']},
+        }),
+        ('pending operator payments', 'operator_payment_requests', {
+            'user_id': user_id, 'status': {'$nin': ['PAID', 'CREDITED', 'FAILED', 'REJECTED', 'CANCELLED', 'EXPIRED']},
+            '$nor': [{'kind': 'DEPOSIT', 'status': 'APPROVED'}],
+        }),
     )
-    blockers = []
+    retained = []
     for label, collection, query in checks:
         if await db[collection].find_one(query, {'_id': 1}, **kwargs):
-            blockers.append(label)
-    return blockers
+            retained.append(label)
+    return retained
 
 
 async def _delete_player_account(user_id: str, admin: dict) -> dict:
-    """Permanently remove one player login with transaction and role guards."""
-    user = await db.users.find_one({'id': user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-    _require_player_credential_target(user)
-    blockers = await _account_delete_blockers(user_id)
-    if blockers:
-        raise HTTPException(status_code=409, detail={
-            'code': 'ACCOUNT_DELETE_BLOCKED',
-            'message': (
-                'This player cannot be deleted while the account has '
-                f"{', '.join(blockers)}. Resolve active items or suspend the account instead."
-            ),
-            'blockers': blockers,
-        })
+    """Remove player access without orphaning money or unfinished game records.
 
-    original_status = user.get('status')
-
+    The retained identity is a terminal tombstone, not an active account.
+    Its ID and balances remain available to settlement and audit code.
+    """
     async def commit_deletion(session):
         kwargs = {'session': session} if session is not None else {}
-        current = await db.users.find_one(
-            {'id': user_id, 'role': 'PLAYER', 'status': original_status}, **kwargs,
-        )
+        current = await db.users.find_one({'id': user_id}, **kwargs)
         if not current:
-            existing = await db.users.find_one({'id': user_id}, **kwargs)
-            if not existing:
-                raise HTTPException(status_code=404, detail='User not found')
-            _require_player_credential_target(existing)
-            raise HTTPException(status_code=409, detail={
-                'code': 'ACCOUNT_STATE_CHANGED',
-                'message': 'The player account changed. Reload the list and confirm deletion again.',
-            })
+            raise HTTPException(status_code=404, detail='User not found')
+        if current.get('role') != 'PLAYER':
+            _require_player_credential_target(current)
+        if current.get('deleted_at') or current.get('status') == 'DELETED':
+            return {
+                'ephemeral_records_deleted': 0,
+                'retained_activity': current.get('deletion_retained_activity', []),
+                'already_deleted': True,
+            }
 
+        deleted_at = _now()
         locked = await db.users.update_one(
-            {'id': user_id, 'role': 'PLAYER', 'status': original_status},
-            {'$set': {
-                'status': 'DELETING',
-                'active_session_id': f'revoked-{uuid.uuid4()}',
-                'deletion_started_at': _now(),
-                'deletion_started_by': admin['id'],
-            }},
+            {'id': user_id, 'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}},
+            {
+                '$set': {
+                    'status': 'DELETED',
+                    'deleted_at': deleted_at,
+                    'deleted_by': admin['id'],
+                    'deletion_previous_status': current.get('status'),
+                    'active_session_id': f'revoked-{uuid.uuid4()}',
+                },
+                '$unset': {field: '' for field in (
+                    'password_hash', 'reset_code_hash', 'reset_expires_at',
+                    'verification_code_hash', 'verification_expires_at',
+                    'password_provisioned_at', 'password_provisioned_by',
+                    'password_reset_by_admin_id', 'pending_login_at',
+                    'login_otp_bypass_once', 'locked_until', 'password_failed_attempts',
+                )},
+            },
             **kwargs,
         )
         if locked.matched_count != 1:
             raise HTTPException(status_code=409, detail={
                 'code': 'ACCOUNT_STATE_CHANGED',
-                'message': 'The player account changed. Reload the list and confirm deletion again.',
+                'message': 'The account changed during deletion. Retry the delete action.',
             })
 
-        # Re-check after acquiring the player-row write lock. On production
-        # MongoDB, a concurrent bet/payment write now conflicts with this
-        # transaction rather than racing account removal.
-        blockers_now = await _account_delete_blockers(user_id, session=session)
-        if blockers_now:
-            raise HTTPException(status_code=409, detail={
-                'code': 'ACCOUNT_DELETE_BLOCKED',
-                'message': 'New account activity appeared before deletion. Reload and try again.',
-                'blockers': blockers_now,
-            })
+        # Shared stake/payment mutations also lock this user row. MongoDB
+        # transactions serialize them with deletion; historical settlement
+        # continues to use this retained owner rather than an orphaned ID.
+        retained_activity = await _account_delete_retained_activity(user_id, session=session)
+        await db.users.update_one(
+            {'id': user_id, 'status': 'DELETED'},
+            {'$set': {
+                'deletion_retained_activity': retained_activity,
+                'deletion_reconciliation_required': bool(retained_activity),
+            }},
+            **kwargs,
+        )
 
         deleted_ephemeral = 0
         for collection, field in ACCOUNT_DELETE_EPHEMERAL_COLLECTIONS:
@@ -1060,32 +1062,25 @@ async def _delete_player_account(user_id: str, admin: dict) -> dict:
             '$or': [{'_id': user_id}, {'user_id': user_id}],
         }, **kwargs)
         deleted_ephemeral += int(avatar_result.deleted_count)
-        reservation_result = await db.login_id_reservations.delete_many({
-            'owner_type': 'USER', 'owner_id': user_id,
-        }, **kwargs)
-        deleted_ephemeral += int(reservation_result.deleted_count)
 
-        # Attribution and immutable history are retained, but the current
-        # assignment is closed so no future report treats a deleted login as an
-        # active distributor player.
+        # These are unapproved play-chip requests, not provider payment orders.
+        # Payment/payout orders, bank methods, balances and ledger rows stay intact.
+        await db.chip_requests.update_many(
+            {'user_id': user_id, 'status': 'PENDING'},
+            {'$set': {
+                'status': 'REJECTED', 'reviewed_at': deleted_at,
+                'reviewed_by': admin['id'], 'admin_note': 'Account deleted by administrator.',
+            }},
+            **kwargs,
+        )
         await db.player_attribution.update_many(
             {'user_id': user_id, 'active': True},
             {'$set': {
-                'active': False, 'closed_at': _now(),
+                'active': False, 'closed_at': deleted_at,
                 'closed_by': admin['id'], 'close_reason': 'ACCOUNT_DELETED',
             }},
             **kwargs,
         )
-
-        result = await db.users.delete_one({
-            'id': user_id, 'role': 'PLAYER', 'status': 'DELETING',
-        }, **kwargs)
-        if result.deleted_count != 1:
-            raise HTTPException(status_code=409, detail={
-                'code': 'ACCOUNT_STATE_CHANGED',
-                'message': 'The player account changed before deletion completed.',
-            })
-
         await db.admin_audit.insert_one({
             'id': str(uuid.uuid4()),
             'actor_id': admin['id'],
@@ -1093,30 +1088,35 @@ async def _delete_player_account(user_id: str, admin: dict) -> dict:
             'target_type': 'PLAYER',
             'target_id': user_id,
             'before': {
-                'status': original_status,
+                'status': current.get('status'),
                 'registration_source': current.get('registration_source'),
                 'login_configured': bool(current.get('username') or current.get('email')),
                 'chip_balance': int(current.get('chip_balance') or 0),
                 'points_balance': int(current.get('points_balance') or 0),
             },
-            'after': {'deleted': True},
+            'after': {'deleted': True, 'status': 'DELETED'},
             'metadata': {
                 'ephemeral_records_deleted': deleted_ephemeral,
                 'history_retained': True,
+                'retained_activity': retained_activity,
+                'reconciliation_required': bool(retained_activity),
             },
-            'created_at': _now(),
+            'created_at': deleted_at,
         }, **kwargs)
-        return deleted_ephemeral
+        return {
+            'ephemeral_records_deleted': deleted_ephemeral,
+            'retained_activity': retained_activity,
+            'already_deleted': False,
+        }
 
-    deleted_ephemeral = await _run_account_transaction(commit_deletion)
-    logger.info(
-        'admin %s deleted player account %s; removed %s ephemeral records',
-        admin.get('id'), user_id, deleted_ephemeral,
-    )
+    result = await _run_account_transaction(commit_deletion)
+    logger.info('admin %s deleted player account %s', admin.get('id'), user_id)
     return {
-        'message': 'Player account deleted permanently.',
+        'message': 'Player account deleted. Login access is permanently disabled; financial and game records are retained.',
         'deleted_user_id': user_id,
         'history_retained': True,
+        'reconciliation_required': bool(result['retained_activity']),
+        **result,
     }
 
 
@@ -1150,9 +1150,9 @@ async def _user_ledger_stats() -> dict:
 
 @router.get('/users')
 async def list_users(status: str = Query(default=None), admin: dict = Depends(require_admin)):
-    query = {'role': 'PLAYER'}
+    query = {'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}}
     if status:
-        query['status'] = status
+        query['$and'] = [{'status': status}]
     users = await db.users.find(query, {'_id': 0, 'password_hash': 0, 'verification_code_hash': 0, 'reset_code_hash': 0, 'active_session_id': 0}).sort('created_at', -1).to_list(500)
     stats = await _user_ledger_stats()
     empty = {'total_deposits': 0, 'winning_chips': 0, 'loss_chips': 0}
@@ -1199,7 +1199,7 @@ async def admin_chip_transactions(
 
 @router.delete('/users/{user_id}')
 async def delete_user_account(user_id: str, admin: dict = Depends(require_admin)):
-    """Delete a player login while retaining immutable game/audit history.
+    """Delete any player account while retaining settlement/audit records.
 
     Authentication dependencies guarantee an active administrator. The
     deletion service separately locks the target to ``role=PLAYER`` so this
@@ -1215,6 +1215,7 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
         user = await db.users.find_one({'id': user_id, 'role': 'PLAYER'}, **kwargs)
         if not user:
             raise HTTPException(status_code=404, detail='User not found')
+        _require_player_credential_target(user)
         if user.get('status') == 'ACTIVE':
             raise HTTPException(status_code=400, detail='User already active')
         if user.get('status') not in ('PENDING', 'REJECTED', 'SUSPENDED'):
@@ -1344,7 +1345,7 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
                 'contact_verification_status': ADMIN_REVIEW_APPROVED,
             })
         approval_query = {
-            'id': user_id, 'role': 'PLAYER', 'status': user.get('status'),
+            'id': user_id, 'role': 'PLAYER', 'status': user.get('status'), 'deleted_at': None,
         }
         if manual_review_registration:
             approval_query.update({
@@ -2594,7 +2595,7 @@ async def distributor_players(distributor_id: str, admin: dict = Depends(require
     if not await db.distributors.find_one({'id': distributor_id}):
         raise HTTPException(status_code=404, detail='Distributor not found')
     rows = await db.users.find(
-        {'distributor_id': distributor_id, 'role': 'PLAYER'},
+        {'distributor_id': distributor_id, 'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}},
         {'_id': 0, 'id': 1, 'username': 1, 'full_name': 1, 'status': 1,
          'chip_balance': 1, 'created_at': 1, 'distributor_code': 1},
     ).sort('created_at', -1).to_list(1000)
@@ -2604,7 +2605,7 @@ async def distributor_players(distributor_id: str, admin: dict = Depends(require
 @router.post('/players/{user_id}/distributor')
 async def move_player(user_id: str, body: PlayerReassign, admin: dict = Depends(require_admin)):
     _require_distributor_permission(admin, 'DISTRIBUTORS_MANAGE')
-    if not await db.users.find_one({'id': user_id}):
+    if not await db.users.find_one({'id': user_id, 'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}}):
         raise HTTPException(status_code=404, detail='Player not found')
     try:
         doc = await crm.reassign_user(user_id, body.distributor_id, admin['id'], note=body.note)

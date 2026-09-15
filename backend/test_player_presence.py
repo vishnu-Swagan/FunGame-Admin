@@ -68,6 +68,18 @@ class PlayerPresenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data['online_players']), 100)
         self.assertEqual(len(data['recent_logins']), 100)
 
+    async def test_deleted_players_are_excluded_from_counts_and_recent_logins(self):
+        await self.database.users.insert_many([
+            self.player('kept'),
+            self.player('deleted-status', status='DELETED'),
+            self.player('deleted-marker', deleted_at=self.now.isoformat()),
+        ])
+        data = await player_login_stats(self.database, now=self.now)
+        self.assertEqual(data['total_players'], 1)
+        self.assertEqual(data['online_now'], 1)
+        self.assertEqual(data['players_logged_in_24h'], 1)
+        self.assertEqual([row['id'] for row in data['recent_logins']], ['kept'])
+
     async def test_heartbeat_is_session_bound_and_logout_goes_offline(self):
         user = self.player('test', presence_session_id=None, last_seen_at=None)
         await self.database.users.insert_one(user)

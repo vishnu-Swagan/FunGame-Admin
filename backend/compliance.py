@@ -666,7 +666,7 @@ async def review_players(cfg=None, limit=500):
     """
     cfg = cfg or await get_config()
     rows = await db.users.find(
-        {'role': 'PLAYER'},
+        {'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}},
         {'_id': 0, 'id': 1, 'username': 1, 'country': 1, 'date_of_birth': 1,
          'status': 1, 'chip_balance': 1},
     ).to_list(limit)
