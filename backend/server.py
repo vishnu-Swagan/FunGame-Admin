@@ -510,6 +510,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=['*'],
     allow_headers=['*'],
+    # Signup/resend clients run on a different origin from the API. Without
+    # this, browsers hide the real cooldown and repeatedly retry too early.
+    expose_headers=['Retry-After'],
 )
 if _wildcard:
     logger.warning('CORS is wildcard (*). Set CORS_ORIGINS to your frontend origin in production.')

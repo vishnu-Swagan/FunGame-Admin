@@ -20,7 +20,7 @@ export default function VerifyEmail() {
   const { login } = useAuth();
   const { capabilities, loading: capabilitiesLoading } = useAuthCapabilities();
   const initial = location.state || {};
-  const issuedChallenge = Boolean(initial.identifier || initial.email);
+  const hasVerificationContact = Boolean(initial.identifier || initial.email);
   const [channel, setChannel] = useState(normalizeContactChannel(initial.channel || "PHONE", initial.identifier || initial.email));
   const [identifier, setIdentifier] = useState(initial.identifier || initial.email || "");
   const [challengeId, setChallengeId] = useState(
@@ -45,18 +45,17 @@ export default function VerifyEmail() {
   }, [resendIn]);
 
   useEffect(() => {
-    if (issuedChallenge || capabilitiesLoading || registrationChannelAvailable(capabilities, channel)) return;
+    if (hasVerificationContact || capabilitiesLoading || registrationChannelAvailable(capabilities, channel)) return;
     if (registrationChannelAvailable(capabilities, "PHONE")) setChannel("PHONE");
-  }, [capabilities, capabilitiesLoading, channel, issuedChallenge]);
+  }, [capabilities, capabilitiesLoading, channel, hasVerificationContact]);
 
   const {
     deliveryAvailable: selectedChannelAvailable,
     verificationAvailable,
     anyChannelAvailable,
-  } = verificationChannelState(capabilities, channel, issuedChallenge);
-  // An OTP that has already been delivered remains verifiable if delivery is
-  // later paused. Only direct-entry verification and resend require a live
-  // delivery channel.
+  } = verificationChannelState(capabilities, channel, hasVerificationContact);
+  // Keep existing codes verifiable if delivery is later paused. Contact state
+  // does not prove delivery: the server still validates every submitted code.
 
   const normalizedIdentifier = () => normalizeContactIdentifier(channel, identifier);
 
@@ -143,7 +142,7 @@ export default function VerifyEmail() {
       setChallengeId(data.challenge_id || data.verification_id || "");
       setResendIn(Number(data.resend_after_seconds || DEFAULT_RESEND_SECONDS));
       setCode("");
-      toast.success(data.message || "If an unverified account matches, a new code has been requested");
+      toast.info("New verification code requested. Enter it if it arrives.");
     } catch (error) {
       if (error?.response?.status === 429) {
         const retryAfter = Number(error?.response?.headers?.["retry-after"] || DEFAULT_RESEND_SECONDS);
@@ -157,7 +156,7 @@ export default function VerifyEmail() {
 
   const destination = destinationMasked || identifier || (channel === "PHONE" ? "your mobile" : "your email");
 
-  if (!capabilitiesLoading && capabilities.registration_mode === "ADMIN_REVIEW" && !issuedChallenge) {
+  if (!capabilitiesLoading && capabilities.registration_mode === "ADMIN_REVIEW" && !hasVerificationContact) {
     return (
       <AuthShell title="Administrator review" subtitle="Contact OTP is not part of the current registration flow." backTo="/register">
         <div className="rounded-xl border border-amber-300/25 bg-amber-300/8 p-4 text-sm leading-relaxed text-amber-100">
@@ -171,17 +170,17 @@ export default function VerifyEmail() {
   }
 
   return (
-    <AuthShell title="Verify your account" subtitle={`Enter the 6-digit code issued for ${destination}.`} backTo="/register">
-      {!issuedChallenge && !capabilitiesLoading && !anyChannelAvailable && (
+    <AuthShell title="Verify your account" subtitle={`Enter the 6-digit code if you receive it at ${destination}.`} backTo="/register">
+      {!hasVerificationContact && !capabilitiesLoading && !anyChannelAvailable && (
         <div data-testid="verification-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
           <span><strong>Verification is temporarily unavailable.</strong> Mobile code delivery is not currently ready. Please try again later.</span>
         </div>
       )}
-      {issuedChallenge && !capabilitiesLoading && !selectedChannelAvailable && (
+      {hasVerificationContact && !capabilitiesLoading && !selectedChannelAvailable && (
         <div data-testid="verification-resend-unavailable" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-3 text-xs leading-relaxed text-amber-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-          <span>Your delivered code can still be verified, but sending a new code is temporarily unavailable.</span>
+          <span>If you already received a code, you can still verify it. Requesting another code is temporarily unavailable.</span>
         </div>
       )}
       {!initial.identifier && !initial.email && (
@@ -224,17 +223,20 @@ export default function VerifyEmail() {
         </Button>
       </form>
       <button data-testid="verify-email-resend-button" type="button" onClick={resend} disabled={busy || resending || resendIn > 0 || capabilitiesLoading || !selectedChannelAvailable} className="mt-5 text-sm text-primary font-semibold hover:underline disabled:text-white/35 disabled:no-underline">
-        {resending ? "Sending…" : resendIn > 0 ? `Send a new code in ${resendIn}s` : "Send a new code"}
+        {resending ? "Requesting…" : resendIn > 0 ? `Request a new code in ${resendIn}s` : "Request a new code"}
       </button>
       <div data-testid="verification-recovery-guidance" className="mt-5 rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-white/60">
         <p>
           {channel === "PHONE"
-            ? "No SMS? Confirm the number starts with +country code. If these details were registered before, use login or account recovery instead."
-            : "No email? Check spam or junk. If these details were registered before, use login or account recovery instead."}
+            ? "No SMS? Check your mobile number, including +country code. Wait for the retry timer before requesting another code."
+            : "No email? Check spam or junk before requesting another code."}
         </p>
-        <div className="mt-2 flex gap-4 font-semibold text-primary">
+        {channel === "PHONE" && identifier && <p data-testid="verification-contact-review" className="mt-2 break-all">Mobile number: {normalizedIdentifier()}</p>}
+        <p className="mt-2">If these details were registered before, use login or account recovery instead of signing up again.</p>
+        <p className="mt-2">If your account was deleted, contact support; signing up again will not reopen it.</p>
+        <div className="mt-2 flex flex-wrap gap-4 font-semibold text-primary">
           <Link to="/?auth=login" className="hover:underline">Log in</Link>
-          <Link to="/?auth=forgot" className="hover:underline">Forgot password</Link>
+          <Link to="/?auth=forgot" className="hover:underline">Recover password</Link>
         </div>
       </div>
     </AuthShell>

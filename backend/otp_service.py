@@ -489,8 +489,8 @@ async def registration_storage_ready(*, database=None) -> bool:
 
 async def consume_persistent_limit(action: str, subject: str, *, limit: int,
                                    window_seconds: int, database=None,
-                                   now: datetime | None = None) -> None:
-    """Consume one fixed-window allowance using Mongo's unique ``_id`` CAS."""
+                                   now: datetime | None = None) -> str:
+    """Consume one allowance and return its exact fixed-window document ID."""
     if database is None:
         database = db
     now = now or _now()
@@ -520,6 +520,20 @@ async def consume_persistent_limit(action: str, subject: str, *, limit: int,
             'RATE_LIMITED', 'Too many attempts. Please try again later.',
             status_code=429, retry_after=max(1, retry_after),
         ) from exc
+    return key
+
+
+async def _refund_unsent_issue_allowance(database, allowance_key: str) -> None:
+    """Refund only a confirmed insert loser, without retrying uncertain writes."""
+    try:
+        await database.auth_rate_limits.update_one(
+            {'_id': allowance_key, 'count': {'$gt': 0}},
+            {'$inc': {'count': -1}},
+        )
+    except Exception as exc:
+        # A timeout may mean the refund committed. Never retry and risk
+        # subtracting a different request's actual delivery allowance.
+        logger.warning('Unused OTP allowance refund failed: %s', type(exc).__name__)
 
 
 class OtpDeliveryAdapter(Protocol):
@@ -824,13 +838,6 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
         raise ValueError('A user is required for an OTP challenge')
     now = now or _now()
     identity_hash = _identity_hash(identity)
-    if consume_limit:
-        await consume_persistent_limit(
-            f'otp_issue:{purpose}', f'{identity.channel}:{identity.value}',
-            limit=OTP_ISSUE_LIMIT, window_seconds=OTP_ISSUE_WINDOW_SECONDS,
-            database=database, now=now,
-        )
-
     active = await database.otp_challenges.find_one({
         'identity_hash': identity_hash, 'purpose': purpose, 'active': True,
     })
@@ -842,6 +849,19 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
                 'OTP_RESEND_COOLDOWN', 'Please wait before requesting another code.',
                 status_code=429, retry_after=retry_after,
             )
+
+    # Reject exhausted quotas before touching the last usable OTP. Reserving
+    # after insertion requires restoring it on rejection, which can race with
+    # another rejected resend and leave both requests' previous OTP inactive.
+    allowance_key = None
+    if consume_limit:
+        allowance_key = await consume_persistent_limit(
+            f'otp_issue:{purpose}', f'{identity.channel}:{identity.value}',
+            limit=OTP_ISSUE_LIMIT, window_seconds=OTP_ISSUE_WINDOW_SECONDS,
+            database=database, now=now,
+        )
+
+    if active:
         await database.otp_challenges.update_one(
             {'id': active['id'], 'active': True},
             {'$set': {'active': False, 'status': 'SUPERSEDED', 'updated_at': now}},
@@ -868,6 +888,11 @@ async def issue_challenge(user: dict, identity: Identity, purpose: str, *,
     try:
         await database.otp_challenges.insert_one(doc)
     except DuplicateKeyError as exc:
+        # This request definitely lost the unique active slot and never
+        # attempted delivery. Refund its original bucket, even across an hour
+        # boundary. All uncertain database or provider failures stay charged.
+        if allowance_key is not None:
+            await _refund_unsent_issue_allowance(database, allowance_key)
         raise OtpError(
             'OTP_RESEND_COOLDOWN', 'Please wait before requesting another code.',
             status_code=429, retry_after=OTP_RESEND_COOLDOWN_SECONDS,

@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import Login from "./Login";
 import VerifyEmail from "./VerifyEmail";
+import { toast } from "sonner";
 
 const mockNavigate = jest.fn();
 const mockLogin = jest.fn();
@@ -39,7 +40,7 @@ jest.mock("sonner", () => ({
 }));
 
 jest.mock("@/pages/auth/AuthShell", () => ({
-  AuthShell: ({ children, title }) => <main><h1>{title}</h1>{children}</main>,
+  AuthShell: ({ children, title, subtitle }) => <main><h1>{title}</h1><p data-testid="auth-subtitle">{subtitle}</p>{children}</main>,
 }));
 
 jest.mock("@/components/ui/button", () => ({
@@ -113,6 +114,7 @@ beforeEach(() => {
 afterEach(() => {
   document.body.innerHTML = "";
   jest.clearAllMocks();
+  jest.useRealTimers();
 });
 
 test("an auto-generated Login ID is not re-entered on verify", async () => {
@@ -266,5 +268,84 @@ test("verification rejects a six-character nonnumeric code before calling the AP
 
   expect(mockPost).not.toHaveBeenCalled();
   expect(container.querySelector('[data-testid="verify-email-submit-button"]').disabled).toBe(true);
+  await act(async () => root.unmount());
+});
+
+test("opaque signup verification copy does not claim a code was delivered", async () => {
+  mockLocationState = { channel: "PHONE", identifier: "+91 98765-43210", challengeId: "opaque-challenge" };
+  mockCapabilities = { registration_enabled: false, phone_registration: false };
+  const { container, root } = await render(VerifyEmail);
+
+  expect(container.querySelector('[data-testid="auth-subtitle"]').textContent).toMatch(/if you receive it/i);
+  expect(container.querySelector('[data-testid="verification-resend-unavailable"]').textContent).toMatch(/If you already received a code/i);
+  expect(container.textContent).not.toMatch(/code issued|Your delivered code/);
+  expect(container.querySelector('[data-testid="verification-contact-review"]').textContent).toContain("+919876543210");
+  expect(container.querySelector('[data-testid="verification-recovery-guidance"]').textContent).toMatch(/registered before.*login or account recovery/i);
+  expect(container.querySelector('[data-testid="verification-recovery-guidance"]').textContent).toContain("If your account was deleted, contact support; signing up again will not reopen it.");
+  expect(container.querySelector('a[href="/?auth=login"]')).not.toBeNull();
+  expect(container.querySelector('a[href="/?auth=forgot"]')).not.toBeNull();
+  expect(mockPost).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("signup resend uses the same phone, replaces its challenge and only confirms a request", async () => {
+  mockLocationState = { channel: "PHONE", identifier: "+91 98765-43210", challengeId: "old-challenge" };
+  mockPost
+    .mockResolvedValueOnce({ data: {
+      message: "A code has been sent.", challenge_id: "new-challenge",
+      destination_masked: "+91******10", resend_after_seconds: 30,
+    } })
+    .mockResolvedValueOnce({ data: { access_token: "token", user: { id: "player-1", role: "PLAYER" } } });
+  const { container, root } = await render(VerifyEmail);
+  change(container.querySelector('[data-testid="verification-code-input"]'), "111111");
+  await act(async () => {
+    container.querySelector('[data-testid="verify-email-resend-button"]').click();
+    await settle();
+  });
+  expect(mockPost).toHaveBeenCalledWith("/auth/resend-otp", {
+    channel: "PHONE", identifier: "+919876543210", phone: "+919876543210", email: undefined,
+  });
+  expect(toast.info).toHaveBeenCalledWith("New verification code requested. Enter it if it arrives.");
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="verification-code-input"]').value).toBe("");
+  expect(container.querySelector('[data-testid="verify-email-resend-button"]').textContent).toContain("30s");
+  change(container.querySelector('[data-testid="verification-code-input"]'), "123456");
+  change(container.querySelector('[data-testid="verify-password-input"]'), "Strong-Password-9");
+  change(container.querySelector('[data-testid="verify-password-confirm-input"]'), "Strong-Password-9");
+  await submit(container.querySelector("form"));
+  expect(mockPost).toHaveBeenLastCalledWith("/auth/verify-otp", expect.objectContaining({
+    challenge_id: "new-challenge", verification_id: "new-challenge", code: "123456",
+  }));
+  await act(async () => root.unmount());
+});
+
+test.each([
+  ["server wait", { "retry-after": "180" }, 180],
+  ["missing header", undefined, 60],
+  ["invalid header", { "retry-after": "invalid" }, 60],
+])("signup resend 429 respects %s and retains the prior code", async (_name, headers, waitSeconds) => {
+  jest.useFakeTimers();
+  mockLocationState = { channel: "PHONE", identifier: "+919876543210", challengeId: "old-challenge" };
+  mockPost.mockRejectedValue({ response: {
+    status: 429, headers, data: { detail: { message: "Too many attempts. Please wait." } },
+  } });
+  const { container, root } = await render(VerifyEmail);
+  change(container.querySelector('[data-testid="verification-code-input"]'), "123456");
+  await act(async () => {
+    container.querySelector('[data-testid="verify-email-resend-button"]').click();
+    await settle();
+  });
+  const resend = container.querySelector('[data-testid="verify-email-resend-button"]');
+  expect(resend.textContent).toContain(`${waitSeconds}s`);
+  expect(resend.disabled).toBe(true);
+  expect(container.querySelector('[data-testid="verification-code-input"]').value).toBe("123456");
+  expect(toast.error).toHaveBeenCalledWith("Too many attempts. Please wait.");
+  expect(toast.info).not.toHaveBeenCalled();
+  await act(async () => { jest.advanceTimersByTime((waitSeconds - 1) * 1000); });
+  expect(resend.textContent).toContain("1s");
+  expect(resend.disabled).toBe(true);
+  await act(async () => { jest.advanceTimersByTime(1000); });
+  expect(resend.disabled).toBe(false);
+  expect(mockPost).toHaveBeenCalledTimes(1);
   await act(async () => root.unmount());
 });
