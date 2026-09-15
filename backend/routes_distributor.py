@@ -165,7 +165,7 @@ async def summary(ctx: dict = Depends(require_distributor)):
         'paid_to_date': balance['paid'],
         'in_flight': sum(int(p['amount']) for p in pending),
         'total_players': await db.users.count_documents(
-            {'distributor_id': did, 'role': 'PLAYER'}),
+            {'distributor_id': did, 'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}}),
     }
 
 
@@ -221,7 +221,7 @@ async def my_players(ctx: dict = Depends(require_distributor)):
     operator's to hold, and are not projected here.
     """
     rows = await db.users.find(
-        {'distributor_id': ctx['distributor']['id'], 'role': 'PLAYER'},
+        {'distributor_id': ctx['distributor']['id'], 'role': 'PLAYER', 'deleted_at': None, 'status': {'$ne': 'DELETED'}},
         {'_id': 0, 'id': 1, 'username': 1, 'status': 1, 'created_at': 1, 'last_login_at': 1},
     ).sort('created_at', -1).to_list(1000)
 

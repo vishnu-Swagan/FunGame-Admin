@@ -23,6 +23,7 @@ import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from db import db
+from player_account_state import lock_account_for_new_activity
 
 # Where the operator's day starts and ends. One declared zone, never the
 # server's local time — a container that moves region must not shift the books.
@@ -199,6 +200,7 @@ async def debit_chips(user_id: str, amount: int, note: str, ref: str = None,
                       settlement_ref=None):
     amount = int(amount)
     if kind == STAKE:
+        await lock_account_for_new_activity(db, user_id, session=session)
         # Before the balance moves, and before the caller has written a bet row.
         # The guard reads through the same transaction snapshot as the debit.
         # Since every game transaction also updates this player's balance row,
@@ -214,8 +216,11 @@ async def debit_chips(user_id: str, amount: int, note: str, ref: str = None,
             ref=ref, game=game, session=session,
         )
     kwargs = {'session': session} if session is not None else {}
+    debit_query = {'id': user_id, 'chip_balance': {'$gte': amount}}
+    if kind == STAKE:
+        debit_query.update({'status': {'$ne': 'DELETED'}, 'deleted_at': None})
     result = await db.users.find_one_and_update(
-        {'id': user_id, 'chip_balance': {'$gte': amount}},
+        debit_query,
         {'$inc': {'chip_balance': -amount}},
         return_document=True,
         **kwargs,

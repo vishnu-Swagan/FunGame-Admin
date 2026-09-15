@@ -899,7 +899,7 @@ async def admin_kyc_queue(
     status: Optional[str] = Query(default=None, max_length=20),
     admin: dict = Depends(kyc_view),
 ):
-    query: dict = {"role": "PLAYER"}
+    query: dict = {"role": "PLAYER", "deleted_at": None, "status": {"$ne": "DELETED"}}
     if status:
         wanted = status.strip().upper()
         if wanted == "UNVERIFIED":

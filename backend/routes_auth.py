@@ -35,6 +35,7 @@ from auth_utils import (
     create_access_token,
     get_current_user,
     hash_password,
+    is_deleted_user,
     maybe_upgrade_legacy_avatar,
     public_user,
     verify_password,
@@ -593,6 +594,8 @@ async def _find_identity_user(identity: Identity, *, session=None):
 
 async def _active_challenge_response(user: dict, identity: Identity) -> dict | None:
     """Return truthful metadata for a still-live challenge without resending."""
+    if is_deleted_user(user):
+        return None
     challenge = await db.otp_challenges.find_one({
         'user_id': user.get('id'),
         'purpose': VERIFY_CONTACT,
@@ -720,7 +723,8 @@ async def _resend_identity(body) -> Identity:
 def _self_service_needs_profile(user: dict) -> bool:
     """Repair the pre-profile state without reopening submitted applications."""
     return bool(
-        user.get('registration_source') == 'SELF_SERVICE'
+        not is_deleted_user(user)
+        and user.get('registration_source') == 'SELF_SERVICE'
         and user.get('status') == 'PENDING'
         and not user.get('submitted_at')
     )
@@ -734,6 +738,7 @@ def _legacy_operator_contact_repair_allowed(user: dict, primary: Identity | None
     """
     return bool(
         primary
+        and not is_deleted_user(user)
         and user.get('role') == 'PLAYER'
         and user.get('status') == 'ACTIVE'
         and user.get('registration_source') != 'SELF_SERVICE'
@@ -748,6 +753,7 @@ def _phone_otp_email_pending_repair_needed(user: dict) -> bool:
     """True for leftover dual-OTP PHONE_OTP players who already proved SMS."""
     return bool(
         user
+        and not is_deleted_user(user)
         and user.get('role') == 'PLAYER'
         and user.get('registration_source') == 'SELF_SERVICE'
         and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
@@ -784,6 +790,8 @@ async def _repair_phone_otp_email_pending(user: dict) -> dict:
             'registration_source': 'SELF_SERVICE',
             'activation_mode': PHONE_OTP_ACTIVATION_MODE,
             'phone_verified': True,
+            'deleted_at': None,
+            'status': {'$ne': 'DELETED'},
             '$or': [
                 {'status': 'PENDING'},
                 {'contact_verification_status': 'PHONE_VERIFIED_EMAIL_PENDING'},
@@ -837,6 +845,8 @@ async def _issue_or_public_challenge(user: dict, identity: Identity, purpose: st
     Rate limits still surface. Delivery failures must not 500, and they must
     not delete a pending registration that already exists.
     """
+    if is_deleted_user(user):
+        return _dummy_challenge(identity)
     try:
         return await issue_challenge(user, identity, purpose)
     except OtpError as exc:
@@ -1026,7 +1036,8 @@ async def _register_phone_otp(
     email_existing = await _find_identity_user(email_identity) if email_identity else None
     if phone_existing:
         recoverable_pending = bool(
-            phone_existing.get('role') == 'PLAYER'
+            not is_deleted_user(phone_existing)
+            and phone_existing.get('role') == 'PLAYER'
             and phone_existing.get('status') == 'PENDING'
             and phone_existing.get('registration_source') == 'SELF_SERVICE'
             and phone_existing.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE
@@ -1053,6 +1064,7 @@ async def _register_phone_otp(
             }
         recoverable_email = bool(
             email_required
+            and not is_deleted_user(phone_existing)
             and email_identity
             and phone_existing.get('role') == 'PLAYER'
             and phone_existing.get('status') == 'PENDING'
@@ -1491,7 +1503,7 @@ async def verify_contact(body: VerifyEmailRequest):
             database=db, session=session,
         )
         user = await _find_identity_user(identity, session=session)
-        if (not user or user.get('role') != 'PLAYER'
+        if (not user or is_deleted_user(user) or user.get('role') != 'PLAYER'
                 or _identity_is_verified(user, identity)
                 or verified.get('user_id') != user.get('id')):
             raise OtpError('OTP_INVALID', 'The verification code is invalid or expired.')
@@ -1603,7 +1615,10 @@ async def verify_contact(body: VerifyEmailRequest):
                 'active_session_id': session_id,
             })
         kwargs = {'session': session} if session is not None else {}
-        verification_query = {'id': user['id'], contact_field: {'$ne': True}}
+        verification_query = {
+            'id': user['id'], contact_field: {'$ne': True},
+            'deleted_at': None, 'status': {'$ne': 'DELETED'},
+        }
         if phone_self_service:
             verification_query.update({
                 'role': 'PLAYER',
@@ -1686,7 +1701,8 @@ async def resend_verification(body: ResendVerificationRequest):
         # verified, unverified and unknown identities.
         _raise_otp(exc)
     user = await _find_identity_user(identity)
-    if not user or user.get('role') != 'PLAYER' or _identity_is_verified(user, identity):
+    if (not user or is_deleted_user(user) or user.get('role') != 'PLAYER'
+            or _identity_is_verified(user, identity)):
         return {'message': GENERIC_RESEND_MESSAGE, **_dummy_challenge(identity)}
     if (user.get('registration_source') == 'SELF_SERVICE'
             and user.get('activation_mode') == PHONE_OTP_ACTIVATION_MODE):
@@ -1739,8 +1755,11 @@ async def login(body: LoginRequest):
     password_ok = await asyncio.to_thread(
         verify_password,
         body.password,
-        user.get('password_hash', DUMMY_PASSWORD_HASH) if user else DUMMY_PASSWORD_HASH,
+        user.get('password_hash', DUMMY_PASSWORD_HASH)
+        if user and not is_deleted_user(user) else DUMMY_PASSWORD_HASH,
     )
+    if is_deleted_user(user):
+        raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     locked_until = _as_utc(user.get('locked_until')) if user else None
     if user and locked_until and locked_until <= now:
         await db.users.update_one({'id': user['id']}, {
@@ -1790,6 +1809,8 @@ async def login(body: LoginRequest):
     profile_repair = False
     if user.get('role') == 'PLAYER':
         user = await _repair_phone_otp_email_pending(user)
+        if is_deleted_user(user):
+            raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
         if user.get('status') == 'SUSPENDED':
             raise HTTPException(status_code=403, detail={
                 'code': 'ACCOUNT_SUSPENDED',
@@ -1837,6 +1858,7 @@ async def login(body: LoginRequest):
         'role': user.get('role'),
         'status': user.get('status'),
         'password_hash': user.get('password_hash'),
+        'deleted_at': None,
     }
     if user.get('role') == 'DISTRIBUTOR':
         login_query['active_session_id'] = user.get('active_session_id')
@@ -1856,7 +1878,7 @@ async def login(body: LoginRequest):
         {'$set': login_updates, '$unset': login_unsets},
         return_document=ReturnDocument.AFTER,
     )
-    if not user:
+    if not user or is_deleted_user(user):
         raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     if user.get('role') == 'DISTRIBUTOR':
         current_dist = await db.distributors.find_one({
@@ -1875,6 +1897,8 @@ async def login(body: LoginRequest):
                 'message': 'This partner login is disabled. Please contact the operator.',
             })
     user = await maybe_upgrade_legacy_avatar(user)
+    if is_deleted_user(user):
+        raise HTTPException(status_code=401, detail=INVALID_LOGIN_MESSAGE)
     token = create_access_token(user['id'], user['role'], session_id=session_id)
     return {'access_token': token, 'user': public_user(user)}
 
@@ -1927,6 +1951,7 @@ async def forgot_password(body: ForgotPasswordRequest):
     if (
         delivery_available
         and user
+        and not is_deleted_user(user)
         and user.get('role') == 'PLAYER'
         and _identity_is_verified(user, identity)
     ):
@@ -1973,13 +1998,14 @@ async def reset_password(body: ResetPasswordRequest):
             database=db, session=session,
         )
         user = await _find_identity_user(identity, session=session)
-        if (not user or user.get('role') != 'PLAYER'
+        if (not user or is_deleted_user(user) or user.get('role') != 'PLAYER'
                 or not _identity_is_verified(user, identity)
                 or verified.get('user_id') != user.get('id')):
             raise OtpError('OTP_INVALID', 'The reset request is invalid or expired.')
         kwargs = {'session': session} if session is not None else {}
         updated = await db.users.find_one_and_update(
-            {'id': user['id']},
+            {'id': user['id'], 'role': 'PLAYER', 'deleted_at': None,
+             'status': {'$ne': 'DELETED'}},
             {
                 '$set': {
                     'password_hash': password_hash,
@@ -2037,6 +2063,7 @@ async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_
         'role': user.get('role'),
         'password_hash': original_hash,
         'active_session_id': user.get('active_session_id'),
+        'deleted_at': None,
     }
     if user.get('status') is not None:
         query['status'] = user.get('status')

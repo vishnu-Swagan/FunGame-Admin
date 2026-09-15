@@ -33,6 +33,7 @@ from pymongo.errors import DuplicateKeyError
 import compliance
 import ledger
 from db import db
+from player_account_state import lock_account_for_new_activity, require_available_account
 from payment_providers import (
     DepositStatus,
     PaymentProvider,
@@ -2000,6 +2001,7 @@ async def _ensure_deposit_checkout(
     order: Mapping[str, Any], provider: PaymentProvider,
 ) -> tuple[dict[str, Any], str]:
     """Finish or repair the DB/provider gap using a stable provider key."""
+    await require_available_account(db, order["user_id"])
     if order.get("provider") != provider.name:
         raise FinancialError(
             "PAYMENT_PROVIDER_MISMATCH", "This deposit belongs to another payment provider.", 409,
@@ -2008,6 +2010,17 @@ async def _ensure_deposit_checkout(
         return dict(order), str(order.get("checkout_url") or "")
     if order.get("provider_order_id") and order.get("checkout_url"):
         return dict(order), str(order["checkout_url"])
+
+    async def authorize_checkout(session):
+        await lock_account_for_new_activity(db, order["user_id"], session=session)
+        await db.deposit_orders.update_one(
+            {"id": order["id"], "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {"checkout_authorized_at": now()}}, **_session_kwargs(session),
+        )
+
+    # The external request may finish after deletion, but it must have a
+    # committed authorization that won the race before account closure.
+    await _run_transaction(authorize_checkout)
     return_url = os.environ.get(
         "PAYMENT_RETURN_URL", "http://localhost:3000/wallet/deposit/return",
     )
@@ -2067,6 +2080,7 @@ async def create_deposit(
     user_id: str, amount_paise: int, idempotency_key: str, provider: PaymentProvider,
     promotion_consent_id: Optional[str] = None,
 ) -> tuple[dict[str, Any], str]:
+    await require_available_account(db, user_id)
     idem = validate_idempotency_key(idempotency_key)
     amount = int(amount_paise)
     consent_id = str(promotion_consent_id or "").strip() or None
@@ -2114,6 +2128,7 @@ async def create_deposit(
 
     async def reserve_and_insert(session):
         kwargs = _session_kwargs(session)
+        await lock_account_for_new_activity(db, user_id, session=session)
         duplicate = await db.deposit_orders.find_one(
             {"user_id": user_id, "idempotency_key": idem}, {"_id": 0}, **kwargs,
         )
@@ -2431,6 +2446,7 @@ async def create_withdrawal(
     user_id: str, amount_chips: int, payout_method_id: str,
     idempotency_key: str, provider: PaymentProvider,
 ) -> dict[str, Any]:
+    await require_available_account(db, user_id)
     idem = validate_idempotency_key(idempotency_key)
     chips = int(amount_chips)
     existing = await db.withdrawal_requests.find_one(
@@ -2476,6 +2492,7 @@ async def create_withdrawal(
 
     async def work(session):
         kwargs = _session_kwargs(session)
+        await lock_account_for_new_activity(db, user_id, session=session)
         duplicate = await db.withdrawal_requests.find_one(
             {"user_id": user_id, "idempotency_key": idem}, {"_id": 0}, **kwargs,
         )

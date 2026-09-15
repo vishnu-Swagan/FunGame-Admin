@@ -1,0 +1,222 @@
+"""Deleted accounts reject new value movements but retain existing obligations."""
+from datetime import timedelta
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from fastapi import HTTPException
+
+import test_payments as core
+import test_sgpay24_provider as upi
+import ledger
+from player_account_state import retained_deposit_eligibility_user
+
+
+class DeletedAccountMoneyTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await core.FinancialCoreTests.asyncSetUp(self)
+        self.previous_adapter = ledger._source_wallet_adapter
+        ledger._source_wallet_adapter = None
+
+    async def asyncTearDown(self):
+        ledger._source_wallet_adapter = self.previous_adapter
+
+    async def delete(self):
+        await core.db.users.update_one({"id": self.user["id"]}, {"$set": {
+            "status": "DELETED", "deleted_at": core.finance.now(),
+            "deletion_previous_status": "ACTIVE",
+        }})
+
+    async def bank(self):
+        return await core.finance.create_payout_method(
+            self.user["id"], account_holder_name="Test Player", bank_name="Test Bank",
+            account_number="123456789012", ifsc_code="ABCD0123456",
+        )
+
+    async def test_deleted_markers_block_new_requests_before_balance_changes(self):
+        adapter = AsyncMock()
+        with patch.object(ledger, "_source_wallet_adapter", adapter):
+            for marker in ({"status": "DELETED", "deleted_at": None},
+                           {"status": "ACTIVE", "deleted_at": core.finance.now()}):
+                await core.db.users.update_one({"id": self.user["id"]}, {"$set": marker})
+                actions = (
+                    lambda: core.finance.create_deposit(self.user["id"], 10000, "deleted-deposit", self.provider),
+                    lambda: core.finance.create_withdrawal(self.user["id"], 100, "bank", "deleted-withdrawal", self.provider),
+                    lambda: ledger.debit_chips(self.user["id"], 100, "closed stake", kind=ledger.STAKE),
+                    lambda: upi.operator_rail.create_request(self.user, kind="DEPOSIT", amount_paise=10000),
+                    lambda: upi.operator_rail.create_request(self.user, kind="WITHDRAWAL", amount_paise=10000),
+                )
+                for action in actions:
+                    with self.assertRaises(HTTPException) as blocked:
+                        await action()
+                    self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        adapter.debit.assert_not_awaited()
+        stored = await core.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual(stored["chip_balance"], 1000)
+        for collection in ("deposit_orders", "withdrawal_requests", "operator_payment_requests", "chip_transactions"):
+            self.assertEqual(await core.db[collection].count_documents({}), 0)
+
+    async def test_deletion_wins_race_before_deposit_transaction(self):
+        async def deleted_before_commit(callback):
+            await self.delete()
+            return await callback(None)
+
+        with patch.object(core.finance, "_run_transaction", deleted_before_commit):
+            with self.assertRaises(HTTPException) as blocked:
+                await core.finance.create_deposit(self.user["id"], 10000, "raced-deposit", self.provider)
+        self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        self.assertEqual(await core.db.deposit_orders.count_documents({}), 0)
+        self.assertEqual(self.provider.deposit_calls, 0)
+
+    async def test_deletion_wins_race_before_withdrawal_transaction(self):
+        await core.seed_cash(self.user["id"], 500)
+        bank = await self.bank()
+
+        async def deleted_before_commit(callback):
+            await self.delete()
+            return await callback(None)
+
+        with patch.object(core.finance, "_run_transaction", deleted_before_commit):
+            with self.assertRaises(HTTPException) as blocked:
+                await core.finance.create_withdrawal(
+                    self.user["id"], 100, bank["id"], "raced-withdrawal", self.provider,
+                )
+        self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        self.assertEqual(await core.db.withdrawal_requests.count_documents({}), 0)
+        wallet = await core.finance.wallet_public(self.user["id"])
+        self.assertEqual(wallet["cash_chips"], 500)
+        self.assertEqual(wallet["held_chips"], 0)
+
+    async def test_deletion_between_reservation_and_checkout_stops_provider_call(self):
+        calls = 0
+
+        async def delete_before_checkout(callback):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                await self.delete()
+            return await callback(None)
+
+        with patch.object(core.finance, "_run_transaction", delete_before_checkout):
+            with self.assertRaises(HTTPException) as blocked:
+                await core.finance.create_deposit(self.user["id"], 10000, "raced-checkout", self.provider)
+        self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        order = await core.db.deposit_orders.find_one({"user_id": self.user["id"]})
+        self.assertEqual(order["status"], "CREATED")
+        self.assertIsNone(order["provider_order_id"])
+        self.assertEqual(self.provider.deposit_calls, 0)
+
+    async def test_preexisting_paid_deposit_still_credits_once_after_deletion(self):
+        order, _ = await core.finance.create_deposit(self.user["id"], 10000, "before-delete-deposit", self.provider)
+        await self.delete()
+        event, raw = core.signed_event(self.provider, {
+            "id": "deleted-player-paid", "type": "deposit.paid",
+            "object_id": order["provider_order_id"], "amount_paise": 10000,
+            "currency": "INR", "provider_reference": "deleted-player-paid-reference",
+        })
+        first = await core.finance.process_provider_event(self.provider, event, raw)
+        second = await core.finance.process_provider_event(self.provider, event, raw)
+        self.assertEqual(first["status"], "CREDITED")
+        self.assertTrue(second["duplicate"])
+        stored = await core.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual((stored["status"], stored["chip_balance"]), ("DELETED", 1100))
+        self.assertEqual(await core.db.wallet_operations.count_documents({"kind": "DEPOSIT_CREDIT"}), 1)
+
+    async def test_existing_withdrawals_can_pay_or_release_after_deletion(self):
+        await core.seed_cash(self.user["id"], 500)
+        bank = await self.bank()
+        paid = await core.finance.create_withdrawal(self.user["id"], 100, bank["id"], "pending-to-pay", self.provider)
+        rejected = await core.finance.create_withdrawal(self.user["id"], 100, bank["id"], "pending-to-release", self.provider)
+        await self.delete()
+        await core.finance.approve_withdrawal(paid["id"], "admin")
+        await core.finance.mark_withdrawal_submitted(paid["id"], "admin", "retained-payout-ref")
+        result = await core.finance.mark_withdrawal_paid(paid["id"], "admin", "retained-payout-ref")
+        self.assertEqual(result["status"], "PAID")
+        result = await core.finance.reject_withdrawal(rejected["id"], "admin", "Existing request declined")
+        self.assertEqual(result["status"], "REJECTED")
+        wallet = await core.finance.wallet_public(self.user["id"])
+        self.assertEqual((wallet["cash_chips"], wallet["held_chips"]), (400, 0))
+
+    async def test_payout_and_refund_credits_do_not_reactivate_account(self):
+        await self.delete()
+        await ledger.credit_chips(self.user["id"], 30, "old win", kind=ledger.PAYOUT)
+        await ledger.credit_chips(self.user["id"], 20, "old refund", kind=ledger.REFUND)
+        stored = await core.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual((stored["status"], stored["chip_balance"]), ("DELETED", 1050))
+
+
+class DeletedHostedPaymentTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await upi.HostedUpiOperatorRailTests.asyncSetUp(self)
+
+    async def asyncTearDown(self):
+        await upi.HostedUpiOperatorRailTests.asyncTearDown(self)
+
+    async def delete(self):
+        await self.db.users.update_one({"id": self.user["id"]}, {"$set": {
+            "status": "DELETED", "deleted_at": upi.operator_rail.utcnow(),
+            "deletion_previous_status": "ACTIVE",
+        }})
+
+    async def test_existing_hosted_payment_credits_after_delete_but_new_checkout_is_denied(self):
+        order, _ = await upi.operator_rail.create_hosted_deposit(self.user, 10000, "retained-upi-order", self.gateway)
+        await self.delete()
+        for key in ("retained-upi-order", "new-upi-order"):
+            with self.assertRaises(HTTPException) as blocked:
+                await upi.operator_rail.create_hosted_deposit(self.user, 10000, key, self.gateway)
+            self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        stored = await self.db[upi.operator_rail.COLLECTION].find_one({"id": order["id"]})
+        self.assertEqual(stored["status"], "PENDING")
+        paid = upi.DepositStatus("PAID", 10000, "INR", "RETAINEDUTR12345")
+        first = await upi.operator_rail.settle_hosted_deposit(order["id"], paid, actor="test-provider")
+        second = await upi.operator_rail.settle_hosted_deposit(order["id"], paid, actor="test-provider")
+        self.assertEqual(first["status"], "CREDITED")
+        self.assertTrue(second["duplicate"])
+        user = await self.db.users.find_one({"id": self.user["id"]})
+        self.assertEqual((user["status"], user["chip_balance"]), ("DELETED", 200))
+        self.assertEqual(len(self.gateway.create_calls), 1)
+
+    async def test_hosted_creation_race_refuses_deleted_player(self):
+        async def deleted_before_commit(callback):
+            await self.delete()
+            return await callback(None)
+        with patch.object(upi.operator_rail, "_run_hosted_transaction", deleted_before_commit):
+            with self.assertRaises(HTTPException) as blocked:
+                await upi.operator_rail.create_hosted_deposit(self.user, 10000, "raced-upi-order", self.gateway)
+        self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        self.assertEqual(await self.db[upi.operator_rail.COLLECTION].count_documents({}), 0)
+        self.assertEqual(self.gateway.create_calls, [])
+
+    async def test_hosted_checkout_race_stops_provider_call_after_reservation(self):
+        calls = 0
+
+        async def delete_before_checkout(callback):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                await self.delete()
+            return await callback(None)
+
+        with patch.object(upi.operator_rail, "_run_hosted_transaction", delete_before_checkout):
+            with self.assertRaises(HTTPException) as blocked:
+                await upi.operator_rail.create_hosted_deposit(self.user, 10000, "raced-upi-checkout", self.gateway)
+        self.assertEqual(blocked.exception.detail["code"], "ACCOUNT_DELETED")
+        order = await self.db[upi.operator_rail.COLLECTION].find_one({"user_id": self.user["id"]})
+        self.assertEqual(order["status"], "CREATED")
+        self.assertIsNone(order["provider_order_id"])
+        self.assertEqual(self.gateway.create_calls, [])
+
+    async def test_retained_order_projection_requires_predeletion_issued_order(self):
+        stamp = upi.operator_rail.utcnow()
+        user = {**self.user, "status": "DELETED", "deleted_at": stamp, "deletion_previous_status": "ACTIVE"}
+        valid = {"created_at": stamp - timedelta(seconds=1), "provider_order_id": "issued-order"}
+        self.assertEqual(retained_deposit_eligibility_user(user, valid)["status"], "ACTIVE")
+        for order in ({**valid, "created_at": stamp + timedelta(seconds=1)},
+                      {**valid, "provider_order_id": None}, {**valid, "created_at": None}):
+            self.assertEqual(retained_deposit_eligibility_user(user, order)["status"], "DELETED")
+        frozen = {**user, "financial_status": "FROZEN"}
+        with self.assertRaises(HTTPException):
+            await upi.operator_rail.require_hosted_deposit_eligible(retained_deposit_eligibility_user(frozen, valid))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

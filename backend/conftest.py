@@ -9,9 +9,11 @@ assertion and exit status.
 
 
 collect_ignore = [
+    "test_deleted_player_financial.py",
     "test_commission.py",
     "test_compliance.py",
     "test_crm.py",
+    "test_deleted_player_financial.py",
     "test_distributor_parity.py",
     "test_enable_all_games.py",
     "test_game_transactions.py",

@@ -27,6 +27,12 @@ import financial_wallet as finance
 import bonus_policy
 from ledger import InsufficientChips
 from db import client, db
+from player_account_state import (
+    account_is_deleted,
+    lock_account_for_new_activity,
+    require_available_account,
+    retained_deposit_eligibility_user,
+)
 from payment_providers import (
     DepositStatus,
     PaymentProvider,
@@ -503,6 +509,7 @@ async def create_request(
     bank_detail_id: str | None = None,
     note: str = "",
 ) -> dict[str, Any]:
+    await require_available_account(db, user["id"])
     kind = str(kind or "").upper()
     if kind not in {"DEPOSIT", "WITHDRAWAL"}:
         raise HTTPException(status_code=400, detail={"code": "OPERATOR_KIND_INVALID", "message": "Request type is invalid."})
@@ -554,6 +561,7 @@ async def create_request(
     if kind == "WITHDRAWAL":
         async def reserve_and_insert(session):
             kwargs = _session_kwargs(session)
+            await lock_account_for_new_activity(db, user["id"], session=session)
             try:
                 daily = await bonus_policy.reserve_daily_withdrawal(
                     user["id"], row["id"], paise, session=session,
@@ -568,7 +576,10 @@ async def create_request(
 
         row = await _run_hosted_transaction(reserve_and_insert)
     else:
-        await db[COLLECTION].insert_one(row)
+        async def insert_deposit(session):
+            await lock_account_for_new_activity(db, user["id"], session=session)
+            await db[COLLECTION].insert_one(dict(row), **_session_kwargs(session))
+        await _run_hosted_transaction(insert_deposit)
     row.pop("_id", None)
     return request_dto(row)
 
@@ -652,6 +663,10 @@ def payment_contact_state(user: Mapping[str, Any]) -> dict[str, bool]:
 
 async def require_hosted_deposit_eligible(user: Mapping[str, Any]) -> Mapping[str, Any]:
     """Apply the complete hosted-UPI eligibility contract to a fresh user row."""
+    if account_is_deleted(user):
+        raise HTTPException(status_code=403, detail={
+            "code": "ACCOUNT_DELETED", "message": "This player account has been deleted.",
+        })
     if user.get("role") != "PLAYER" or user.get("status") != "ACTIVE":
         raise HTTPException(status_code=403, detail={
             "code": "FINANCIAL_ACCOUNT_NOT_ACTIVE",
@@ -728,11 +743,9 @@ async def _ensure_hosted_checkout(
         })
     if str(row.get("status") or "").upper() in HOSTED_TERMINAL:
         return dict(row), ""
-    user = await db.users.find_one({"id": row["user_id"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=404, detail={
-            "code": "PLAYER_NOT_FOUND", "message": "The player account was not found.",
-        })
+    # Account removal refuses access to checkout without changing the pending
+    # order: its already-issued provider payment must still reconcile.
+    user = await require_available_account(db, row["user_id"])
     try:
         await require_hosted_deposit_eligible(user)
     except HTTPException as exc:
@@ -773,6 +786,16 @@ async def _ensure_hosted_checkout(
         raise
     if row.get("checkout_url") and row.get("provider_order_id"):
         return dict(row), str(row["checkout_url"])
+
+    async def authorize_checkout(session):
+        current_user = await lock_account_for_new_activity(db, row["user_id"], session=session)
+        await require_hosted_deposit_eligible(current_user)
+        await db[COLLECTION].update_one(
+            {"id": row["id"], "status": {"$in": ["CREATED", "PENDING"]}},
+            {"$set": {"checkout_authorized_at": utcnow()}}, **_session_kwargs(session),
+        )
+
+    await _run_hosted_transaction(authorize_checkout)
     try:
         checkout = await provider.create_deposit_order(
             deposit_id=str(row["id"]),
@@ -870,6 +893,7 @@ async def create_hosted_deposit(
     }
     async def reserve_and_insert(session):
         kwargs = {"session": session} if session is not None else {}
+        await lock_account_for_new_activity(db, user["id"], session=session)
         # Force concurrent purchases for the same player/day to contend on one
         # document. The transaction then re-reads limits and inserts atomically.
         guard_id = f"{user['id']}:{gaming_day}"
@@ -1047,7 +1071,7 @@ async def settle_hosted_deposit(
                 "code": "UPI_PLAYER_MISSING", "message": "The purchase needs operator review.",
             })
         try:
-            await require_hosted_deposit_eligible(user)
+            await require_hosted_deposit_eligible(retained_deposit_eligibility_user(user, current))
         except HTTPException as exc:
             try:
                 await db[COLLECTION].update_one(
