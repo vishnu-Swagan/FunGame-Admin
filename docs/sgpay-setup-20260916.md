@@ -25,7 +25,7 @@ payouts, rewrite balances, or recreate historical payment orders.
 - [x] Correct payout transport, reference binding, submission/retry safety, and
       payout callback handling with regression tests.
 - [x] Align admin permissions and exact-action step-up UI retry handling.
-- [ ] Run the Codex uncommitted-change review and separate payment/security
+- [x] Run the Codex uncommitted-change review and separate payment/security
       review, full tests, and mocked browser workflow checks.
 - [ ] Deploy the reviewed change using the existing services and configure only
       supported callback settings. Preserve the existing environment and rail.
@@ -72,3 +72,18 @@ Status polling remains supported without this optional notification.
 
 No live checkout was created, payout submitted, wallet adjusted, historical
 order recreated, or verification requirement removed during diagnostics.
+
+## Release handoff
+
+Application commit `2a93db1fd33c55c57e39491d3450e54d391d8a44` is prepared in
+draft PR #98, not merged or deployed. GitHub backend and frontend checks passed.
+Local validation: 487 backend tests plus 144 subtests, 75 frontend suites / 466
+tests, production build, and isolated mocked browser payment/admin workflows.
+The uncommitted-change review and final separate payment/security re-review
+reported no remaining actionable findings after fixes.
+
+Deployment is paused because both GitHub and Render tabs became blank and
+Chrome-extension commands timed out. Native Chrome controls could switch tabs
+but did not expose loaded page content. The user was asked to make Chrome
+responsive and reply ready. Do not merge until deployment can be verified.
+The requested unpaid checkout probe still awaits explicit approval.

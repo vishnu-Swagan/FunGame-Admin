@@ -9,7 +9,7 @@ diagnostics. No new subscription or provider fee is introduced by deployment;
 live transactions remain separately chargeable by the provider. Allow 15–25
 minutes for checks and deployment; provider support time is unknown.
 
-- [ ] 🤖 **Review and test without moving money** — 5–10 minutes.
+- [x] 🤖 **Review and test without moving money** — 5–10 minutes.
 
   > Prompt: “Review the SGPay24 patch and run full backend/frontend tests, production build, and isolated mocked browser flows. Confirm JSON transport, merchant/order binding, no duplicate payout after uncertain responses, and exact-action admin verification.”
 
