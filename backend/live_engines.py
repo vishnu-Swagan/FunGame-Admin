@@ -35,8 +35,15 @@ def bad(msg):
 BET_SECONDS = 60
 # Dedicated American Roulette routes consume this schedule. It lives beside the
 # other live schedules so timing contract tests do not need a database-backed
-# route module just to verify the one-minute cycle.
-ROULETTE_TIMING = {"bet": 30, "spin": 20, "result": 10}
+# route module just to verify the 70-second cycle.
+ROULETTE_TIMING = {"bet": 50, "spin": 10, "result": 10}
+# Keep the new 70s schedule disjoint from persisted epoch/60 round IDs. Simply
+# dividing the epoch by 70 would reuse historical, already-known winners and
+# leave recent legacy bets numerically ahead of the current round.
+ROULETTE_ROUND_ID_BASE = 1_000_000_000
+ROULETTE_LEGACY_TIMING = {"bet": 30, "spin": 20, "result": 10}
+PAPPU_ROUND_ID_BASE = 1_000_000_000
+PAPPU_LEGACY_TIMING = {"bet": 12, "reveal": 8, "result": 4}
 
 
 def fixed_cycle_clock(now, bet_seconds, action_seconds, result_seconds,
@@ -79,6 +86,22 @@ def roulette_history_max_round(round_number, phase):
     return round_number if phase == "RESULT" else round_number - 1
 
 
+def roulette_cycle_clock(now):
+    """70s clock with a separate, monotonically increasing round-ID namespace."""
+    round_number, phase, phase_left, round_left, total = fixed_cycle_clock(
+        now, ROULETTE_TIMING['bet'], ROULETTE_TIMING['spin'],
+        ROULETTE_TIMING['result'], 'SPINNING',
+    )
+    return ROULETTE_ROUND_ID_BASE + round_number, phase, phase_left, round_left, total
+
+
+def roulette_round_start(round_number):
+    """Resolve absolute deadlines without treating an opaque round ID as epoch."""
+    if round_number >= ROULETTE_ROUND_ID_BASE:
+        return (round_number - ROULETTE_ROUND_ID_BASE) * sum(ROULETTE_TIMING.values())
+    return round_number * sum(ROULETTE_LEGACY_TIMING.values())
+
+
 def betting_mutation_open(phase, seconds_left, round_number, expected_round=None, guard=0.4):
     """Pure boundary predicate shared by all server-side bet mutations."""
     return (phase == "BETTING" and seconds_left > guard
@@ -102,9 +125,8 @@ LIVE_GAMES = {
     # full 24 seconds for the variable-length deal and 6 seconds for results.
     "andar-bahar":       {"bet": 30, "reveal": 24, "result": 6, "kind": "sides"},
     "keno":              {"bet": 30, "reveal": 20, "result": 10, "kind": "picks"},
-    # Picture Play follows the supplied fast portrait cabinet: a short betting
-    # window, one theatrical card reveal and one shared picture for everyone.
-    "pappu-pictures":    {"bet": 12, "reveal": 8, "result": 4, "kind": "symbols"},
+    # Picture Play: 20 seconds to bet, then the existing reveal and result hold.
+    "pappu-pictures":    {"bet": 20, "reveal": 8, "result": 4, "kind": "symbols"},
     "bingo":             {"bet": BET_SECONDS, "reveal": 6, "result": 4, "kind": "stake"},
     "fever-joker-bonus": {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
     "giant-jackpot":     {"bet": BET_SECONDS, "reveal": 5, "result": 3, "kind": "stake"},
@@ -266,6 +288,26 @@ def limits_for(slug):
 def cycle_seconds(slug):
     c = LIVE_GAMES[slug]
     return c["bet"] + c["reveal"] + c["result"]
+
+
+def live_cycle_clock(slug, now):
+    """Use a fresh Pappu ID namespace when moving its cycle from 24s to 32s."""
+    cfg = LIVE_GAMES[slug]
+    rn, phase, phase_left, round_left, total = fixed_cycle_clock(
+        now, cfg['bet'], cfg['reveal'], cfg['result'],
+    )
+    if slug == 'pappu-pictures':
+        rn += PAPPU_ROUND_ID_BASE
+    return rn, phase, phase_left, round_left, total
+
+
+def live_round_start(slug, round_number):
+    """Resolve epoch deadlines independently from versioned round identities."""
+    if slug == 'pappu-pictures':
+        if round_number >= PAPPU_ROUND_ID_BASE:
+            return (round_number - PAPPU_ROUND_ID_BASE) * cycle_seconds(slug)
+        return round_number * sum(PAPPU_LEGACY_TIMING.values())
+    return round_number * cycle_seconds(slug)
 
 
 # ---------------- Universal outcome generators ----------------

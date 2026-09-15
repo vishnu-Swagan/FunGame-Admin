@@ -1,4 +1,5 @@
 import { MARKUP } from "./markup.js";
+import { ROULETTE_DEFAULT_TIMING } from "./timing";
 import { CLIENT_BETTING_GUARD_SECONDS, secondsUntil } from "@/lib/serverClock";
 
 export function gateRouletteWheelAssets(phone) {
@@ -80,7 +81,7 @@ export function mountRoulette(root, opts) {
   const EURO = POCKETS;               // the wheel-order sequence, whatever the wheel
   const SEG  = 360 / NP;
   const CHIPS = [10, 50, 100, 500, 1000];
-  let timing = { bettingSeconds: 30, spinSeconds: 20, resultSeconds: 10, roundSeconds: 60 };
+  let timing = { ...ROULETTE_DEFAULT_TIMING };
   let tableLimits = { minimum: 10, even_money_position_max: 2000, position_max: 10000 };
 
   /* ---- calibrated projective model of the photographed wheel ----
@@ -554,8 +555,11 @@ export function mountRoulette(root, opts) {
   /* Park the ball in a pocket and leave it there. */
   function restAt(number) {
     cancelAnimationFrame(rafId);
+    rafId = 0;
     ball.classList.remove('fast');
     setBall(screenTheta(number), S_POCKET, 0);
+    Sound.rollSet(0, true);
+    Sound.rollStop();
   }
 
 
@@ -2335,7 +2339,7 @@ export function mountRoulette(root, opts) {
         ? (acceptingBets ? `BET ${phaseLeft}s` : 'BETS LOCKED')
         : clockPhase === 'SPINNING' ? `SPIN ${phaseLeft}s` : `NEXT ${phaseLeft}s`;
     }
-    const total = Math.max(1, Number(timing.roundSeconds) || 60);
+    const total = Math.max(1, Number(timing.roundSeconds) || ROULETTE_DEFAULT_TIMING.roundSeconds);
     tval.style.strokeDashoffset = (T_CIRC * (1 - Math.min(1, roundLeftRaw / total))).toFixed(1);
     if (ringval) {
       ringval.style.strokeDashoffset = (CIRC * (1 - Math.min(1, roundLeftRaw / total))).toFixed(1);
@@ -2446,16 +2450,23 @@ export function mountRoulette(root, opts) {
     }
 
     // --- the spin: start it once per round, timed to the phase that is left ---
-    if (st.winningNumber != null && st.phase !== 'BETTING' && spunRound !== st.roundNumber) {
+    if (st.winningNumber != null && st.phase === 'SPINNING' && spunRound !== st.roundNumber) {
       spunRound = st.roundNumber;
       const spinLeft = phaseDeadlineMs ? secondsUntil(phaseDeadlineMs) : Math.max(0, Number(st.secondsLeft) || 0);
-      const dur = st.phase === 'SPINNING' ? Math.max(1200, Math.round(spinLeft * 1000)) : 1600;
-      spin(String(st.winningNumber), dur);
+      // A late poll gets only the remaining server spin window, never a local
+      // minimum duration that would continue turning through the result buffer.
+      const dur = Math.max(0, Math.floor(spinLeft * 1000));
+      if (dur > 0) spin(String(st.winningNumber), dur);
+      else restAt(String(st.winningNumber));
     }
 
     // --- the result, once the ball is down ---
     if (st.phase === 'RESULT' && st.winningNumber != null && shownRound !== st.roundNumber) {
       shownRound = st.roundNumber;
+      spunRound = st.roundNumber;
+      // Joining in RESULT must not invent another spin. Also stop an in-flight
+      // frame immediately if the server advances the phase before it finishes.
+      restAt(String(st.winningNumber));
       showResult(String(st.winningNumber), st.settled);
     }
   }

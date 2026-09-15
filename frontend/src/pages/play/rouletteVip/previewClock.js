@@ -1,13 +1,10 @@
-export const ROULETTE_PREVIEW_TIMING = {
-  bettingSeconds: 30,
-  spinSeconds: 20,
-  resultSeconds: 10,
-  roundSeconds: 60,
-};
+import { ROULETTE_DEFAULT_TIMING } from "./timing";
+
+export const ROULETTE_PREVIEW_TIMING = ROULETTE_DEFAULT_TIMING;
 
 const DEFAULT_WINNERS = ["17", "00", "32", "5", "21", "0", "14", "29", "8", "35"];
 
-/** Pure repeating preview clock, kept identical to the production 30/20/10 cycle. */
+/** Pure repeating preview clock for the 50/10/10 cycle; never drives live play. */
 export function roulettePreviewState(elapsedMs, winners = DEFAULT_WINNERS) {
   const elapsedSeconds = Math.max(0, Number(elapsedMs) || 0) / 1000;
   const roundIndex = Math.floor(elapsedSeconds / ROULETTE_PREVIEW_TIMING.roundSeconds);

@@ -95,7 +95,7 @@ jest.mock("@/pages/app/wallet/WalletBits", () => ({
 }));
 
 jest.mock("@/components/ui/tabs", () => ({
-  Tabs: ({ children }) => <div>{children}</div>,
+  Tabs: ({ children }) => <div data-testid="wallet-tabs">{children}</div>,
   TabsList: ({ children }) => <div>{children}</div>,
   TabsTrigger: ({ children, ...props }) => <button {...props}>{children}</button>,
   TabsContent: ({ children, value }) => <div data-tab={value}>{children}</div>,
@@ -260,7 +260,7 @@ test("Deposit creates an idempotent INR order and opens only the routed hosted c
   expect(container.querySelector('[data-testid="deposit-form"]')).not.toBeNull();
   expect(container.textContent).toContain("Deposit funds");
   expect(container.textContent).toContain("₹1,000");
-  expect(container.textContent).toContain("completed by the approved provider");
+  expect(container.querySelector('[data-testid="deposit-form"]').textContent).toContain("Your wallet updates after verified provider confirmation.");
 
   change(container.querySelector('[data-testid="deposit-amount"]'), "2500");
   await submit(container.querySelector('[data-testid="deposit-form"]'));
@@ -366,7 +366,7 @@ test("payment does not open when the accepted consent differs from the displayed
   await act(async () => root.unmount());
 });
 
-test("does not claim an active approved provider while financial readiness is dormant", async () => {
+test("unavailable payment forms retain their notices and disabled actions", async () => {
   mockWallet.mockResolvedValue({
     ...READY_WALLET,
     financial: {
@@ -376,15 +376,15 @@ test("does not claim an active approved provider while financial readiness is do
   });
   const { container, root } = await renderPage();
 
-  expect(container.textContent).toContain("Payment services are not active yet");
-  expect(container.textContent).toContain("remain unavailable");
+  expect(container.textContent).toContain("Deposits are temporarily unavailable.");
+  expect(container.textContent).toContain("Withdrawals are temporarily unavailable.");
   expect(container.textContent).not.toContain("completed by the approved provider");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(true);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(true);
   await act(async () => root.unmount());
 });
 
-test("provider readiness copy reports deposit-only availability precisely", async () => {
+test("deposit-only availability leaves withdrawals disabled with a form notice", async () => {
   mockWallet.mockResolvedValue({
     ...READY_WALLET,
     financial: {
@@ -394,15 +394,15 @@ test("provider readiness copy reports deposit-only availability precisely", asyn
   });
   const { container, root } = await renderPage();
 
-  expect(container.textContent).toContain("Deposits are completed by the approved provider");
-  expect(container.textContent).toContain("Withdrawals are not active yet");
-  expect(container.textContent).not.toContain("Deposits and withdrawals are completed");
+  expect(container.textContent).toContain("Your wallet updates after verified provider confirmation.");
+  expect(container.textContent).toContain("Withdrawals are temporarily unavailable.");
+  expect(container.textContent).not.toContain("Deposits are temporarily unavailable.");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(false);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(true);
   await act(async () => root.unmount());
 });
 
-test("provider readiness copy reports withdrawal-only availability precisely", async () => {
+test("withdrawal-only availability leaves deposits disabled with a form notice", async () => {
   mockWallet.mockResolvedValue({
     ...READY_WALLET,
     financial: {
@@ -412,9 +412,9 @@ test("provider readiness copy reports withdrawal-only availability precisely", a
   });
   const { container, root } = await renderPage();
 
-  expect(container.textContent).toContain("Withdrawals are completed by the approved provider");
-  expect(container.textContent).toContain("Deposits are not active yet");
-  expect(container.textContent).not.toContain("Chip purchases and withdrawals are completed");
+  expect(container.textContent).toContain("Withdraw to your bank");
+  expect(container.textContent).toContain("Deposits are temporarily unavailable.");
+  expect(container.textContent).not.toContain("Withdrawals are temporarily unavailable.");
   expect(container.querySelector('[data-testid="deposit-submit"]').disabled).toBe(true);
   expect(container.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(false);
   await act(async () => root.unmount());
@@ -553,6 +553,65 @@ const UPI_OPERATOR_WALLET = {
   },
 };
 
+test.each([
+  ["hosted UPI and admin withdrawals", false, false, true, true, "UPI_HOSTED"],
+  ["hosted UPI and provider withdrawals", false, true, true, false, "UPI_HOSTED"],
+  ["hosted provider deposits and withdrawals", true, true, false, false, ""],
+  ["admin deposits and withdrawals", false, false, true, true, "ADMIN_REVIEW"],
+  ["admin deposits only", false, false, true, false, "ADMIN_REVIEW"],
+  ["admin withdrawals only", false, false, false, true, "ADMIN_REVIEW"],
+  ["hosted deposits only", true, false, false, false, ""],
+  ["hosted withdrawals only", false, true, false, false, ""],
+  ["unavailable payments", false, false, false, false, ""],
+])("%s has no provider intro above the tabs while preserving form gating", async (_name, hostedDeposit, hostedWithdrawal, operatorDeposit, operatorWithdrawal, rail) => {
+  const depositAvailable = hostedDeposit || operatorDeposit;
+  const withdrawalAvailable = hostedWithdrawal || operatorWithdrawal;
+  mockWallet.mockResolvedValue({
+    ...READY_WALLET,
+    financial: {
+      ready: hostedDeposit || hostedWithdrawal,
+      features: { real_money: hostedDeposit || hostedWithdrawal, deposits: hostedDeposit, withdrawals: hostedWithdrawal },
+      operator: {
+        enabled: operatorDeposit || operatorWithdrawal,
+        deposits_enabled: operatorDeposit,
+        withdrawals_enabled: operatorWithdrawal,
+        rail,
+        hosted_checkout: rail === "UPI_HOSTED",
+        checkout_hosts: rail === "UPI_HOSTED" ? ["root.sgpay24.com"] : [],
+      },
+    },
+  });
+  const { container, root } = await renderPage();
+
+  // With no bonus/mission card in this fixture, the tabs directly follow the balance.
+  // This catches reintroducing an intro panel regardless of its provider-specific copy.
+  const tabs = container.querySelector('[data-testid="wallet-tabs"]');
+  expect(container.querySelector('[data-testid="wallet-balance-card"]').nextElementSibling).toBe(tabs);
+  expect([...tabs.querySelectorAll("button[value]")].map((button) => button.textContent)).toEqual(["Deposit", "Withdraw", "Activity"]);
+  const depositForm = tabs.querySelector('[data-testid="deposit-form"]');
+  const withdrawalForm = tabs.querySelector('[data-testid="withdrawal-form"]');
+  expect(depositForm).not.toBeNull();
+  expect(withdrawalForm).not.toBeNull();
+  expect(depositForm.querySelector('[data-testid="deposit-submit"]').disabled).toBe(!depositAvailable);
+  expect(withdrawalForm.querySelector('[data-testid="withdrawal-submit"]').disabled).toBe(!withdrawalAvailable);
+  expect(depositForm.textContent.includes("Deposits are temporarily unavailable.")).toBe(!depositAvailable);
+  expect(withdrawalForm.textContent.includes("Withdrawals are temporarily unavailable.")).toBe(!withdrawalAvailable);
+  expect(depositForm.textContent).toContain(rail === "UPI_HOSTED"
+    ? "Pay through SgPay secure UPI checkout."
+    : operatorDeposit && !hostedDeposit
+      ? "Submit a deposit request for Admin review."
+      : "Pay in INR through secure hosted checkout.");
+  expect(withdrawalForm.textContent).toContain("Daily request maximum:");
+  expect(withdrawalForm.textContent).toContain("Admin approves, then SgPay pays your saved method.");
+  expect(tabs.querySelector('[data-testid="deposit-activity-row"]')).not.toBeNull();
+  expect(tabs.querySelector('[data-testid="withdrawal-activity-row"]')).not.toBeNull();
+  expect(mockCreateDeposit).not.toHaveBeenCalled();
+  expect(mockCreateWithdrawal).not.toHaveBeenCalled();
+  expect(mockCreateOperatorDeposit).not.toHaveBeenCalled();
+  expect(mockCreateOperatorWithdrawal).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
 test("hosted UPI operator rail creates an idempotent deposit and opens only SgPay checkout", async () => {
   mockWallet.mockResolvedValue(UPI_OPERATOR_WALLET);
   mockCreateOperatorDeposit.mockResolvedValue({
@@ -608,7 +667,7 @@ test("operator rail unlocks buy and withdraw without hosted checkout", async () 
     minDepositPaise: 10000,
     minWithdrawalPaise: 100000,
   });
-  expect(container.textContent).toContain("submitted for Admin review");
+  expect(container.querySelector('[data-testid="deposit-form"]').textContent).toContain("Submit a deposit request for Admin review.");
   expect(container.textContent).toContain("Daily buy limit");
   expect(container.textContent).toMatch(/2,00,000|200,000/);
   expect(container.textContent).not.toContain("Payment services are not active yet");

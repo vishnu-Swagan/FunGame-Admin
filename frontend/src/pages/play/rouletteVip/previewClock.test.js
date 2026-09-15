@@ -1,13 +1,19 @@
-import { roulettePreviewState } from "./previewClock";
+import { ROULETTE_PREVIEW_TIMING, roulettePreviewState } from "./previewClock";
+
+test("roulette has a 70-second cycle with a complete 10-second result buffer", () => {
+  expect(ROULETTE_PREVIEW_TIMING).toEqual({ bettingSeconds: 50, spinSeconds: 10, resultSeconds: 10, roundSeconds: 70 });
+  expect(ROULETTE_PREVIEW_TIMING.bettingSeconds + ROULETTE_PREVIEW_TIMING.spinSeconds + ROULETTE_PREVIEW_TIMING.resultSeconds)
+    .toBe(ROULETTE_PREVIEW_TIMING.roundSeconds);
+});
 
 test.each([
-  [0, "BETTING", 30, 60, null],
-  [29900, "BETTING", 0.1, 30.1, null],
-  [30000, "SPINNING", 20, 30, "17"],
-  [49900, "SPINNING", 0.1, 10.1, "17"],
-  [50000, "RESULT", 10, 10, "17"],
-  [59900, "RESULT", 0.1, 0.1, "17"],
-  [60000, "BETTING", 30, 60, null],
+  [0, "BETTING", 50, 70, null],
+  [49999, "BETTING", 0.001, 20.001, null],
+  [50000, "SPINNING", 10, 20, "17"],
+  [59999, "SPINNING", 0.001, 10.001, "17"],
+  [60000, "RESULT", 10, 10, "17"],
+  [69999, "RESULT", 0.001, 0.001, "17"],
+  [70000, "BETTING", 50, 70, null],
 ])("preview clock at %ims", (elapsed, phase, phaseLeft, roundLeft, winner) => {
   const state = roulettePreviewState(elapsed, ["17", "00"]);
   expect(state.phase).toBe(phase);
@@ -16,6 +22,9 @@ test.each([
   expect(state.winningNumber).toBe(winner);
 });
 
-test("preview advances winner only after a complete 60-second round", () => {
-  expect(roulettePreviewState(90000, ["17", "00"]).winningNumber).toBe("00");
+test("preview rolls over after 70 seconds and hides the next winner until betting closes", () => {
+  expect(roulettePreviewState(69999, ["17", "00"]).roundNumber).toBe("PREVIEW-1");
+  expect(roulettePreviewState(70000, ["17", "00"])).toMatchObject({ roundNumber: "PREVIEW-2", roundIndex: 1, winningNumber: null });
+  expect(roulettePreviewState(90000, ["17", "00"]).winningNumber).toBeNull();
+  expect(roulettePreviewState(120000, ["17", "00"])).toMatchObject({ phase: "SPINNING", winningNumber: "00" });
 });
