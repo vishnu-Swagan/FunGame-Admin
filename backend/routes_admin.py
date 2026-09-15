@@ -984,6 +984,7 @@ async def _account_delete_retained_activity(user_id: str, *, session=None) -> li
         }),
         ('pending operator payments', 'operator_payment_requests', {
             'user_id': user_id, 'status': {'$nin': ['PAID', 'CREDITED', 'FAILED', 'REJECTED', 'CANCELLED', 'EXPIRED']},
+            '$nor': [{'kind': 'DEPOSIT', 'status': 'APPROVED'}],
         }),
     )
     retained = []

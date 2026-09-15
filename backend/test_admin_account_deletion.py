@@ -142,6 +142,18 @@ class AdminAccountDeletionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result['deleted_user_id'], user_id)
                 self.assertEqual((await self.database.users.find_one({'id': user_id}))['status'], 'DELETED')
 
+    async def test_approved_deposit_is_terminal_but_approved_withdrawal_needs_reconciliation(self):
+        await self._player('deposit-player')
+        await self._player('withdrawal-player', username='withdrawal-player')
+        await self.database.operator_payment_requests.insert_many([
+            {'id': 'deposit', 'user_id': 'deposit-player', 'kind': 'DEPOSIT', 'status': 'APPROVED'},
+            {'id': 'withdrawal', 'user_id': 'withdrawal-player', 'kind': 'WITHDRAWAL', 'status': 'APPROVED'},
+        ])
+        deposit_result = await routes_admin.delete_user_account('deposit-player', self.admin)
+        self.assertFalse(deposit_result['reconciliation_required'])
+        withdrawal_result = await routes_admin.delete_user_account('withdrawal-player', self.admin)
+        self.assertIn('pending operator payments', withdrawal_result['retained_activity'])
+
     async def test_repeat_deletion_is_idempotent_and_deleted_players_stay_out_of_lists(self):
         await self._player('deleted-player', username='delete-me')
         await self._player('kept-player', username='keep-me')

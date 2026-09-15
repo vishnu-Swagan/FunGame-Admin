@@ -28,15 +28,45 @@ class _Result:
 
 def _matches(doc, query):
     for key, expected in query.items():
+        if key == '$or':
+            if not any(_matches(doc, clause) for clause in expected):
+                return False
+            continue
+        if key == '$and':
+            if not all(_matches(doc, clause) for clause in expected):
+                return False
+            continue
         actual = doc.get(key)
         if isinstance(expected, dict) and any(str(op).startswith('$') for op in expected):
             if '$exists' in expected and (key in doc) != bool(expected['$exists']):
                 return False
             if '$gte' in expected and (actual is None or actual < expected['$gte']):
                 return False
+            if '$lte' in expected and (actual is None or actual > expected['$lte']):
+                return False
+            if '$nin' in expected and actual in expected['$nin']:
+                return False
+            if '$ne' in expected and actual == expected['$ne']:
+                return False
         elif actual != expected:
             return False
     return True
+
+
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = copy.deepcopy(rows)
+
+    def sort(self, fields):
+        self.rows.sort(key=lambda row: tuple(row.get(field) or '' for field, _ in fields))
+        return self
+
+    def limit(self, limit):
+        self.rows = self.rows[:limit]
+        return self
+
+    async def to_list(self, limit):
+        return self.rows[:limit]
 
 
 class _Collection:
@@ -60,6 +90,9 @@ class _Collection:
             if _matches(row, query):
                 return copy.deepcopy(row)
         return None
+
+    def find(self, query, projection=None):
+        return _Cursor([row for row in self.rows if _matches(row, query)])
 
     async def find_one_and_update(self, query, update, return_document=None, session=None, **kwargs):
         self._mutation('find_one_and_update', session)
@@ -91,6 +124,8 @@ class _Collection:
                     row[key] = copy.deepcopy(value)
                 for key, value in update.get('$inc', {}).items():
                     row[key] = row.get(key, 0) + value
+                for key in update.get('$unset', {}):
+                    row.pop(key, None)
                 return _Result(1)
         return _Result()
 
@@ -474,6 +509,128 @@ class BlackjackAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.database.rows['users'][0]['chip_balance'], 120)
         self.assertEqual(len(self.database.rows['chip_transactions']), 1)
         self.assertEqual(len(self.database.rows['game_rounds']), 1)
+
+    def deleted_player(self, ident='player-1', **overrides):
+        return {
+            'id': ident, 'role': 'PLAYER', 'status': 'DELETED',
+            'deleted_at': '2026-09-15T00:00:00+00:00', 'chip_balance': 80,
+            **overrides,
+        }
+
+    async def test_deleted_player_hand_stands_and_settles_without_login(self):
+        game = _game(dealer=[[10, 'C'], [6, 'D']], shoe=[[4, 'S']])
+        self.database.seed('users', self.deleted_player())
+        self.database.seed('blackjack_games', game)
+
+        result = await route.resolve_deleted_player_hand('player-1')
+
+        self.assertTrue(result['resolved'])
+        settled = self.database.rows['blackjack_games'][0]
+        self.assertEqual(settled['dealer'], [[10, 'C'], [6, 'D'], [4, 'S']])
+        self.assertEqual(settled['hands'][0]['cards'], game['hands'][0]['cards'])
+        self.assertEqual(settled['hands'][0]['outcome'], 'LOSE')
+        self.assertEqual(settled['total_payout'], 0)
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 80)
+        self.assertEqual(self.database.rows['users'][0]['status'], 'DELETED')
+        self.assertEqual(self.database.rows['users'][0]['blackjack_deletion_resolution_status'], 'SETTLED')
+        self.assertEqual(self.database.rows['game_rounds'][0]['automatic_resolution']['reason'], 'ACCOUNT_DELETED')
+
+    async def test_deleted_player_insurance_is_declined_without_extra_stake(self):
+        game = _game(status='insurance', dealer=[[14, 'C'], [13, 'D']])
+        self.database.seed('users', self.deleted_player())
+        self.database.seed('blackjack_games', game)
+
+        await route.resolve_deleted_player_hand('player-1')
+
+        settled = self.database.rows['blackjack_games'][0]
+        self.assertEqual(settled['insurance_bet'], 0)
+        self.assertFalse(settled['insurance_offered'])
+        self.assertEqual(settled['total_staked'], 20)
+        self.assertEqual(settled['hands'][0]['outcome'], 'LOSE')
+        self.assertEqual(settled['automatic_resolution']['insurance_action'], 'DECLINE')
+        self.assertEqual(self.database.rows.get('chip_transactions', []), [])
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 80)
+
+    async def test_deleted_player_split_hands_preserve_sources_and_existing_side_payout(self):
+        game = _game(total_payout=30)
+        game['hands'][0]['stake_refs'] = ['real-stake']
+        game['hands'].append({
+            **copy.deepcopy(game['hands'][0]), 'cards': [[10, 'S'], [6, 'H']],
+            'stake_refs': ['bonus-stake'],
+        })
+        game['total_staked'] = 40
+        self.database.seed('users', self.deleted_player(chip_balance=90))
+        self.database.seed('blackjack_games', game)
+
+        await route.resolve_deleted_player_hand('player-1')
+
+        settled = self.database.rows['blackjack_games'][0]
+        self.assertEqual([hand['outcome'] for hand in settled['hands']], ['WIN', 'LOSE'])
+        self.assertEqual(settled['total_payout'], 70)
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 130)
+        payouts = self.database.rows['chip_transactions']
+        self.assertEqual(len(payouts), 1)
+        self.assertEqual(payouts[0]['source_refs'], ['real-stake'])
+        self.assertEqual(payouts[0]['amount'], 40)
+
+    async def test_deleted_player_resolution_is_exactly_once_on_races_and_driver_retry(self):
+        self.database.seed('users', self.deleted_player())
+        self.database.seed('blackjack_games', _game())
+        self.database.retry_callback_once = True
+        results = await asyncio.gather(
+            route.resolve_deleted_player_hand('player-1'),
+            route.resolve_deleted_player_hand('player-1'),
+        )
+        self.assertEqual(sum(result['resolved'] for result in results), 1)
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 120)
+        self.assertEqual(len(self.database.rows['chip_transactions']), 1)
+        self.assertEqual(len(self.database.rows['game_rounds']), 1)
+        self.assertTrue(all(session is not None for _, _, session in self.database.mutations))
+
+    async def test_resolution_failure_preserves_hand_wallet_and_marker_until_retry(self):
+        game = _game()
+        player = self.deleted_player()
+        self.database.seed('users', player)
+        self.database.seed('blackjack_games', game)
+        self.database.fail_next('game_rounds', 'insert_one')
+        with self.assertRaisesRegex(RuntimeError, 'injected'):
+            await route.resolve_deleted_player_hand('player-1')
+        self.assertEqual(self.database.rows['blackjack_games'][0], game)
+        self.assertEqual(self.database.rows['users'][0], player)
+        self.assertEqual(self.database.rows.get('chip_transactions', []), [])
+        self.assertTrue((await route.resolve_deleted_player_hand('player-1'))['resolved'])
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 120)
+
+    async def test_sweeper_backoff_preserves_legacy_uncertainty_without_starving_next_user(self):
+        legacy = _game(status='done', total_payout=40)
+        self.database.seed('users', self.deleted_player(), self.deleted_player('player-2'))
+        self.database.seed('blackjack_games', legacy)
+
+        first = await route.reconcile_deleted_player_hands(limit=1)
+        self.assertEqual(first['errors'], 1)
+        self.assertEqual(self.database.rows['blackjack_games'][0], legacy)
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 80)
+        self.assertEqual(self.database.rows['users'][0]['blackjack_deletion_resolution_status'], 'REVIEW_REQUIRED')
+        self.assertIn('blackjack_deletion_resolution_next_at', self.database.rows['users'][0])
+        self.assertEqual(self.database.rows['admin_audit'][0]['metadata']['error_code'], 'LEGACY_HAND_REVIEW_REQUIRED')
+
+        second = await route.reconcile_deleted_player_hands(limit=1)
+        self.assertEqual(second, {'checked': 1, 'settled': 0, 'no_open_hand': 1, 'errors': 0})
+        self.assertEqual(self.database.rows['users'][1]['blackjack_deletion_resolution_status'], 'NO_OPEN_HAND')
+        self.assertEqual((await route.reconcile_deleted_player_hands())['checked'], 0)
+
+    async def test_sweeper_preserves_malformed_hand_and_active_players_are_untouched(self):
+        malformed = _game(dealer=[[10, 'C'], [6, 'D']], shoe=[])
+        self.database.seed('users', self.deleted_player())
+        self.database.seed('blackjack_games', malformed)
+        result = await route.reconcile_deleted_player_hands()
+        self.assertEqual(result['errors'], 1)
+        self.assertEqual(self.database.rows['blackjack_games'][0], malformed)
+        self.assertEqual(self.database.rows['users'][0]['chip_balance'], 80)
+        self.database.seed('users', {'id': 'player-1', 'role': 'PLAYER', 'status': 'ACTIVE', 'chip_balance': 80})
+        self.assertEqual((await route.resolve_deleted_player_hand('player-1'))['status'], 'NOT_DELETED')
+        self.assertEqual((await route.reconcile_deleted_player_hands())['checked'], 0)
+        self.assertEqual(self.database.rows['blackjack_games'][0], malformed)
 
     async def test_missing_transaction_support_fails_closed(self):
         self.database.client.available = False

@@ -887,6 +887,9 @@ async def create_hosted_deposit(
         "provider_order_id": None,
         "provider_reference": None,
         "checkout_url": None,
+        # Distinguish a reservation that never reached the provider boundary
+        # from legacy rows where a missing id may mean an uncertain submission.
+        "checkout_authorization_required": True,
         "idempotency_key": key,
         "created_at": utcnow(),
         "updated_at": utcnow(),
@@ -1293,6 +1296,48 @@ async def settle_operator_deposit(
     return await settle_admin_review_deposit(request_id, authoritative, actor=actor)
 
 
+async def _close_deleted_unissued_checkout(
+    row: Mapping[str, Any], *, actor: str,
+) -> dict[str, Any] | None:
+    """Close only orders proven never authorized for external submission."""
+    user = await db.users.find_one({"id": row["user_id"]}, {"_id": 0})
+    if not account_is_deleted(user):
+        return None
+    # A committed authorization races on the same users row as deletion. Once
+    # deletion wins, no authorization can be added; this CAS also protects an
+    # authorization/provider response that committed before the tombstone.
+    closed = await db[COLLECTION].find_one_and_update(
+        {
+            "id": row["id"], "source": UPI_SOURCE, "status": "CREATED",
+            "checkout_authorization_required": True,
+            "checkout_authorized_at": None,
+            "provider_order_id": {"$in": [None, ""]},
+            "checkout_url": {"$in": [None, ""]},
+            "provider_reference": {"$in": [None, ""]},
+            "utr_claim": {"$in": [None, ""]},
+        },
+        {"$set": {
+            "status": "FAILED", "last_error": "ACCOUNT_DELETED_BEFORE_CHECKOUT",
+            "resolved_at": utcnow(), "resolved_by": actor, "updated_at": utcnow(),
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    if closed:
+        return {"id": str(row["id"]), "status": "FAILED", "terminal": True}
+    return None
+
+
+async def _schedule_hosted_status_retry(request_id: str, error: str) -> None:
+    await db[COLLECTION].update_one(
+        {"id": request_id, "source": UPI_SOURCE, "status": {"$in": ["CREATED", "PENDING"]}},
+        {"$set": {
+            "last_error": error,
+            "next_reconcile_at": utcnow() + timedelta(seconds=15),
+            "updated_at": utcnow(),
+        }, "$inc": {"reconcile_attempts": 1}},
+    )
+
+
 async def _reconcile_upi_row(
     row: Mapping[str, Any], gateway: PaymentProvider, *, actor: str,
 ) -> dict[str, Any]:
@@ -1301,19 +1346,45 @@ async def _reconcile_upi_row(
         return {"id": request_id, "status": row["status"], "terminal": True}
     lookup_order_id = str(row.get("provider_order_id") or "").strip()
     if not lookup_order_id:
+        closed = await _close_deleted_unissued_checkout(row, actor=actor)
+        if closed:
+            return closed
         # Checkout uses deposit_id as the SgPay order_id. A pending row may
         # already exist at the provider even if we never persisted the id.
-        try:
-            authoritative = await gateway.get_payment_status(
-                str(row["id"]), expected_amount_paise=int(row["amount_paise"]),
-            )
-        except (ProviderConfigurationError, ProviderRequestError):
-            stored, _ = await _ensure_hosted_checkout(row, gateway)
-            logging.getLogger("operator_rail").info(
-                "hosted UPI missing provider_order_id request_id=%s fell back to checkout",
-                request_id,
-            )
-            return {"id": request_id, "status": stored.get("status", "PENDING")}
+    try:
+        authoritative = await gateway.get_payment_status(
+            lookup_order_id or request_id, expected_amount_paise=int(row["amount_paise"]),
+        )
+    except (ProviderConfigurationError, ProviderRequestError) as exc:
+        if not lookup_order_id:
+            # Account deletion may have committed during the status lookup.
+            closed = await _close_deleted_unissued_checkout(row, actor=actor)
+            if closed:
+                return closed
+            user = await db.users.find_one({"id": row["user_id"]}, {"_id": 0})
+            if user and not account_is_deleted(user):
+                try:
+                    stored, _ = await _ensure_hosted_checkout(row, gateway)
+                except HTTPException:
+                    closed = await _close_deleted_unissued_checkout(row, actor=actor)
+                    if closed:
+                        return closed
+                    await _schedule_hosted_status_retry(request_id, "CHECKOUT_RETRY_UNAVAILABLE")
+                    raise
+                logging.getLogger("operator_rail").info(
+                    "hosted UPI missing provider_order_id request_id=%s fell back to checkout",
+                    request_id,
+                )
+                return {"id": request_id, "status": stored.get("status", "PENDING")}
+        # Issued, authorized-but-uncertain and legacy orders keep their state.
+        # Deferring failures prevents the oldest due rows starving later work;
+        # deleted players must never be sent through a new checkout attempt.
+        await _schedule_hosted_status_retry(request_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            "code": "UPI_STATUS_UNAVAILABLE",
+            "message": "UPI payment status is temporarily unavailable.",
+        }) from exc
+    if not lookup_order_id:
         await db[COLLECTION].update_one(
             {"id": request_id, "source": UPI_SOURCE},
             {"$set": {"provider_order_id": str(row["id"]), "updated_at": utcnow()}},
@@ -1321,24 +1392,6 @@ async def _reconcile_upi_row(
         logging.getLogger("operator_rail").info(
             "hosted UPI looked up request_id=%s by deposit id", request_id,
         )
-        return await settle_hosted_deposit(request_id, authoritative, actor=actor)
-    try:
-        authoritative = await gateway.get_payment_status(
-            lookup_order_id, expected_amount_paise=int(row["amount_paise"]),
-        )
-    except (ProviderConfigurationError, ProviderRequestError) as exc:
-        await db[COLLECTION].update_one(
-            {"id": request_id, "source": UPI_SOURCE},
-            {"$set": {
-                "last_error": type(exc).__name__,
-                "next_reconcile_at": utcnow() + timedelta(seconds=15),
-                "updated_at": utcnow(),
-            }, "$inc": {"reconcile_attempts": 1}},
-        )
-        raise HTTPException(status_code=503, detail={
-            "code": "UPI_STATUS_UNAVAILABLE",
-            "message": "UPI payment status is temporarily unavailable.",
-        }) from exc
     return await settle_hosted_deposit(request_id, authoritative, actor=actor)
 
 
@@ -1509,7 +1562,7 @@ async def reconcile_hosted_batch(
     }
     rows = await db[COLLECTION].find(
         query, {"_id": 0, "id": 1},
-    ).sort("created_at", 1).limit(cap).to_list(cap)
+    ).sort([("next_reconcile_at", 1), ("created_at", 1)]).limit(cap).to_list(cap)
     updated = errors = 0
     request_ids = [row["id"] for row in rows]
     settled = HOSTED_TERMINAL | {"APPROVED"}

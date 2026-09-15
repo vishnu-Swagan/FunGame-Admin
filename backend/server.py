@@ -99,6 +99,20 @@ async def _aviator_keepalive():
         await asyncio.sleep(0.7)
 
 
+async def _deleted_player_game_worker():
+    """Resolve retained hands without depending on the removed player's login."""
+    while True:
+        try:
+            result = await routes_blackjack.reconcile_deleted_player_hands(limit=25)
+            if result.get('settled') or result.get('errors'):
+                logger.info('deleted player game reconciliation: %s', result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception('deleted player game reconciliation failed')
+        await asyncio.sleep(10)
+
+
 async def _financial_worker():
     """Leader-only financial, hosted-UPI, and SgPay payout reconciliation loops."""
     import sgpay_payout
@@ -325,6 +339,7 @@ async def lifespan(app: FastAPI):
 
     keepalive = asyncio.create_task(_aviator_keepalive())
     financial_worker = asyncio.create_task(_financial_worker())
+    deleted_player_game_worker = asyncio.create_task(_deleted_player_game_worker())
     logger.info(
         'Chakri.Casino ready - 11 reviewed games approved; '
         'remaining catalogue coming soon'
@@ -332,6 +347,7 @@ async def lifespan(app: FastAPI):
     yield
     keepalive.cancel()
     financial_worker.cancel()
+    deleted_player_game_worker.cancel()
     client.close()
 
 

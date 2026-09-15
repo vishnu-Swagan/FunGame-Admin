@@ -204,6 +204,90 @@ class DeletedHostedPaymentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order["status"], "CREATED")
         self.assertIsNone(order["provider_order_id"])
         self.assertEqual(self.gateway.create_calls, [])
+        self.assertTrue(order["checkout_authorization_required"])
+        unavailable = AsyncMock(side_effect=upi.ProviderRequestError("not issued"))
+        with patch.object(self.gateway, "get_payment_status", unavailable):
+            result = await upi.operator_rail.reconcile_hosted_deposit(order["id"], self.gateway)
+        self.assertEqual(result["status"], "FAILED")
+        unavailable.assert_not_awaited()
+        stored = await self.db[upi.operator_rail.COLLECTION].find_one({"id": order["id"]})
+        self.assertEqual(stored["last_error"], "ACCOUNT_DELETED_BEFORE_CHECKOUT")
+
+    async def test_never_authorized_deleted_orders_do_not_starve_later_batch(self):
+        paid, _ = await upi.operator_rail.create_hosted_deposit(
+            self.user, 10000, "newer-paid-order", self.gateway,
+        )
+        stamp = upi.operator_rail.utcnow()
+        for index in range(25):
+            await self.db[upi.operator_rail.COLLECTION].insert_one({
+                **paid, "id": f"never-issued-{index}", "status": "CREATED",
+                "provider_order_id": None, "checkout_url": None,
+                "checkout_authorized_at": None,
+                "created_at": stamp - timedelta(days=1),
+                "next_reconcile_at": stamp - timedelta(days=1),
+            })
+        await self.db[upi.operator_rail.COLLECTION].update_one(
+            {"id": paid["id"]}, {"$set": {"next_reconcile_at": stamp}},
+        )
+        await self.delete()
+        self.gateway.status = upi.DepositStatus("PAID", 10000, "INR", "BATCHPAID12345")
+        first = await upi.operator_rail.reconcile_hosted_batch(self.gateway)
+        second = await upi.operator_rail.reconcile_hosted_batch(self.gateway)
+        self.assertEqual(first, {"checked": 25, "updated": 25, "errors": 0})
+        self.assertEqual(second, {"checked": 1, "updated": 1, "errors": 0})
+        self.assertEqual(self.gateway.status_calls, [(paid["id"], 10000)])
+        self.assertEqual(len(self.gateway.create_calls), 1)
+        self.assertEqual(await self.db[upi.operator_rail.COLLECTION].count_documents({
+            "status": "FAILED", "last_error": "ACCOUNT_DELETED_BEFORE_CHECKOUT",
+        }), 25)
+
+    async def test_uncertain_deleted_orders_defer_without_starving_later_settlements(self):
+        paid, _ = await upi.operator_rail.create_hosted_deposit(
+            self.user, 10000, "newer-paid-after-uncertain", self.gateway,
+        )
+        stamp = upi.operator_rail.utcnow()
+        for index in range(25):
+            row = {
+                **paid, "id": f"uncertain-{index}", "status": "CREATED",
+                "provider_order_id": None, "checkout_url": None,
+                "created_at": stamp - timedelta(days=1),
+                "next_reconcile_at": stamp - timedelta(days=1),
+            }
+            if index % 3 == 1:  # Legacy submission with no reliable authorization marker.
+                row.pop("checkout_authorization_required")
+                row.pop("checkout_authorized_at")
+            elif index % 3 == 2:  # Issued order, including a persisted provider id.
+                row.update(status="PENDING", provider_order_id=row["id"])
+            await self.db[upi.operator_rail.COLLECTION].insert_one(row)
+        await self.db[upi.operator_rail.COLLECTION].update_one(
+            {"id": paid["id"]}, {"$set": {"next_reconcile_at": stamp}},
+        )
+        await self.delete()
+        clock = [stamp]
+
+        async def slow_status(order_id, *, expected_amount_paise):
+            if order_id == paid["id"]:
+                return upi.DepositStatus("PAID", 10000, "INR", "FAIRBATCH12345")
+            clock[0] += timedelta(seconds=2)
+            raise upi.ProviderRequestError("status temporarily unavailable")
+
+        with patch.object(upi.operator_rail, "utcnow", side_effect=lambda: clock[0]), \
+             patch.object(self.gateway, "get_payment_status", side_effect=slow_status):
+            first = await upi.operator_rail.reconcile_hosted_batch(self.gateway)
+            # Some retries are already due after a slow batch; the untouched
+            # newer order must nevertheless be checked before those retries.
+            second = await upi.operator_rail.reconcile_hosted_batch(self.gateway, limit=1)
+        self.assertEqual(first, {"checked": 25, "updated": 0, "errors": 25})
+        self.assertEqual(second, {"checked": 1, "updated": 1, "errors": 0})
+        self.assertEqual(len(self.gateway.create_calls), 1)
+        uncertain = await self.db[upi.operator_rail.COLLECTION].find_one({"id": "uncertain-0"})
+        self.assertEqual(uncertain["status"], "CREATED")
+        self.assertEqual(uncertain["reconcile_attempts"], 1)
+        self.assertEqual(uncertain["last_error"], "ProviderRequestError")
+        self.assertIsNotNone(uncertain["next_reconcile_at"])
+        self.gateway.status = upi.DepositStatus("PAID", 10000, "INR", "RECOVERED12345")
+        recovered = await upi.operator_rail.reconcile_hosted_deposit("uncertain-0", self.gateway)
+        self.assertEqual(recovered["status"], "CREDITED")
 
     async def test_retained_order_projection_requires_predeletion_issued_order(self):
         stamp = upi.operator_rail.utcnow()
