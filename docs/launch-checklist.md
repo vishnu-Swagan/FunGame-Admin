@@ -1,5 +1,33 @@
 # Chakri.Casino staging and production launch checklist
 
+## Wallet and game timing maintenance release — 2026-09-16
+
+Scope: remove the provider-information panel above the wallet tabs; change American Roulette to 50 seconds of betting, 10 seconds of spinning, and 10 seconds of results/buffer; change Pappu Pictures to 20 seconds of betting while retaining its 8-second reveal and 4-second result. The existing React frontend, FastAPI backend, and MongoDB on Render remain in place. No new subscriptions, credentials, payment settings, or environment changes are needed. Allow approximately 15–25 minutes after authenticated browser access is available.
+
+- [x] 🤖 **Review and test the exact release changes** — 5–10 minutes.
+
+  > Prompt: “Review the wallet cleanup and both game timers. Verify old rounds retain their original settlement deadlines, new round identifiers do not collide with old ones, other games remain unchanged, and wallet forms retain their payment safeguards. Run the backend and frontend suites and production build using mocked services only.”
+
+  **You'll know it worked when:** the backend suite (438 tests), frontend suite (75 suites / 434 tests), and production build pass. Mocked browser checks cover both complete game cycles and mobile wallet navigation without placing bets or making payments.
+
+- [ ] 🤝 **Confirm browser access and briefly pause only the two affected games** — 2–5 minutes.
+
+  Open Chrome while the Mac is unlocked. In the authenticated Render shell, check only the `reviewed_game_set_v1` flag in `system_config[key="main"]`; it must already be true so restarting the API preserves paused games. Do not set that migration flag merely to pass this check. In Chakri Admin → Games, record the current status of `fun-roulette` and `pappu-pictures`, then set those two games to `MAINTENANCE`. Wait at least 60 seconds after both pauses are confirmed. Cost: no new service charge.
+
+  **You'll know it worked when:** both games are paused before any merge to `main`, their previous statuses are recorded, and all pre-pause betting windows have ended. Existing bets and history are preserved; open bets can settle through the new code after reopening.
+
+- [ ] 🤖 **Deploy the reviewed release to both existing Render services** — 5–10 minutes.
+
+  > Prompt: “Create and merge the tested maintenance release through GitHub after confirming the two game pauses. Wait for both frontend and API deployment records to succeed for the same main commit. The frontend deploys on commit and the API after checks pass. Preserve live configuration; do not synchronize the Render Blueprint, change payment flags, or alter credentials.”
+
+  **You'll know it worked when:** both services run the reviewed release and the public API remains healthy. The pre-release health response has `financial_ready:false`; this unrelated payment readiness condition is not fixed or changed by this release.
+
+- [ ] 🤖 **Verify the deployed screens and restore the recorded game statuses** — 3–5 minutes.
+
+  > Prompt: “Check deployed frontend assets and mobile wallet navigation, and exercise both timer displays with isolated mocked game responses so no live bets, payouts, or payments are created. Confirm every API instance is updated before restoring each game's recorded status. Read back both statuses. Preserve the rollout evidence and report exactly what was verified.”
+
+  **You'll know it worked when:** the wallet panel is absent, Roulette displays 50/10/10, Pappu displays 20-second betting, both deployment records succeed, and both games have their original availability restored. Once new-format round bets exist, do not roll back to the old backend binary: pause the affected games and use a forward fix or separately reviewed reconciliation instead. Detailed safeguards are in `roulette-timing-rollout.md` and `pappu-timing-rollout.md`.
+
 ## Signup SMS maintenance release — 2026-09-16
 
 This is a narrow update to the existing React frontend and FastAPI backend on Render. It does not change SMS credentials, reopen deleted accounts, remove OTP verification, or change payment settings. No new service or subscription is required. Allow approximately 15–25 minutes for automated checks, deployment, and verification; SMS carrier delivery still requires a handset check.

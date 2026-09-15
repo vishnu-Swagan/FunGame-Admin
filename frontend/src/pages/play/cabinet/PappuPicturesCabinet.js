@@ -31,7 +31,7 @@ const CHIP_THEME = {
   100: ["#e53a34", "#921410", "#fff0dc", "#4c0807"],
   200: ["#8e35c2", "#4b146d", "#f6e3ff", "#270a38"],
 };
-const DEMO_BET_SECONDS = 10;
+const DEMO_BET_SECONDS = 20;
 const DEMO_REVEAL_SECONDS = 8;
 const DEMO_RESULT_SECONDS = 4;
 

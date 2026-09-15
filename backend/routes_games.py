@@ -19,8 +19,9 @@ import ledger
 from game_engines import (RNG, MIN_BET, roulette_multiplier, roulette_color,
                           ROULETTE_POCKETS, roulette_payout)
 from live_engines import (
-    ROULETTE_TIMING, betting_mutation_open, fixed_cycle_clock,
-    roulette_history_max_round,
+    ROULETTE_TIMING, ROULETTE_LEGACY_TIMING, ROULETTE_ROUND_ID_BASE,
+    betting_mutation_open, fixed_cycle_clock, roulette_cycle_clock,
+    roulette_history_max_round, roulette_round_start,
 )
 from game_access import require_playable_game
 from transactions import run_game_transaction
@@ -70,9 +71,9 @@ async def play_game(slug: str, body: PlayRequest, user: dict = Depends(require_a
 # ---------------- Live American Roulette (universal synchronized rounds) ----------------
 # Rounds are derived from universal epoch time: every player worldwide sees the
 # same round number, the same countdown and the same winning number.
-BETTING_SECONDS = ROULETTE_TIMING['bet']       # 0-30s: bets open
-SPIN_SECONDS = ROULETTE_TIMING['spin']         # 30-50s: bets locked while the wheel spins
-ROUND_SECONDS = sum(ROULETTE_TIMING.values())  # 50-60s: result display, then the next round
+BETTING_SECONDS = ROULETTE_TIMING['bet']       # 0-50s: bets open
+SPIN_SECONDS = ROULETTE_TIMING['spin']         # 50-60s: bets locked while the wheel spins
+ROUND_SECONDS = sum(ROULETTE_TIMING.values())  # 60-70s: result display and next-round buffer
 BETTING_MUTATION_GUARD = 0.4
 
 # Table limits (anti-Martingale). Even-money positions (red/black, odd/even,
@@ -111,10 +112,30 @@ def _roulette_position_key(bet_type, value):
 
 def _roulette_clock(now=None):
     now = time.time() if now is None else now
-    round_number, phase, phase_ends_in, round_ends_in, _ = fixed_cycle_clock(
-        now, BETTING_SECONDS, SPIN_SECONDS, ROULETTE_TIMING['result'], 'SPINNING'
-    )
+    round_number, phase, phase_ends_in, round_ends_in, _ = roulette_cycle_clock(now)
     return round_number, phase, phase_ends_in, round_ends_in
+
+
+def _roulette_closed_rounds(current_round, phase, now):
+    """Only reveal/settle each schedule's rounds after its own spin has ended.
+
+    Legacy OPEN bets remain recoverable after the timing release, but a request
+    during rollout must not settle a still-spinning legacy round early.
+    """
+    history_max = roulette_history_max_round(current_round, phase)
+    if current_round < ROULETTE_ROUND_ID_BASE:
+        return {'round_number': {'$lte': history_max}}
+    legacy_round, legacy_phase, *_ = fixed_cycle_clock(
+        now, ROULETTE_LEGACY_TIMING['bet'], ROULETTE_LEGACY_TIMING['spin'],
+        ROULETTE_LEGACY_TIMING['result'], 'SPINNING',
+    )
+    return {'$or': [
+        {'round_number': {'$gte': ROULETTE_ROUND_ID_BASE, '$lte': history_max}},
+        {'round_number': {
+            '$lt': ROULETTE_ROUND_ID_BASE,
+            '$lte': roulette_history_max_round(legacy_round, legacy_phase),
+        }},
+    ]}
 
 
 def _require_roulette_betting(expected_round=None, message='Bets are closed - wait for the next round.'):
@@ -151,13 +172,12 @@ async def _roulette_round_result(round_number: int):
         return str(existing['winning_number'])
 
 
-async def _roulette_settle_user(user_id: str, current_round: int, phase: str):
+async def _roulette_settle_user(user_id: str, current_round: int, phase: str, now=None):
     """Idempotently settle all of this user's OPEN bets from closed betting windows."""
     query = {'user_id': user_id, 'slug': 'fun-roulette-bet', 'status': 'OPEN'}
-    if phase == 'RESULT':
-        query['round_number'] = {'$lte': current_round}
-    else:
-        query['round_number'] = {'$lt': current_round}
+    query.update(_roulette_closed_rounds(
+        current_round, phase, time.time() if now is None else now,
+    ))
     # Discover rounds without applying a UI-page cap. Each complete round is
     # then read and settled inside its own transaction below.
     round_numbers = await db.roulette_bets.distinct('round_number', query)
@@ -240,10 +260,11 @@ async def roulette_state(user: dict = Depends(require_active_player)):
     phase_offset = (BETTING_SECONDS if phase == 'BETTING'
                     else BETTING_SECONDS + SPIN_SECONDS if phase == 'SPINNING'
                     else ROUND_SECONDS)
-    phase_ends_at = round_number * ROUND_SECONDS + phase_offset
+    round_started_at = roulette_round_start(round_number)
+    phase_ends_at = round_started_at + phase_offset
 
     # Settle anything owed to this user (idempotent, lazy)
-    settled = await _roulette_settle_user(user['id'], round_number, phase)
+    settled = await _roulette_settle_user(user['id'], round_number, phase, clock_sampled_at)
 
     winning_number = None
     if phase != 'BETTING':
@@ -254,9 +275,8 @@ async def roulette_state(user: dict = Depends(require_active_player)):
         {'_id': 0, 'bet_type': 1, 'value': 1, 'amount': 1},
     ).to_list(100)
 
-    history_max = roulette_history_max_round(round_number, phase)
     last = await db.roulette_rounds.find(
-        {'round_number': {'$lte': history_max}}, {'_id': 0}
+        _roulette_closed_rounds(round_number, phase, clock_sampled_at), {'_id': 0}
     ).sort('round_number', -1).to_list(12)
     balance = await _fresh_balance(user['id'])
     return {
@@ -266,7 +286,7 @@ async def roulette_state(user: dict = Depends(require_active_player)):
         'next_round_in': next_round_in,
         'clock_sampled_at': clock_sampled_at,
         'phase_ends_at': phase_ends_at,
-        'round_ends_at': (round_number + 1) * ROUND_SECONDS,
+        'round_ends_at': round_started_at + ROUND_SECONDS,
         'betting_seconds': BETTING_SECONDS,
         'spin_seconds': SPIN_SECONDS,
         'round_seconds': ROUND_SECONDS,

@@ -228,19 +228,6 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
   );
   const buyFeatureAvailable = hostedBuyAvailable || operatorBuyAvailable;
   const withdrawalFeatureAvailable = hostedWithdrawAvailable || operatorWithdrawAvailable;
-  const providerReadinessCopy = hostedUpiBuyAvailable && operatorWithdrawAvailable
-    ? "Deposit securely through SgPay hosted UPI checkout. Withdrawals are submitted for Admin review and paid to your saved bank or UPI method after approval. Funds are credited only after server verification."
-    : hostedUpiBuyAvailable && hostedWithdrawAvailable
-      ? "Deposit securely through SgPay hosted UPI checkout. Withdrawals use the approved provider selected by the secure server. Funds are credited only after server verification."
-      : hostedBuyAvailable && hostedWithdrawAvailable
-        ? "Deposits and withdrawals are completed by the approved provider selected by the secure server. Funds are credited only after server verification; returning from checkout never changes your balance by itself."
-        : operatorBuyAvailable || operatorWithdrawAvailable
-          ? "Deposit and withdrawal requests are submitted for Admin review. Your wallet changes only after verified approval."
-          : buyFeatureAvailable
-            ? "Deposits are completed by the approved provider selected by the secure server. Withdrawals are not active yet. Funds are credited only after server verification."
-            : withdrawalFeatureAvailable
-              ? "Withdrawals are completed by the approved provider selected by the secure server. Deposits are not active yet."
-              : "Payment services are not active yet. Deposits and withdrawals remain unavailable while secure provider setup and server readiness checks are completed.";
   const buyConfigured = Boolean(
     config.chipsPerInr
     && config.minDepositPaise
@@ -445,10 +432,6 @@ export default function ChipsPage({ checkoutNavigator = defaultCheckoutNavigator
         </section>
       )}
       {wallet.active_mission && <MissionCard mission={wallet.active_mission} onOpen={() => navigate(`/bonus-mission/${encodeURIComponent(wallet.active_mission.id || wallet.active_mission.mission_id)}`)} />}
-
-      <div className="rounded-2xl border border-primary/25 bg-primary/8 p-4 text-xs leading-relaxed text-white/65">
-        {providerReadinessCopy}
-      </div>
 
       <Tabs value={tab} onValueChange={changeTab}>
         <TabsList className="grid h-12 w-full grid-cols-3 rounded-xl border border-white/10 bg-white/5">

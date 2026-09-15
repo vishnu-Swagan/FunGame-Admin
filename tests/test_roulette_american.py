@@ -5,16 +5,18 @@ from fastapi import HTTPException
 from game_engines import (AMERICAN_ORDER, ROULETTE_POCKETS, ROULETTE_SECTORS,
                           ROULETTE_RED, roulette_color, roulette_multiplier,
                           roulette_payout, LEGAL_INSIDE)
-from live_engines import ROULETTE_TIMING, betting_mutation_open, fixed_cycle_clock, roulette_history_max_round
+from live_engines import (ROULETTE_TIMING, ROULETTE_ROUND_ID_BASE,
+                          betting_mutation_open, roulette_cycle_clock,
+                          roulette_history_max_round)
 
 fail = []
 def ck(cond, msg):
     if not cond: fail.append(msg)
 
 # ---- the live broadcast clock ----
-ck(ROULETTE_TIMING == {"bet": 30, "spin": 20, "result": 10},
-   "roulette must run a 60s cycle with betting locked after 30s")
-ck(sum(ROULETTE_TIMING.values()) == 60, "roulette round must total exactly 60s")
+ck(ROULETTE_TIMING == {"bet": 50, "spin": 10, "result": 10},
+   "roulette must run a 70s cycle with betting locked after 50s")
+ck(sum(ROULETTE_TIMING.values()) == 70, "roulette round must total exactly 70s")
 ck(roulette_history_max_round(800, "BETTING") == 799,
    "current roulette round must stay out of history while betting")
 ck(roulette_history_max_round(800, "SPINNING") == 799,
@@ -27,15 +29,16 @@ ck(not betting_mutation_open("BETTING", .40, 800, expected_round=800),
    "roulette mutation guard must close at the 0.4s boundary")
 
 def roulette_clock(now):
-    return fixed_cycle_clock(now, 30, 20, 10, "SPINNING")
+    round_number, *clock = roulette_cycle_clock(now)
+    return (round_number - ROULETTE_ROUND_ID_BASE, *clock)
 
 for timestamp, expected in [
-    (29.99, (0, "BETTING", 0.01)),
-    (30.00, (0, "SPINNING", 20.0)),
-    (49.99, (0, "SPINNING", 0.01)),
-    (50.00, (0, "RESULT", 10.0)),
-    (59.99, (0, "RESULT", 0.01)),
-    (60.00, (1, "BETTING", 30.0)),
+    (49.99, (0, "BETTING", 0.01)),
+    (50.00, (0, "SPINNING", 10.0)),
+    (59.99, (0, "SPINNING", 0.01)),
+    (60.00, (0, "RESULT", 10.0)),
+    (69.99, (0, "RESULT", 0.01)),
+    (70.00, (1, "BETTING", 50.0)),
 ]:
     ck(roulette_clock(timestamp)[:3] == expected,
        f"roulette clock boundary {timestamp:.2f} must be {expected}")

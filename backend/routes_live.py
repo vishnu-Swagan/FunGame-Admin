@@ -32,7 +32,8 @@ from live_engines import (
     LIVE_GAMES, SIDE_OPTIONS, generate_outcome, validate_selection,
     settle_bet, summarize_outcome, make_bingo_card, paytable_for, limits_for,
     PICTURE_SYMBOLS, PICTURE_BASE_MULTIPLIER, betting_mutation_open,
-    fixed_cycle_clock,
+    fixed_cycle_clock, live_cycle_clock, live_round_start,
+    PAPPU_LEGACY_TIMING, PAPPU_ROUND_ID_BASE,
 )
 from game_access import require_playable_game
 from transactions import run_game_transaction
@@ -549,12 +550,29 @@ class LiveBet(BaseModel):
 
 
 def _live_clock(slug, now=None):
-    cfg = LIVE_GAMES[slug]
     now = time.time() if now is None else now
-    rn, phase, ends, _, total = fixed_cycle_clock(
-        now, cfg['bet'], cfg['reveal'], cfg['result']
-    )
+    rn, phase, ends, _, total = live_cycle_clock(slug, now)
     return rn, phase, round(ends, 2), total
+
+
+def _live_closed_rounds(slug, current_rn, phase, now, *, include_current_result=True):
+    """Preserve each schedule's settlement deadline across the Pappu update.
+
+    History excludes the current round even during RESULT, matching the existing
+    roadmap policy. Settlement includes it only after its reveal has completed.
+    """
+    current_max = current_rn if include_current_result and phase == 'RESULT' else current_rn - 1
+    if slug != 'pappu-pictures' or current_rn < PAPPU_ROUND_ID_BASE:
+        return {'round_number': {'$lte': current_max}}
+    legacy_rn, legacy_phase, *_ = fixed_cycle_clock(
+        now, PAPPU_LEGACY_TIMING['bet'], PAPPU_LEGACY_TIMING['reveal'],
+        PAPPU_LEGACY_TIMING['result'],
+    )
+    legacy_max = legacy_rn if include_current_result and legacy_phase == 'RESULT' else legacy_rn - 1
+    return {'$or': [
+        {'round_number': {'$gte': PAPPU_ROUND_ID_BASE, '$lte': current_max}},
+        {'round_number': {'$lt': PAPPU_ROUND_ID_BASE, '$lte': legacy_max}},
+    ]}
 
 
 BETTING_MUTATION_GUARD = 0.4
@@ -611,10 +629,12 @@ async def _live_outcome(slug, rn):
         return final
 
 
-async def _live_settle_user(user_id, slug, current_rn, phase):
+async def _live_settle_user(user_id, slug, current_rn, phase, now=None):
     """Idempotently settle this user's OPEN bets from closed betting windows."""
     query = {'user_id': user_id, 'slug': slug, 'status': 'OPEN'}
-    query['round_number'] = {'$lte': current_rn} if phase == 'RESULT' else {'$lt': current_rn}
+    query.update(_live_closed_rounds(
+        slug, current_rn, phase, time.time() if now is None else now,
+    ))
     # Discover rounds without applying a UI-page cap. Each complete round is
     # then read and settled inside its own transaction below.
     round_numbers = await db.live_bets.distinct('round_number', query)
@@ -694,8 +714,9 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
     phase_offset = (LIVE_GAMES[slug]['bet'] if phase == 'BETTING'
                     else LIVE_GAMES[slug]['bet'] + LIVE_GAMES[slug]['reveal'] if phase == 'REVEAL'
                     else total)
-    phase_ends_at = rn * total + phase_offset
-    settled = await _live_settle_user(user['id'], slug, rn, phase)
+    round_started_at = live_round_start(slug, rn)
+    phase_ends_at = round_started_at + phase_offset
+    settled = await _live_settle_user(user['id'], slug, rn, phase, clock_sampled_at)
 
     outcome = None
     if phase != 'BETTING':
@@ -705,18 +726,23 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
     # rounds. Other cabinets only need their compact ten-result strip.
     history_limit = 100 if slug in ('seven-up-down', 'andar-bahar', 'pappu-pictures') else 10
     history_floor = history_limit
+    history_query = {'slug': slug, **_live_closed_rounds(
+        slug, rn, phase, clock_sampled_at, include_current_result=False,
+    )}
     prev = await db.live_outcomes.find(
-        {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
+        history_query, {'_id': 0, 'round_number': 1, 'summary': 1}
     ).sort('round_number', -1).to_list(history_limit)
     if len(prev) < history_floor:
         have = {p['round_number'] for p in prev}
-        missing = [rn - i for i in range(1, history_floor + 1) if rn - i >= 0 and rn - i not in have]
+        namespace_floor = PAPPU_ROUND_ID_BASE if slug == 'pappu-pictures' else 0
+        missing = [rn - i for i in range(1, history_floor + 1)
+                   if rn - i >= namespace_floor and rn - i not in have]
         # Seed the empty roadmap in one bounded concurrent window. Each result
         # is still created by the same atomic outcome path used by live rounds.
         for start in range(0, len(missing), 20):
             await asyncio.gather(*(_live_outcome(slug, past) for past in missing[start:start + 20]))
         prev = await db.live_outcomes.find(
-            {'slug': slug, 'round_number': {'$lt': rn}}, {'_id': 0, 'round_number': 1, 'summary': 1}
+            history_query, {'_id': 0, 'round_number': 1, 'summary': 1}
         ).sort('round_number', -1).to_list(history_limit)
 
     my_bets, balance, win_rows = await asyncio.gather(
@@ -755,7 +781,7 @@ async def live_state(slug: str, user: dict = Depends(require_active_player)):
         'round_number': rn, 'phase': phase, 'phase_ends_in': ends_in,
         'clock_sampled_at': clock_sampled_at,
         'phase_ends_at': phase_ends_at,
-        'round_ends_at': (rn + 1) * total,
+        'round_ends_at': round_started_at + total,
         'timings': {'bet': cfg['bet'], 'reveal': cfg['reveal'], 'result': cfg['result'], 'total': total},
         'kind': cfg['kind'], 'options': SIDE_OPTIONS.get(slug),
         # The stake limits the table is actually held to. The cabinet screens
