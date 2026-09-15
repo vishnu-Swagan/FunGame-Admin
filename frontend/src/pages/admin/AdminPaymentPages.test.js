@@ -2,14 +2,18 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AdminDeposits, AdminKyc, AdminWithdrawals } from "./AdminPaymentPages";
 import { adminPayments } from "@/lib/paymentApi";
+import { toast } from "sonner";
 
 let mockUser;
+let mockStepUpProps;
 
 jest.mock("@/lib/paymentApi", () => ({ adminPayments: {
   deposits: jest.fn(),
   withdrawals: jest.fn(),
   resolveOperatorRequest: jest.fn(),
   withdrawalAction: jest.fn(),
+  retryOperatorPayout: jest.fn(),
+  syncOperatorPayout: jest.fn(),
   kyc: jest.fn(),
   reviewKyc: jest.fn(),
   requestPlayerVerification: jest.fn(),
@@ -18,11 +22,15 @@ jest.mock("@/lib/paymentApi", () => ({ adminPayments: {
 } }));
 jest.mock("@/components/AdminStepUpDialog", () => ({
   __esModule: true,
-  default: ({ open, onCancel, onVerified }) => open ? (
-    <button data-testid="mock-admin-step-up" onClick={async () => { await onVerified(); onCancel(); }}>
-      Complete administrator verification
-    </button>
-  ) : null,
+  default: (props) => {
+    mockStepUpProps = props;
+    return props.open ? <div>
+      <button data-testid="mock-admin-step-up" onClick={async () => { await props.onVerified(); props.onCancel(); }}>
+        Complete administrator verification
+      </button>
+      <button data-testid="mock-admin-step-up-cancel" onClick={props.onCancel}>Cancel verification</button>
+    </div> : null;
+  },
   requiresAdminStepUp: (error) => ["ADMIN_MFA_REQUIRED", "ADMIN_STEP_UP_REQUIRED"]
     .includes(error?.response?.data?.detail?.code),
 }));
@@ -32,15 +40,7 @@ jest.mock("@/components/common", () => ({
   formatChips: (value) => String(value ?? 0),
 }));
 jest.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: mockUser }) }));
-jest.mock("@/components/RouteGuards", () => ({
-  ADMIN_PERMISSIONS: {
-    PAYMENTS_VIEW: "PAYMENTS_VIEW",
-    KYC_REVIEW: "KYC_REVIEW",
-    WITHDRAWALS_APPROVE: "WITHDRAWALS_APPROVE",
-    WITHDRAWALS_MARK_PAID: "WITHDRAWALS_MARK_PAID",
-  },
-  hasPermission: () => true,
-}));
+jest.mock("@/components/RouteGuards", () => jest.requireActual("@/lib/adminPermissions"));
 jest.mock("react-router-dom", () => ({
   useSearchParams: () => [new URLSearchParams(), jest.fn()],
 }), { virtual: true });
@@ -81,8 +81,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  jest.clearAllMocks();
-  mockUser = { role: "ADMIN", status: "ACTIVE", admin_permissions: [] };
+  jest.resetAllMocks();
+  mockStepUpProps = null;
+  mockUser = { role: "ADMIN", status: "ACTIVE", admin_role: "SUPER_ADMIN", admin_permissions: [] };
   adminPayments.deposits.mockResolvedValue([{
     id: "op-dep-1",
     user_email: "player@example.test",
@@ -104,6 +105,8 @@ beforeEach(() => {
     created_at: "2026-09-01T02:05:00Z",
   }]);
   adminPayments.resolveOperatorRequest.mockResolvedValue({ request: { status: "APPROVED" } });
+  adminPayments.retryOperatorPayout.mockResolvedValue({ request: { payout_status: "PROCESSING" } });
+  adminPayments.syncOperatorPayout.mockResolvedValue({ request: { payout_status: "PROCESSING" } });
   adminPayments.kyc.mockResolvedValue([{
     id: "player-kyc-1",
     email_masked: "p•••@example.test",
@@ -130,6 +133,19 @@ test("admin deposits can approve operator buy requests", async () => {
     await settle();
   });
   expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledWith("op-dep-1", "approve", { note: null });
+  await act(async () => root.unmount());
+});
+
+test.each([503, null])("hosted deposit shows only sanitized checkout code and HTTP status %s", async (httpStatus) => {
+  adminPayments.deposits.mockResolvedValue([{
+    id: "hosted-failed", source: "UPI_HOSTED", status: "CREATED", amount_paise: 10000,
+    checkout_diagnostics: { code: "PROVIDER_HTTP_ERROR", http_status: httpStatus, raw_body: "PRIVATE_PROVIDER_RESPONSE" },
+  }]);
+  const { container, root } = await render(AdminDeposits);
+  const diagnostic = container.querySelector('[data-testid="checkout-diagnostic-hosted-failed"]');
+  expect(diagnostic.textContent).toBe(`Checkout diagnostic: PROVIDER_HTTP_ERROR${httpStatus ? ` · HTTP ${httpStatus}` : ""}`);
+  expect(container.textContent).not.toContain("PRIVATE_PROVIDER_RESPONSE");
+  expect(buttonByText(container, "Approve")).toBeUndefined();
   await act(async () => root.unmount());
 });
 
@@ -194,3 +210,214 @@ test("admin verification page does not expose manual age controls", async () => 
   )).toBe(false);
   await act(async () => root.unmount());
 });
+
+const stepUpError = { response: { data: { detail: {
+  code: "ADMIN_STEP_UP_REQUIRED", message: "Recent administrator verification required",
+} } } };
+
+function grant(...permissions) {
+  mockUser = { role: "ADMIN", status: "ACTIVE", admin_role: "FINANCE", admin_permissions: permissions };
+}
+
+function buttonByText(container, text) {
+  return Array.from(container.querySelectorAll("button")).find((button) => button.textContent === text);
+}
+
+async function click(button) {
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+}
+
+async function inputValue(input, value) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+  });
+}
+
+test("payments-view permission cannot approve or reject operator deposits", async () => {
+  grant("PAYMENTS_VIEW");
+  const { container, root } = await render(AdminDeposits);
+  expect(buttonByText(container, "Approve")).toBeUndefined();
+  expect(buttonByText(container, "Reject")).toBeUndefined();
+  expect(adminPayments.resolveOperatorRequest).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("deposit step-up retries the original rejection once, preserving its reason", async () => {
+  grant("PAYMENTS_RECONCILE");
+  adminPayments.resolveOperatorRequest.mockRejectedValueOnce(stepUpError).mockResolvedValueOnce({});
+  const { container, root } = await render(AdminDeposits);
+  const note = container.querySelector('input[placeholder="Note or rejection reason"]');
+  await inputValue(note, "Original audit reason");
+  await click(buttonByText(container, "Reject"));
+  expect(mockStepUpProps.open).toBe(true);
+  expect(buttonByText(container, "Approve").disabled).toBe(true);
+  await inputValue(note, "Changed after verification opened");
+  const verify = mockStepUpProps.onVerified;
+  await act(async () => { await Promise.all([verify(), verify()]); await settle(); });
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(2);
+  expect(adminPayments.resolveOperatorRequest.mock.calls).toEqual([
+    ["op-dep-1", "reject", { reason: "Original audit reason" }],
+    ["op-dep-1", "reject", { reason: "Original audit reason" }],
+  ]);
+  expect(mockStepUpProps.open).toBe(false);
+  await act(async () => root.unmount());
+});
+
+test("cancelling deposit step-up does not resubmit or retain the pending action", async () => {
+  adminPayments.resolveOperatorRequest.mockRejectedValueOnce(stepUpError);
+  const { container, root } = await render(AdminDeposits);
+  await click(buttonByText(container, "Approve"));
+  const staleVerify = mockStepUpProps.onVerified;
+  await click(container.querySelector('[data-testid="mock-admin-step-up-cancel"]'));
+  await act(async () => { await staleVerify(); await settle(); });
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(1);
+  expect(mockStepUpProps.open).toBe(false);
+  await act(async () => root.unmount());
+});
+
+test.each([
+  [["PAYMENTS_VIEW"], false, false],
+  [["WITHDRAWALS_APPROVE"], false, true],
+  [["WITHDRAWALS_MARK_PAID"], false, false],
+  [["WITHDRAWALS_APPROVE", "WITHDRAWALS_MARK_PAID"], true, true],
+])("operator withdrawal gates match financial permissions %j", async (permissions, approve, reject) => {
+  grant(...permissions);
+  const { container, root } = await render(AdminWithdrawals);
+  expect(Boolean(buttonByText(container, "Approve"))).toBe(approve);
+  expect(Boolean(buttonByText(container, "Reject"))).toBe(reject);
+  await act(async () => root.unmount());
+});
+
+test("withdrawal approval retries only after step-up and does not loop when verification is rejected again", async () => {
+  adminPayments.resolveOperatorRequest.mockRejectedValue(stepUpError);
+  const { container, root } = await render(AdminWithdrawals);
+  await click(buttonByText(container, "Approve"));
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(1);
+  expect(mockStepUpProps.open).toBe(true);
+  await click(container.querySelector('[data-testid="mock-admin-step-up"]'));
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(2);
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenLastCalledWith("op-wd-1", "approve", { note: null });
+  expect(mockStepUpProps.open).toBe(false);
+  expect(toast.error).toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("rapid repeat withdrawal approval clicks submit only one request", async () => {
+  let complete;
+  adminPayments.resolveOperatorRequest.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+  const { container, root } = await render(AdminWithdrawals);
+  const approve = buttonByText(container, "Approve");
+  await act(async () => {
+    approve.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    approve.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+  });
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(1);
+  await act(async () => { complete({}); await settle(); });
+  await act(async () => root.unmount());
+});
+
+test("provider errors are displayed without automatically repeating a withdrawal action", async () => {
+  adminPayments.resolveOperatorRequest.mockRejectedValue({ response: { data: { detail: {
+    code: "PROVIDER_UNAVAILABLE", message: "Provider unavailable",
+  } } } });
+  const { container, root } = await render(AdminWithdrawals);
+  await click(buttonByText(container, "Approve"));
+  expect(adminPayments.resolveOperatorRequest).toHaveBeenCalledTimes(1);
+  expect(mockStepUpProps.open).toBe(false);
+  expect(toast.error).toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("non-operator withdrawal action retains its endpoint and payment reference through step-up", async () => {
+  grant("WITHDRAWALS_MARK_PAID");
+  adminPayments.withdrawals.mockResolvedValue([{
+    id: "financial-wd", source: "PROVIDER", internal_status: "PROCESSING", withdrawal_mode: "MANUAL",
+    amount_chips: 100, amount_paise: 10000,
+  }]);
+  adminPayments.withdrawalAction.mockRejectedValueOnce(stepUpError).mockResolvedValueOnce({});
+  const { container, root } = await render(AdminWithdrawals);
+  await inputValue(container.querySelector('input[placeholder="Provider/payment reference"]'), "Original reference");
+  await click(buttonByText(container, "Mark paid"));
+  await click(container.querySelector('[data-testid="mock-admin-step-up"]'));
+  expect(adminPayments.withdrawalAction.mock.calls).toEqual([
+    ["financial-wd", "mark-paid", { provider_reference: "Original reference" }],
+    ["financial-wd", "mark-paid", { provider_reference: "Original reference" }],
+  ]);
+  expect(adminPayments.resolveOperatorRequest).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+function pendingPayout(status = "PREPARATION_FAILED") {
+  adminPayments.withdrawals.mockResolvedValue([{
+    id: "op-wd-payout", source: "ADMIN_REVIEW", status: "APPROVED", internal_status: "APPROVED",
+    payout_status: status, amount_chips: 100, amount_paise: 10000,
+  }]);
+}
+
+test.each([
+  [["PAYMENTS_VIEW"], false, false],
+  [["WITHDRAWALS_MARK_PAID"], true, false],
+  [["PAYMENTS_RECONCILE"], false, true],
+])("operator payout retry and sync have distinct permissions %j", async (permissions, retry, sync) => {
+  grant(...permissions);
+  pendingPayout();
+  const { container, root } = await render(AdminWithdrawals);
+  expect(Boolean(buttonByText(container, "Retry SgPay payout"))).toBe(retry);
+  expect(Boolean(buttonByText(container, "Check SgPay payout status"))).toBe(sync);
+  await act(async () => root.unmount());
+});
+
+test.each([
+  ["Retry SgPay payout", "retryOperatorPayout"],
+  ["Check SgPay payout status", "syncOperatorPayout"],
+])("%s uses its exact endpoint with one verified retry", async (label, method) => {
+  pendingPayout();
+  adminPayments[method].mockRejectedValueOnce(stepUpError).mockResolvedValueOnce({});
+  const { container, root } = await render(AdminWithdrawals);
+  await click(buttonByText(container, label));
+  expect(mockStepUpProps.open).toBe(true);
+  const verify = mockStepUpProps.onVerified;
+  await act(async () => { await Promise.all([verify(), verify()]); await settle(); });
+  expect(adminPayments[method]).toHaveBeenCalledTimes(2);
+  expect(adminPayments[method]).toHaveBeenLastCalledWith("op-wd-payout");
+  expect(adminPayments.resolveOperatorRequest).not.toHaveBeenCalled();
+  expect(adminPayments.withdrawalAction).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+test("paid payouts expose neither retry nor sync controls", async () => {
+  pendingPayout("PAID");
+  const { container, root } = await render(AdminWithdrawals);
+  expect(buttonByText(container, "Retry SgPay payout")).toBeUndefined();
+  expect(buttonByText(container, "Check SgPay payout status")).toBeUndefined();
+  await act(async () => root.unmount());
+});
+
+test("a legacy sync error response is not reported as successful provider confirmation", async () => {
+  pendingPayout("PROCESSING");
+  adminPayments.syncOperatorPayout.mockResolvedValueOnce({ payout: { error: "PRIVATE_PROVIDER_DIAGNOSTIC" } });
+  const { container, root } = await render(AdminWithdrawals);
+  await click(buttonByText(container, "Check SgPay payout status"));
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).toHaveBeenCalledWith("Could not confirm payout status. No new payout was sent. Check the status again later.");
+  expect(container.textContent).not.toContain("PRIVATE_PROVIDER_DIAGNOSTIC");
+  expect(adminPayments.retryOperatorPayout).not.toHaveBeenCalled();
+  expect(adminPayments.syncOperatorPayout).toHaveBeenCalledTimes(1);
+  await act(async () => root.unmount());
+});
+
+test.each(["PROCESSING", "SUBMITTED", "QUEUED", "PENDING", "UNKNOWN", "SUBMITTING", "SUBMISSION_UNKNOWN", "FAILED", ""])(
+  "an unresolved %s payout offers a status check, never a resubmission", async (status) => {
+    pendingPayout(status);
+    const { container, root } = await render(AdminWithdrawals);
+    expect(buttonByText(container, "Retry SgPay payout")).toBeUndefined();
+    expect(buttonByText(container, "Check SgPay payout status")).toBeTruthy();
+    await act(async () => root.unmount());
+  },
+);

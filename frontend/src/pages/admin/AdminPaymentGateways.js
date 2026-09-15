@@ -319,7 +319,9 @@ function HostedProviderCard({ provider }) {
         </div>
         <div className="gateway-hosted-flags" aria-label="Hosted provider availability">
           <span className={provider.deposits_enabled ? "is-enabled" : "is-disabled"}>Deposits {provider.deposits_enabled ? "enabled" : "disabled"}</span>
-          <span className="is-disabled">Withdrawals not provided</span>
+          <span className={provider.withdrawals_enabled ? "is-enabled" : "is-disabled"}>
+            {provider.withdrawals_enabled ? "Withdrawals enabled — admin approval" : "Withdrawals disabled"}
+          </span>
         </div>
       </header>
       <div className="gateway-card-body">

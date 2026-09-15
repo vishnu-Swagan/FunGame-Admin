@@ -1,5 +1,38 @@
 # Chakri.Casino staging and production launch checklist
 
+## SGPay24 maintenance release — 2026-09-16
+
+This update preserves the existing React/FastAPI/MongoDB services on Render,
+payment credentials, customer balances, and administrator approval policy. It
+corrects the documented SGPay24 payout contract and adds redacted deposit-error
+diagnostics. No new subscription or provider fee is introduced by deployment;
+live transactions remain separately chargeable by the provider. Allow 15–25
+minutes for checks and deployment; provider support time is unknown.
+
+- [x] 🤖 **Review and test without moving money** — 5–10 minutes.
+
+  > Prompt: “Review the SGPay24 patch and run full backend/frontend tests, production build, and isolated mocked browser flows. Confirm JSON transport, merchant/order binding, no duplicate payout after uncertain responses, and exact-action admin verification.”
+
+  **You'll know it worked when:** reviews and tests pass without sending a real payment, payout, or SMS.
+
+- [ ] 🤖 **Release to the existing Render services** — 5–10 minutes.
+
+  > Prompt: “Merge the reviewed SGPay24 change, verify GitHub checks, and inspect both Render deployment records for the same main commit. Preserve live flags and credentials; do not synchronize the Blueprint or pause games. Verify the public health response and authenticated gateway status.”
+
+  **You'll know it worked when:** both services run the reviewed commit and the hosted card accurately identifies administrator-approved withdrawals. The pre-existing financial-wallet readiness flag is not the hosted/operator rail's readiness flag.
+
+- [ ] 🧑 **Ask SGPay24 support to set the payout callback** — approximately 5 minutes to request; support turnaround unknown.
+
+  In SGPay24 → Profile, the payout callback is blank and the merchant edit form does not expose a callback field. Ask provider support to set it to `https://api.chakri.casino/api/payments/webhooks/sgpay24/payout` after the endpoint is deployed. Keep the existing paying callback unchanged. A callback is the provider's notification to the server; authenticated status polling remains the authority and also works without callbacks. Do not send API tokens or passwords in a ticket.
+
+  **You'll know it worked when:** Profile displays the exact payout callback URL. Neither notification nor a screenshot alone proves a withdrawal succeeded.
+
+- [ ] 🤝 **Confirm the unresolved checkout rejection and a controlled user journey** — 5–10 minutes plus provider response time.
+
+  An existing completed ₹5,000 order verifies successfully using the configured merchant. Recent failed checkout creation saved only a generic error, so its exact provider-side reason remains unproven. Create an unpaid ₹100 test link only with explicit approval; do not complete it. Any real deposit or payout test requires a separate agreed amount and beneficiary. Inspect fixed-category diagnostics, never raw provider payloads or credentials.
+
+  **You'll know it worked when:** a new checkout is accepted and the user separately confirms the intended payment/withdrawal end to end. A deployed patch alone is not proof of money movement or future provider availability.
+
 ## Wallet and game timing maintenance release — 2026-09-16
 
 Scope: remove the provider-information panel above the wallet tabs; change American Roulette to 50 seconds of betting, 10 seconds of spinning, and 10 seconds of results/buffer; change Pappu Pictures to 20 seconds of betting while retaining its 8-second reveal and 4-second result. The existing React frontend, FastAPI backend, and MongoDB on Render remain in place. No new subscriptions, credentials, payment settings, or environment changes are needed. Allow approximately 15–25 minutes after authenticated browser access is available.

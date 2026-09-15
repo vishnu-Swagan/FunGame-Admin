@@ -111,7 +111,8 @@ class WagerPromoTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, PayoutSubmission)
         self.assertEqual(result.provider_payout_id, "po-1")
         called = adapter._request_json.await_args
-        self.assertEqual(called.kwargs.get("as_query"), True)
+        # The merchant's documented root API accepts JSON, not URL credentials.
+        self.assertFalse(called.kwargs.get("as_query", False))
         sent = called.args[1]
         self.assertNotIn("upi_id", sent)
         self.assertNotIn("callback_url", sent)

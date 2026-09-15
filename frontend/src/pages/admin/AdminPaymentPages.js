@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, BookOpenCheck, CheckCircle2, RefreshCw, ScrollText, Settings2, ShieldCheck, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,44 @@ function filteredRows(rows, query, status, statusKey = "status") {
 function DataCard({ children }) { return <div className="overflow-hidden rounded-2xl border border-white/10 bg-card/55 divide-y divide-white/5">{children}</div>; }
 function Empty({ icon, loading, noun }) { return loading ? <div className="h-40 rounded-2xl fg-shimmer border border-white/5" /> : <EmptyState icon={icon} title={`No ${noun}`} subtitle={`Matching ${noun} will appear here.`} />; }
 
+function usePaymentAction(perform) {
+  const [acting, setActing] = useState("");
+  const [pending, setPending] = useState(null);
+  const pendingRef = useRef(null);
+  const busyRef = useRef(false);
+  const run = async (action, offerStepUp = true) => {
+    if (busyRef.current || (offerStepUp && pendingRef.current)) return;
+    busyRef.current = true;
+    setActing(action.key);
+    try {
+      await perform(action);
+    } catch (error) {
+      if (offerStepUp && requiresAdminStepUp(error)) {
+        // Keep the exact rejected request, not mutable form values. The dialog
+        // sends a security code only when the administrator explicitly asks.
+        pendingRef.current = action;
+        setPending(action);
+      } else {
+        toast.error(errMsg(error));
+      }
+    } finally {
+      busyRef.current = false;
+      setActing("");
+    }
+  };
+  const cancel = () => { pendingRef.current = null; setPending(null); };
+  const retry = async () => {
+    const action = pendingRef.current;
+    if (!action) return;
+    // Consume before awaiting so repeated verification callbacks cannot submit
+    // a second payout. A failed retry never starts another step-up ceremony.
+    pendingRef.current = null;
+    await run(action, false);
+    setPending(null);
+  };
+  return { acting, pending, busy: Boolean(acting || pending), run, cancel, retry };
+}
+
 export function AdminDeposits() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -64,24 +102,21 @@ export function AdminDeposits() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
   const [drafts, setDrafts] = useState({});
-  const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status), [rows, query, status]);
-  const canReview = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
+  const canReview = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_RECONCILE);
+  const { acting, pending, busy, run, cancel, retry } = usePaymentAction(async ({ id, action, body }) => {
+    await adminPayments.resolveOperatorRequest(id, action, body);
+    toast.success(`Buy request ${action === "approve" ? "approved" : "rejected"}`);
+    setDrafts((current) => ({ ...current, [id]: "" }));
+    await load();
+  });
   const act = async (item, action) => {
+    if (!canReview) return;
     const note = (drafts[item.id] || "").trim();
     if (action === "reject" && !note) return toast.error("Enter a rejection reason first");
-    const key = `${item.id}:${action}`;
-    setActing(key);
-    try {
-      await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
-      toast.success(`Buy request ${action === "approve" ? "approved" : "rejected"}`);
-      setDrafts((current) => ({ ...current, [item.id]: "" }));
-      await load();
-    } catch (error) {
-      toast.error(errMsg(error));
-    } finally {
-      setActing("");
-    }
+    await run({ id: item.id, action, key: `${item.id}:${action}`,
+      body: action === "reject" ? { reason: note } : { note: note || null },
+      label: action === "approve" ? "approving this deposit" : "rejecting this deposit" });
   };
   return <PageTransition className="space-y-4">
     <PageHead icon={ArrowDownToLine} title="Deposits" subtitle="Admin-reviewed funding requests and provider-created deposits. Operator requests credit the player balance only after approval." onRefresh={load} loading={loading} />
@@ -96,9 +131,11 @@ export function AdminDeposits() {
           <div><p className="truncate font-mono text-[10px] text-white/55">{operator ? "Admin review" : valueOf(item, "provider_order_id", "provider_reference")}</p><p className="text-[10px] text-white/35">{when(item.created_at)}</p></div>
           <PaymentStatus status={item.status} />
         </div>
-        {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
+        {!operator && item.checkout_diagnostics?.code && <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 font-mono text-[11px] text-amber-100" data-testid={`checkout-diagnostic-${item.id}`}>Checkout diagnostic: {item.checkout_diagnostics.code}{Number.isInteger(item.checkout_diagnostics.http_status) ? ` · HTTP ${item.checkout_diagnostics.http_status}` : ""}</p>}
+        {pending && canReview && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Note or rejection reason" className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" /><Button type="button" size="sm" data-testid={`approve-deposit-${item.id}`} onClick={() => act(item, "approve")} disabled={busy} className="h-10 rounded-xl">{acting === `${item.id}:approve` ? "Working…" : "Approve"}</Button><Button type="button" size="sm" variant="destructive" data-testid={`reject-deposit-${item.id}`} onClick={() => act(item, "reject")} disabled={busy} className="h-10 rounded-xl">{acting === `${item.id}:reject` ? "Working…" : "Reject"}</Button></div>}
       </article>;
     })}</div> : <Empty icon={ArrowDownToLine} loading={loading} noun="deposits" />}
+    <AdminStepUpDialog open={Boolean(pending)} actionLabel={pending?.label} onCancel={cancel} onVerified={retry} />
   </PageTransition>;
 }
 
@@ -119,45 +156,52 @@ export function AdminWithdrawals() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState(searchParams.get("status")?.toUpperCase() || ALL);
   const [drafts, setDrafts] = useState({});
-  const [acting, setActing] = useState("");
   const shown = useMemo(() => filteredRows(rows, query, status, "internal_status"), [rows, query, status]);
   const canApprove = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_APPROVE);
-  const canReviewOperator = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_VIEW);
   const canMarkPaid = hasPermission(user, ADMIN_PERMISSIONS.WITHDRAWALS_MARK_PAID);
+  const canReconcile = hasPermission(user, ADMIN_PERMISSIONS.PAYMENTS_RECONCILE);
+  const { acting, pending, busy, run, cancel, retry } = usePaymentAction(async ({ id, operator, action, body }) => {
+    if (operator && action === "retry-payout") {
+      await adminPayments.retryOperatorPayout(id);
+    } else if (operator && action === "sync-payout") {
+      const response = await adminPayments.syncOperatorPayout(id);
+      if (response?.payout?.error) {
+        toast.error("Could not confirm payout status. No new payout was sent. Check the status again later.");
+        await load();
+        return;
+      }
+    } else if (operator) {
+      await adminPayments.resolveOperatorRequest(id, action, body);
+    } else {
+      await adminPayments.withdrawalAction(id, action, body);
+    }
+    toast.success(action === "sync-payout" ? "SgPay payout status checked" : `Withdrawal ${action.replaceAll("-", " ")}`);
+    setDrafts((current) => ({ ...current, [id]: "" }));
+    await load();
+  });
   const act = async (item, action) => {
-    const key = `${item.id}:${action}`;
+    const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
+    const allowed = action === "sync-payout" ? canReconcile
+      : action === "approve" ? canApprove && (!operator || canMarkPaid)
+        : action === "reject" ? canApprove : canMarkPaid;
+    if (!allowed) return;
     const note = (drafts[item.id] || "").trim();
     if (action === "reject" && !note) return toast.error("Enter a rejection reason first");
     if (["mark-submitted", "mark-paid"].includes(action) && !note) return toast.error("Enter the provider or payment reference first");
-    setActing(key);
-    try {
-      const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
-      if (operator && action === "retry-payout") {
-        await adminPayments.retryOperatorPayout(item.id);
-      } else if (operator) {
-        await adminPayments.resolveOperatorRequest(item.id, action, action === "reject" ? { reason: note } : { note: note || null });
-      } else {
-        const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
-        await adminPayments.withdrawalAction(item.id, action, body);
-      }
-      toast.success(`Withdrawal ${action.replaceAll("-", " ")}`);
-      setDrafts((current) => ({ ...current, [item.id]: "" }));
-      await load();
-    } catch (error) {
-      toast.error(errMsg(error));
-    } finally {
-      setActing("");
-    }
+    const body = action === "reject" ? { reason: note } : action === "approve" ? { note: note || null } : ["mark-submitted", "mark-paid"].includes(action) ? { provider_reference: note } : {};
+    await run({ id: item.id, operator, action, body, key: `${item.id}:${action}`,
+      label: action === "sync-payout" ? "checking this SgPay payout" : `completing this withdrawal action (${action.replaceAll("-", " ")})` });
   };
   return <PageTransition className="space-y-4">
     <PageHead icon={ArrowUpFromLine} title="Withdrawal queue" subtitle="Approve, reject and record provider settlement without exposing full bank data." onRefresh={load} loading={loading} />
     <FilterBar query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={["PENDING", "REQUESTED", "PENDING_ADMIN", "APPROVED", "SUBMITTED_TO_PROVIDER", "PROCESSING", "PAID", "REJECTED", "FAILED", "CANCELLED"]} />
     {shown.length ? <div className="space-y-3">{shown.map((item) => {
       const internalStatus = String(item.internal_status || item.status).toUpperCase();
+      const payoutStatus = String(item.payout_status || "").toUpperCase();
       const automatic = String(item.withdrawal_mode || "").toUpperCase() === "AUTOMATIC";
       const operator = String(item.source || "").toUpperCase() === "ADMIN_REVIEW";
       const permittedActions = (WITHDRAWAL_ACTIONS[internalStatus] || []).filter(([action]) => {
-        if (operator) return ["approve", "reject"].includes(action) && canReviewOperator;
+        if (operator) return action === "approve" ? canApprove && canMarkPaid : action === "reject" && canApprove;
         if (automatic && ["mark-submitted", "mark-paid"].includes(action)) return false;
         return ["approve", "reject"].includes(action) ? canApprove : canMarkPaid;
       });
@@ -170,13 +214,15 @@ export function AdminWithdrawals() {
         </div>
         {item.provider_reference && <div className="mt-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-white/35">Provider reference</p><p className="mt-0.5 break-all font-mono text-xs text-white/70">{item.provider_reference}</p></div>}
         {operator && item.payout_status && <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/8 px-3 py-2 text-[11px] text-emerald-100">SgPay payout: {item.payout_status}{item.payout_error ? ` · ${item.payout_error}` : ""}</p>}
-        {operator && String(item.internal_status || "").toUpperCase() === "APPROVED" && String(item.payout_status || "").toUpperCase() !== "PAID" && canReviewOperator && (
-          <Button type="button" size="sm" className="mt-3 h-10 rounded-xl" onClick={() => act(item, "retry-payout")} disabled={Boolean(acting)}>Retry SgPay payout</Button>
-        )}
+        {operator && internalStatus === "APPROVED" && payoutStatus !== "PAID" && <div className="mt-3 flex flex-wrap gap-2">
+          {canMarkPaid && payoutStatus === "PREPARATION_FAILED" && <Button type="button" size="sm" className="h-10 rounded-xl" onClick={() => act(item, "retry-payout")} disabled={busy}>Retry SgPay payout</Button>}
+          {canReconcile && <Button type="button" size="sm" variant="outline" className="h-10 rounded-xl" onClick={() => act(item, "sync-payout")} disabled={busy}>Check SgPay payout status</Button>}
+        </div>}
         {automatic && <p className="mt-3 rounded-lg border border-sky-400/20 bg-sky-400/8 px-3 py-2 text-[11px] text-sky-200">Automatic route · provider/outbox events control submission and settlement.</p>}
-        {permittedActions.length > 0 && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={permittedActions.some(([action]) => action === "reject") ? "Reason (required to reject)" : "Provider/payment reference"} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" />{permittedActions.map(([action, label]) => <Button key={action} type="button" size="sm" variant={action === "reject" ? "destructive" : "default"} onClick={() => act(item, action)} disabled={Boolean(acting)} className="h-10 rounded-xl">{acting === `${item.id}:${action}` ? "Working…" : label}</Button>)}</div>}
+        {permittedActions.length > 0 && <div className="mt-4 flex flex-col gap-2 border-t border-white/5 pt-3 sm:flex-row"><Input value={drafts[item.id] || ""} onChange={(event) => setDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={permittedActions.some(([action]) => action === "reject") ? "Reason (required to reject)" : "Provider/payment reference"} className="h-10 flex-1 rounded-xl border-white/10 bg-white/5" />{permittedActions.map(([action, label]) => <Button key={action} type="button" size="sm" variant={action === "reject" ? "destructive" : "default"} onClick={() => act(item, action)} disabled={busy} className="h-10 rounded-xl">{acting === `${item.id}:${action}` ? "Working…" : label}</Button>)}</div>}
       </article>;
     })}</div> : <Empty icon={ArrowUpFromLine} loading={loading} noun="withdrawals" />}
+    <AdminStepUpDialog open={Boolean(pending)} actionLabel={pending?.label} onCancel={cancel} onVerified={retry} />
   </PageTransition>;
 }
 

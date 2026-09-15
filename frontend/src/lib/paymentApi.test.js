@@ -1,4 +1,5 @@
-import { payments, responseRows } from "./paymentApi";
+import { adminPayments, payments, responseRows } from "./paymentApi";
+import { financialApi } from "@/lib/api";
 
 const mockFinancialPost = jest.fn();
 
@@ -24,4 +25,15 @@ test("deposit attaches only an explicit server consent id", async () => {
     amount_paise: 50000,
     promotion_consent_id: "consent-1",
   }, { idempotencyKey: "deposit-key-2" });
+});
+
+test.each([
+  ["retryOperatorPayout", "retry-payout"],
+  ["syncOperatorPayout", "sync-payout"],
+])("%s does not fail over or create another payout request", async (method, endpoint) => {
+  financialApi.post.mockResolvedValueOnce({ data: { request: { id: "operator/request" } } });
+  await expect(adminPayments[method]("operator/request")).resolves.toEqual({ request: { id: "operator/request" } });
+  expect(financialApi.post).toHaveBeenLastCalledWith(
+    `/admin/payments/operator-requests/operator%2Frequest/${endpoint}`, {}, { __noFailover: true },
+  );
 });
