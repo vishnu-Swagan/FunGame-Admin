@@ -41,7 +41,7 @@ async function renderComponent(component) {
 test("website spotlight explains all new offers and routes visitors to signup", async () => {
   const view = await renderComponent(<NewPlayerOffersSpotlight />);
 
-  expect(view.container.textContent).toContain("1,000");
+  expect(view.container.textContent).not.toMatch(/1,000|signup bonus|chips on signup/i);
   expect(view.container.textContent).toContain("100% first deposit bonus");
   expect(view.container.textContent).toContain("10% + 5% referrals");
   expect(view.container.textContent).toContain("Maximum withdrawal requests: ₹500 per day");
@@ -68,6 +68,7 @@ test("lobby spotlight routes players to the deposit and referral destinations", 
 test("offer popup appears once per surface in a browser session and its CTA redirects", async () => {
   const first = await renderComponent(<NewPlayerOffersPopup />);
   expect(document.body.querySelector('[data-testid="website-offers-popup"]')).not.toBeNull();
+  expect(document.body.querySelector('[data-testid="website-offers-popup"]').textContent).not.toMatch(/1,000|signup chips|signup bonus/i);
   expect(document.documentElement.dataset.chakriOffersSurface).toBe("true");
 
   await act(async () => {

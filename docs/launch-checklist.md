@@ -1,5 +1,25 @@
 # Chakri.Casino staging and production launch checklist
 
+## Signup promotion retirement — 2026-09-22
+
+Existing React/FastAPI/MongoDB services on Render stay in place. The public
+website is deployed separately through Sites. No credentials, payment flags,
+game settings or existing customer balances change. No new service cost.
+
+- [x] 🤖 **Remove and verify the signup offer** — 10 minutes.
+
+  > Prompt: “Remove the 1,000-chip signup advertising and future signup grants. Preserve existing wallets, historical grants, deposit matches and referral rewards. Test account activation and approval plus all affected offer surfaces.”
+
+  **You'll know it worked when:** new accounts receive zero signup chips, tests
+  preserve historical balances, and no signup-chip promise remains in the UI.
+
+- [ ] 🤖 **Publish both application services and the public website** — 5–10 minutes.
+
+  > Prompt: “Publish only the reviewed promotion-retirement changes. Wait for the frontend and API deployment records for the same main commit and the separate public-site deployment to succeed. Do not synchronize the Render Blueprint or change production configuration.”
+
+  **You'll know it worked when:** the banner, welcome card, popup, lobby and
+  terms no longer offer signup chips, while deposit/referral offers remain.
+
 ## SGPay24 maintenance release — 2026-09-16
 
 This update preserves the existing React/FastAPI/MongoDB services on Render,

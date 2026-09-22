@@ -1389,7 +1389,7 @@ async def approve_user(user_id: str, body: AdminUserAction = None, admin: dict =
             )
             await _notify(
                 user_id, 'Account approved!',
-                f'Welcome to Chakri.Casino. Your account is approved and a {WELCOME_BONUS} promotional balance was added.',
+                'Welcome to Chakri.Casino. Your account is approved and ready to use.',
                 'APPROVAL', session=session,
             )
         else:

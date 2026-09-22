@@ -83,7 +83,7 @@ class BonusPolicyTests(unittest.IsolatedAsyncioTestCase):
         await self.db.users.insert_one(row)
         return row
 
-    async def test_signup_grant_is_exactly_once_and_restricted(self):
+    async def test_signup_offer_is_disabled_without_wallet_or_notification_writes(self):
         await self._player("new-player")
 
         first = await bonus_policy.grant_signup_bonus(
@@ -94,16 +94,23 @@ class BonusPolicyTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(first["duplicate"])
-        self.assertTrue(duplicate["duplicate"])
+        self.assertTrue(first["disabled"])
+        self.assertTrue(duplicate["disabled"])
         user = await self.db.users.find_one({"id": "new-player"})
         wallet = await finance.wallet_public("new-player")
-        self.assertEqual(user["chip_balance"], 1_000)
+        self.assertEqual(user["chip_balance"], 0)
         self.assertEqual(wallet["cash_chips"], 0)
-        self.assertEqual(wallet["bonus_chips"], 1_000)
+        self.assertEqual(wallet["bonus_chips"], 0)
         self.assertEqual(wallet["withdrawable_chips"], 0)
         self.assertEqual(await self.db.chip_transactions.count_documents({
             "user_id": "new-player", "ref": "signup-bonus:new-player",
-        }), 1)
+        }), 0)
+        self.assertEqual(await self.db.signup_bonus_grants.count_documents({}), 0)
+        self.assertEqual(await self.db.notifications.count_documents({}), 0)
+        self.assertNotIn("signup_bonus_granted_at", user)
+        state = await bonus_policy.public_state("new-player")
+        self.assertEqual(state["signup_bonus_chips"], 0)
+        self.assertTrue(state["first_deposit_offer"]["eligible"])
 
     async def test_concurrent_signup_grants_cannot_double_credit(self):
         await self._player("concurrent-player")
@@ -114,17 +121,33 @@ class BonusPolicyTests(unittest.IsolatedAsyncioTestCase):
             ) for _ in range(8)
         ])
 
-        self.assertEqual(sum(not row["duplicate"] for row in results), 1)
+        self.assertTrue(all(row["disabled"] and row["chips"] == 0 for row in results))
         user = await self.db.users.find_one({"id": "concurrent-player"})
         wallet = await finance.wallet_public("concurrent-player")
-        self.assertEqual(user["chip_balance"], 1_000)
-        self.assertEqual(wallet["bonus_chips"], 1_000)
+        self.assertEqual(user["chip_balance"], 0)
+        self.assertEqual(wallet["bonus_chips"], 0)
+
+    async def _historical_signup_grant(self, user_id):
+        # Existing awards remain valid after the offer is retired.
+        await ledger.credit_chips(
+            user_id, 1_000, "Historical signup award",
+            ref=f"signup-bonus:{user_id}", kind=ledger.BONUS,
+        )
+
+    async def test_retired_offer_preserves_existing_balances_and_history(self):
+        await self._player("existing-player")
+        await self._historical_signup_grant("existing-player")
+        before = await finance.wallet_public("existing-player")
+        transactions = await self.db.chip_transactions.count_documents({})
+        for source in ("SELF_SERVICE_PHONE_OTP", "SELF_SERVICE_ADMIN_REVIEW", "LEGACY_SIGNUP_ADMIN_APPROVAL"):
+            result = await bonus_policy.grant_signup_bonus("existing-player", source=source)
+            self.assertTrue(result["disabled"])
+        self.assertEqual(await finance.wallet_public("existing-player"), before)
+        self.assertEqual(await self.db.chip_transactions.count_documents({}), transactions)
 
     async def test_settled_bonus_play_progressively_unlocks_real_chips(self):
         await self._player("playing-player")
-        await bonus_policy.grant_signup_bonus(
-            "playing-player", source="SELF_SERVICE_PHONE_OTP",
-        )
+        await self._historical_signup_grant("playing-player")
 
         await ledger.debit_chips(
             "playing-player", 100, "Aviator stake", ref="bet-1",
@@ -187,9 +210,7 @@ class BonusPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deposit_match_waits_until_playing_chips_are_finished(self):
         await self._player("waiting-player")
-        await bonus_policy.grant_signup_bonus(
-            "waiting-player", source="SELF_SERVICE_PHONE_OTP",
-        )
+        await self._historical_signup_grant("waiting-player")
         await ledger.credit_chips(
             "waiting-player", 100, "Verified deposit", ref="deposit-cash:early",
             kind=ledger.DEPOSIT,
