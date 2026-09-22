@@ -24,7 +24,7 @@ from db import db
 
 
 POLICY_VERSION = "chakri-bonus-v1"
-SIGNUP_BONUS_CHIPS = 1_000
+SIGNUP_BONUS_CHIPS = 0
 FIRST_DEPOSIT_MIN_PAISE = 10_000
 FIRST_DEPOSIT_MAX_PAISE = 500_000
 FIRST_DEPOSIT_MAX_BONUS_CHIPS = 5_000
@@ -166,47 +166,12 @@ def signup_user_fields() -> dict[str, Any]:
 async def grant_signup_bonus(
     user_id: str, *, source: str, session=None,
 ) -> dict[str, Any]:
-    """Grant exactly one 1,000-chip restricted signup balance."""
-    import ledger
+    """The signup offer is retired; preserve existing grants and balances.
 
-    source_key = f"signup-bonus:{user_id}"
-    kwargs = _session_kwargs(session)
-    existing = await db.chip_transactions.find_one(
-        {"user_id": user_id, "ref": source_key, "kind": ledger.BONUS},
-        {"_id": 0, "id": 1}, **kwargs,
-    )
-    if existing:
-        return {"chips": SIGNUP_BONUS_CHIPS, "duplicate": True}
-    try:
-        await db.signup_bonus_grants.insert_one({
-            "id": source_key, "user_id": user_id, "source": str(source),
-            "policy_version": POLICY_VERSION, "created_at": now(),
-        }, **kwargs)
-    except DuplicateKeyError:
-        return {"chips": SIGNUP_BONUS_CHIPS, "duplicate": True}
-    await ledger.credit_chips(
-        user_id, SIGNUP_BONUS_CHIPS,
-        "Welcome signup bonus (playing chips)",
-        ref=source_key, kind=ledger.BONUS, session=session,
-    )
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {
-            "signup_bonus_chips": SIGNUP_BONUS_CHIPS,
-            "signup_bonus_source": str(source),
-            "signup_bonus_granted_at": now().isoformat(),
-        }}, **kwargs,
-    )
-    await db.notifications.insert_one({
-        "id": str(uuid.uuid4()), "user_id": user_id,
-        "title": "1,000 signup chips added",
-        "body": (
-            "Your 1,000 playing chips are ready. Settled bonus-chip wagers "
-            "progressively unlock remaining value as real chips."
-        ),
-        "type": "BONUS", "read": False, "created_at": now(),
-    }, **kwargs)
-    return {"chips": SIGNUP_BONUS_CHIPS, "duplicate": False}
+    Keep this no-op for all activation paths, including approval of registrations
+    started before the offer ended. Deposit/referral participation is unchanged.
+    """
+    return {"chips": 0, "duplicate": False, "disabled": True}
 
 
 def _invite_code() -> str:

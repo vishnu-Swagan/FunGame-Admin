@@ -949,14 +949,14 @@ async def main():
         'approval-user', AdminUserAction(), admin,
     )
     assert approved['user']['status'] == 'ACTIVE'
-    assert approved['user']['chip_balance'] == routes_admin.WELCOME_BONUS
+    assert approved['user'].get('chip_balance', 0) == 0
     await expect_http_error(
         routes_admin.approve_user('approval-user', AdminUserAction(), admin), 400,
     )
     assert await database.chip_transactions.count_documents({
         'user_id': 'approval-user',
         'ref': 'signup-bonus:approval-user',
-    }) == 1
+    }) == 0
 
     # Play-chip operation remains backward-compatible. If real-money mode is
     # explicitly enabled later, every game dependency fails closed on age,

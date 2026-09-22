@@ -373,7 +373,8 @@ async def main():
     assert chip['request']['status'] == 'PENDING'
     assert chip['request']['user_phone'] == '+919876543210'
     assert chip['request']['user_email'] == 'new.player@example.com'
-    assert (await database.users.find_one({'id': player['id']}))['chip_balance'] == 1_000
+    assert (await database.users.find_one({'id': player['id']}))['chip_balance'] == 0
+    assert await database.chip_transactions.count_documents({'ref': f"signup-bonus:{player['id']}"}) == 0
 
     listed = await routes_admin.list_users(
         status='ACTIVE', admin={'id': 'admin-1', 'role': 'ADMIN', 'status': 'ACTIVE'},

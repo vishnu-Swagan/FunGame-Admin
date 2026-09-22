@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, BadgeIndianRupee, Gift, Sparkles, Users } from "lucide-react";
+import { ArrowRight, BadgeIndianRupee, Sparkles, Users } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,13 +14,6 @@ export const OFFER_POPUP_SESSION_KEYS = {
 };
 
 const offerItems = [
-  {
-    icon: Gift,
-    eyebrow: "Signup bonus",
-    value: "1,000",
-    title: "Playing Chips",
-    copy: "New accounts receive 1,000 non-withdrawable Playing Chips. Each settled bonus chip wagered unlocks up to one remaining Playing Chip as a Real Chip.",
-  },
   {
     icon: BadgeIndianRupee,
     eyebrow: "First deposit",
@@ -57,7 +50,7 @@ function OfferAction({ signedIn, onNavigate, compact = false }) {
         onClick={() => onNavigate(primaryTarget)}
         className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-extrabold text-primary-foreground shadow-[0_12px_30px_rgba(255,199,64,.22)] transition-[filter,transform] duration-200 hover:brightness-110 active:scale-[.98]"
       >
-        {signedIn ? "Check my deposit offer" : "Sign up and get 1,000"}
+        {signedIn ? "Check my deposit offer" : "Create an account"}
         <ArrowRight className="h-4 w-4" aria-hidden="true" />
       </button>
       <button
@@ -90,10 +83,10 @@ export function NewPlayerOffersSpotlight({ signedIn = false }) {
 
       <div className="mt-4 border-b border-white/10 pb-5">
         <p className="font-tech text-[clamp(2.7rem,13vw,4.5rem)] font-black leading-none tracking-[-.07em] text-white tabular-nums">
-          1,000
+          Your rewards
         </p>
         <h2 id={`new-player-offers-${signedIn ? "lobby" : "website"}`} className="mt-1 text-xl font-extrabold tracking-tight text-primary">
-          Playing Chips on signup
+          Deposit and referral offers
         </h2>
         <p className="mt-2 max-w-[54ch] text-sm leading-6 text-white/65">
           Each settled bonus chip wagered unlocks up to one remaining Playing Chip as a withdrawable Real Chip.
@@ -176,10 +169,10 @@ export function NewPlayerOffersPopup({ signedIn = false, surface = "website", en
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> {signedIn ? "Chakri rewards" : "Welcome offers"}
           </span>
           <DialogTitle className="mt-3 text-balance font-tech text-[1.75rem] font-black uppercase leading-[1.02] tracking-[-.04em] text-white">
-            {signedIn ? <>Your next <span className="text-primary">bonus</span> starts here</> : <>Start with <span className="text-primary">1,000</span> Playing Chips</>}
+            Your next <span className="text-primary">bonus</span> starts here
           </DialogTitle>
           <DialogDescription className="mx-auto mt-2 max-w-[34ch] text-xs leading-5 text-white/65">
-            Signup chips. Deposit bonus. Referral rewards.
+            Deposit bonus. Referral rewards.
           </DialogDescription>
         </div>
 
