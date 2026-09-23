@@ -61,6 +61,7 @@
     "zod": "3.24.4"
   },
   "scripts": {
+    "preview:chicken-road": "node scripts/preview-chicken-road.cjs",
     "prestart": "yarn build:aviator",
     "start": "craco start",
     "build:aviator": "npm --prefix aviator-reference ci --legacy-peer-deps --no-audit --no-fund && PUBLIC_URL=/aviator-live BUILD_PATH=../public/aviator-live npm --prefix aviator-reference run build",

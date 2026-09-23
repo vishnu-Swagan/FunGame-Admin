@@ -1,0 +1,208 @@
+.road-fx-burst {
+  --road-fx-duration: 1400ms;
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+  animation: road-fx-burst-envelope var(--road-fx-duration) linear both;
+}
+
+.road-fx-burst-glow {
+  position: absolute;
+  inset: -8% -15% -3%;
+  background: radial-gradient(ellipse at 50% 68%, #ff962185 0, #ff642847 35%, transparent 69%);
+  filter: blur(7px);
+  transform-origin: 50% 100%;
+  animation: road-fx-glow-envelope var(--road-fx-duration) ease-out both;
+}
+
+.road-fx-jet {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  animation: road-fx-jet-rise var(--road-fx-duration) linear both;
+}
+
+.road-fx-stream {
+  position: absolute;
+  bottom: -2%;
+  left: -4%;
+  display: block;
+  width: 108%;
+  height: 116%;
+  overflow: visible;
+  filter: drop-shadow(0 0 5px #ff512860);
+}
+
+.road-fx-rim {
+  fill: #ff471b;
+  stroke: #be2d24;
+  stroke-width: 4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.road-fx-core { fill: #fff94e; }
+.road-fx-lick { fill: #ff5617; }
+
+/* Discrete silhouette replacement keeps hand-drawn tongues crisp. The parent
+   supplies one continuous opacity envelope; exactly one contour stays active. */
+.road-fx-contour { opacity: 0; animation-duration: var(--road-fx-duration); animation-timing-function: steps(1, end); animation-fill-mode: both; }
+.road-fx-contour--a { animation-name: road-fx-contour-a; }
+.road-fx-contour--b { animation-name: road-fx-contour-b; }
+.road-fx-contour--c { animation-name: road-fx-contour-c; }
+.road-fx-contour--d { animation-name: road-fx-contour-d; }
+
+.road-fx-fragments { position: absolute; inset: 0; overflow: visible; }
+.road-fx-fragment {
+  --road-fx-fragment-drift: -14px;
+  position: absolute;
+  left: 24%;
+  bottom: 31%;
+  width: 36%;
+  height: 29%;
+  overflow: visible;
+  opacity: 0;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 0 3px #ff51284d);
+  animation: road-fx-fragment-rise calc(var(--road-fx-duration) * .39) ease-out calc(var(--road-fx-duration) * .57) both;
+}
+.road-fx-fragment--b { left: 65%; bottom: 61%; width: 25%; height: 22%; --road-fx-fragment-drift: 12px; animation-delay: calc(var(--road-fx-duration) * .6); }
+.road-fx-fragment--c { left: 38%; bottom: 10%; width: 23%; height: 19%; --road-fx-fragment-drift: 17px; animation-delay: calc(var(--road-fx-duration) * .63); }
+
+.road-fx-embers { position: absolute; inset: 0; overflow: visible; }
+.road-fx-embers i {
+  --road-fx-drift: -12px;
+  --road-fx-rise: -180px;
+  --road-fx-spark-delay: 0ms;
+  position: absolute;
+  left: 25%;
+  bottom: 14%;
+  width: 7px;
+  height: 14px;
+  border: 2px solid #ff6321;
+  border-radius: 80% 20% 60% 35%;
+  background: #fff66c;
+  box-shadow: 0 0 5px #ff672855;
+  opacity: 0;
+  transform: rotate(-20deg);
+  animation: road-fx-ember-rise calc(var(--road-fx-duration) * .6) cubic-bezier(.15, .4, .6, 1) calc(var(--road-fx-duration) * .3 + var(--road-fx-spark-delay)) both;
+}
+.road-fx-embers i:nth-child(2) { left: 66%; bottom: 21%; width: 9px; height: 20px; --road-fx-drift: 19px; --road-fx-rise: -235px; --road-fx-spark-delay: 18ms; }
+.road-fx-embers i:nth-child(3) { left: 38%; bottom: 41%; width: 6px; height: 10px; --road-fx-drift: -26px; --road-fx-rise: -190px; --road-fx-spark-delay: 45ms; }
+.road-fx-embers i:nth-child(4) { left: 76%; bottom: 48%; width: 10px; height: 28px; --road-fx-drift: 13px; --road-fx-rise: -140px; --road-fx-spark-delay: 30ms; }
+.road-fx-embers i:nth-child(5) { left: 52%; bottom: 25%; width: 5px; height: 11px; --road-fx-drift: 23px; --road-fx-rise: -270px; --road-fx-spark-delay: 65ms; }
+.road-fx-embers i:nth-child(6) { left: 20%; bottom: 34%; width: 8px; height: 20px; --road-fx-drift: -10px; --road-fx-rise: -215px; --road-fx-spark-delay: 40ms; }
+.road-fx-embers i:nth-child(7) { left: 42%; bottom: 15%; width: 5px; height: 8px; --road-fx-drift: -21px; --road-fx-rise: -125px; --road-fx-spark-delay: 75ms; }
+.road-fx-embers i:nth-child(8) { left: 64%; bottom: 38%; width: 6px; height: 14px; --road-fx-drift: 24px; --road-fx-rise: -180px; --road-fx-spark-delay: 55ms; }
+
+.road-fx-ambient {
+  --road-fx-delay: 0ms;
+  position: absolute;
+  z-index: 3;
+  bottom: 100%;
+  left: 50%;
+  display: block;
+  width: clamp(24px, 2vw, 36px);
+  height: clamp(38px, 3.3vw, 58px);
+  pointer-events: none;
+  user-select: none;
+  transform: translateX(-50%);
+  animation: road-fx-ambient-cycle 7800ms ease-in-out var(--road-fx-delay) infinite;
+}
+.road-fx-pilot {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  opacity: .72;
+  transform-origin: 50% 100%;
+  animation: road-fx-pilot-flicker 1380ms ease-in-out var(--road-fx-delay) infinite;
+}
+.road-fx-pilot-edge { fill: #ff491b; filter: drop-shadow(0 0 2px #ff54298c); }
+.road-fx-pilot-core { fill: #fff66b; transform-origin: 50% 100%; animation: road-fx-pilot-core 870ms ease-in-out var(--road-fx-delay) infinite; }
+.road-fx-pilot-glow { position: absolute; bottom: -2px; left: -40%; width: 180%; height: 16px; border-radius: 50%; background: #ff9c3696; filter: blur(4px); opacity: .8; }
+
+@keyframes road-fx-burst-envelope {
+  0% { opacity: 0; visibility: visible; }
+  5% { opacity: 1; }
+  78% { opacity: 1; }
+  94% { opacity: .52; }
+  100% { opacity: 0; visibility: hidden; }
+}
+@keyframes road-fx-glow-envelope {
+  0% { opacity: 0; transform: scale(.6, .1); }
+  20% { opacity: 1; transform: scale(1, 1); }
+  62% { opacity: .85; transform: scale(1, 1); }
+  85% { opacity: .2; transform: scale(.85, .8); }
+  100% { opacity: 0; transform: scale(.65, .35); }
+}
+@keyframes road-fx-jet-rise {
+  0% { transform: translateY(0) scale(.7, .035); }
+  10% { transform: translateY(0) scale(.89, .42); }
+  20% { transform: translateY(0) scale(1, 1); }
+  60% { transform: translateY(0) scale(1, 1); }
+  68% { transform: translateY(-13%) scale(.86, .93); }
+  81% { transform: translateY(-36%) scale(.7, .75); }
+  94% { transform: translateY(-77%) scale(.48, .52); }
+  100% { transform: translateY(-112%) scale(.3, .24); }
+}
+@keyframes road-fx-contour-a {
+  0%, 40%, 80% { opacity: 1; }
+  10%, 50%, 90%, 100% { opacity: 0; }
+}
+@keyframes road-fx-contour-b {
+  0%, 20%, 60%, 100% { opacity: 0; }
+  10%, 50%, 90% { opacity: 1; }
+}
+@keyframes road-fx-contour-c {
+  0%, 30%, 70%, 100% { opacity: 0; }
+  20%, 60% { opacity: 1; }
+}
+@keyframes road-fx-contour-d {
+  0%, 40%, 80%, 100% { opacity: 0; }
+  30%, 70% { opacity: 1; }
+}
+@keyframes road-fx-ember-rise {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0) rotate(-15deg) scale(.35); }
+  13% { opacity: 1; }
+  62% { opacity: .9; }
+  100% { opacity: 0; transform: translate3d(var(--road-fx-drift), var(--road-fx-rise), 0) rotate(38deg) scale(.2); }
+}
+@keyframes road-fx-fragment-rise {
+  0% { opacity: 0; transform: translate3d(0, 12%, 0) scale(.7, .88); }
+  12% { opacity: 1; }
+  60% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--road-fx-fragment-drift), -78%, 0) scale(.18, .35); }
+}
+@keyframes road-fx-pilot-flicker {
+  0%, 100% { opacity: .66; transform: scale(.9, .72) rotate(-3deg); }
+  22% { opacity: .77; transform: scale(1.05, 1) rotate(2deg); }
+  43% { opacity: .7; transform: scale(.88, .84) rotate(-2deg); }
+  68% { opacity: .8; transform: scale(.96, 1.08) rotate(3deg); }
+  83% { opacity: .69; transform: scale(1, .79) rotate(-1deg); }
+}
+@keyframes road-fx-ambient-cycle {
+  0%, 66%, 100% { opacity: 0; }
+  73%, 91% { opacity: 1; }
+}
+@keyframes road-fx-pilot-core {
+  0%, 100% { transform: scaleY(.8) translateX(-1px); }
+  40% { transform: scaleY(1.07) translateX(1px); }
+  72% { transform: scaleY(.91) translateX(0); }
+}
+
+/* Ambient motion sleeps off-screen. A finite burst keeps its elapsed time so
+   returning to the tab cannot restart a stale collision animation. */
+.is-background .road-fx-ambient { visibility: hidden; }
+.is-background .road-fx-ambient * { animation-play-state: paused !important; }
+.road-game.is-background .road-fx-burst { visibility: hidden !important; animation-play-state: running !important; }
+.road-game.is-background .road-fx-burst * { animation-play-state: running !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .road-fx-burst, .road-fx-ambient { display: none; }
+  .road-fx-burst *, .road-fx-ambient * { animation: none !important; }
+}

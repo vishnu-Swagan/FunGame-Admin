@@ -101,6 +101,10 @@ import PartnerProfile from "@/pages/partner/PartnerProfile";
 import PartnerTransactions from "@/pages/partner/PartnerTransactions";
 import PartnerPasswordChange from "@/pages/partner/PartnerPasswordChange";
 
+// Keep preview code and its CSS out of the production app bundle.
+const ChickenRoadGame = process.env.NODE_ENV === "development"
+  ? require("@/pages/play/chicken-road/ChickenRoadGame").default : null;
+
 // Onboarding-only gate: ACTIVE users and admins are redirected away
 function OnboardingRoute({ children }) {
   const { user, loading } = useAuth();
@@ -390,5 +394,10 @@ function PlayerApp() {
 }
 
 export default function App() {
+  // Isolated preview: intentionally outside AuthProvider, the player catalogue,
+  // and production routes. Never fetches a wallet or places a real bet.
+  if (process.env.NODE_ENV === "development" && window.location.pathname === "/__preview/chicken-road") {
+    return <ChickenRoadGame />;
+  }
   return IS_ADMIN_CONSOLE ? <AdminConsoleApp /> : <PlayerApp />;
 }

@@ -28,6 +28,7 @@ import CheckerGame from "@/pages/play/CheckerGame";
 import IceFishingGame from "@/pages/play/IceFishingGame";
 import BlackjackGame from "@/pages/play/BlackjackGame";
 import RummyGame from "@/pages/play/RummyGame";
+import LiveChickenRoadGame from "@/pages/play/chicken-road/LiveChickenRoadGame";
 
 /* The cabinet rebuild. Games move over one at a time so the live app keeps
    working through the rollout — a slug is either on the new landscape
@@ -67,6 +68,7 @@ const COMPONENTS = {
   "ice-fishing": IceFishingGame,
   blackjack: BlackjackGame,
   rummy: RummyGame,
+  "chicken-road": LiveChickenRoadGame,
 };
 
 /* Slugs already rebuilt as landscape cabinets. */
@@ -74,12 +76,12 @@ const CABINET = new Set([
   "seven-up-down", "andar-bahar", "fun-target", "keno", "pappu-pictures", "bingo", "checker",
   "fun-roulette", "aviator", "super-golden-wheel", "no-hold", "champion-poker",
   "fever-joker-bonus", "giant-jackpot", "lucky-8-line", "triple-fun",
-  "rummy",
+  "rummy", "chicken-road",
 ]);
 
 /* These fullscreen tables already carry dense, game-native result/history
    chrome. Keep the shared winner receipt off them so it never covers play. */
-const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down", "andar-bahar", "pappu-pictures", "rummy"]);
+const NO_WINNER_ROTATOR = new Set(["aviator", "fun-roulette", "keno", "seven-up-down", "andar-bahar", "pappu-pictures", "rummy", "chicken-road"]);
 
 export default function GamePlay() {
   const { slug } = useParams();
