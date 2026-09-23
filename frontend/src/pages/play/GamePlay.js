@@ -89,6 +89,9 @@ export default function GamePlay() {
   const [game, setGame] = useState(null);
 
   useEffect(() => {
+    // This authenticated live controller owns availability and recovery. A
+    // catalogue pause must not prevent an existing round from being cashed out.
+    if (slug === "chicken-road") return;
     let active = true;
     api
       .get(`/games/${slug}`)
@@ -102,6 +105,7 @@ export default function GamePlay() {
         setGame(data.game);
       })
       .catch((error) => {
+        if (!active) return;
         if (isComingSoonError(error) || errCode(error) === "GAME_COMING_SOON") {
           toast.info("This game is coming soon.");
           navigate(`/games/${slug}`, { replace: true });
@@ -114,6 +118,10 @@ export default function GamePlay() {
       active = false;
     };
   }, [slug, navigate]);
+
+  if (slug === "chicken-road") {
+    return <PageTransition><LiveChickenRoadGame /></PageTransition>;
+  }
 
   if (!game) {
     return (

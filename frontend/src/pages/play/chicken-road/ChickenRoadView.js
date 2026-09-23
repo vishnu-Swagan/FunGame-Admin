@@ -111,9 +111,24 @@ export default function ChickenRoadView({
   goDisabled = actionDisabled, cashOutDisabled = actionDisabled, cashOutText = "—",
   result = null, error = "", banner = null, historyText = "", rulesLabel = "Game rules",
   chanceHint = "", statusPanel = null, dialog = null, animateOutcome = true, onStakeChange, onMinimum, onMaximum,
-  onPreset, onDifficulty, onAction, onFullscreen, onDialogChange,
+  onPreset, onDifficulty, onAction, onFullscreen, onDialogChange, escapeFromLane = 0,
 }) {
-  return <main className={`road-game${resetting ? " is-resetting" : ""}${hidden ? " is-background" : ""}`} ref={rootRef} data-testid="chicken-road" data-phase={moving ? "hopping" : phase}>
+  const [endedBurst, setEndedBurst] = useState(null);
+  const [escapeBurst, setEscapeBurst] = useState(null);
+  const collisionKey = `${roundKey}:${currentLane}`;
+  const motionAllowed = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const showCollision = animateOutcome && endedBurst !== collisionKey && motionAllowed;
+  useEffect(() => {
+    if (!motionAllowed) {
+      setEscapeBurst(null);
+      if (phase === "crashed") setEndedBurst(collisionKey);
+    } else if (moving && escapeFromLane > 0) {
+      // The controller supplies this only for an already-confirmed safe hop.
+      // Keep its decorative departure flame alive after the chicken lands.
+      setEscapeBurst({ roundKey, lane: escapeFromLane });
+    }
+  }, [moving, escapeFromLane, roundKey, motionAllowed, phase, collisionKey]);
+  return <main className={`road-game${resetting ? " is-resetting" : ""}${hidden ? " is-background" : ""}`} ref={rootRef} data-testid="chicken-road" data-phase={moving ? "hopping" : phase} data-difficulty={difficulty}>
     <header className="road-topbar">
       <RoadBrand />
       <div className="road-toolbar">
@@ -135,11 +150,18 @@ export default function ChickenRoadView({
             : currentLane === lane && phase !== "idle" && !moving ? "current"
               : lane < (moving ? visibleLane : currentLane) ? "passed"
                 : lane === (moving ? visibleLane : currentLane + 1) ? "next" : "idle";
-          return <div className="road-lane" key={lane} data-state={state} style={{ "--lane-index": index }}>
+          const escaping = phase !== "idle" && motionAllowed && escapeBurst?.roundKey === roundKey && escapeBurst?.lane === lane;
+          const colliding = state === "crashed" && showCollision;
+          return <div className="road-lane" key={lane} data-state={state} style={{ "--lane-index": index }} onAnimationEnd={(event) => {
+            if (!event.target.classList.contains("road-fx-burst") || event.animationName !== "road-fx-burst-envelope") return;
+            if (event.target.classList.contains("road-fx-escape")) setEscapeBurst(null);
+            else setEndedBurst(collisionKey);
+          }}>
             <div className="road-lane-glow" /><div className="road-patch road-patch--one" /><div className="road-patch road-patch--two" />
             <Coin multiplier={multiplier} state={state} />
-            <div className="road-grate">{state !== "current" && state !== "crashed" && state !== "passed" && <AmbientFlame lane={lane} />}</div>
-            {state === "crashed" && animateOutcome && <FireBurst key={roundKey} />}
+            <div className={`road-grate${colliding || escaping ? " is-firing" : ""}`}>{state !== "current" && state !== "crashed" && state !== "passed" && <AmbientFlame lane={lane} />}</div>
+            {colliding && <FireBurst key={`collision:${roundKey}`} />}
+            {escaping && <FireBurst key={`escape:${roundKey}:${lane}`} className="road-fx-escape" />}
           </div>;
         })}
         <div className={`road-character-layer${moving ? " is-hopping" : ""}${phase === "crashed" && !moving ? " is-crashed" : ""}`} style={{ "--lane": visibleLane }}>

@@ -5,7 +5,7 @@ import path from "path";
 import { api } from "@/lib/api";
 import ChickenRoadGame from "./ChickenRoadGame";
 import { createChickenRoadAudio } from "./chickenRoadAudio";
-import { MEDIUM_MULTIPLIERS } from "./chickenRoadDemo";
+import { MEDIUM_MULTIPLIERS, DIFFICULTIES, getDemoMultipliers } from "./chickenRoadDemo";
 
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn(), post: jest.fn() } }));
 jest.mock("./chickenRoadAudio", () => ({ createChickenRoadAudio: jest.fn() }));
@@ -106,6 +106,12 @@ function advance(milliseconds = HOP_MS) {
   act(() => jest.advanceTimersByTime(milliseconds));
 }
 
+function endAnimation(target, name) {
+  const event = new Event("animationend", { bubbles: true });
+  Object.defineProperty(event, "animationName", { value: name });
+  act(() => target.dispatchEvent(event));
+}
+
 function setStake(value) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
   act(() => {
@@ -170,6 +176,55 @@ test("Play attempts lane one and reveals its 1.12 multiplier after the 480 ms cr
   expect(container.querySelector('.road-lane[data-state="next"] .road-fx-ambient')).not.toBeNull();
 });
 
+test("ambient flames originate inside grates, and the collision grate resets after its finite burst", () => {
+  const ambient = [...container.querySelectorAll(".road-fx-ambient")];
+  expect(ambient).toHaveLength(MEDIUM_MULTIPLIERS.length);
+  expect(ambient.every((flame) => flame.parentElement.classList.contains("road-grate"))).toBe(true);
+  expect(container.querySelector(".road-grate.is-firing")).toBeNull();
+  playAndLand();
+  for (let lane = 2; lane <= 6; lane += 1) { click(byTestId("road-go")); advance(); }
+  const crashed = element('.road-lane[data-state="crashed"]');
+  expect(crashed.querySelector(".road-grate.is-firing")).not.toBeNull();
+  const burst = crashed.querySelector(".road-fx-burst");
+  endAnimation(burst.querySelector(".road-fx-jet"), "road-fx-jet-rise");
+  expect(crashed.querySelector(".road-grate.is-firing")).not.toBeNull();
+  endAnimation(burst, "road-fx-burst-envelope");
+  expect(crashed.querySelector(".road-grate.is-firing")).toBeNull();
+  expect(crashed.querySelector(".road-fx-burst")).toBeNull();
+  expect(phase()).toBe("crashed");
+  expect(element('[aria-label="Roasted chicken after a collision"]')).toBeTruthy();
+  playAndLand();
+  expect(element('.road-lane[data-state="crashed"] .road-grate.is-firing')).toBeTruthy();
+});
+
+test("a safe departure flares only the previous grate and survives landing until its animation ends", () => {
+  click(byTestId("road-play"));
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
+  advance();
+  click(byTestId("road-go"));
+  const burst = element('.road-lane[data-state="passed"] .road-fx-escape');
+  expect(burst.parentElement.querySelector(".road-grate.is-firing")).not.toBeNull();
+  expect(container.querySelector(".road-home .road-fx-burst")).toBeNull();
+  expect(phase()).toBe("hopping");
+  advance();
+  expect(phase()).toBe("playing");
+  expect(container.querySelector(".road-fx-escape")).toBe(burst);
+  endAnimation(burst, "road-fx-burst-envelope");
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
+  expect(container.querySelector(".road-grate.is-firing")).toBeNull();
+  expect(phase()).toBe("playing");
+  expect(byTestId("chicken-road").dataset.difficulty).toBe("medium");
+});
+
+test("reduced motion never raises a firing grate without a visible animation", () => {
+  window.matchMedia = jest.fn(() => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }));
+  playAndLand();
+  for (let lane = 2; lane <= 6; lane += 1) { click(byTestId("road-go")); advance(); }
+  expect(phase()).toBe("crashed");
+  expect(container.querySelector(".road-grate.is-firing")).toBeNull();
+  expect(container.querySelector(".road-fx-burst")).toBeNull();
+});
+
 test("two Play clicks in one act start only one crossing and deduct only one stake", () => {
   click(byTestId("road-play"), 2);
   expect(phase()).toBe("hopping");
@@ -220,17 +275,38 @@ test("rapid cash-out clicks credit 3.36 once and show a completed result", () =>
   expectBalance("1,000.36");
 });
 
-test("Hard explains missing rules and disables Play until Medium is restored", () => {
-  click(difficultyButton("Hard"));
-  expect(difficultyButton("Hard").getAttribute("aria-pressed")).toBe("true");
-  expect(element('[role="alert"]').textContent).toContain("odds and payout table are not supplied");
-  expect(byTestId("road-play").disabled).toBe(true);
-  click(byTestId("road-play"));
-  expect(phase()).toBe("idle");
-  expectBalance("1,000");
-  expect(jest.getTimerCount()).toBe(0);
-  click(difficultyButton("Medium"));
+test.each(DIFFICULTIES)("$label is playable only as a local scripted preview with its own ladder", ({ id, label }) => {
+  const ladder = getDemoMultipliers(id);
+  click(difficultyButton(label));
+  expect(difficultyButton(label).getAttribute("aria-pressed")).toBe("true");
+  expect(byTestId("chicken-road").dataset.difficulty).toBe(id);
   expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(byTestId("road-play").disabled).toBe(false);
+  expect([...container.querySelectorAll(".road-coin text")].map((node) => node.textContent)).toEqual(ladder.map((value) => `${value.toFixed(2)}x`));
+  playAndLand();
+  expect(phase()).toBe("playing");
+  expect(element(`.road-coin[aria-label="${ladder[0].toFixed(2)} times, current multiplier"]`)).toBeTruthy();
+  expect(difficultyButtons().every((node) => node.disabled)).toBe(true);
+  const payout = Math.floor(300 * Math.round(ladder[0] * 100) / 100);
+  click(byTestId("road-cashout"));
+  expect(phase()).toBe("cashed_out");
+  expectBalance(((99700 + payout) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 }));
+  expect(container.textContent).toContain("Demo credits only");
+  expect(container.textContent).toContain("Scripted outcomes, not real odds");
+});
+
+test("changing a finished round's difficulty resets only its board and preserves credits and history", () => {
+  playAndLand();
+  click(byTestId("road-go")); advance();
+  click(byTestId("road-cashout"));
+  const history = element(".road-history").textContent;
+  click(difficultyButton("Hardcore"));
+  expect(phase()).toBe("idle");
+  expectBalance("1,000.84");
+  expect(element(".road-history").textContent).toBe(history);
+  expect(element(".road-character-layer").style.getPropertyValue("--lane")).toBe("0");
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
+  expect([...container.querySelectorAll(".road-coin text")].map((node) => node.textContent)).toEqual(getDemoMultipliers("hardcore").map((value) => `${value.toFixed(2)}x`));
   expect(byTestId("road-play").disabled).toBe(false);
 });
 

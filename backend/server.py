@@ -491,12 +491,13 @@ async def health():
 
 
 api_router.include_router(routes_auth.router)
+# The specific state path must precede routes_live's /live/{slug}/state.
+if routes_chicken_road.RULES_APPROVED:
+    api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)
 api_router.include_router(routes_rummy.router)
-if routes_chicken_road.RULES_APPROVED:
-    api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_player.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_distributor.router)

@@ -19,7 +19,7 @@ the dormant deployment.
 - [x] Visually verify desktop rendering, stepping, cash-out, replay and collision.
 - [x] Generate a matching gold/emerald/purple lobby logo and wire the game header.
 - [x] Recheck compact mobile rendering after the shared-view extraction (390×844).
-- [ ] Complete independent code review and full frontend regression checks.
+- [x] Complete independent code review and full frontend regression checks.
 - [ ] Obtain operator approval of the proposed math before enabling wallet-backed play.
 
 The reference shows a single full-width stage, a compact top bar, large multiplier
@@ -31,15 +31,18 @@ readable sizes. Respect reduced-motion preferences.
 
 Computer-use browser access recovered. The local preview was exercised with
 scripted credits only: a safe hop, cash-out, replay and collision all worked. The
-updated 1.4-second collision burst visibly reaches the full road height, and
-brighter ambient flames emerge above the grates rather than behind the curb.
+updated 1.4-second collision burst visibly reaches the full road height. Flames
+start inside the grills behind foreground bars and extend into the road, with
+gradient cores, orange edges, wisps and embers. A confirmed safe crossing leaves
+a finite departure flare behind the hopping chicken; a confirmed collision burns
+the destination lane. Difficulty affects decorative intensity, never outcomes.
 No production bet, payment or withdrawal was used for verification.
 
-Final integration checks on 2026-09-23: 80 frontend suites / 595 tests passed;
+Final integration checks on 2026-09-23: 81 frontend suites / 641 tests passed;
 the separate Aviator renderer passed 4 suites / 27 tests. The complete backend
-run passed 558 tests / 985 subtests, followed by the final Chicken Road suite
-with 72 tests / 841 subtests after two additional fairness regressions. The
-production build succeeded, and the compiled application contains none of the
+run passed 561 tests / 987 subtests, followed by the final Chicken Road suite
+with 73 tests / 843 subtests. The final general CLI review was clean. The
+production build passed, and the compiled application contains none of the
 local demo labels or scripted-model markers. Existing bundle-size and dependency
 deprecation warnings remain; no unrelated dependency upgrade was attempted.
 
@@ -54,10 +57,12 @@ authentication provider; it imports no wallet or gameplay API. Production builds
 do not register this preview route. The catalogue entry defaults to Coming Soon;
 its logo can be published without activating unapproved odds.
 
-Only the captured Medium ladder is playable. The other difficulty buttons expose
-the missing specification instead of inventing probabilities. Demo outcomes use a
-documented fixed sequence, not a random or certified payout model. The recording
-does not establish real odds, the complete ladder, or auto-play stopping rules.
+All four difficulties are selectable in the local preview. Medium preserves the
+captured labels; the other design-only ladders use the explicitly unapproved
+proposal. Preview outcomes use documented fixed sequences, not random or certified
+odds. Each fourth scripted round demonstrates full traversal. This is not evidence
+of a live payout model. The recording does not establish real odds, the complete
+provider ladder, or auto-play stopping rules.
 See `chicken-road-rules-audit.md` before any real-money integration and
 `chicken-road-live-rules-proposal.md` for an unapproved four-difficulty proposal.
 

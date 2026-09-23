@@ -1,3 +1,8 @@
+.road-game { --road-ambient-cycle: 7800ms; --road-fire-flicker: 1380ms; --road-escape-height: 70%; }
+.road-game[data-difficulty="medium"] { --road-ambient-cycle: 6200ms; --road-fire-flicker: 1150ms; --road-escape-height: 76%; }
+.road-game[data-difficulty="hard"] { --road-ambient-cycle: 4700ms; --road-fire-flicker: 920ms; --road-escape-height: 84%; }
+.road-game[data-difficulty="hardcore"] { --road-ambient-cycle: 3400ms; --road-fire-flicker: 720ms; --road-escape-height: 92%; }
+
 .road-fx-burst {
   --road-fx-duration: 1400ms;
   position: absolute;
@@ -9,10 +14,21 @@
   animation: road-fx-burst-envelope var(--road-fx-duration) linear both;
 }
 
+/* A safe crossing leaves a short jet behind the chicken, after it has begun
+   its hop. This is presentation only; it never chooses the crossing result. */
+.road-fx-burst.road-fx-escape {
+  inset: auto 17% 0;
+  height: var(--road-escape-height, 76%);
+  animation-delay: 180ms;
+}
+.road-fx-escape .road-fx-jet,
+.road-fx-escape .road-fx-burst-glow,
+.road-fx-escape .road-fx-contour { animation-delay: 180ms; }
+
 .road-fx-burst-glow {
   position: absolute;
   inset: -8% -15% -3%;
-  background: radial-gradient(ellipse at 50% 68%, #ff962185 0, #ff642847 35%, transparent 69%);
+  background: radial-gradient(ellipse at 50% 90%, #ffca568f 0, #ff642847 35%, transparent 69%);
   filter: blur(7px);
   transform-origin: 50% 100%;
   animation: road-fx-glow-envelope var(--road-fx-duration) ease-out both;
@@ -37,15 +53,15 @@
 }
 
 .road-fx-rim {
-  fill: #ff471b;
-  stroke: #be2d24;
-  stroke-width: 4;
+  fill: var(--road-fire-edge, #ff471b);
+  stroke: #ff632175;
+  stroke-width: 1.2;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
-.road-fx-core { fill: #fff94e; }
-.road-fx-lick { fill: #ff5617; }
+.road-fx-core { fill: var(--road-fire-core, #fff94e); }
+.road-fx-lick { fill: #ff762075; }
 
 /* Discrete silhouette replacement keeps hand-drawn tongues crisp. The parent
    supplies one continuous opacity envelope; exactly one contour stays active. */
@@ -102,15 +118,16 @@
   --road-fx-delay: 0ms;
   position: absolute;
   z-index: 3;
-  bottom: 100%;
+  /* The source sits inside the opening, behind the foreground grill bars. */
+  bottom: 14px;
   left: 50%;
   display: block;
-  width: clamp(24px, 2vw, 36px);
-  height: clamp(38px, 3.3vw, 58px);
+  width: 62%;
+  height: calc(100% + 32px);
   pointer-events: none;
   user-select: none;
   transform: translateX(-50%);
-  animation: road-fx-ambient-cycle 7800ms ease-in-out var(--road-fx-delay) infinite;
+  animation: road-fx-ambient-cycle var(--road-ambient-cycle, 7800ms) ease-in-out var(--road-fx-delay) infinite;
 }
 .road-fx-pilot {
   position: relative;
@@ -118,12 +135,15 @@
   width: 100%;
   height: 100%;
   overflow: visible;
-  opacity: .72;
+  opacity: .9;
   transform-origin: 50% 100%;
-  animation: road-fx-pilot-flicker 1380ms ease-in-out var(--road-fx-delay) infinite;
+  animation: road-fx-pilot-flicker var(--road-fire-flicker, 1380ms) ease-in-out var(--road-fx-delay) infinite;
 }
-.road-fx-pilot-edge { fill: #ff491b; filter: drop-shadow(0 0 2px #ff54298c); }
-.road-fx-pilot-core { fill: #fff66b; transform-origin: 50% 100%; animation: road-fx-pilot-core 870ms ease-in-out var(--road-fx-delay) infinite; }
+.road-fx-pilot-edge { fill: var(--road-fire-edge, #ff491b); filter: drop-shadow(0 0 2px #ff54298c); }
+.road-fx-pilot-core { fill: var(--road-fire-core, #fff66b); transform-origin: 50% 100%; animation: road-fx-pilot-core 870ms ease-in-out var(--road-fx-delay) infinite; }
+.road-fx-wisp { fill: var(--road-fire-edge, #ff491b); transform-box: fill-box; transform-origin: 50% 100%; animation: road-fx-wisp 930ms ease-in-out var(--road-fx-delay) infinite alternate; }
+.road-fx-pilot-ember { position: absolute; bottom: 12%; left: 28%; width: 3px; height: 5px; border-radius: 50%; background: #ffd764; box-shadow: 0 0 3px #ff832f; animation: road-fx-pilot-ember 1700ms ease-out var(--road-fx-delay) infinite; }
+.road-fx-pilot-ember--second { left: 69%; width: 2px; height: 4px; animation-delay: calc(var(--road-fx-delay) - 710ms); }
 .road-fx-pilot-glow { position: absolute; bottom: -2px; left: -40%; width: 180%; height: 16px; border-radius: 50%; background: #ff9c3696; filter: blur(4px); opacity: .8; }
 
 @keyframes road-fx-burst-envelope {
@@ -193,6 +213,15 @@
   0%, 100% { transform: scaleY(.8) translateX(-1px); }
   40% { transform: scaleY(1.07) translateX(1px); }
   72% { transform: scaleY(.91) translateX(0); }
+}
+@keyframes road-fx-wisp {
+  from { opacity: .5; transform: scale(.8, .7) rotate(-7deg); }
+  to { opacity: .85; transform: scale(1.05, 1.15) rotate(5deg); }
+}
+@keyframes road-fx-pilot-ember {
+  0% { opacity: 0; transform: translate(0, 0) scale(.5); }
+  15% { opacity: .85; }
+  100% { opacity: 0; transform: translate(-9px, -145px) scale(.15); }
 }
 
 /* Ambient motion sleeps off-screen. A finite burst keeps its elapsed time so

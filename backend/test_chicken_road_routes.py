@@ -19,11 +19,12 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from mongomock_motor import AsyncMongoMockClient
 from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError, OperationFailure
+from starlette.routing import Match
 
 
 # Install an isolated db module before importing any financial dependencies;
@@ -903,6 +904,67 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RequestAndPublicationTests(unittest.TestCase):
+    def test_server_registration_order_matches_specific_state_before_generic(self):
+        """Exercise actual registration order without importing server/lifespan.
+
+        The generic endpoint is a nonexecuted sentinel at its source-declared
+        path. The Chicken Road router is real. Starlette's ordered matcher
+        therefore reproduces the production overlap without any handler, auth,
+        database, or startup side effects.
+        """
+        server_tree = ast.parse(Path(__file__).with_name("server.py").read_text())
+        live_tree = ast.parse(Path(__file__).with_name("routes_live.py").read_text())
+        state_node = next(node for node in live_tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "live_state")
+        state_path = next(ast.literal_eval(decorator.args[0]) for decorator in state_node.decorator_list
+                          if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "router.get")
+        live_router_assignment = next(node for node in live_tree.body if isinstance(node, ast.Assign)
+                                      and any(isinstance(target, ast.Name) and target.id == "router" for target in node.targets))
+        live_namespace = {"APIRouter": APIRouter}
+        exec(compile(ast.Module(body=[live_router_assignment], type_ignores=[]), "routes_live.py:router", "exec"), live_namespace)
+
+        async def generic_live_state(slug: str):
+            raise AssertionError("Routing regression must not execute handlers")
+
+        generic_router = live_namespace["router"]
+        generic_router.add_api_route(state_path, generic_live_state, methods=["GET"])
+        router_names = {"routes_auth.router", "routes_chicken_road.router", "routes_live.router"}
+
+        def relevant_registrations(nodes):
+            selected = []
+            for node in nodes:
+                if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                        and ast.unparse(node.value.func) == "api_router.include_router"
+                        and node.value.args and ast.unparse(node.value.args[0]) in router_names):
+                    selected.append(copy.deepcopy(node))
+                elif isinstance(node, ast.If):
+                    body, otherwise = relevant_registrations(node.body), relevant_registrations(node.orelse)
+                    if body or otherwise:
+                        selected.append(ast.If(test=copy.deepcopy(node.test), body=body or [ast.Pass()], orelse=otherwise))
+            return selected
+
+        registrations = relevant_registrations(server_tree.body)
+        self.assertEqual(sum(isinstance(node, ast.Call) for statement in registrations for node in ast.walk(statement)), 3)
+        api_assignment = next(node for node in server_tree.body if isinstance(node, ast.Assign)
+                              and any(isinstance(target, ast.Name) and target.id == "api_router" for target in node.targets))
+        assembly = ast.fix_missing_locations(ast.Module(body=[copy.deepcopy(api_assignment), *registrations], type_ignores=[]))
+        scope = {"type": "http", "path": "/api/live/chicken-road/state", "method": "GET", "root_path": ""}
+        for approved in (False, True):
+            with self.subTest(approved=approved):
+                namespace = {"APIRouter": APIRouter,
+                             "routes_auth": types.SimpleNamespace(router=APIRouter()),
+                             "routes_live": types.SimpleNamespace(router=generic_router),
+                             "routes_chicken_road": types.SimpleNamespace(RULES_APPROVED=approved, router=route.router)}
+                exec(compile(assembly, "server.py:router-registration", "exec"), namespace)
+                app = FastAPI()
+                app.include_router(namespace["api_router"])
+                matches = [entry for entry in app.routes if entry.matches(scope)[0] == Match.FULL]
+                self.assertEqual(len(matches), 2 if approved else 1)
+                self.assertIs(matches[0].endpoint, route.state if approved else generic_live_state)
+                if approved:
+                    self.assertIs(matches[1].endpoint, generic_live_state)
+                else:
+                    self.assertFalse(any(entry.endpoint is route.state for entry in app.routes))
+
     def test_request_models_enforce_strict_types_bounds_and_unknown_fields(self):
         valid = {
             "operation_id": "play-operation", "commitment_id": "commitment-1", "client_seed": "a" * 64,

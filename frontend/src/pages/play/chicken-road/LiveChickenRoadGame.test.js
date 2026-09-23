@@ -3,11 +3,18 @@ import { createRoot } from "react-dom/client";
 import fs from "fs";
 import path from "path";
 import { randomFillSync } from "crypto";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { financialApi, createIdempotencyKey } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { createChickenRoadAudio } from "./chickenRoadAudio";
 import LiveChickenRoadGame from "./LiveChickenRoadGame";
 
+// CRA's Jest resolver predates package exports; load the real router's CJS
+// build rather than mocking Link/navigation. Node supplies jsdom's missing API.
+jest.mock("react-router-dom", () => {
+  global.TextEncoder = require("util").TextEncoder;
+  return jest.requireActual("react-router/dist/development/index.js");
+}, { virtual: true });
 jest.mock("@/lib/api", () => ({
   financialApi: { get: jest.fn(), post: jest.fn() },
   createIdempotencyKey: jest.fn(),
@@ -42,15 +49,15 @@ const setUser = jest.fn();
 const originalMatchMedia = window.matchMedia;
 const originalHidden = Object.getOwnPropertyDescriptor(document, "hidden");
 const originalActEnvironment = global.IS_REACT_ACT_ENVIRONMENT;
-const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+const originalCrypto = Object.getOwnPropertyDescriptor(window, "crypto");
 
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
-  Object.defineProperty(globalThis, "crypto", { configurable: true, value: { getRandomValues: (bytes) => randomFillSync(bytes) } });
+  Object.defineProperty(window, "crypto", { configurable: true, value: { getRandomValues: (bytes) => randomFillSync(bytes) } });
 });
 afterAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
-  if (originalCrypto) Object.defineProperty(globalThis, "crypto", originalCrypto); else delete globalThis.crypto;
+  if (originalCrypto) Object.defineProperty(window, "crypto", originalCrypto); else delete window.crypto;
 });
 beforeEach(() => {
   jest.useFakeTimers(); jest.clearAllMocks();
@@ -77,7 +84,13 @@ afterEach(() => {
   if (originalHidden) Object.defineProperty(document, "hidden", originalHidden); else delete document.hidden;
 });
 
-const mount = async () => { await act(async () => { root.render(<LiveChickenRoadGame />); }); };
+function Lobby() {
+  const { user: currentUser } = useAuth();
+  return <div data-testid="lobby">{currentUser?.id}</div>;
+}
+const mount = async () => { await act(async () => { root.render(<MemoryRouter initialEntries={["/games/chicken-road/play"]}>
+  <Routes><Route path="/games/chicken-road/play" element={<LiveChickenRoadGame />} /><Route path="/games" element={<Lobby />} /></Routes>
+</MemoryRouter>); }); };
 const flush = async () => { await act(async () => { await Promise.resolve(); }); };
 const byId = (id) => container.querySelector(`[data-testid="${id}"]`);
 const button = (text) => [...container.querySelectorAll("button")].find((element) => element.textContent === text);
@@ -255,6 +268,29 @@ test("an unapproved backend and a disabled-service response cannot enable Play",
   expect(financialApi.post).not.toHaveBeenCalled();
 });
 
+test("the dormant backend's GAME_COMING_SOON response is unavailable, not a network outage", async () => {
+  financialApi.get.mockRejectedValue({ response: { status: 409, data: { detail: { code: "GAME_COMING_SOON" } } } });
+  await mount();
+  expect(container.textContent).toContain("Chicken Road is unavailable");
+  expect(container.textContent).not.toContain("Connection interrupted");
+  expect(byId("road-play").disabled).toBe(true);
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("a GAME_COMING_SOON recovery response does not discard an uncertain action", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  financialApi.post.mockRejectedValue(new Error("Lost crossing response"));
+  await click(byId("road-go"));
+  const saved = pendingAction();
+  financialApi.get.mockRejectedValue({ response: { status: 409, data: { detail: { code: "GAME_COMING_SOON" } } } });
+  await click(button("Check round"));
+  expect(container.textContent).toContain("Chicken Road is unavailable");
+  expect(pendingAction()).toEqual(saved);
+  expect(byId("road-go").disabled).toBe(true);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+});
+
 test("restored collision is read-only and does not replay fire or sound", async () => {
   server = initial({ balance: 900, latest_round: round({ status: "CRASHED", cashout_amount: 0, multiplier_hundredths: 0 }) });
   await mount();
@@ -276,10 +312,12 @@ test("GO moves and plays collision effects only after its server result is recei
   expect(audio.playWalk).not.toHaveBeenCalled();
   expect(audio.playFire).not.toHaveBeenCalled();
   expect(financialApi.post).toHaveBeenCalledTimes(1);
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
   const collision = round({ status: "CRASHED", version: 2, lane: 2, cashout_amount: 0, multiplier_hundredths: 0 });
   server = initial({ balance: 900, latest_round: collision });
   response.resolve({ data: receipt(sent, collision) }); await flush();
   expect(phase()).toBe("hopping");
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
   expect(audio.playWalk).toHaveBeenCalledTimes(1);
   expect(audio.playFire).not.toHaveBeenCalled();
   advance();
@@ -289,6 +327,28 @@ test("GO moves and plays collision effects only after its server result is recei
   expect(byId("road-balance").getAttribute("aria-label")).toBe("Balance 900 chips");
 });
 
+test("a safe departure flame waits for a confirmed safe server response", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  const response = deferred(); let sent;
+  financialApi.post.mockImplementation(async (_url, body) => { sent = body; return response.promise; });
+  await click(byId("road-go"));
+  expect(container.querySelector(".road-fx-escape")).toBeNull();
+  const safe = round({ version: 2, lane: 2, multiplier_hundredths: 113, cashout_amount: 113 });
+  server = initial({ balance: 900, active_round: safe });
+  response.resolve({ data: receipt(sent, safe) }); await flush();
+  expect(phase()).toBe("hopping");
+  const burst = container.querySelector('.road-lane[data-state="passed"] .road-fx-escape');
+  expect(burst).not.toBeNull();
+  expect(container.querySelector('.road-lane[data-state="next"] .road-fx-burst')).toBeNull();
+  advance();
+  expect(phase()).toBe("playing");
+  expect(container.querySelector(".road-fx-escape")).toBe(burst);
+  expect(container.querySelector('[aria-label="Roasted chicken after a collision"]')).toBeNull();
+  expect(audio.playFire).not.toHaveBeenCalled();
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+});
+
 test("no signed-in player means no game network request and no wagering controls", async () => {
   user = null;
   await mount();
@@ -296,6 +356,38 @@ test("no signed-in player means no game network request and no wagering controls
   expect(byId("road-play").disabled).toBe(true);
   expect(financialApi.get).not.toHaveBeenCalled();
   expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test.each([false, true])("the lobby exit stays available with an active round (pending offline action: %s)", async (offline) => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  if (offline) {
+    financialApi.post.mockRejectedValue(new Error("Lost crossing response"));
+    await click(byId("road-go"));
+    expect(container.textContent).toContain("Connection interrupted");
+    expect(byId("road-go").disabled).toBe(true);
+    expect(pendingAction().kind).toBe("go");
+  }
+  const saved = pendingAction();
+  const mutations = financialApi.post.mock.calls.length;
+  await click(container.querySelector('button[aria-label="Game menu"]'));
+  const exit = container.querySelector('.road-dialog a[href="/games"]');
+  expect(exit.textContent).toBe("Back to lobby");
+  expect(exit.hasAttribute("aria-disabled")).toBe(false);
+  const locationBefore = window.location.href;
+  let defaultPrevented;
+  const observeClick = (event) => { defaultPrevented = event.defaultPrevented; };
+  document.addEventListener("click", observeClick, { once: true });
+  await act(async () => { exit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })); });
+  expect(defaultPrevented).toBe(true);
+  expect(byId("lobby").textContent).toBe("live-player-1");
+  expect(window.location.href).toBe(locationBefore);
+  expect(byId("chicken-road")).toBeNull();
+  expect(pendingAction()).toEqual(saved);
+  expect(financialApi.post).toHaveBeenCalledTimes(mutations);
+  act(() => root.unmount()); root = null;
+  expect(pendingAction()).toEqual(saved);
+  expect(financialApi.post).toHaveBeenCalledTimes(mutations);
 });
 
 test("live and neutral view modules cannot import the development simulator", () => {

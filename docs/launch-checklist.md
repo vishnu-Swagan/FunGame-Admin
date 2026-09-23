@@ -10,7 +10,7 @@ subscription is introduced. Never synchronize the Render Blueprint for this rele
 
 - [x] **Visual implementation:** reference road, articulated walking/blinking
   chicken, gesture-started audio, visible grate and collision flames, matching logo.
-- [ ] **Release verification:** isolated backend transaction/concurrency tests,
+- [x] **Release verification:** isolated backend transaction/concurrency tests,
   full frontend suite, production build, independent general and security reviews.
 - [ ] **Dormant publication:** merge the reviewed release, wait for both Render
   services to report the exact main commit, and verify the logo/catalogue. This

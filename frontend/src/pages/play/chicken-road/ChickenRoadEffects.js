@@ -1,4 +1,19 @@
+import { useId } from "react";
 import "./chicken-road-effects.css";
+
+function FlamePaint({ id }) {
+  return <defs>
+    <linearGradient id={`${id}-edge`} x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stopColor="#ffbd32" /><stop offset=".36" stopColor="#ff691c" />
+      <stop offset=".78" stopColor="#ef3c0f" stopOpacity=".9" /><stop offset="1" stopColor="#c52910" stopOpacity=".25" />
+    </linearGradient>
+    <linearGradient id={`${id}-core`} x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stopColor="#fffbe4" /><stop offset=".24" stopColor="#fff28a" />
+      <stop offset=".55" stopColor="#ffd039" /><stop offset=".82" stopColor="#ff921c" />
+      <stop offset="1" stopColor="#ff5c14" stopOpacity=".55" />
+    </linearGradient>
+  </defs>;
+}
 
 /**
  * Decorative, finite collision effect. Mount once for each collision (use a
@@ -6,11 +21,13 @@ import "./chicken-road-effects.css";
  * Four drawn contours alternate through a clearly visible 1400 ms burst.
  */
 export function FireBurst({ durationMs = 1400, className = "" }) {
+  const paint = `road-fire-${useId().replace(/:/g, "")}`;
   const duration = Number.isFinite(durationMs) ? Math.max(400, Math.min(1800, durationMs)) : 1400;
-  return <div className={`road-fx-burst ${className}`.trim()} style={{ "--road-fx-duration": `${duration}ms` }} aria-hidden="true">
+  return <div className={`road-fx-burst ${className}`.trim()} style={{ "--road-fx-duration": `${duration}ms`, "--road-fire-edge": `url(#${paint}-edge)`, "--road-fire-core": `url(#${paint}-core)` }} aria-hidden="true">
     <div className="road-fx-burst-glow" />
     <div className="road-fx-jet">
       <svg className="road-fx-stream" viewBox="0 0 100 600" preserveAspectRatio="none" focusable="false">
+        <FlamePaint id={paint} />
         <g className="road-fx-contour road-fx-contour--a">
           <path className="road-fx-rim" d="M18 615C8 566 34 543 22 493C7 438 36 408 27 357C17 311 36 279 24 228C13 181 31 145 18 107C9 82 23 58 12 16L21 29C31 2 27-15 23-35C33-68 32-91 44-118C61-89 46-62 58-37C72-57 69-71 78-91C89-64 79-47 87-35C99 19 66 56 86 115C102 166 69 208 84 260C100 314 69 357 76 405L87 373C102 432 70 465 83 520C94 560 87 587 91 615Z" />
           <path className="road-fx-core" d="M30 615C19 569 47 522 36 469C22 413 49 380 44 329C36 275 58 245 45 200C33 153 49 118 36 78C30 48 47 6 41-35C44-49 42-70 45-88C54-62 52-48 58-25C66-43 68-49 72-63L77-35C86 27 61 64 72 115C82 165 61 207 67 246C76 295 55 330 59 374C65 421 50 466 60 510C68 548 70 583 72 615Z" />
@@ -55,12 +72,16 @@ export function FireBurst({ durationMs = 1400, className = "" }) {
 
 /** Small background grate flame. The lane only staggers decoration, never odds. */
 export function AmbientFlame({ lane = 0, className = "" }) {
+  const paint = `road-pilot-${useId().replace(/:/g, "")}`;
   const index = Number.isFinite(lane) ? Math.abs(lane) : 0;
-  return <span className={`road-fx-ambient ${className}`.trim()} style={{ "--road-fx-delay": `${-((index * 1373) % 7800)}ms` }} aria-hidden="true">
+  return <span className={`road-fx-ambient ${className}`.trim()} style={{ "--road-fx-delay": `${-((index * 1373) % 7800)}ms`, "--road-fire-edge": `url(#${paint}-edge)`, "--road-fire-core": `url(#${paint}-core)` }} aria-hidden="true">
     <span className="road-fx-pilot-glow" />
-    <svg className="road-fx-pilot" viewBox="0 0 36 56" focusable="false">
+    <svg className="road-fx-pilot" viewBox="0 0 36 56" preserveAspectRatio="none" focusable="false">
+      <FlamePaint id={paint} />
+      <path className="road-fx-wisp road-fx-wisp--left" d="M9 54C1 44 2 36 6 27C12 16 8 11 13 3C11 20 19 24 13 34C8 42 15 48 9 54Z" />
       <path className="road-fx-pilot-edge" d="M17 54C4 52 4 41 8 34C13 25 12 19 11 15C16 19 16 25 16 25C22 17 17 10 23 2C22 18 33 24 28 35C33 32 34 29 34 26C39 43 29 57 17 54Z" />
       <path className="road-fx-pilot-core" d="M18 51C10 50 11 42 15 37C20 31 18 26 21 22C24 33 30 38 26 45C23 52 20 52 18 51Z" />
     </svg>
+    <i className="road-fx-pilot-ember" /><i className="road-fx-pilot-ember road-fx-pilot-ember--second" />
   </span>;
 }

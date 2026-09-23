@@ -1,26 +1,50 @@
 /**
- * REFERENCE DEMO ONLY — no wallet, API, random outcomes, or probability model.
- * These multipliers reproduce the Medium ladder visible in the supplied
- * recording. They do not describe verified odds or a production game engine.
- * Collision lanes repeat the explicit presentation script [6, 1, 4, 0];
- * zero means the chicken can traverse the entire captured ladder.
+ * LOCAL PREVIEW ONLY — no wallet, API, random outcomes, or probability model.
+ * All tables are design-only copies of the UNAPPROVED live-rules proposal;
+ * Medium also follows the labels in the supplied reference recording.
+ * Neither the tables nor scripted collisions claim odds or certification.
+ * Each difficulty repeats its explicit presentation script below. A zero
+ * means full traversal, not a probability; harder scripts catch earlier.
  */
-export const MEDIUM_MULTIPLIERS = Object.freeze([
-  1.12, 1.28, 1.47, 1.70, 1.98, 2.33, 2.76, 3.32, 4.03, 4.96, 6.20, 6.91, 8.90,
-]);
+export const DEMO_MULTIPLIER_HUNDREDTHS = Object.freeze({
+  easy: Object.freeze([106, 113, 120, 127, 134, 142, 151, 160, 169, 180, 190, 202, 214]),
+  medium: Object.freeze([112, 128, 147, 170, 198, 233, 276, 332, 403, 496, 620, 691, 890]),
+  hard: Object.freeze([135, 183, 247, 333, 449, 606, 818, 1104, 1490, 2011, 2715, 3665, 4947]),
+  hardcore: Object.freeze([150, 225, 338, 507, 760, 1140, 1709, 2563, 3845, 5767, 8650, 12975, 19462]),
+});
+
+const DEMO_MULTIPLIERS = Object.freeze(Object.fromEntries(
+  Object.entries(DEMO_MULTIPLIER_HUNDREDTHS).map(([difficulty, ladder]) => [
+    difficulty, Object.freeze(ladder.map((hundredths) => hundredths / 100)),
+  ]),
+));
+const EMPTY_LADDER = Object.freeze([]);
+
+/** Display-only ladder; use the selected ID when idle and the round ID in play. */
+export function getDemoMultipliers(difficulty) {
+  return typeof difficulty === "string" && Object.prototype.hasOwnProperty.call(DEMO_MULTIPLIERS, difficulty)
+    ? DEMO_MULTIPLIERS[difficulty] : EMPTY_LADDER;
+}
+
+// Preserve the reference-preview import while consumers adopt selected ladders.
+export const MEDIUM_MULTIPLIERS = getDemoMultipliers("medium");
 
 export const DIFFICULTIES = Object.freeze([
-  Object.freeze({ id: "easy", label: "Easy", supported: false }),
+  Object.freeze({ id: "easy", label: "Easy", supported: true }),
   Object.freeze({ id: "medium", label: "Medium", supported: true }),
-  Object.freeze({ id: "hard", label: "Hard", supported: false }),
-  Object.freeze({ id: "hardcore", label: "Hardcore", supported: false }),
+  Object.freeze({ id: "hard", label: "Hard", supported: true }),
+  Object.freeze({ id: "hardcore", label: "Hardcore", supported: true }),
 ]);
 
 export const MIN_STAKE_CENTS = 100;
 export const MAX_STAKE_CENTS = 1000000;
 
-const SCRIPTED_COLLISION_LANES = Object.freeze([6, 1, 4, 0]);
-const MULTIPLIER_HUNDREDTHS = MEDIUM_MULTIPLIERS.map((value) => Math.round(value * 100));
+export const SCRIPTED_COLLISION_LANES = Object.freeze({
+  easy: Object.freeze([10, 4, 7, 0]),
+  medium: Object.freeze([6, 1, 4, 0]),
+  hard: Object.freeze([4, 1, 2, 0]),
+  hardcore: Object.freeze([2, 1, 1, 0]),
+});
 
 /** Initial balance is in demo credits; all stored amounts are integer hundredths. */
 export function createDemoState(initialBalance = 1000) {
@@ -43,14 +67,14 @@ export function createDemoState(initialBalance = 1000) {
 
 export function currentMultiplier(state) {
   if (state.phase === "crashed") return 0;
-  return MEDIUM_MULTIPLIERS[state.lane - 1] || 1;
+  return getDemoMultipliers(state.difficulty)[state.lane - 1] || 1;
 }
 
 /** Only an active round has an available cash-out; settled payout is on state. */
 export function cashOutCents(state) {
   if (state.phase !== "playing" || state.lane < 1) return 0;
   // Multiply integer hundredths before division to avoid decimal multiplier drift.
-  return Math.floor(state.stakeCents * MULTIPLIER_HUNDREDTHS[state.lane - 1] / 100);
+  return Math.floor(state.stakeCents * DEMO_MULTIPLIER_HUNDREDTHS[state.difficulty][state.lane - 1] / 100);
 }
 
 function settle(state, phase) {
@@ -76,7 +100,7 @@ function settle(state, phase) {
 function hop(state) {
   const next = { ...state, lane: state.lane + 1 };
   if (next.lane === next.collisionLane) return settle(next, "crashed");
-  if (next.lane === MEDIUM_MULTIPLIERS.length) return settle(next, "cashed_out");
+  if (next.lane === getDemoMultipliers(next.difficulty).length) return settle(next, "cashed_out");
   return next;
 }
 
@@ -90,14 +114,16 @@ export function transitionDemoState(state, action) {
     case "PLAY": {
       const { stakeCents, difficulty } = action;
       if (state.phase !== "idle"
-        || difficulty !== "medium"
+        || getDemoMultipliers(difficulty).length === 0
         || !Number.isSafeInteger(stakeCents)
         || stakeCents < MIN_STAKE_CENTS
         || stakeCents > MAX_STAKE_CENTS
         || stakeCents > state.balanceCents) {
         return state;
       }
-      const largestPayout = Math.floor(stakeCents * MULTIPLIER_HUNDREDTHS[MULTIPLIER_HUNDREDTHS.length - 1] / 100);
+      const ladder = DEMO_MULTIPLIER_HUNDREDTHS[difficulty];
+      const script = SCRIPTED_COLLISION_LANES[difficulty];
+      const largestPayout = Math.floor(stakeCents * ladder[ladder.length - 1] / 100);
       if (!Number.isSafeInteger(state.balanceCents - stakeCents + largestPayout)) return state;
       return hop({
         ...state,
@@ -108,7 +134,7 @@ export function transitionDemoState(state, action) {
         lane: 0,
         difficulty,
         roundNumber: state.roundNumber + 1,
-        collisionLane: SCRIPTED_COLLISION_LANES[state.roundNumber % SCRIPTED_COLLISION_LANES.length],
+        collisionLane: script[state.roundNumber % script.length],
       });
     }
     case "HOP":

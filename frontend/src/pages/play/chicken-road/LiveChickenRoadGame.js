@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Link } from "react-router-dom";
 import { Volume2, VolumeX } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { errMsg } from "@/lib/api";
@@ -13,7 +14,7 @@ const chips = (amount) => Number.isSafeInteger(amount) ? amount.toLocaleString("
 const roundFrom = (state) => state?.active_round || state?.latest_round || null;
 const phaseOf = (round) => ({ PLAYING: "playing", CRASHED: "crashed", CASHED: "cashed_out" }[round?.status] || "idle");
 const availability = (state) => state.rules.approval !== "APPROVED" ? "unavailable" : state.enabled ? "ready" : "paused";
-const failureConnection = (failure) => failure?.response?.data?.detail?.code === "CHICKEN_ROAD_DISABLED" ? "unavailable" : "offline";
+const failureConnection = (failure) => ["CHICKEN_ROAD_DISABLED", "GAME_COMING_SOON"].includes(failure?.response?.data?.detail?.code) ? "unavailable" : "offline";
 const savedMute = () => { try { return localStorage.getItem(SOUND_KEY) === "true"; } catch { return false; } };
 
 /** Live-only controller. The server supplies every outcome, amount and ladder. */
@@ -247,7 +248,7 @@ export default function LiveChickenRoadGame() {
   </>;
   const dialogContent = dialog === "help" ? <><ol><li>Choose a stake and difficulty, then press <b>Play</b> to attempt the first crossing.</li><li>Press <b>GO</b> for another crossing, or <b>CASH OUT</b> to collect the amount shown.</li><li>A collision ends the round. Reaching the final lane automatically collects the final payout.</li></ol><p>Stake and difficulty remain fixed throughout a round. Results and your balance are confirmed by the server.</p></>
     : dialog === "auto" ? <p>Crossings use Play, GO and Cash Out. Automatic betting is not available.</p>
-      : dialog === "menu" ? <><p>Chakri.Casino · Chicken Road</p><button className="road-top-button" onClick={() => setDialog("help")}>How to play</button><button className="road-top-button" onClick={() => setDialog("rules")}>Rules & limits</button><button className="road-top-button" onClick={toggleSound} aria-pressed={!muted} aria-label={muted ? "Turn game sounds on" : "Mute game sounds"}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}<span>Sound {muted ? "off" : "on"}</span></button><p>Animations follow your device’s reduced-motion preference.</p></>
+      : dialog === "menu" ? <><p>Chakri.Casino · Chicken Road</p><Link className="road-top-button" to="/games">Back to lobby</Link><button className="road-top-button" onClick={() => setDialog("help")}>How to play</button><button className="road-top-button" onClick={() => setDialog("rules")}>Rules & limits</button><button className="road-top-button" onClick={toggleSound} aria-pressed={!muted} aria-label={muted ? "Turn game sounds on" : "Mute game sounds"}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}<span>Sound {muted ? "off" : "on"}</span></button><p>Animations follow your device’s reduced-motion preference.</p></>
         : rules ? <><p>Stake: {chips(rules.min_stake)}–{chips(rules.max_stake)} chips, in steps of {chips(rules.stake_step)}.</p>{Number.isFinite(rules.rtp_bps) && <p>Theoretical return to player: {rules.rtp_bps / 100}%. This is a long-run average, not a promise for an individual round.</p>}<p>Multipliers show the total amount returned, including your stake. A collision returns no payout. The displayed cash-out amount comes from the server.</p>{rules.difficulties.map((item) => <p key={item.id}><b>{item.label}:</b> {item.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}</p>)}</>
           : <p>The game rules are unavailable while disconnected.</p>;
 
@@ -257,6 +258,7 @@ export default function LiveChickenRoadGame() {
     balanceText={chips(snapshot?.balance)} balanceLabel={snapshot ? `Balance ${chips(snapshot.balance)} chips` : "Balance unavailable"}
     stake={stake} presets={presets} difficulty={difficulty} visibleLane={visibleLane}
     camera={Math.max(0, visibleLane - (compact ? 1 : 2))} moving={moving} resetting={resetting} hidden={hidden}
+    escapeFromLane={moving && snapshot?.active_round ? visibleLane - 1 : 0}
     locked={locked} playDisabled={!ready || !stakeValid || !selected || Boolean(pending)} actionDisabled={!ready || Boolean(pending)}
     cashOutDisabled={!canCashOut} goDisabled={!ready || Boolean(pending)}
     cashOutText={chips(snapshot?.active_round?.cashout_amount)} animateOutcome={animateOutcome}
