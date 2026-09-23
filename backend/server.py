@@ -32,6 +32,7 @@ import routes_games
 import routes_live
 import routes_blackjack
 import routes_rummy
+import routes_chicken_road
 import routes_security
 import routes_migration_export
 import routes_game_settlement
@@ -110,6 +111,18 @@ async def _deleted_player_game_worker():
             raise
         except Exception:
             logger.exception('deleted player game reconciliation failed')
+        await asyncio.sleep(10)
+
+
+async def _chicken_road_settlement_worker():
+    """Settle abandoned accepted rounds even when intake is paused."""
+    while True:
+        try:
+            await routes_chicken_road.settle_expired_chicken_rounds()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception('Chicken Road expiry reconciliation failed')
         await asyncio.sleep(10)
 
 
@@ -313,6 +326,10 @@ async def lifespan(app: FastAPI):
     await step('indexes:compliance', compliance.ensure_indexes())
     await step('gameplay:core-readiness', _prepare_gameplay_core())
     await step('gameplay:rummy-core', routes_rummy.ensure_rummy_core())
+    # Rules approval is a reviewed release decision, not a CRM toggle. A
+    # dormant release creates no Chicken Road financial collection or worker.
+    if routes_chicken_road.RULES_APPROVED:
+        await step('gameplay:chicken-road-core', routes_chicken_road.prepare_chicken_road_storage())
     # Disabled by default; this creates no collection or index until the
     # separately reviewed Supabase game-settlement bridge is explicitly enabled.
     await step('indexes:game_settlement', routes_game_settlement.ensure_indexes())
@@ -340,6 +357,8 @@ async def lifespan(app: FastAPI):
     keepalive = asyncio.create_task(_aviator_keepalive())
     financial_worker = asyncio.create_task(_financial_worker())
     deleted_player_game_worker = asyncio.create_task(_deleted_player_game_worker())
+    chicken_road_worker = (asyncio.create_task(_chicken_road_settlement_worker())
+                          if routes_chicken_road.RULES_APPROVED else None)
     logger.info(
         'Chakri.Casino ready - 11 reviewed games approved; '
         'remaining catalogue coming soon'
@@ -348,6 +367,8 @@ async def lifespan(app: FastAPI):
     keepalive.cancel()
     financial_worker.cancel()
     deleted_player_game_worker.cancel()
+    if chicken_road_worker is not None:
+        chicken_road_worker.cancel()
     client.close()
 
 
@@ -470,6 +491,9 @@ async def health():
 
 
 api_router.include_router(routes_auth.router)
+# The specific state path must precede routes_live's /live/{slug}/state.
+if routes_chicken_road.RULES_APPROVED:
+    api_router.include_router(routes_chicken_road.router)
 api_router.include_router(routes_live.router)
 api_router.include_router(routes_games.router)
 api_router.include_router(routes_blackjack.router)

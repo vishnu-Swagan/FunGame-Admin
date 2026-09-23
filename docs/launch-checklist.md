@@ -1,5 +1,37 @@
 # Chakri.Casino staging and production launch checklist
 
+## Chicken Road — 2026-09-23
+
+The existing React/FastAPI/MongoDB Render services remain in place. The public
+Sites worker already proxies `/games/**` and `/game-art/**` and refreshes the CRM
+catalogue, so this game needs no separate website architecture or DNS change.
+Preserve all existing payment, authentication and wallet flags. No new service
+subscription is introduced. Never synchronize the Render Blueprint for this release.
+
+- [x] **Visual implementation:** reference road, articulated walking/blinking
+  chicken, gesture-started audio, visible grate and collision flames, matching logo.
+- [x] **Release verification:** isolated backend transaction/concurrency tests,
+  full frontend suite, production build, independent general and security reviews.
+- [ ] **Dormant publication:** merge the reviewed release, wait for both Render
+  services to report the exact main commit, and verify the logo/catalogue. This
+  stage exposes no demo and does not enable betting.
+- [ ] **Operator rules decision:** approve or replace
+  `chicken-road-live-rules-proposal.md`. The source recording does not establish
+  the provider's hidden collision odds. Do not represent the proposal as those rules.
+- [ ] **Live activation:** only after approval, update the reviewed rules constant
+  and game allow-list, set an operator-approved aggregate exposure limit, enable
+  `CHICKEN_ROAD_LIVE_ENABLED`, and publish the catalogue record as ENABLED. Keep
+  existing source-wallet/transaction readiness checks. Verify all four difficulties
+  from the authenticated server response; there is no production demo fallback.
+- [ ] **Owner-controlled real-money check:** the owner, not browser automation,
+  places any actual stake. Check the resulting ledger receipt, source balances,
+  cash-out/reconnect and final-lane/expiry settlement against the approved rules.
+
+Before activation, the code approval gate is false and the backend routes/worker
+are not registered. After accepted rounds exist, pause intake rather than
+removing settlement routes or reverting to a binary that cannot settle them.
+Retain the exact deployed commit and settle outstanding rounds before rollback.
+
 ## Signup promotion retirement — 2026-09-22
 
 Existing React/FastAPI/MongoDB services on Render stay in place. The public

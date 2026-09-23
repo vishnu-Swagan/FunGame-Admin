@@ -19,10 +19,13 @@ test("recognises the canonical and legacy coming-soon error codes", () => {
   expect(isComingSoonError({ response: { data: { detail: { code: "COMING_SOON" } } } })).toBe(true);
 });
 
-test("the reviewed game set contains exactly the ten published games", () => {
-  expect(REVIEWED_GAME_SLUGS.size).toBe(10);
+test("supported live views include Chicken Road but still require server publication", () => {
+  expect(REVIEWED_GAME_SLUGS.size).toBe(11);
   expect(["aviator", "seven-up-down", "fun-roulette", "keno", "pappu-pictures", "andar-bahar", "teen-patti", "poker", "blackjack", "rummy"].every(isReviewedGame)).toBe(true);
   expect(isReviewedGame("bingo")).toBe(false);
+  expect(isGameEnabled({ slug: "chicken-road", status: GAME_STATUS.COMING_SOON })).toBe(false);
+  expect(isGameEnabled({ slug: "chicken-road", status: GAME_STATUS.MAINTENANCE })).toBe(false);
+  expect(isGameEnabled({ slug: "chicken-road", status: GAME_STATUS.LIVE })).toBe(true);
 });
 
 test("a locked detail can be recovered from the public catalogue", () => {

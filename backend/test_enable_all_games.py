@@ -43,6 +43,9 @@ async def main():
 
     assert updated == len(rows)
     assert len(reviewed_slugs) == 10
+    assert 'chicken-road' in all_slugs
+    assert 'chicken-road' not in reviewed_slugs
+    assert by_slug['chicken-road']['status'] == 'COMING_SOON'
     assert all(by_slug[slug]['status'] == 'ENABLED' for slug in reviewed_slugs)
     assert all(
         by_slug[slug]['status'] == 'COMING_SOON'
@@ -70,7 +73,7 @@ async def main():
     assert (await database.games.find_one({'slug': 'bingo'}))['status'] == 'COMING_SOON'
 
     from fastapi import HTTPException
-    for slug in ('bingo', 'retired-experiment', 'does-not-exist', 'aviator'):
+    for slug in ('bingo', 'chicken-road', 'retired-experiment', 'does-not-exist', 'aviator'):
         try:
             await game_access.require_playable_game(slug, database=database)
             raise AssertionError(f'{slug} unexpectedly playable')

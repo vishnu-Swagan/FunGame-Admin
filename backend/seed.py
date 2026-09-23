@@ -25,6 +25,9 @@ async def _safe_insert(coro):
 
 
 GAMES = [
+    {"slug": "chicken-road", "name": "Chicken Road", "category": "Crash", "tagline": "Cross a lane or cash out", "featured": True,
+     "description": "Guide the chicken across the road one lane at a time. Choose a difficulty, advance for a higher multiplier, or cash out before a collision.",
+     "art": {"from": "#172b25", "to": "#505272", "accent": "#ffd447", "icon": "bird", "glyph": "CR"}},
     {"slug": "aviator", "name": "Aviator", "category": "Crash", "tagline": "Fly high, ride the multiplier", "featured": True,
      "description": "Watch the plane climb and cash out your stake before it flies away. The longer it flies, the higher the multiplier.",
      "art": {"from": "#0d1b3e", "to": "#e0353f", "accent": "#ff5964", "icon": "plane", "glyph": "2.4x"}},
@@ -185,7 +188,7 @@ async def run_seed():
 
     # Games added after the initial seed — ensure they exist and are playable on
     # already-seeded databases (idempotent; won't clobber later edits).
-    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101), ('rummy', 102)):
+    for slug, order in (('ice-fishing', 99), ('blackjack', 100), ('pappu-pictures', 101), ('rummy', 102), ('chicken-road', 103)):
         gm = next((g for g in GAMES if g['slug'] == slug), None)
         if gm:
             await db.games.update_one(

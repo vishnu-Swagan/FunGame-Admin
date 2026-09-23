@@ -4,6 +4,11 @@ import { GameArt } from "./GameArt";
 
 const cases = [
   {
+    slug: "chicken-road",
+    path: "/game-art/chicken-road.png",
+    art: { from: "#172b25", to: "#505272", accent: "#ffd447", icon: "bird", glyph: "CR" },
+  },
+  {
     slug: "pappu-pictures",
     path: "/game-art/pappu-pictures.png",
     art: { from: "#004b31", to: "#00a466", accent: "#ffe34b", icon: "images", glyph: "12" },
