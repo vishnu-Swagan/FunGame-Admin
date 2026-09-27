@@ -24,7 +24,7 @@ jest.mock("@/context/AuthContext", () => ({ useAuth: jest.fn() }));
 jest.mock("./chickenRoadAudio", () => ({ createChickenRoadAudio: jest.fn() }));
 
 const rules = {
-  version: "test-live-rules-v1", approval: "APPROVED", rtp_bps: 9700,
+  version: "chicken-road-proposal-v2", approval: "APPROVED", rtp_bps: 9000,
   min_stake: 100, max_stake: 1000, stake_step: 100, max_lanes: 2,
   difficulties: [
     { id: "easy", label: "Easy", multipliers_hundredths: [106, 113] },
@@ -122,6 +122,75 @@ test("all four difficulty controls and payout labels come from server configurat
   }
   expect(container.querySelector('input[aria-label="Stake"]').value).toBe("100");
   expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("Game rules displays the server's 90% RTP and all four unchanged payout ladders", async () => {
+  await mount();
+  await click(button("Game rules"));
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain("Theoretical return to player: 90%.");
+  expect(dialog.textContent).not.toContain("97%");
+  expect(dialog.textContent).toContain("This is a long-run average, not a promise for an individual round.");
+  for (const configuration of rules.difficulties) {
+    expect(dialog.textContent).toContain(`${configuration.label}: ${configuration.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}`);
+  }
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("an older active round keeps its payout and distinguishes new-round rules", async () => {
+  server = initial({ balance: 900, active_round: round({ rules_version: "chicken-road-proposal-v1" }) });
+  await mount();
+  expect(byId("road-cashout").textContent).toContain("106");
+  expect(container.querySelector('.road-coin[aria-label="1.06 times, current multiplier"]')).not.toBeNull();
+  await click(button("Game rules"));
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain("Rules for new rounds");
+  expect(dialog.textContent).toContain("Your current round uses its locked rules (chicken-road-proposal-v1)");
+  expect(dialog.textContent).toContain("The rules below apply only to new rounds; your current payout table and cash-out amount are unchanged.");
+  expect(dialog.textContent).toContain("Theoretical return to player: 90%.");
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("stale preparation refreshes rules without a stake and requires a new Play gesture", async () => {
+  server = initial({ rules: { ...rules, version: "chicken-road-proposal-v1", rtp_bps: 9700 } });
+  await mount();
+  server = initial();
+  await click(byId("road-play"));
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  expect(financialApi.post.mock.calls[0][0]).toBe("/live/chicken-road/prepare");
+  expect(pendingAction()).toBeNull();
+  expect(container.textContent).toContain("Review the updated rules and press Play again.");
+  expect(byId("road-play").disabled).toBe(false);
+  expect(byId("road-balance").getAttribute("aria-label")).toBe("Balance 1,000 chips");
+  await click(button("Game rules"));
+  expect(container.querySelector('[role="dialog"]').textContent).toContain("Theoretical return to player: 90%.");
+  await click(container.querySelector('[aria-label="Close dialog"]'));
+  financialApi.post.mockImplementation(async (url, body) => {
+    if (url.endsWith("/prepare")) return { data: prepared(body) };
+    server = initial({ balance: 900, active_round: round() });
+    return { data: receipt(body) };
+  });
+  await click(byId("road-play"));
+  expect(financialApi.post).toHaveBeenCalledTimes(3);
+  expect(financialApi.post.mock.calls[1][1].operation_id).not.toBe(financialApi.post.mock.calls[0][1].operation_id);
+  expect(financialApi.post.mock.calls[2][1].rules_version).toBe("chicken-road-proposal-v2");
+  advance();
+  expect(phase()).toBe("playing");
+});
+
+test("a failed rule refresh after stale preparation stays locked without auto-submitting", async () => {
+  server = initial({ rules: { ...rules, version: "chicken-road-proposal-v1", rtp_bps: 9700 } });
+  await mount();
+  server = initial();
+  financialApi.get.mockRejectedValueOnce(new Error("State offline"));
+  await click(byId("road-play"));
+  expect(pendingAction()).toBeNull();
+  expect(byId("road-play").disabled).toBe(true);
+  expect(container.textContent).toContain("Reconnect to load the current rules.");
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  await click(button("Check round"));
+  expect(byId("road-play").disabled).toBe(false);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
 });
 
 test.each(["easy", "medium", "hard", "hardcore"])("%s Play waits for the server, submits once, and displays its exact money values", async (difficulty) => {

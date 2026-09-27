@@ -1,6 +1,6 @@
 # Chicken Road backend integration — dormant proposal
 
-The engine implements [the unapproved rules proposal](chicken-road-live-rules-proposal.md). It is not a certified provider implementation. `backend/routes_chicken_road.py` sets `RULES_APPROVED = False`; importing the module neither registers routes nor accesses the database. Implementation and automated verification used no live wager or production database call. A dormant application deployment does not activate these routes.
+The engine implements [the owner-selected 90% RTP rules](chicken-road-live-rules-proposal.md), with live activation still pending the aggregate exposure budget and release verification. It is not a certified provider implementation. `backend/routes_chicken_road.py` sets `RULES_APPROVED = False`; importing the module neither registers routes nor accesses the database. Implementation and automated verification used no live wager or production database call. A dormant application deployment does not activate these routes.
 
 ## Release gates and startup
 
@@ -32,7 +32,7 @@ All paths below are relative to `/api/live/chicken-road`. Authentication uses th
 | `GET /operations/{operation_id}` | — | `{found:false, operation_id}` or `{found:true, ...stored_receipt}`; strictly read-only |
 | `GET /rounds/{round_id}/fairness` | — | Terminal-only seed disclosure below |
 
-`rules` contains `version`, `approval`, `rtp_bps:9700`, `min_stake:100`, `max_stake:1000`, `stake_step:100`, `max_lanes:13`, and `difficulties:[{id,label,multipliers_hundredths,collision_fractions:[{numerator,denominator}]}]`. The pure proposal engine reports `UNAPPROVED`; a registered runtime reports `APPROVED` only after the explicit code approval gate. The default gate returns `503 CHICKEN_ROAD_DISABLED` before any state response or mutation.
+Current `rules` contains `version:"chicken-road-proposal-v2"`, `approval`, `rtp_bps:9000`, `min_stake:100`, `max_stake:1000`, `stake_step:100`, `max_lanes:13`, and `difficulties:[{id,label,multipliers_hundredths,collision_fractions:[{numerator,denominator}]}]`. The pure proposal engine reports `UNAPPROVED`; a registered runtime reports `APPROVED` only after the explicit code approval gate. This flag means production-release readiness, not whether an RTP preference has been selected. The default gate returns `503 CHICKEN_ROAD_DISABLED` before any state response or mutation. Any accepted v1 rounds retain their original 97% version for outcomes, payout settlement, and fairness; new intake uses v2 only.
 
 A successful mutation returns:
 
@@ -51,7 +51,7 @@ A successful mutation returns:
     "multiplier_hundredths": 112,
     "cashout_amount": 112,
     "payout": 0,
-    "rules_version": "chicken-road-proposal-v1",
+    "rules_version": "chicken-road-proposal-v2",
     "fairness_version": "chicken-road-hmac-v1",
     "multipliers_hundredths": [112,128,147,170,198,233,276,332,403,496,620,691,890],
     "server_seed_hash": "commitment-hash",
@@ -94,3 +94,16 @@ Each accepted mutation atomically couples its round CAS/version transition, one-
 Engine tests use exact fractions and deterministic cryptographic fixtures. Route tests use isolated mock collections and a serialized snapshot/rollback transaction double with injected failures. These tests establish application invariants and hook usage, **not Mongo replica-set isolation or deployment certification**. A staging replica-set concurrency/rollback run, public verifier, approved rules/limits, and explicit release decision remain necessary before activation. Do not test by placing production wagers.
 
 Local verification (2026-09-23): `python -m pytest -q test_chicken_road_engine.py test_chicken_road_routes.py` passed **73 tests and 843 subtests**. The existing transaction and source-wallet suites passed another **27 tests**. Undefined-name checks passed. A follow-up independent Codex CLI review found no further actionable defects after fixing commitment-version binding, durable paused-intake rejection, and expiry retry starvation. A separate agent audit additionally identified and verified a fix preserving immutable terminal fairness proofs across later rules-version changes. The router-order regression assembles the actual server registrations and proves that the approved Chicken Road state endpoint precedes the generic live-state route; reversing the order fails its negative control. These results do not constitute third-party certification.
+
+RTP update verification (2026-09-28): current v2 is 90%; archived v1 remains 97%.
+The 86 focused engine/route tests include exact RTP checks for both versions
+across all four difficulties, 13 lanes, and ten supported stakes (1,040 cases).
+Existing accepted v1 rounds retain their original GO outcomes, cash-out/expiry
+settlements, and receipt/fairness history; unused old commitments cannot start a
+new v2 stake. A confirmed preparation-only version mismatch is safely retired
+in the browser and requires a fresh explicit Play after a rules refresh;
+uncertain financial actions keep their original body and operation ID. The UI
+labels current rules as applying to new rounds and identifies an active round
+that retains an older version. The full backend suite passed 574 tests plus
+1,755 subtests; the frontend passed 658 tests. Both general and financial-integrity
+reviews finished clean. No production configuration or balances changed.

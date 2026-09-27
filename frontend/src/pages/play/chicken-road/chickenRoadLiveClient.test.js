@@ -3,7 +3,7 @@ import { CHICKEN_ROAD_API, createChickenRoadLiveClient, validateLiveState } from
 jest.mock("@/lib/api", () => ({ financialApi: {}, createIdempotencyKey: jest.fn() }));
 
 const rules = {
-  version: "test-rules-v1", approval: "APPROVED", min_stake: 100, max_stake: 1000, stake_step: 100,
+  version: "chicken-road-proposal-v2", approval: "APPROVED", rtp_bps: 9000, min_stake: 100, max_stake: 1000, stake_step: 100,
   difficulties: [{ id: "medium", label: "Medium", multipliers_hundredths: [112, 128] }],
 };
 const state = (overrides = {}) => ({ mode: "live", enabled: true, rules, balance: 1000, active_round: null, latest_round: null, ...overrides });
@@ -75,6 +75,27 @@ test("lost Play response survives a new client and explicit retry uses the exact
   expect(nextClient.readPending()).toBeNull();
 });
 
+test("a pending historical Play retains its original rules version when current server rules change", async () => {
+  // Current state describes new v2 plays; the saved historical request stays v1.
+  const originalVersion = "chicken-road-proposal-v1";
+  const { client, transport } = setup();
+  transport.post.mockImplementation(async (path, body) => {
+    if (path.endsWith("/prepare")) return { data: { ...commitment(body.operation_id), rules_version: originalVersion } };
+    throw new Error("Network timeout");
+  });
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: originalVersion })).rejects.toThrow("Network timeout");
+  const saved = client.readPending();
+  transport.get.mockImplementation(async (path) => ({ data: path.includes("/operations/") ? { found: false, operation_id: saved.operationId } : state() }));
+  const recovered = await client.reconcile();
+  expect(recovered.state.rules).toMatchObject({ version: "chicken-road-proposal-v2", rtp_bps: 9000 });
+  expect(client.readPending().body.rules_version).toBe(originalVersion);
+  expect(transport.post).toHaveBeenCalledTimes(2);
+  transport.post.mockResolvedValueOnce({ data: result(saved.operationId, { round: round({ rules_version: originalVersion }) }) });
+  await client.retryPending();
+  expect(transport.post.mock.calls[2]).toEqual(transport.post.mock.calls[1]);
+  expect(client.readPending()).toBeNull();
+});
+
 test("a missing receipt never causes a POST or releases the pending action", async () => {
   const { client, transport } = setup();
   transport.post.mockRejectedValue(new Error("Network timeout"));
@@ -126,6 +147,111 @@ test("recovering a preparation receipt does not automatically continue into a ne
   expect((await client.reconcile()).pending).toEqual(saved);
   expect(seedFactory).not.toHaveBeenCalled();
   expect(transport.post).toHaveBeenCalledTimes(1);
+});
+
+test("a confirmed newer preparation retires only the unsubmitted intent and requires a fresh Play", async () => {
+  const { client, transport, seedFactory } = setup();
+  transport.post.mockImplementation(async (_path, body) => ({ data: commitment(body.operation_id) }));
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" }))
+    .rejects.toMatchObject({ code: "CHICKEN_ROAD_RULES_CHANGED" });
+  expect(client.readPending()).toBeNull();
+  expect(seedFactory).not.toHaveBeenCalled();
+  expect(transport.post).toHaveBeenCalledTimes(1);
+  expect(transport.post.mock.calls[0][0]).toBe(`${CHICKEN_ROAD_API}/prepare`);
+
+  const recovered = await client.reconcile();
+  expect(recovered.state.rules.version).toBe(rules.version);
+  expect(recovered.pending).toBeNull();
+  expect(transport.post).toHaveBeenCalledTimes(1);
+  transport.post.mockImplementation(async (url, body) => ({ data: url.endsWith("/prepare") ? commitment(body.operation_id) : result(body.operation_id) }));
+  await client.play({ amount: 100, difficulty: "medium", rulesVersion: recovered.state.rules.version });
+  expect(transport.post.mock.calls[1][0]).toBe(`${CHICKEN_ROAD_API}/prepare`);
+  expect(transport.post.mock.calls[1][1].operation_id).not.toBe(transport.post.mock.calls[0][1].operation_id);
+  expect(transport.post.mock.calls[2][1].rules_version).toBe(rules.version);
+  expect(seedFactory).toHaveBeenCalledTimes(1);
+});
+
+test("reload reconciles a confirmed preparation version change with reads only", async () => {
+  const options = setup();
+  const { client, transport, seedFactory } = options;
+  transport.post.mockRejectedValue(new Error("Preparation response lost"));
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" })).rejects.toThrow();
+  const saved = client.readPending();
+  const reloaded = createChickenRoadLiveClient(options);
+  transport.get.mockImplementation(async (url) => ({ data: url.includes("/operations/") ? { found: true, ...commitment(saved.operationId) } : state() }));
+  const recovered = await reloaded.reconcile();
+  expect(recovered.pending).toBeNull();
+  expect(recovered.confirmed).toBeNull();
+  expect(recovered.rejection).toMatchObject({ code: "CHICKEN_ROAD_RULES_CHANGED" });
+  expect(recovered.state.rules).toMatchObject({ version: rules.version, rtp_bps: 9000 });
+  expect(transport.get.mock.calls.map(([url]) => url)).toEqual([
+    `${CHICKEN_ROAD_API}/operations/${saved.operationId}`, `${CHICKEN_ROAD_API}/state`,
+  ]);
+  expect(transport.post).toHaveBeenCalledTimes(1);
+  expect(seedFactory).not.toHaveBeenCalled();
+});
+
+test("explicit retry of an outdated preparation preserves its exact request and never submits Play", async () => {
+  const { client, transport, seedFactory } = setup();
+  transport.post.mockRejectedValueOnce(new Error("Preparation response lost"));
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" })).rejects.toThrow();
+  const saved = client.readPending();
+  transport.post.mockResolvedValueOnce({ data: commitment(saved.operationId) });
+  await expect(client.retryPending()).rejects.toMatchObject({ code: "CHICKEN_ROAD_RULES_CHANGED" });
+  expect(transport.post.mock.calls[1]).toEqual(transport.post.mock.calls[0]);
+  expect(client.readPending()).toBeNull();
+  expect(seedFactory).not.toHaveBeenCalled();
+  expect(transport.post).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+  { found: false },
+  { found: true, commitment_id: "commit-1", rules_version: rules.version },
+  { found: true, server_seed_hash: "b".repeat(64), rules_version: rules.version },
+])("an unconfirmed or malformed preparation receipt %p cannot retire the original intent", async (response) => {
+  const { client, transport, seedFactory } = setup();
+  transport.post.mockRejectedValue(new Error("Preparation response lost"));
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" })).rejects.toThrow();
+  const saved = client.readPending();
+  transport.get.mockImplementation(async (url) => ({ data: url.includes("/operations/") ? { operation_id: saved.operationId, ...response } : state() }));
+  if (response.found) await expect(client.reconcile()).rejects.toThrow("could not be verified");
+  else expect((await client.reconcile()).pending).toEqual(saved);
+  expect(client.readPending()).toEqual(saved);
+  expect(seedFactory).not.toHaveBeenCalled();
+  expect(transport.post).toHaveBeenCalledTimes(1);
+});
+
+test.each(["play", "prepare"])("a late mismatched preparation cannot clear a replacement %s intent", async (kind) => {
+  const { client, transport, storage, seedFactory } = setup();
+  let resolve;
+  transport.post.mockReturnValue(new Promise((yes) => { resolve = yes; }));
+  const request = client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" });
+  const saved = client.readPending();
+  const replacement = kind === "play"
+    ? { ...saved, kind, operationId: "replacement-play", body: { operation_id: "replacement-play", amount: 100, difficulty: "medium", rules_version: rules.version } }
+    : { ...saved, intent: { ...saved.intent, amount: 200 } };
+  storage.setItem("cc_chicken_road_pending_v1:player-1", JSON.stringify(replacement));
+  resolve({ data: commitment(saved.operationId) });
+  await expect(request).rejects.toThrow("pending action changed");
+  expect(client.readPending()).toEqual(replacement);
+  expect(storage.removeItem).not.toHaveBeenCalled();
+  expect(seedFactory).not.toHaveBeenCalled();
+  expect(transport.post).toHaveBeenCalledTimes(1);
+});
+
+test("a preparation-shaped receipt cannot release an uncertain monetary Play", async () => {
+  const { client, transport } = setup();
+  transport.post.mockImplementation(async (url, body) => {
+    if (url.endsWith("/prepare")) return { data: { ...commitment(body.operation_id), rules_version: "chicken-road-proposal-v1" } };
+    throw new Error("Play response lost");
+  });
+  await expect(client.play({ amount: 100, difficulty: "medium", rulesVersion: "chicken-road-proposal-v1" })).rejects.toThrow();
+  const saved = client.readPending();
+  expect(saved.kind).toBe("play");
+  transport.get.mockResolvedValue({ data: { found: true, ...commitment(saved.operationId) } });
+  await expect(client.reconcile()).rejects.toThrow("could not be verified");
+  expect(client.readPending()).toEqual(saved);
+  expect(transport.post).toHaveBeenCalledTimes(2);
 });
 
 test.each(["go", "cashout"])("%s sends only the current round id and exact server version", async (kind) => {

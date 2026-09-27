@@ -139,16 +139,32 @@ export function createChickenRoadLiveClient({ userId, transport = financialApi, 
     return data;
   };
 
+  const checkPreparation = (data, pending) => {
+    if (pending.kind !== "prepare" || !data || data.operation_id !== pending.operationId
+      || !identifier(data.commitment_id) || !identifier(data.server_seed_hash)
+      || !identifier(data.rules_version) || !identifier(pending.intent?.rules_version)) {
+      throw problem("The seed commitment could not be verified. Check the pending action.");
+    }
+    if (data.rules_version === pending.intent.rules_version) return null;
+    // Only a confirmed, unchanged PREPARE can be retired: its /play request
+    // has not been created or dispatched. Never clear a money action here.
+    const current = readPending();
+    if (JSON.stringify(current) !== JSON.stringify(pending)) throw problem("The pending action changed. Reconnect before continuing.");
+    clearPending(pending.operationId);
+    return {
+      code: "CHICKEN_ROAD_RULES_CHANGED",
+      message: "The rules changed before this play was submitted. Review the updated rules and press Play again.",
+    };
+  };
+
   const postPending = async (pending) => {
     const { data } = await transport.post(`${CHICKEN_ROAD_API}/${pending.kind}`, pending.body, {
       ...REQUEST_OPTIONS,
       headers: { "Idempotency-Key": pending.operationId },
     });
     if (pending.kind === "prepare") {
-      if (!data || data.operation_id !== pending.operationId || !identifier(data.commitment_id)
-        || !identifier(data.server_seed_hash) || data.rules_version !== pending.intent?.rules_version) {
-        throw problem("The seed commitment could not be verified. Check the pending action.");
-      }
+      const changed = checkPreparation(data, pending);
+      if (changed) throw problem(changed.message, changed.code);
       if (readPending()?.operationId !== pending.operationId) throw problem("The pending action changed. Reconnect before continuing.");
       // The server commitment exists before this browser generates its seed.
       const next = createPending("play", {
@@ -200,6 +216,8 @@ export function createChickenRoadLiveClient({ userId, transport = financialApi, 
         } else if (pending.kind !== "prepare") {
           confirmed = validateMutation(found, pending);
           clearPending(pending.operationId);
+        } else {
+          rejection = checkPreparation(found, pending);
         }
       }
     }

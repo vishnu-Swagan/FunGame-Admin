@@ -207,6 +207,24 @@ export default function LiveChickenRoadGame() {
     } catch (failure) {
       if (!mounted.current || requestEpoch.current !== epoch) return;
       soundEpoch.current += 1; audio?.stopAll();
+      if (failure.code === "CHICKEN_ROAD_RULES_CHANGED") {
+        // A confirmed preparation-only mismatch is safe to retire. Refresh by
+        // GET only; the changed rules always require a separate Play gesture.
+        try {
+          const next = await client.reconcile();
+          if (!mounted.current || requestEpoch.current !== epoch) return;
+          adopt(next.state); setPending(next.pending);
+          setConnection(next.pending ? "pending" : availability(next.state));
+          setError(failure.message);
+        } catch (refreshFailure) {
+          if (!mounted.current || requestEpoch.current !== epoch) return;
+          setConnection(failureConnection(refreshFailure));
+          setError(`${failure.message} Reconnect to load the current rules.`);
+          try { setPending(client.readPending()); } catch { setPending({ kind: "unknown" }); }
+        }
+        busy.current = false;
+        return;
+      }
       // A successful mutation can be followed by a failed state read. Its
       // receipt is authoritative, but actions stay locked until reconnection.
       if (receipt && snapshotRef.current) {
@@ -249,7 +267,7 @@ export default function LiveChickenRoadGame() {
   const dialogContent = dialog === "help" ? <><ol><li>Choose a stake and difficulty, then press <b>Play</b> to attempt the first crossing.</li><li>Press <b>GO</b> for another crossing, or <b>CASH OUT</b> to collect the amount shown.</li><li>A collision ends the round. Reaching the final lane automatically collects the final payout.</li></ol><p>Stake and difficulty remain fixed throughout a round. Results and your balance are confirmed by the server.</p></>
     : dialog === "auto" ? <p>Crossings use Play, GO and Cash Out. Automatic betting is not available.</p>
       : dialog === "menu" ? <><p>Chakri.Casino · Chicken Road</p><Link className="road-top-button" to="/games">Back to lobby</Link><button className="road-top-button" onClick={() => setDialog("help")}>How to play</button><button className="road-top-button" onClick={() => setDialog("rules")}>Rules & limits</button><button className="road-top-button" onClick={toggleSound} aria-pressed={!muted} aria-label={muted ? "Turn game sounds on" : "Mute game sounds"}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}<span>Sound {muted ? "off" : "on"}</span></button><p>Animations follow your device’s reduced-motion preference.</p></>
-        : rules ? <><p>Stake: {chips(rules.min_stake)}–{chips(rules.max_stake)} chips, in steps of {chips(rules.stake_step)}.</p>{Number.isFinite(rules.rtp_bps) && <p>Theoretical return to player: {rules.rtp_bps / 100}%. This is a long-run average, not a promise for an individual round.</p>}<p>Multipliers show the total amount returned, including your stake. A collision returns no payout. The displayed cash-out amount comes from the server.</p>{rules.difficulties.map((item) => <p key={item.id}><b>{item.label}:</b> {item.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}</p>)}</>
+        : rules ? <>{snapshot.active_round?.rules_version && snapshot.active_round.rules_version !== rules.version && <p>Your current round uses its locked rules ({snapshot.active_round.rules_version}). The rules below apply only to new rounds; your current payout table and cash-out amount are unchanged.</p>}<p>Stake: {chips(rules.min_stake)}–{chips(rules.max_stake)} chips, in steps of {chips(rules.stake_step)}.</p>{Number.isFinite(rules.rtp_bps) && <p>Theoretical return to player: {rules.rtp_bps / 100}%. This is a long-run average, not a promise for an individual round.</p>}<p>Multipliers show the total amount returned, including your stake. A collision returns no payout. The displayed cash-out amount comes from the server.</p>{rules.difficulties.map((item) => <p key={item.id}><b>{item.label}:</b> {item.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}</p>)}</>
           : <p>The game rules are unavailable while disconnected.</p>;
 
   return <ChickenRoadView
@@ -275,6 +293,6 @@ export default function LiveChickenRoadGame() {
     onPreset={(value) => setStake(String(value))}
     onDifficulty={(id) => { setDifficulty(id); setDisplayRound(null); setVisibleLane(0); setAnimateOutcome(false); setError(""); }}
     onAction={runAction} onFullscreen={fullscreen} onDialogChange={setDialog}
-    dialog={dialog ? { title: dialog === "help" ? "How to play" : dialog === "menu" ? "Chicken Road" : dialog === "auto" ? "Auto play" : "Game rules", content: dialogContent } : null}
+    dialog={dialog ? { title: dialog === "help" ? "How to play" : dialog === "menu" ? "Chicken Road" : dialog === "auto" ? "Auto play" : "Rules for new rounds", content: dialogContent } : null}
   />;
 }
