@@ -1,5 +1,34 @@
 # Chakri.Casino staging and production launch checklist
 
+## Chicken Road RTP update — 2026-09-28
+
+Owner-selected change: 90% theoretical gross RTP for all four difficulties,
+with the existing 13-lane multipliers and 100–1,000-chip stakes in increments
+of 100. Current rules become `chicken-road-proposal-v2`; accepted v1 rounds
+retain their original 97% outcomes, payouts, settlement, and fairness proofs.
+This is not a Roulette RTP change.
+
+- [x] **Math and version compatibility:** exact fractions across every lane and
+  supported stake, archived HMAC/commitment vectors, and retained-round
+  cash-out, expiry, collision, and idempotent receipt tests.
+- [x] **Final verification:** general and financial-integrity Codex CLI reviews
+  are clean after fixing stale preparation recovery. Backend: 574 tests and
+  1,755 subtests; frontend: 81 suites / 658 tests; React application build passed.
+  Isolated browser checks confirmed 90% rules and all four difficulty controls,
+  with mocked balances and wagering/network requests disabled. These checks do
+  not replace real Mongo replica-set concurrency verification or certification.
+- [ ] **Aggregate exposure budget:** owner must specify a positive whole-chip
+  total outstanding payout limit. The unchanged maximum gross payout per round
+  is 194,620 chips; 90% RTP does not reduce that maximum promise.
+- [ ] **Dormant production publication:** owner requested deployment on
+  2026-09-28. Publish only this reviewed RTP update to the existing API and web
+  services; verify both services report the merged commit and public smoke
+  checks pass. Do not synchronize the Render Blueprint or include the unfinished
+  Sorrat rename. Record deployment evidence in the release pull request.
+- [ ] **Live activation:** finish the remaining live-release checks below before
+  changing approval, allow-list, Render flags, or catalogue. No production bets,
+  balance changes, environment edits, or activation are part of this deployment.
+
 ## Chicken Road — 2026-09-23
 
 The existing React/FastAPI/MongoDB Render services remain in place. The public

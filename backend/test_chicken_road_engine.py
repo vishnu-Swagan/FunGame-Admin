@@ -23,14 +23,15 @@ COMMITMENT_ID = "round-commitment-001"
 UINT256_RANGE = 1 << 256
 
 
-def independent_lane(difficulty, lane, server=SERVER, client=CLIENT, nonce=NONCE):
+def independent_lane(difficulty, lane, server=SERVER, client=CLIENT, nonce=NONCE,
+                     version="chicken-road-proposal-v2", target=90):
     """Reference derivation with literal protocol fields, independent of helpers."""
     denominator = TABLES[difficulty][lane - 1]
-    threshold = 97 if lane == 1 else TABLES[difficulty][lane - 2]
+    threshold = target if lane == 1 else TABLES[difficulty][lane - 2]
     counter = 0
     while True:
         message = json.dumps([
-            "chicken-road:lane", "chicken-road-proposal-v1", "chicken-road-hmac-v1",
+            "chicken-road:lane", version, "chicken-road-hmac-v1",
             difficulty, lane, nonce, counter, client,
         ], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         digest = hmac.new(bytes.fromhex(server), message, hashlib.sha256).digest()
@@ -42,7 +43,7 @@ def independent_lane(difficulty, lane, server=SERVER, client=CLIENT, nonce=NONCE
 
 class ProposalMathTests(unittest.TestCase):
     def test_constants_and_authoritative_tables(self):
-        self.assertEqual(engine.RULES_VERSION, "chicken-road-proposal-v1")
+        self.assertEqual(engine.RULES_VERSION, "chicken-road-proposal-v2")
         self.assertEqual(engine.FAIRNESS_VERSION, "chicken-road-hmac-v1")
         self.assertEqual((engine.MIN_STAKE, engine.MAX_STAKE, engine.STAKE_STEP), (100, 1000, 100))
         self.assertEqual((engine.MAX_LANES, engine.EXPIRY_SECONDS), (13, 900))
@@ -61,22 +62,26 @@ class ProposalMathTests(unittest.TestCase):
 
     def test_exact_rtp_for_every_difficulty_lane_and_supported_stake(self):
         checked = 0
-        for difficulty, values in TABLES.items():
-            reach_probability = Fraction(1)
-            previous = 97
-            for lane, value in enumerate(values, 1):
-                reach_probability *= Fraction(previous, value)
-                self.assertEqual(reach_probability, Fraction(97, value))
-                for stake in range(100, 1001, 100):
-                    with self.subTest(difficulty=difficulty, lane=lane, stake=stake):
-                        payout = engine.payout_chips(stake, difficulty, lane)
-                        self.assertIs(type(payout), int)
-                        self.assertEqual((stake * value) % 100, 0)
-                        self.assertEqual(Fraction(payout), Fraction(stake * value, 100))
-                        self.assertEqual(reach_probability * payout / stake, Fraction(97, 100))
-                        checked += 1
-                previous = value
-        self.assertEqual(checked, 520)
+        for version, target in (("chicken-road-proposal-v1", 97), ("chicken-road-proposal-v2", 90)):
+            for row in engine.rules_payload(version)["difficulties"]:
+                difficulty, values = row["id"], TABLES[row["id"]]
+                reach_probability = Fraction(1)
+                previous = target
+                for lane, (value, collision) in enumerate(zip(values, row["collision_fractions"]), 1):
+                    survival = 1 - Fraction(collision["numerator"], collision["denominator"])
+                    self.assertEqual(survival, Fraction(previous, value))
+                    reach_probability *= survival
+                    self.assertEqual(reach_probability, Fraction(target, value))
+                    for stake in range(100, 1001, 100):
+                        with self.subTest(version=version, difficulty=difficulty, lane=lane, stake=stake):
+                            payout = engine.payout_chips(stake, difficulty, lane, rules_version=version)
+                            self.assertIs(type(payout), int)
+                            self.assertEqual((stake * value) % 100, 0)
+                            self.assertEqual(Fraction(payout), Fraction(stake * value, 100))
+                            self.assertEqual(reach_probability * payout / stake, Fraction(target, 100))
+                            checked += 1
+                    previous = value
+        self.assertEqual(checked, 1040)
         self.assertEqual(engine.payout_chips(1000, "hardcore", 13), 194620)
 
     def test_conditional_risk_order_at_every_lane(self):
@@ -84,7 +89,7 @@ class ProposalMathTests(unittest.TestCase):
             risks = []
             for values in TABLES.values():
                 value = values[lane - 1]
-                previous = 97 if lane == 1 else values[lane - 2]
+                previous = 90 if lane == 1 else values[lane - 2]
                 risks.append(Fraction(value - previous, value))
             self.assertTrue(all(left < right for left, right in zip(risks, risks[1:])))
         # Medium's captured lane 12 is a lower conditional risk than lane 11.
@@ -94,14 +99,14 @@ class ProposalMathTests(unittest.TestCase):
         rules = engine.rules_payload()
         self.assertEqual(set(rules), {"version", "approval", "rtp_bps", "min_stake", "max_stake", "stake_step", "max_lanes", "difficulties"})
         self.assertEqual(rules["approval"], "UNAPPROVED")
-        self.assertEqual(rules["version"], "chicken-road-proposal-v1")
-        self.assertEqual(rules["rtp_bps"], 9700)
+        self.assertEqual(rules["version"], "chicken-road-proposal-v2")
+        self.assertEqual(rules["rtp_bps"], 9000)
         self.assertEqual((rules["min_stake"], rules["max_stake"], rules["stake_step"], rules["max_lanes"]), (100, 1000, 100, 13))
         self.assertEqual([row["id"] for row in rules["difficulties"]], list(TABLES))
         for row in rules["difficulties"]:
             self.assertEqual(row["label"], row["id"].capitalize())
             self.assertEqual(row["multipliers_hundredths"], list(TABLES[row["id"]]))
-            previous = 97
+            previous = 90
             for value, risk in zip(TABLES[row["id"]], row["collision_fractions"]):
                 self.assertEqual(risk, {"numerator": value - previous, "denominator": value})
                 previous = value
@@ -118,7 +123,60 @@ class ProposalMathTests(unittest.TestCase):
         self.assertEqual(fresh["approval"], "UNAPPROVED")
         self.assertEqual(len(fresh["difficulties"]), 4)
         self.assertEqual(fresh["difficulties"][0]["multipliers_hundredths"][0], 106)
-        self.assertEqual(fresh["difficulties"][0]["collision_fractions"][0], {"numerator": 9, "denominator": 106})
+        self.assertEqual(fresh["difficulties"][0]["collision_fractions"][0], {"numerator": 16, "denominator": 106})
+
+    def test_version_upgrade_changes_only_first_lane_probability_and_rtp(self):
+        old, current = engine.rules_payload("chicken-road-proposal-v1"), engine.rules_payload()
+        self.assertEqual((old["rtp_bps"], current["rtp_bps"]), (9700, 9000))
+        self.assertEqual(old["approval"], current["approval"])
+        for previous, revised in zip(old["difficulties"], current["difficulties"]):
+            self.assertEqual(previous["multipliers_hundredths"], revised["multipliers_hundredths"])
+            self.assertEqual(previous["collision_fractions"][1:], revised["collision_fractions"][1:])
+            self.assertEqual(revised["collision_fractions"][0]["numerator"] -
+                             previous["collision_fractions"][0]["numerator"], 7)
+        for field in ("min_stake", "max_stake", "stake_step", "max_lanes"):
+            self.assertEqual(old[field], current[field])
+
+    def test_locked_rules_require_known_version_pair_and_exact_integer_snapshot(self):
+        for version in ("chicken-road-proposal-v1", "chicken-road-proposal-v2"):
+            for difficulty, ladder in TABLES.items():
+                self.assertIsNone(engine.validate_locked_rules(version, "chicken-road-hmac-v1", difficulty, list(ladder)))
+        for version, fairness, difficulty, ladder in (
+            (None, "chicken-road-hmac-v1", "medium", list(TABLES["medium"])),
+            ("unknown", "chicken-road-hmac-v1", "medium", list(TABLES["medium"])),
+            (engine.RULES_VERSION, "unknown", "medium", list(TABLES["medium"])),
+            (engine.RULES_VERSION, "chicken-road-hmac-v1", "expert", list(TABLES["medium"])),
+            (engine.RULES_VERSION, "chicken-road-hmac-v1", "medium", [112] * 13),
+            (engine.RULES_VERSION, "chicken-road-hmac-v1", "medium", [112.0] + list(TABLES["medium"][1:])),
+            (engine.RULES_VERSION, "chicken-road-hmac-v1", "medium", TABLES["medium"]),
+        ):
+            with self.subTest(version=version, fairness=fairness, difficulty=difficulty, ladder=ladder):
+                with self.assertRaises(ValueError):
+                    engine.validate_locked_rules(version, fairness, difficulty, ladder)
+
+    def test_archived_ladders_cannot_be_mutated_or_rebound_through_current_export(self):
+        with self.assertRaises(TypeError):
+            engine.LADDER_HUNDREDTHS["medium"] = (112,) * 13
+        with self.assertRaises(TypeError):
+            engine._RULESETS["chicken-road-proposal-v1"] = (90, "bad", {})
+        with patch.object(engine, "LADDER_HUNDREDTHS", {"medium": (999,) * 13}):
+            for version in ("chicken-road-proposal-v1", "chicken-road-proposal-v2"):
+                self.assertEqual(engine.payout_chips(300, "medium", 1, rules_version=version), 336)
+                self.assertIsNone(engine.validate_locked_rules(version, "chicken-road-hmac-v1", "medium", list(TABLES["medium"])))
+
+    def test_unknown_rules_fail_closed_in_every_consumer(self):
+        for version in ("", "future-rules", 2, True, [], {}):
+            with self.subTest(version=version), patch.object(engine, "_hmac_sha256") as draw:
+                for call in (
+                    lambda: engine.rules_payload(version),
+                    lambda: engine.multiplier_hundredths("medium", 1, rules_version=version),
+                    lambda: engine.payout_chips(300, "medium", 1, rules_version=version),
+                    lambda: engine.seed_commitment(SERVER, COMMITMENT_ID, rules_version=version),
+                    lambda: engine.lane_survives(SERVER, CLIENT, NONCE, "medium", 1, rules_version=version),
+                ):
+                    with self.assertRaises(ValueError):
+                        call()
+                draw.assert_not_called()
 
     def test_valid_stakes_and_difficulties_return_without_coercion(self):
         for stake in range(100, 1001, 100):
@@ -158,7 +216,7 @@ class ProposalMathTests(unittest.TestCase):
     def test_malformed_ladders_fail_closed(self):
         invalid_ladders = (
             None, list(TABLES["medium"]), (), TABLES["medium"][:-1],
-            (97,) + TABLES["medium"][1:],
+            (90,) + TABLES["medium"][1:],
             (True,) + TABLES["medium"][1:],
             (112.0,) + TABLES["medium"][1:],
             ("112",) + TABLES["medium"][1:],
@@ -166,7 +224,8 @@ class ProposalMathTests(unittest.TestCase):
             TABLES["medium"][:-1] + (UINT256_RANGE,),
         )
         for ladder in invalid_ladders:
-            with self.subTest(ladder=ladder), patch.dict(engine.LADDER_HUNDREDTHS, {"medium": ladder}):
+            invalid_rules = {engine.RULES_VERSION: (90, engine.FAIRNESS_VERSION, {**TABLES, "medium": ladder})}
+            with self.subTest(ladder=ladder), patch.object(engine, "_RULESETS", invalid_rules):
                 for call in (
                     engine.rules_payload,
                     lambda: engine.multiplier_hundredths("medium", 1),
@@ -175,17 +234,17 @@ class ProposalMathTests(unittest.TestCase):
                 ):
                     with self.assertRaises(ValueError):
                         call()
-        with patch.dict(engine.LADDER_HUNDREDTHS, {}, clear=True):
+        with patch.object(engine, "_RULESETS", {engine.RULES_VERSION: (90, engine.FAIRNESS_VERSION, {})}):
             with self.assertRaises(ValueError):
                 engine.rules_payload()
 
 
 class FairnessTests(unittest.TestCase):
     def test_commitment_matches_independent_and_fixed_derivation(self):
-        wire = ('["chicken-road:seed-commitment","chicken-road-proposal-v1",'
+        wire = ('["chicken-road:seed-commitment","chicken-road-proposal-v2",'
                 '"chicken-road-hmac-v1","round-commitment-001",'
                 '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]')
-        expected = "b498afde0591b4d72b7dc2cf1426e12dab823696435add65e97138596858dbdf"
+        expected = "94dbb913e70141b3d9fbffcf0d98136c2c80f8e8eb30794a8702df2c1d5c0eeb"
         self.assertEqual(hashlib.sha256(wire.encode("utf-8")).hexdigest(), expected)
         self.assertEqual(engine.seed_commitment(SERVER, COMMITMENT_ID), expected)
 
@@ -193,15 +252,19 @@ class FairnessTests(unittest.TestCase):
         original = engine.seed_commitment(SERVER, COMMITMENT_ID)
         self.assertNotEqual(original, engine.seed_commitment("0" * 64, COMMITMENT_ID))
         self.assertNotEqual(original, engine.seed_commitment(SERVER, COMMITMENT_ID + "-2"))
-        with patch.object(engine, "RULES_VERSION", "chicken-road-proposal-v2"):
-            self.assertNotEqual(original, engine.seed_commitment(SERVER, COMMITMENT_ID))
-        with patch.object(engine, "FAIRNESS_VERSION", "chicken-road-hmac-v2"):
-            self.assertNotEqual(original, engine.seed_commitment(SERVER, COMMITMENT_ID))
+        legacy = engine.seed_commitment(SERVER, COMMITMENT_ID, rules_version="chicken-road-proposal-v1")
+        self.assertEqual(legacy, "b498afde0591b4d72b7dc2cf1426e12dab823696435add65e97138596858dbdf")
+        self.assertNotEqual(original, legacy)
+        # Historical commitments use the archived fairness version, not a
+        # deployment's later defaults. Its literal wire hash is frozen above.
+        with patch.object(engine, "RULES_VERSION", "future-rules"), patch.object(engine, "FAIRNESS_VERSION", "future-fairness"):
+            self.assertEqual(legacy, engine.seed_commitment(SERVER, COMMITMENT_ID, rules_version="chicken-road-proposal-v1"))
+            self.assertEqual(original, engine.seed_commitment(SERVER, COMMITMENT_ID, rules_version="chicken-road-proposal-v2"))
 
     def test_canonical_identifiers_are_unambiguous_and_ascii_escaped(self):
         identifier = 'round:|["\\\n\u2603'
         expected_wire = json.dumps([
-            "chicken-road:seed-commitment", "chicken-road-proposal-v1", "chicken-road-hmac-v1", identifier, SERVER,
+            "chicken-road:seed-commitment", "chicken-road-proposal-v2", "chicken-road-hmac-v1", identifier, SERVER,
         ], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         self.assertEqual(engine.seed_commitment(SERVER, identifier), hashlib.sha256(expected_wire).hexdigest())
         with patch.object(engine, "_hmac_sha256", return_value=bytes(32)) as digest:
@@ -210,7 +273,7 @@ class FairnessTests(unittest.TestCase):
         self.assertEqual(parts[5], identifier)
         self.assertIn(b"\\u2603", digest.call_args.args[1])
 
-    def test_fixed_lane_outcome_and_digest_fixtures(self):
+    def test_legacy_fixed_lane_outcome_and_digest_fixtures_are_unchanged(self):
         fixtures = (
             ("easy", 1, "0c4b97b6c2dce072d5c8d9882edbb29d6dee230a37b2de59b9364677d494e97a", 104, False),
             ("medium", 1, "0ee43c3fcef1b72a1f92d3918013818bf70202f3a4a07a8335fb80319061635d", 93, True),
@@ -228,37 +291,72 @@ class FairnessTests(unittest.TestCase):
                 ], separators=(",", ":")).encode("utf-8")
                 self.assertEqual(hmac.new(bytes.fromhex(SERVER), wire, hashlib.sha256).hexdigest(), digest_hex)
                 self.assertEqual(int(digest_hex, 16) % TABLES[difficulty][lane - 1], draw)
+                self.assertIs(engine.lane_survives(SERVER, CLIENT, NONCE, difficulty, lane,
+                                                 rules_version="chicken-road-proposal-v1"), survives)
+
+    def test_current_fixed_lane_outcome_and_digest_fixtures(self):
+        fixtures = (
+            ("easy", 1, "9af8637cde835ec331b08cb9347264731633105c9073eb6319914af6609a15bd", 87, True),
+            ("medium", 1, "e54567793983d1eb75b23be11ddce6d68b52150399f6f9b04d9eb4cf27bf1aef", 63, True),
+            ("medium", 12, "43aba19b0468dfc3acc1c515d86c2069e3f241350907398bc331905dae548a1e", 166, True),
+            ("medium", 13, "5f437ae1dd00634b1dc4bcc23cc3d2a67a42ced98ccb2a7a9ebd96871b6f343f", 85, True),
+            ("hard", 2, "511726c82cc66f47d03523c89e51703b61d3f77b66dda5010b1712c01dae191c", 48, True),
+            ("hardcore", 1, "86c07afe398a96a5ef3e7bae028d9063129df90a8f391e2721233325495679eb", 15, True),
+            ("hardcore", 13, "8930cdb281003296cb6841b5c76b49d250d9509ea9661a7993d5a1aae73b39f4", 14452, False),
+        )
+        for difficulty, lane, digest_hex, draw, survives in fixtures:
+            with self.subTest(difficulty=difficulty, lane=lane):
+                wire = json.dumps([
+                    "chicken-road:lane", "chicken-road-proposal-v2", "chicken-road-hmac-v1",
+                    difficulty, lane, NONCE, 0, CLIENT,
+                ], separators=(",", ":")).encode("utf-8")
+                self.assertEqual(hmac.new(bytes.fromhex(SERVER), wire, hashlib.sha256).hexdigest(), digest_hex)
+                self.assertEqual(int(digest_hex, 16) % TABLES[difficulty][lane - 1], draw)
                 self.assertIs(engine.lane_survives(SERVER, CLIENT, NONCE, difficulty, lane), survives)
 
     def test_all_lanes_match_independent_derivation_and_retry_replays(self):
-        for difficulty in TABLES:
-            for lane in range(1, 14):
-                for nonce in (NONCE, "another-round"):
-                    expected = independent_lane(difficulty, lane, nonce=nonce)
-                    self.assertIs(engine.lane_survives(SERVER, CLIENT, nonce, difficulty, lane), expected)
-                    self.assertIs(engine.lane_survives(SERVER, CLIENT, nonce, difficulty, lane), expected)
+        for version, target in (("chicken-road-proposal-v1", 97), ("chicken-road-proposal-v2", 90)):
+            for difficulty in TABLES:
+                for lane in range(1, 14):
+                    for nonce in (NONCE, "another-round"):
+                        expected = independent_lane(difficulty, lane, nonce=nonce, version=version, target=target)
+                        for _ in range(2):
+                            self.assertIs(engine.lane_survives(SERVER, CLIENT, nonce, difficulty, lane,
+                                                             rules_version=version), expected)
 
     def test_each_lane_survival_threshold_and_its_exact_boundary(self):
-        for difficulty, values in TABLES.items():
-            for lane, upper_bound in enumerate(values, 1):
-                threshold = 97 if lane == 1 else values[lane - 2]
-                for value, survives in ((0, True), (threshold - 1, True), (threshold, False), (upper_bound - 1, False)):
-                    with self.subTest(difficulty=difficulty, lane=lane, value=value):
-                        with patch.object(engine, "_hmac_sha256", return_value=value.to_bytes(32, "big")):
-                            self.assertIs(engine.lane_survives(SERVER, CLIENT, NONCE, difficulty, lane), survives)
+        for version, target in (("chicken-road-proposal-v1", 97), ("chicken-road-proposal-v2", 90)):
+            for difficulty, values in TABLES.items():
+                for lane, upper_bound in enumerate(values, 1):
+                    threshold = target if lane == 1 else values[lane - 2]
+                    for value, survives in ((0, True), (threshold - 1, True), (threshold, False), (upper_bound - 1, False)):
+                        with self.subTest(version=version, difficulty=difficulty, lane=lane, value=value):
+                            with patch.object(engine, "_hmac_sha256", return_value=value.to_bytes(32, "big")):
+                                self.assertIs(engine.lane_survives(SERVER, CLIENT, NONCE, difficulty, lane,
+                                                                 rules_version=version), survives)
+
+    def test_exhaustive_first_lane_residues_have_exact_90_or_97_survivors(self):
+        for version, target in (("chicken-road-proposal-v1", 97), ("chicken-road-proposal-v2", 90)):
+            for difficulty, values in TABLES.items():
+                with self.subTest(version=version, difficulty=difficulty):
+                    samples = [value.to_bytes(32, "big") for value in range(values[0])]
+                    with patch.object(engine, "_hmac_sha256", side_effect=samples):
+                        outcomes = [engine.lane_survives(SERVER, CLIENT, NONCE, difficulty, 1,
+                                                        rules_version=version) for _ in samples]
+                    self.assertEqual(sum(outcomes), target)
 
     def test_rejected_values_advance_bound_counter_and_use_fresh_hmac(self):
         upper_bound = 112
         limit = (UINT256_RANGE // upper_bound) * upper_bound
         self.assertGreater(UINT256_RANGE, limit)
-        samples = (UINT256_RANGE - 1, limit, 96)
+        samples = (UINT256_RANGE - 1, limit, 89)
         with patch.object(engine, "_hmac_sha256", side_effect=[sample.to_bytes(32, "big") for sample in samples]) as digest:
             self.assertTrue(engine.lane_survives(SERVER, CLIENT, NONCE, "medium", 1))
         self.assertEqual(digest.call_count, 3)
         for counter, call in enumerate(digest.call_args_list):
             self.assertEqual(call.args[0], bytes.fromhex(SERVER))
             self.assertEqual(json.loads(call.args[1]), [
-                "chicken-road:lane", "chicken-road-proposal-v1", "chicken-road-hmac-v1",
+                "chicken-road:lane", "chicken-road-proposal-v2", "chicken-road-hmac-v1",
                 "medium", 1, NONCE, counter, CLIENT,
             ])
 
@@ -297,10 +395,11 @@ class FairnessTests(unittest.TestCase):
                 engine.lane_survives(*args)
                 calls.append(digest.call_args.args)
         self.assertEqual(len(set(calls)), len(cases))
-        for constant in ("RULES_VERSION", "FAIRNESS_VERSION"):
-            with patch.object(engine, constant, "version-2"), patch.object(engine, "_hmac_sha256", return_value=bytes(32)) as digest:
-                engine.lane_survives(*cases[0])
-                self.assertNotEqual(digest.call_args.args, calls[0])
+        with patch.object(engine, "_hmac_sha256", return_value=bytes(32)) as digest:
+            engine.lane_survives(*cases[0], rules_version="chicken-road-proposal-v1")
+            self.assertNotEqual(digest.call_args.args, calls[0])
+            self.assertEqual(json.loads(digest.call_args.args[1])[1:3],
+                             ["chicken-road-proposal-v1", "chicken-road-hmac-v1"])
 
     def test_invalid_seed_forms_rejected_before_drawing(self):
         invalid = (None, True, 0, bytes(32), [], {}, "", "0" * 63, "0" * 65, "g" * 64, "A" * 64, "0" * 63 + "\n")

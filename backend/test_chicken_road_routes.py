@@ -11,6 +11,8 @@ import ast
 import asyncio
 import copy
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -54,7 +56,29 @@ finally:
 
 _REAL_REQUIRE_WALLET_USER = route._require_wallet_user
 _REAL_TRANSACTION_RUNNER = transactions.run_game_transaction
+_REAL_LANE_SURVIVES = engine.lane_survives
 _INITIAL_RULES_APPROVED = route.RULES_APPROVED
+_LEGACY_RULES_VERSION = "chicken-road-proposal-v1"
+_CURRENT_RULES_VERSION = "chicken-road-proposal-v2"
+_LEGACY_MEDIUM_LADDER = [112, 128, 147, 170, 198, 233, 276, 332, 403, 496, 620, 691, 890]
+_LEGACY_SERVER_SEED = "0" * 62 + "2e"
+
+
+def _independent_legacy_draw(proof, lane):
+    """Reproduce the archived wire protocol without calling engine helpers."""
+    upper_bound = _LEGACY_MEDIUM_LADDER[lane - 1]
+    uint256_range = 1 << 256
+    limit = uint256_range - uint256_range % upper_bound
+    counter = 0
+    while True:
+        message = json.dumps([
+            "chicken-road:lane", _LEGACY_RULES_VERSION, "chicken-road-hmac-v1",
+            "medium", lane, proof["nonce"], counter, proof["client_seed"],
+        ], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        sample = int.from_bytes(hmac.new(bytes.fromhex(proof["server_seed"]), message, hashlib.sha256).digest(), "big")
+        if sample < limit:
+            return sample % upper_bound
+        counter += 1
 
 
 class _SessionCollection:
@@ -206,6 +230,22 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
         body = await self.play_body(**kwargs)
         return body, await route.play(body, user)
 
+    async def start_legacy_fixture(self):
+        # Accept the round through the real v1 prepare/play path before the
+        # process switches to v2. The fixture has v1 draws 42, 28, 130: two
+        # survivors then a collision. V2 lane 2 would instead collide (121).
+        self.survival.side_effect = _REAL_LANE_SURVIVES
+        identities = iter(("legacy-commitment", "legacy-round"))
+        prepare_key = self.key("legacy-prepare")
+        with patch.object(engine, "RULES_VERSION", _LEGACY_RULES_VERSION), \
+                patch.object(route, "uuid", types.SimpleNamespace(uuid4=lambda: next(identities))), \
+                patch.object(route.secrets, "token_hex", return_value=_LEGACY_SERVER_SEED):
+            prepared = await self.prepare(key=prepare_key)
+            body, played = await self.start(commitment=prepared)
+        self.assertEqual(played["round"]["status"], "PLAYING")
+        self.assertEqual(played["round"]["rules_version"], _LEGACY_RULES_VERSION)
+        return prepare_key, prepared, body, played
+
     def action_body(self, response, *, key=None, version=None):
         current = response["round"]
         return route.RoundRequest(operation_id=key or self.key("action"), round_id=current["id"],
@@ -261,6 +301,7 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(played["balance"], before - 300)
                 self.assertEqual(await self.exposure(), 3 * ladder[-1])
                 self.assertEqual(self.survival.call_args.args[-2:], (difficulty, 1))
+                self.assertEqual(self.survival.call_args.kwargs, {"rules_version": engine.RULES_VERSION})
                 stepped = await route.go(self.action_body(played), self.user)
                 self.assertEqual((stepped["round"]["lane"], stepped["round"]["version"]), (2, 2))
                 cashed = await route.cashout(self.action_body(stepped), self.user)
@@ -564,6 +605,148 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.db.chicken_road_commitments.find_one({"_id": commitment["commitment_id"]}))["status"], "PREPARED")
         self.survival.assert_not_called()
 
+    async def test_new_rounds_publish_and_bind_only_current_ninety_percent_rules(self):
+        self.assertEqual(engine.RULES_VERSION, _CURRENT_RULES_VERSION)
+        prepared = await self.prepare()
+        body, played = await self.start(commitment=prepared)
+        state = await route.state(self.user)
+        self.assertEqual(state["rules"]["version"], _CURRENT_RULES_VERSION)
+        self.assertEqual(state["rules"]["rtp_bps"], 9000)
+        for item in (prepared, body.model_dump(), played["round"]):
+            self.assertEqual(item["rules_version"], _CURRENT_RULES_VERSION)
+        stored = await self.db.chicken_road_rounds.find_one({"_id": played["round"]["id"]})
+        self.assertEqual(stored["server_seed_hash"], engine.seed_commitment(
+            stored["server_seed"], stored["nonce"], rules_version=_CURRENT_RULES_VERSION,
+        ))
+        self.assertNotEqual(stored["server_seed_hash"], engine.seed_commitment(
+            stored["server_seed"], stored["nonce"], rules_version=_LEGACY_RULES_VERSION,
+        ))
+        self.assertEqual(self.survival.call_args.kwargs, {"rules_version": _CURRENT_RULES_VERSION})
+
+    async def test_legacy_active_go_cashout_and_terminal_proof_preserve_v1_rules(self):
+        _, prepared, _, played = await self.start_legacy_fixture()
+        self.assertEqual(engine.RULES_VERSION, _CURRENT_RULES_VERSION)
+        current = await route.state(self.user)
+        self.assertEqual(current["rules"]["rtp_bps"], 9000)
+        self.assertEqual(current["active_round"]["rules_version"], _LEGACY_RULES_VERSION)
+        self.assertEqual(current["active_round"]["multipliers_hundredths"], _LEGACY_MEDIUM_LADDER)
+        # This fixture would crash if GO accidentally used the current engine.
+        self.assertFalse(_REAL_LANE_SURVIVES(
+            _LEGACY_SERVER_SEED, "f" * 64, "legacy-commitment", "medium", 2,
+            rules_version=_CURRENT_RULES_VERSION,
+        ))
+        stepped = await route.go(self.action_body(played), self.user)
+        self.assertEqual((stepped["round"]["status"], stepped["round"]["lane"]), ("PLAYING", 2))
+        self.assertEqual(self.survival.call_args.kwargs, {"rules_version": _LEGACY_RULES_VERSION})
+        cashed = await route.cashout(self.action_body(stepped), self.user)
+        self.assertEqual(cashed["round"]["payout"], 384)
+        self.assertEqual(cashed["round"]["rules_version"], _LEGACY_RULES_VERSION)
+        self.assertEqual(await self.balance(), 100084)
+        self.assertEqual(await self.exposure(), 0)
+        await self.assert_terminal_once(cashed)
+        proof = await route.fairness(played["round"]["id"], self.user)
+        self.assertEqual(proof["rules_version"], _LEGACY_RULES_VERSION)
+        self.assertEqual(proof["multipliers_hundredths"], _LEGACY_MEDIUM_LADDER)
+        commitment_bytes = json.dumps([
+            "chicken-road:seed-commitment", _LEGACY_RULES_VERSION, "chicken-road-hmac-v1",
+            proof["nonce"], proof["server_seed"],
+        ], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(hashlib.sha256(commitment_bytes).hexdigest(), prepared["server_seed_hash"])
+        self.assertEqual(proof["server_seed_hash"], prepared["server_seed_hash"])
+        self.assertEqual([_independent_legacy_draw(proof, lane) for lane in (1, 2, 3)], [42, 28, 130])
+        for lane in (1, 2):
+            self.assertTrue(_REAL_LANE_SURVIVES(
+                proof["server_seed"], proof["client_seed"], proof["nonce"], proof["difficulty"], lane,
+                rules_version=proof["rules_version"],
+            ))
+
+    async def test_legacy_collision_uses_v1_stream_and_settles_stake_once(self):
+        _, _, _, played = await self.start_legacy_fixture()
+        stepped = await route.go(self.action_body(played), self.user)
+        request = self.action_body(stepped)
+        crashed = await route.go(request, self.user)
+        self.assertEqual((crashed["round"]["status"], crashed["round"]["lane"], crashed["round"]["payout"]), ("CRASHED", 3, 0))
+        self.assertEqual(crashed["round"]["rules_version"], _LEGACY_RULES_VERSION)
+        self.assertEqual(await route.go(request, self.user), crashed)
+        self.assertEqual(await self.balance(), 99700)
+        self.assertEqual(await self.exposure(), 0)
+        await self.assert_terminal_once(crashed)
+        proof = await route.fairness(played["round"]["id"], self.user)
+        self.assertGreaterEqual(_independent_legacy_draw(proof, 3), _LEGACY_MEDIUM_LADDER[1])
+
+    async def _assert_legacy_expiry_after_upgrade(self, *, worker):
+        _, _, _, played = await self.start_legacy_fixture()
+        stepped = await route.go(self.action_body(played), self.user)
+        self.clock += timedelta(seconds=engine.EXPIRY_SECONDS)
+        with patch.dict(os.environ, {"CHICKEN_ROAD_LIVE_ENABLED": "false"}):
+            if worker:
+                await self.db.users.update_one({"id": self.user["id"]}, {"$set": {"status": "SUSPENDED"}})
+                self.assertEqual(await route.settle_expired_chicken_rounds(), 1)
+                self.assertEqual(await route.settle_expired_chicken_rounds(), 0)
+                terminal = await self.db.chicken_road_rounds.find_one({"_id": stepped["round"]["id"]})
+            else:
+                state = await route.state(self.user)
+                self.assertEqual(await route.state(self.user), state)
+                self.assertFalse(state["enabled"])
+                self.assertIsNone(state["active_round"])
+                terminal = state["latest_round"]
+        self.assertEqual((terminal["status"], terminal["lane"], terminal["payout"]), ("CASHED", 2, 384))
+        self.assertEqual(terminal["reason"], "INACTIVITY")
+        self.assertEqual(terminal["rules_version"], _LEGACY_RULES_VERSION)
+        self.assertEqual(terminal["multipliers_hundredths"], _LEGACY_MEDIUM_LADDER)
+        self.assertEqual(await self.balance(), 100084)
+        self.assertEqual(await self.exposure(), 0)
+        self.assertEqual(self.survival.call_count, 2)
+        await self.assert_terminal_once({"round": terminal})
+
+    async def test_legacy_state_expiry_survives_upgrade_and_intake_pause(self):
+        await self._assert_legacy_expiry_after_upgrade(worker=False)
+
+    async def test_legacy_worker_expiry_survives_upgrade_pause_and_restriction(self):
+        await self._assert_legacy_expiry_after_upgrade(worker=True)
+
+    async def test_all_legacy_receipts_replay_unchanged_after_rules_upgrade(self):
+        with patch.object(engine, "RULES_VERSION", _LEGACY_RULES_VERSION):
+            prepare_key, prepared, play_body, played = await self.start_legacy_fixture()
+            go_body = self.action_body(played)
+            stepped = await route.go(go_body, self.user)
+            cash_body = self.action_body(stepped)
+            cashed = await route.cashout(cash_body, self.user)
+        before = await self.db.snapshot()
+        draws_before = self.survival.call_count
+        self.assertEqual(await self.prepare(key=prepare_key), prepared)
+        self.assertEqual(await route.play(play_body, self.user), played)
+        self.assertEqual(await route.go(go_body, self.user), stepped)
+        self.assertEqual(await route.cashout(cash_body, self.user), cashed)
+        for key, receipt in ((prepare_key, prepared), (play_body.operation_id, played),
+                             (go_body.operation_id, stepped), (cash_body.operation_id, cashed)):
+            self.assertEqual(await route.operation_receipt(key, self.user), {"found": True, **receipt})
+        self.assertEqual(await self.db.snapshot(), before)
+        self.assertEqual(self.survival.call_count, draws_before)
+        await self.assert_terminal_once(cashed)
+
+    async def test_unused_v1_commitment_cannot_accept_a_new_stake_after_upgrade(self):
+        with patch.object(engine, "RULES_VERSION", _LEGACY_RULES_VERSION):
+            prepared = await self.prepare()
+            old_body = await self.play_body(commitment=prepared)
+        self.assertEqual(engine.RULES_VERSION, _CURRENT_RULES_VERSION)
+        await self.assert_error(route.play(old_body, self.user), "RULES_CHANGED")
+        # Merely relabelling the Play request must not upgrade its commitment.
+        changed_body = old_body.model_copy(update={
+            "operation_id": self.key("relabelled-play"), "rules_version": _CURRENT_RULES_VERSION,
+        })
+        await self.assert_error(route.play(changed_body, self.user), "RULES_CHANGED")
+        for body in (old_body, changed_body):
+            rejected = await route.operation_receipt(body.operation_id, self.user)
+            self.assertEqual((rejected["status"], rejected["error"]["code"]), ("REJECTED", "RULES_CHANGED"))
+        self.assertEqual(await self.balance(), 100000)
+        self.assertEqual(await self.events(), [])
+        self.assertEqual(await self.exposure(), 0)
+        self.assertEqual(await self.db.chicken_road_rounds.count_documents({}), 0)
+        self.assertEqual(await self.db.chicken_road_players.count_documents({}), 0)
+        self.assertEqual((await self.db.chicken_road_commitments.find_one({"_id": prepared["commitment_id"]}))["status"], "PREPARED")
+        self.survival.assert_not_called()
+
     async def test_settled_fairness_proof_survives_rules_and_fairness_version_upgrades(self):
         _, played = await self.start()
         await route.cashout(self.action_body(played), self.user)
@@ -573,7 +756,7 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(engine, "RULES_VERSION", "chicken-road-rules-v2"), patch.object(engine, "FAIRNESS_VERSION", "chicken-road-hmac-v2"):
             self.assertEqual(await route.fairness(round_id, self.user), original)
         self.assertEqual(await self.db.snapshot(), snapshot)
-        self.assertEqual(original["rules_version"], "chicken-road-proposal-v1")
+        self.assertEqual(original["rules_version"], _CURRENT_RULES_VERSION)
         self.assertEqual(original["fairness_version"], "chicken-road-hmac-v1")
 
     async def test_malformed_terminal_or_unknown_status_never_reveals_a_private_seed(self):
@@ -591,14 +774,24 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.db.snapshot(), snapshot)
 
     async def test_corrupted_locked_rules_fail_before_financial_transition(self):
-        _, played = await self.start()
-        for changes in ({"rules_version": "future-rules"}, {"fairness_version": "future-fairness"}, {"multipliers_hundredths": [112] * 13}):
-            original = await self.db.chicken_road_rounds.find_one({"_id": played["round"]["id"]})
-            await self.db.chicken_road_rounds.update_one({"_id": original["id"]}, {"$set": changes})
-            snapshot = await self.db.snapshot()
-            await self.assert_error(route.cashout(self.action_body(played), self.user), "CHICKEN_ROAD_RULES_UNAVAILABLE", 503)
-            self.assertEqual(await self.db.snapshot(), snapshot)
-            await self.db.chicken_road_rounds.replace_one({"_id": original["id"]}, original)
+        for version in (_LEGACY_RULES_VERSION, _CURRENT_RULES_VERSION):
+            with patch.object(engine, "RULES_VERSION", version):
+                _, played = await self.start()
+            for changes in ({"rules_version": "future-rules"}, {"rules_version": None},
+                            {"fairness_version": "future-fairness"}, {"multipliers_hundredths": [112] * 13},
+                            {"multipliers_hundredths": [float(value) for value in _LEGACY_MEDIUM_LADDER]},
+                            {"amount": True}):
+                with self.subTest(version=version, changes=changes):
+                    original = await self.db.chicken_road_rounds.find_one({"_id": played["round"]["id"]})
+                    await self.db.chicken_road_rounds.update_one({"_id": original["id"]}, {"$set": changes})
+                    snapshot = await self.db.snapshot()
+                    draws_before = self.survival.call_count
+                    await self.assert_error(route.cashout(self.action_body(played), self.user), "CHICKEN_ROAD_RULES_UNAVAILABLE", 503)
+                    await self.assert_error(route.go(self.action_body(played), self.user), "CHICKEN_ROAD_RULES_UNAVAILABLE", 503)
+                    self.assertEqual(await self.db.snapshot(), snapshot)
+                    self.assertEqual(self.survival.call_count, draws_before)
+                    await self.db.chicken_road_rounds.replace_one({"_id": original["id"]}, original)
+            await route.cashout(self.action_body(played), self.user)
 
     async def test_state_expiry_settles_at_last_safe_lane_once_even_while_paused(self):
         _, played = await self.start()

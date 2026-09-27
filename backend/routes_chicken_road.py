@@ -232,11 +232,14 @@ def _public_round(round_doc):
 
 
 def _assert_rules(round_doc):
-    if (round_doc.get("rules_version") != engine.RULES_VERSION
-            or round_doc.get("fairness_version") != engine.FAIRNESS_VERSION
-            or round_doc.get("multipliers_hundredths") != list(engine.LADDER_HUNDREDTHS.get(round_doc.get("difficulty"), ()))):
-        raise _error(503, "CHICKEN_ROAD_RULES_UNAVAILABLE", "The locked round rules require reconciliation.")
-    engine.validate_stake(round_doc["amount"])
+    try:
+        engine.validate_locked_rules(
+            round_doc.get("rules_version"), round_doc.get("fairness_version"),
+            round_doc.get("difficulty"), round_doc.get("multipliers_hundredths"),
+        )
+        engine.validate_stake(round_doc.get("amount"))
+    except ValueError as exc:
+        raise _error(503, "CHICKEN_ROAD_RULES_UNAVAILABLE", "The locked round rules require reconciliation.") from exc
 
 
 def _payout(round_doc):
@@ -346,7 +349,10 @@ async def _transition(current, *, lane, status, reason, session):
 async def _hop(current, session):
     lane = current["lane"] + 1
     _assert_rules(current)
-    survived = engine.lane_survives(current["server_seed"], current["client_seed"], current["nonce"], current["difficulty"], lane)
+    survived = engine.lane_survives(
+        current["server_seed"], current["client_seed"], current["nonce"], current["difficulty"], lane,
+        rules_version=current["rules_version"],
+    )
     status = "CRASHED" if not survived else "CASHED" if lane == engine.MAX_LANES else "PLAYING"
     return await _transition(current, lane=lane, status=status,
                              reason="COLLISION" if not survived else "FINAL_LANE" if status == "CASHED" else None,
