@@ -1,6 +1,6 @@
-# Chicken Road live rules — 90% RTP, activation pending
+# Chicken Road live rules — 90% RTP, owner-approved limit
 
-Updated 28 September 2026. The owner selected **90% RTP**, all four difficulties, and the 100–1,000-chip stake range in 100-chip increments. **Live activation remains pending an explicit aggregate exposure budget and the release checks below.** This document is not certification or authority to change balances. This is an original mathematical model, not recovered provider rules. The supplied recording establishes Medium multiplier labels only. See [the source audit](chicken-road-rules-audit.md).
+Updated 28 September 2026. The owner selected **90% RTP**, all four difficulties, and the 100–1,000-chip stake range in 100-chip increments, and approved **194,620 chips as the aggregate outstanding payout limit**. Live activation follows the release checks below; the published game has no demo mode. This document is not certification or authority to change balances outside accepted game actions. This is an original mathematical model, not recovered provider rules. The supplied recording establishes Medium multiplier labels only. See [the source audit](chicken-road-rules-audit.md).
 
 ## Selected rules package
 
@@ -9,7 +9,7 @@ Updated 28 September 2026. The owner selected **90% RTP**, all four difficulties
 - Initially accept **100–1,000 whole chips, in increments of 100**. Default 300; suggested presets 100 / 300 / 800 / 1,000. This fits the existing integer-chip ledger and makes every listed payout exact.
 - Play deducts once and immediately attempts lane 1. GO attempts exactly one further lane. Cash Out settles the current safe lane. Collision pays zero. Surviving lane 13 automatically cashes out.
 - Lock difficulty, stake, paytable, and rules version for the round. One active round per player. After 15 minutes without a successful game action, automatically cash out at the last committed safe lane; closing the browser does not create a loss or cancel a stake.
-- Maximum gross round payout is **194,620 chips** at the initial maximum stake. Reserve worst-case round exposure before accepting Play, within a separately operator-approved aggregate exposure limit. The atomic liability counter limits outstanding promises; it is not evidence of bank funding. The operator remains responsible for liquidity. Never truncate an earned payout to a cap.
+- Maximum gross round payout is **194,620 chips** at the initial maximum stake. Reserve worst-case round exposure before accepting Play, within the owner-approved **194,620-chip aggregate limit**. Reject a new round before debit if its reservation would exceed the limit. This can limit simultaneous play, especially maximum-stake Hardcore rounds. The atomic liability counter limits outstanding promises; it is not evidence of bank funding. The operator remains responsible for liquidity. Never truncate an earned payout to a cap.
 
 The reference's 3-chip stake and 3.36-chip payout cannot both be retained with the present whole-chip ledger. The proposed default is 300 actual chips, not an undisclosed conversion of 3 chips.
 

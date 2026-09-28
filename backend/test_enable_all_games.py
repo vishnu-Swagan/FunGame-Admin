@@ -42,10 +42,12 @@ async def main():
     config = await database.system_config.find_one({'key': 'main'})
 
     assert updated == len(rows)
-    assert len(reviewed_slugs) == 10
+    assert len(reviewed_slugs) == 11
     assert 'chicken-road' in all_slugs
-    assert 'chicken-road' not in reviewed_slugs
-    assert by_slug['chicken-road']['status'] == 'COMING_SOON'
+    assert 'chicken-road' in reviewed_slugs
+    assert by_slug['chicken-road']['status'] == 'ENABLED'
+    game_access.assert_admin_status_change_allowed('chicken-road', 'ENABLED')
+    assert (await game_access.require_playable_game('chicken-road', database=database))['slug'] == 'chicken-road'
     assert all(by_slug[slug]['status'] == 'ENABLED' for slug in reviewed_slugs)
     assert all(
         by_slug[slug]['status'] == 'COMING_SOON'
@@ -62,6 +64,9 @@ async def main():
     await database.games.update_one(
         {'slug': 'aviator'}, {'$set': {'status': 'MAINTENANCE'}},
     )
+    await database.games.update_one(
+        {'slug': 'chicken-road'}, {'$set': {'status': 'COMING_SOON'}},
+    )
     # A stale process or manual database write must not republish an
     # unreviewed game after the one-time migration flag has been set.
     await database.games.update_one(
@@ -70,6 +75,7 @@ async def main():
     second = await game_access.reconcile_game_availability(database=database)
     assert second['already_applied'] is True
     assert (await database.games.find_one({'slug': 'aviator'}))['status'] == 'MAINTENANCE'
+    assert (await database.games.find_one({'slug': 'chicken-road'}))['status'] == 'COMING_SOON'
     assert (await database.games.find_one({'slug': 'bingo'}))['status'] == 'COMING_SOON'
 
     from fastapi import HTTPException

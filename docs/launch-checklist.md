@@ -8,6 +8,36 @@ of 100. Current rules become `chicken-road-proposal-v2`; accepted v1 rounds
 retain their original 97% outcomes, payouts, settlement, and fairness proofs.
 This is not a Roulette RTP change.
 
+### Live activation — owner approved 2026-09-28
+
+The owner approved a **194,620-chip combined outstanding payout limit**, all
+four difficulties, and live-wallet play only. There is no public demo balance,
+demo toggle, or simulated outcome fallback. The limit reserves the maximum
+possible payout before a round begins; it never truncates an earned payout.
+
+- [x] **Owner decision:** use 194,620 chips; preserve the selected 90% v2 rules.
+- [x] **Agent verification:** eight real, disposable Mongo replica-set tests
+  passed twice; full backend passed 586 tests / 1,765 subtests; final frontend
+  passed 82 suites / 728 tests, plus 27 Aviator rendering tests. Production build
+  passed. Chrome verified risk/inactivity disclosures, all four difficulties,
+  proof verification and keyboard access. General and financial reviews are
+  clean after fixing the proof disclosure focus trap. No production wagers.
+- [ ] **Agent publication:** deploy the reviewed approval/availability changes
+  to the existing Render services. Set only `CHICKEN_ROAD_EXPOSURE_LIMIT=194620`
+  and `CHICKEN_ROAD_LIVE_ENABLED=true`, then enable the existing catalogue row.
+  Do not synchronize Blueprint or alter broader financial/payment flags.
+- [ ] **Agent smoke checks:** confirm exact deployed commits, Chicken Road
+  storage/counter/worker readiness, published catalogue and all four 90% live
+  difficulties. No production wager, test credit or balance mutation.
+- [ ] **Owner real-money check:** owner places any actual stake and retains the
+  round/receipt identifier for subsequent read-only verification.
+
+Read-only preflight: 9 nondeleted players; 5 have the source-policy flag and
+matching source wallets, 4 legacy players have no source-wallet account. No
+mirror mismatches, Chicken Road active rounds or exposure counter existed.
+Legacy balances must be reconciled separately; this release does not guess
+whether they are cash or restricted bonus chips or bypass wallet requirements.
+
 - [x] **Math and version compatibility:** exact fractions across every lane and
   supported stake, archived HMAC/commitment vectors, and retained-round
   cash-out, expiry, collision, and idempotent receipt tests.
@@ -17,17 +47,14 @@ This is not a Roulette RTP change.
   Isolated browser checks confirmed 90% rules and all four difficulty controls,
   with mocked balances and wagering/network requests disabled. These checks do
   not replace real Mongo replica-set concurrency verification or certification.
-- [ ] **Aggregate exposure budget:** owner must specify a positive whole-chip
-  total outstanding payout limit. The unchanged maximum gross payout per round
-  is 194,620 chips; 90% RTP does not reduce that maximum promise.
-- [ ] **Dormant production publication:** owner requested deployment on
-  2026-09-28. Publish only this reviewed RTP update to the existing API and web
-  services; verify both services report the merged commit and public smoke
-  checks pass. Do not synchronize the Render Blueprint or include the unfinished
-  Sorrat rename. Record deployment evidence in the release pull request.
-- [ ] **Live activation:** finish the remaining live-release checks below before
-  changing approval, allow-list, Render flags, or catalogue. No production bets,
-  balance changes, environment edits, or activation are part of this deployment.
+- [x] **Aggregate exposure budget:** owner approved 194,620 chips. The maximum
+  gross payout of one maximum-stake Hardcore round is also 194,620 chips; that
+  round can be admitted only when no other exposure uses the limit.
+- [x] **Dormant production publication:** both Render services verified live at
+  `dacffe5` (PR #101), with matching public assets and healthy API. No Blueprint
+  sync or unfinished Sorrat rename. Evidence is recorded in PR #101.
+- [ ] **Live activation:** complete the activation checklist above. No automated
+  production bets or balance changes are authorized by deployment.
 
 ## Chicken Road — 2026-09-23
 
@@ -56,8 +83,10 @@ subscription is introduced. Never synchronize the Render Blueprint for this rele
   places any actual stake. Check the resulting ledger receipt, source balances,
   cash-out/reconnect and final-lane/expiry settlement against the approved rules.
 
-Before activation, the code approval gate is false and the backend routes/worker
-are not registered. After accepted rounds exist, pause intake rather than
+The original dormant release kept the code approval gate false. The reviewed
+2026-09-28 activation makes it true and registers backend routes/worker; live
+intake still requires the explicit environment and catalogue switches above.
+After accepted rounds exist, pause intake rather than
 removing settlement routes or reverting to a binary that cannot settle them.
 Retain the exact deployed commit and settle outstanding rounds before rollback.
 

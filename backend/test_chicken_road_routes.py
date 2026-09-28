@@ -1,4 +1,4 @@
-"""Isolated route/ledger contracts for the dormant Chicken Road proposal.
+"""Isolated route/ledger contracts for approved, default-paused Chicken Road.
 
 SnapshotTransactionRunner is an explicit test double: a process-local lock and
 collection snapshots model serialization/rollback. It does not prove MongoDB
@@ -183,6 +183,7 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
         self._patch(patch.object(route, "client", self.client))
         self._patch(patch.object(route, "run_game_transaction", self.runner))
         self._patch(patch.object(route, "RULES_APPROVED", True))
+        self._patch(patch.object(route, "_STORAGE_READY", False))
         self._patch(patch.object(route, "_now", side_effect=lambda: self.clock))
         self.playable = self._patch(patch.object(route, "require_playable_game", new_callable=AsyncMock))
         self.wallet_ready = self._patch(patch.object(route, "_require_wallet_user", new_callable=AsyncMock))
@@ -1042,10 +1043,145 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_exposure_configuration_and_reviewed_catalogue_gate_fail_closed(self):
         for value in ("", "0", "-1", "1.5", "true", "９００", "9000000000000001"):
             with patch.dict(os.environ, {"CHICKEN_ROAD_EXPOSURE_LIMIT": value}):
-                await self.assert_error(self.prepare(), "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE", 503)
+                await self.assert_error(self.prepare(), "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
         with patch.object(route, "require_playable_game", game_access.require_playable_game):
             await self.assert_error(self.prepare(), "GAME_COMING_SOON")
         self.assertEqual(await self.db.chicken_road_commitments.count_documents({}), 0)
+
+    async def test_state_and_status_report_all_intake_requirements_without_writes(self):
+        before = await self.db.snapshot()
+        ready = await route.chicken_road_status()
+        self.assertEqual(ready, {
+            "ready": True, "intake_requested": True, "catalogue_enabled": True, "enabled": True,
+            "requirements": {"rules_approved": True, "storage_prepared": True,
+                             "exposure_configured": True, "exposure_counter_valid": True},
+        })
+        state = await route.state(self.user)
+        self.assertTrue(state["enabled"])
+        self.assertEqual(state["rules"]["approval"], "APPROVED")
+        self.assertEqual(state["readiness"], ready)
+        self.assertEqual(await self.db.snapshot(), before)
+        with patch.dict(os.environ, {"CHICKEN_ROAD_LIVE_ENABLED": "false"}):
+            status = await route.chicken_road_status()
+            self.assertTrue(status["ready"])
+            self.assertFalse(status["enabled"])
+            self.assertFalse(status["intake_requested"])
+        self.playable.side_effect = game_access.coming_soon_error(route.SLUG)
+        status = await route.chicken_road_status()
+        self.assertTrue(status["ready"])
+        self.assertFalse(status["catalogue_enabled"])
+        self.assertFalse(status["enabled"])
+
+    async def test_failed_bootstrap_blocks_new_mutations_but_cashout_and_receipts_survive(self):
+        body, played = await self.start()
+        exposure = await self.exposure()
+        self.db.fail_once("chicken_road_rounds", "create_index")
+        with self.assertRaisesRegex(RuntimeError, "injected"):
+            await route.prepare_chicken_road_storage()
+        self.assertFalse(route._STORAGE_READY)
+        self.assertEqual(await self.exposure(), exposure)
+        current = await route.state(self.user)
+        self.assertFalse(current["enabled"])
+        self.assertFalse(current["readiness"]["requirements"]["storage_prepared"])
+        self.assertEqual(current["active_round"]["cashout_amount"], 336)
+        rejected_go = self.action_body(played)
+        await self.assert_error(route.go(rejected_go, self.user), "CHICKEN_ROAD_STORAGE_UNAVAILABLE")
+        await self.assert_error(self.prepare(), "CHICKEN_ROAD_STORAGE_UNAVAILABLE")
+        await self.assert_error(route.play(body.model_copy(update={"operation_id": self.key("not-ready")}), self.user),
+                                "CHICKEN_ROAD_STORAGE_UNAVAILABLE")
+        self.assertEqual((await route.operation_receipt(rejected_go.operation_id, self.user))["status"], "REJECTED")
+        self.assertEqual(await route.play(body, self.user), played)
+        self.assertEqual(len(await self.events(ledger.STAKE)), 1)
+        cashed = await route.cashout(self.action_body(played), self.user)
+        await self.assert_terminal_once(cashed)
+        self.assertEqual(await self.exposure(), 0)
+        await route.prepare_chicken_road_storage()
+        self.assertTrue(route._STORAGE_READY)
+        self.assertTrue((await route.state(self.user))["enabled"])
+        await self.assert_error(route.go(rejected_go, self.user), "CHICKEN_ROAD_STORAGE_UNAVAILABLE")
+
+    async def test_missing_exposure_configuration_durably_rejects_go_and_allows_cashout(self):
+        _, played = await self.start()
+        rejected_go = self.action_body(played)
+        with patch.dict(os.environ, {"CHICKEN_ROAD_EXPOSURE_LIMIT": ""}):
+            state = await route.state(self.user)
+            self.assertFalse(state["enabled"])
+            self.assertFalse(state["readiness"]["requirements"]["exposure_configured"])
+            await self.assert_error(route.go(rejected_go, self.user), "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
+            self.assertEqual((await route.operation_receipt(rejected_go.operation_id, self.user))["status"], "REJECTED")
+            cashed = await route.cashout(self.action_body(played), self.user)
+        await self.assert_terminal_once(cashed)
+        self.assertEqual(await self.exposure(), 0)
+        await self.assert_error(route.go(rejected_go, self.user), "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
+
+    async def test_expiry_survives_failed_bootstrap_and_missing_exposure_configuration(self):
+        _, played = await self.start()
+        self.clock += timedelta(seconds=engine.EXPIRY_SECONDS)
+        with patch.object(route, "_STORAGE_READY", False), patch.dict(os.environ, {"CHICKEN_ROAD_EXPOSURE_LIMIT": ""}):
+            self.assertEqual(await route.settle_expired_chicken_rounds(), 1)
+            state = await route.state(self.user)
+        self.assertFalse(state["enabled"])
+        self.assertIsNone(state["active_round"])
+        self.assertEqual(state["latest_round"]["payout"], 336)
+        self.assertEqual(state["latest_round"]["id"], played["round"]["id"])
+        await self.assert_terminal_once({"round": state["latest_round"]})
+
+    async def test_missing_or_invalid_counter_never_advertises_or_accepts_new_play(self):
+        body = await self.play_body()
+        for invalid in (None, True, 0.0, "0", -1, 9_000_000_000_000_001):
+            await self.db.chicken_road_exposure.delete_many({})
+            if invalid is not None:
+                await self.db.chicken_road_exposure.insert_one({"_id": route.SLUG, "outstanding_chips": invalid})
+            with self.subTest(counter=invalid):
+                state = await route.state(self.user)
+                self.assertFalse(state["enabled"])
+                self.assertFalse(state["readiness"]["requirements"]["exposure_counter_valid"])
+                await self.assert_error(self.prepare(), "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
+                await self.assert_error(route.play(body.model_copy(update={"operation_id": self.key("counter-play")}), self.user),
+                                        "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
+                self.assertEqual(await self.events(), [])
+                self.assertEqual(await self.balance(), 100000)
+
+    async def test_preparation_preserves_reserved_liability_and_rejects_corrupt_counter(self):
+        _, played = await self.start()
+        exposure = await self.exposure()
+        await route.prepare_chicken_road_storage()
+        self.assertEqual(await self.exposure(), exposure)
+        with patch.dict(os.environ, {"CHICKEN_ROAD_EXPOSURE_LIMIT": str(exposure)}):
+            # Full budget is not a technical outage and cannot disable GO or
+            # cash-out for a round whose full liability is already reserved.
+            self.assertTrue((await route.chicken_road_status())["ready"])
+            stepped = await route.go(self.action_body(played), self.user)
+            await route.cashout(self.action_body(stepped), self.user)
+        await self.db.chicken_road_exposure.update_one({"_id": route.SLUG}, {"$set": {"outstanding_chips": -1}})
+        with self.assertRaisesRegex(RuntimeError, "reconciliation"):
+            await route.prepare_chicken_road_storage()
+        self.assertFalse(route._STORAGE_READY)
+        self.assertEqual(await self.exposure(), -1)
+
+    async def test_missing_counter_with_retained_round_is_not_reinitialized_to_zero(self):
+        _, played = await self.start()
+        await self.db.chicken_road_exposure.delete_many({})
+        # The round alone must protect its liability even if its guard is
+        # separately missing and already needs reconciliation.
+        await self.db.chicken_road_players.delete_many({})
+        before = await self.db.snapshot()
+        with self.assertRaisesRegex(RuntimeError, "retained rounds"):
+            await route.prepare_chicken_road_storage()
+        self.assertFalse(route._STORAGE_READY)
+        self.assertEqual(await self.db.snapshot(), before)
+        self.assertIsNone(await self.db.chicken_road_exposure.find_one({"_id": route.SLUG}))
+        self.assertEqual((await self.db.chicken_road_rounds.find_one({"_id": played["round"]["id"]}))["status"], "PLAYING")
+
+    async def test_missing_counter_with_orphaned_active_guard_is_not_reinitialized_to_zero(self):
+        await self.db.chicken_road_exposure.delete_many({})
+        await self.db.chicken_road_players.insert_one({"_id": self.user["id"], "active_round_id": "missing-round"})
+        before = await self.db.snapshot()
+        with self.assertRaisesRegex(RuntimeError, "retained rounds"):
+            await route.prepare_chicken_road_storage()
+        self.assertFalse(route._STORAGE_READY)
+        self.assertEqual(await self.db.snapshot(), before)
+        self.assertIsNone(await self.db.chicken_road_exposure.find_one({"_id": route.SLUG}))
 
     async def test_real_wallet_readiness_guard_fails_without_installed_adapter(self):
         with patch.object(route, "_require_wallet_user", _REAL_REQUIRE_WALLET_USER):
@@ -1183,12 +1319,17 @@ class RequestAndPublicationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 route.RoundRequest(operation_id="round-action", round_id="round-1", expected_version=version)
 
-    def test_rules_are_unapproved_routes_unregistered_and_catalogue_unreviewed(self):
-        self.assertFalse(_INITIAL_RULES_APPROVED)
+    def test_rules_and_catalogue_are_reviewed_but_intake_and_exposure_remain_explicit(self):
+        self.assertTrue(_INITIAL_RULES_APPROVED)
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(route._live_enabled())
-        self.assertFalse(game_access.is_reviewed_game(route.SLUG))
-        self.assertEqual(game_access.project_catalogue_game({"slug": route.SLUG, "status": "ENABLED"})["status"], "COMING_SOON")
+            with self.assertRaises(HTTPException) as missing:
+                route._exposure_limit()
+            self.assertEqual(missing.exception.detail["code"], "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE")
+        self.assertTrue(game_access.is_reviewed_game(route.SLUG))
+        self.assertEqual(game_access.project_catalogue_game({"slug": route.SLUG, "status": "ENABLED"})["status"], "ENABLED")
+        self.assertEqual(game_access.project_catalogue_game({"slug": route.SLUG, "status": "COMING_SOON"})["status"], "COMING_SOON")
+        self.assertIsNone(game_access.assert_admin_status_change_allowed(route.SLUG, "ENABLED"))
         tree = ast.parse(Path(__file__).with_name("server.py").read_text())
         parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 

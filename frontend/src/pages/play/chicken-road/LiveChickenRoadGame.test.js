@@ -7,7 +7,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { financialApi, createIdempotencyKey } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { createChickenRoadAudio } from "./chickenRoadAudio";
+import { verifyChickenRoadFairness } from "./chickenRoadFairness";
 import LiveChickenRoadGame from "./LiveChickenRoadGame";
+import { RoadDialog } from "./ChickenRoadView";
 
 // CRA's Jest resolver predates package exports; load the real router's CJS
 // build rather than mocking Link/navigation. Node supplies jsdom's missing API.
@@ -22,6 +24,14 @@ jest.mock("@/lib/api", () => ({
 }));
 jest.mock("@/context/AuthContext", () => ({ useAuth: jest.fn() }));
 jest.mock("./chickenRoadAudio", () => ({ createChickenRoadAudio: jest.fn() }));
+jest.mock("./chickenRoadFairness", () => ({ ...jest.requireActual("./chickenRoadFairness"), verifyChickenRoadFairness: jest.fn() }));
+
+const fullLadders = {
+  easy: [106, 113, 120, 127, 134, 142, 151, 160, 169, 180, 190, 202, 214],
+  medium: [112, 128, 147, 170, 198, 233, 276, 332, 403, 496, 620, 691, 890],
+  hard: [135, 183, 247, 333, 449, 606, 818, 1104, 1490, 2011, 2715, 3665, 4947],
+  hardcore: [150, 225, 338, 507, 760, 1140, 1709, 2563, 3845, 5767, 8650, 12975, 19462],
+};
 
 const rules = {
   version: "chicken-road-proposal-v2", approval: "APPROVED", rtp_bps: 9000,
@@ -61,6 +71,7 @@ afterAll(() => {
 });
 beforeEach(() => {
   jest.useFakeTimers(); jest.clearAllMocks();
+  verifyChickenRoadFairness.mockReset();
   localStorage.clear(); sequence = 0;
   user = { id: "live-player-1", role: "PLAYER", status: "ACTIVE", chip_balance: 77777 };
   useAuth.mockImplementation(() => ({ user, loading: false, setUser }));
@@ -121,6 +132,107 @@ test("all four difficulty controls and payout labels come from server configurat
     expect(container.querySelector(`.road-coin[aria-label="${(item.multipliers_hundredths[0] / 100).toFixed(2)} times"]`)).not.toBeNull();
   }
   expect(container.querySelector('input[aria-label="Stake"]').value).toBe("100");
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("rules disclose every conditional lane risk and inactivity settlement without placing a wager", async () => {
+  server = initial({ rules: { ...rules, max_lanes: 13, difficulties: rules.difficulties.map((item) => ({ ...item, multipliers_hundredths: fullLadders[item.id] })) } });
+  await mount();
+  expect(container.querySelector('.road-risk [title]').title).toBe("Next lane 1 collision: 15.09% (16/106)");
+  await click(button("Game rules"));
+  const text = container.querySelector('[role="dialog"]').textContent;
+  expect(text).toContain("After 15 minutes without a crossing or cash-out");
+  expect(text).toContain("Reconnecting does not reset that deadline");
+  expect(text).toContain("19.64% (22/112)");
+  expect(text).toContain("33.33% (45/135)");
+  expect(text).toContain("40.00% (60/150)");
+  expect(text.match(/Lane 13:/g)).toHaveLength(4);
+  expect(text).toContain("not independent certification");
+  expect(button("Verify last round")).toBeUndefined();
+  expect(financialApi.post).not.toHaveBeenCalled();
+  expect(financialApi.get.mock.calls.every(([url]) => !url.endsWith("/fairness"))).toBe(true);
+});
+
+test("an active historical round discloses risk from its locked table rather than new-round configuration", async () => {
+  server = initial({ active_round: round({ rules_version: "chicken-road-proposal-v1", multipliers_hundredths: fullLadders.easy }) });
+  await mount();
+  expect(container.querySelector('.road-risk [title]').title).toBe("Next lane 2 collision: 6.19% (7/113)");
+  await click(container.querySelector('button[aria-label="How to play"]'));
+  expect(container.querySelector('[role="dialog"]').textContent).toContain("under your round's locked rules (chicken-road-proposal-v1)");
+  expect(button("Verify last round")).toBeUndefined();
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("terminal proof checks are read-only, bind the known round, and show success only after verification", async () => {
+  const terminal = round({ status: "CASHED", version: 2, cashout_amount: 0, payout: 106 });
+  server = initial({ latest_round: terminal });
+  const proof = { round_id: terminal.id, server_seed: "a".repeat(64) };
+  financialApi.get.mockImplementation(async (url) => ({ data: url.endsWith("/fairness") ? proof : server }));
+  const verification = deferred();
+  verifyChickenRoadFairness.mockReturnValueOnce(verification.promise);
+  await mount();
+  await click(button("Game rules"));
+  await click(button("Verify last round"));
+  expect(button("Checking proof…").disabled).toBe(true);
+  expect(container.textContent).not.toContain("Verified mathematical consistency");
+  expect(verifyChickenRoadFairness).toHaveBeenCalledWith(proof, terminal);
+  verification.resolve({ checkedLanes: 1, payout: 106 }); await flush();
+  expect(container.textContent).toContain("Verified mathematical consistency for 1 attempted lane(s)");
+  expect(container.textContent).toContain("recorded payout of 106 chips");
+  expect(financialApi.get).toHaveBeenCalledWith("/live/chicken-road/rounds/live-round-1/fairness", { timeout: 15000, __noFailover: true });
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("a final proof disclosure stays in the reusable dialog keyboard focus cycle", async () => {
+  act(() => root.render(<RoadDialog title="Round verification" onClose={jest.fn()}>
+    <button>Verify last round</button><details><summary>Revealed proof</summary><pre>Verified evidence</pre></details>
+  </RoadDialog>));
+  const verify = button("Verify last round");
+  const summary = container.querySelector('.road-dialog summary');
+  const close = container.querySelector('button[aria-label="Close dialog"]');
+  expect(summary.textContent).toBe("Revealed proof");
+  // This jsdom version lacks native summary focusability. Match the browser's
+  // built-in tab stop without changing the production disclosure markup.
+  summary.tabIndex = 0;
+
+  verify.focus();
+  const forward = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+  act(() => verify.dispatchEvent(forward));
+  // jsdom does not perform native Tab movement. It must remain unprevented
+  // here so the browser can move from Verify to the following summary.
+  expect(forward.defaultPrevented).toBe(false);
+  summary.focus();
+  expect(document.activeElement).toBe(summary);
+  const wrapForward = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+  act(() => summary.dispatchEvent(wrapForward));
+  expect(wrapForward.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(close);
+
+  const wrapBackward = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+  act(() => close.dispatchEvent(wrapBackward));
+  expect(wrapBackward.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(summary);
+  await click(summary);
+  expect(summary.parentElement.open).toBe(true);
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test.each(["network", "verification"])("a %s failure does not present a verified round or change funds", async (failureKind) => {
+  server = initial({ latest_round: round({ status: "CRASHED", cashout_amount: 0, multiplier_hundredths: 0 }) });
+  financialApi.get.mockImplementation(async (url) => {
+    if (url.endsWith("/fairness")) {
+      if (failureKind === "network") throw new Error("Proof unavailable");
+      return { data: { round_id: "live-round-1" } };
+    }
+    return { data: server };
+  });
+  verifyChickenRoadFairness.mockRejectedValueOnce(new Error("Commitment mismatch"));
+  await mount();
+  await click(button("Game rules"));
+  await click(button("Verify last round"));
+  expect(container.textContent).toContain("Not verified:");
+  expect(container.textContent).not.toContain("Verified mathematical consistency");
+  expect(byId("road-balance").getAttribute("aria-label")).toBe("Balance 1,000 chips");
   expect(financialApi.post).not.toHaveBeenCalled();
 });
 
@@ -460,9 +572,15 @@ test.each([false, true])("the lobby exit stays available with an active round (p
 });
 
 test("live and neutral view modules cannot import the development simulator", () => {
-  for (const file of ["LiveChickenRoadGame.js", "chickenRoadLiveClient.js", "ChickenRoadView.js"]) {
+  for (const file of ["LiveChickenRoadGame.js", "chickenRoadLiveClient.js", "chickenRoadFairness.js", "ChickenRoadView.js"]) {
     const source = fs.readFileSync(path.join(__dirname, file), "utf8");
     expect(source).not.toMatch(/from\s+["'][^"']*(?:chickenRoadDemo|ChickenRoadGame)["']/);
     expect(source).not.toMatch(/createDemoState|transitionDemoState|MEDIUM_MULTIPLIERS/);
   }
+  const app = fs.readFileSync(path.resolve(__dirname, "../../../App.js"), "utf8");
+  expect(app).toMatch(/process\.env\.NODE_ENV === "development"\s*\? require\("@\/pages\/play\/chicken-road\/ChickenRoadGame"\)/);
+  expect(app).toMatch(/if \(process\.env\.NODE_ENV === "development" && window\.location\.pathname === "\/__preview\/chicken-road"\)/);
+  const gameplay = fs.readFileSync(path.resolve(__dirname, "../GamePlay.js"), "utf8");
+  expect(gameplay).toContain('"chicken-road": LiveChickenRoadGame');
+  expect(gameplay).not.toMatch(/from\s+["'][^"']*\/ChickenRoadGame["']/);
 });

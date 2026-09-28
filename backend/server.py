@@ -326,8 +326,8 @@ async def lifespan(app: FastAPI):
     await step('indexes:compliance', compliance.ensure_indexes())
     await step('gameplay:core-readiness', _prepare_gameplay_core())
     await step('gameplay:rummy-core', routes_rummy.ensure_rummy_core())
-    # Rules approval is a reviewed release decision, not a CRM toggle. A
-    # dormant release creates no Chicken Road financial collection or worker.
+    # Rules approval is a reviewed release decision, not a CRM toggle. The
+    # success-only storage latch keeps intake closed after partial bootstrap.
     if routes_chicken_road.RULES_APPROVED:
         await step('gameplay:chicken-road-core', routes_chicken_road.prepare_chicken_road_storage())
     # Disabled by default; this creates no collection or index until the
@@ -480,6 +480,20 @@ async def health():
                 'message': 'Requested promotion services are not ready.',
             },
         )
+    try:
+        chicken_road = await routes_chicken_road.chicken_road_status()
+    except Exception as exc:
+        logger.error('Chicken Road readiness check failed: %s', type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'CHICKEN_ROAD_NOT_READY', 'message': 'Chicken Road readiness could not be verified.'},
+        ) from exc
+    if chicken_road['intake_requested'] and not chicken_road['ready']:
+        raise HTTPException(
+            status_code=503,
+            detail={'code': 'CHICKEN_ROAD_NOT_READY', 'message': 'Requested Chicken Road services are not ready.',
+                    'readiness': chicken_road},
+        )
     return {
         'status': 'ok',
         'gameplay_ready': True,
@@ -487,6 +501,7 @@ async def health():
         'crm_ready': True,
         'financial_ready': bool(financial['ready']),
         'promotion_core_ready': bool(promotions.promotion_core_status()['ready']),
+        'chicken_road': chicken_road,
     }
 
 

@@ -1,4 +1,4 @@
-"""Pure, unapproved Chicken Road proposal math; this module enables no game.
+"""Pure, versioned Chicken Road math; runtime release controls game approval.
 
 The paytables originate in ``docs/chicken-road-live-rules-proposal.md``. They
 are an original proposal, not recovered or certified provider rules. All

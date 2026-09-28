@@ -79,7 +79,7 @@ export function RoadDialog({ title, onClose, children }) {
   const handleKey = (event) => {
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
     if (event.key !== "Tab") return;
-    const focusable = [...dialogRef.current.querySelectorAll("button:not(:disabled), a[href], input:not(:disabled)")];
+    const focusable = [...dialogRef.current.querySelectorAll("button:not(:disabled), a[href], input:not(:disabled), summary")];
     const first = focusable[0]; const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }

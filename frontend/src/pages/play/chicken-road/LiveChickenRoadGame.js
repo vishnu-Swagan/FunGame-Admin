@@ -7,6 +7,7 @@ import { errMsg } from "@/lib/api";
 import ChickenRoadView from "./ChickenRoadView";
 import { createChickenRoadLiveClient } from "./chickenRoadLiveClient";
 import { createChickenRoadAudio } from "./chickenRoadAudio";
+import { chickenRoadCollisionChances, verifyChickenRoadFairness } from "./chickenRoadFairness";
 
 const HOP_MS = 480;
 const SOUND_KEY = "chakri.chicken-road.sound-muted";
@@ -16,6 +17,12 @@ const phaseOf = (round) => ({ PLAYING: "playing", CRASHED: "crashed", CASHED: "c
 const availability = (state) => state.rules.approval !== "APPROVED" ? "unavailable" : state.enabled ? "ready" : "paused";
 const failureConnection = (failure) => ["CHICKEN_ROAD_DISABLED", "GAME_COMING_SOON"].includes(failure?.response?.data?.detail?.code) ? "unavailable" : "offline";
 const savedMute = () => { try { return localStorage.getItem(SOUND_KEY) === "true"; } catch { return false; } };
+const collisionText = (chance) => `${(100 * chance.numerator / chance.denominator).toFixed(2)}% (${chance.numerator}/${chance.denominator})`;
+const chancesFor = (version, item) => {
+  try { return chickenRoadCollisionChances(version, item.difficulty || item.id, item.multipliers_hundredths); }
+  catch { return null; }
+};
+const inactivityRule = <p>After 15 minutes without a crossing or cash-out, an active round is automatically cashed out at its current safe lane. This pays the current cash-out amount, not a new crossing. Reconnecting does not reset that deadline.</p>;
 
 /** Live-only controller. The server supplies every outcome, amount and ladder. */
 export default function LiveChickenRoadGame() {
@@ -31,6 +38,7 @@ export default function LiveChickenRoadGame() {
   const [difficulty, setDifficulty] = useState("");
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(null);
+  const [fairness, setFairness] = useState(null);
   const [visibleLane, setVisibleLane] = useState(0);
   const [moving, setMoving] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -49,6 +57,7 @@ export default function LiveChickenRoadGame() {
   const hopTimer = useRef(null);
   const refreshRef = useRef(null);
   const snapshotRef = useRef(null);
+  const fairnessEpoch = useRef(0);
 
   const updateBalance = useCallback((balance) => {
     setUser?.((current) => current && String(current.id) === userId ? { ...current, chip_balance: balance } : current);
@@ -98,11 +107,13 @@ export default function LiveChickenRoadGame() {
     snapshotRef.current = null;
     setSnapshot(null); setDisplayRound(null); setPending(null); setStake(""); setDifficulty("");
     setVisibleLane(0); setMoving(false); setAnimateOutcome(false); setError("");
+    fairnessEpoch.current += 1; setFairness(null);
     if (!auth?.loading && client) refresh();
     else setConnection(auth?.loading ? "loading" : "auth");
     return () => {
       mounted.current = false;
       requestEpoch.current += 1;
+      fairnessEpoch.current += 1;
       soundEpoch.current += 1;
       clearTimeout(hopTimer.current);
       audioRef.current?.stopAll();
@@ -159,6 +170,23 @@ export default function LiveChickenRoadGame() {
   const approved = rules?.approval === "APPROVED";
   const ready = connection === "ready" && snapshot?.enabled === true && approved;
   const canCashOut = approved && ["ready", "paused"].includes(connection) && active && !pending && !moving;
+  const proofRound = snapshot?.latest_round && ["CRASHED", "CASHED"].includes(snapshot.latest_round.status) ? snapshot.latest_round : null;
+  const checkedFairness = fairness?.roundId === proofRound?.id && fairness?.version === proofRound?.version ? fairness : null;
+
+  const verifyLastRound = async () => {
+    if (!client || !proofRound || checkedFairness?.status === "checking") return;
+    const terminal = JSON.parse(JSON.stringify(proofRound));
+    const epoch = ++fairnessEpoch.current;
+    const identity = { roundId: terminal.id, version: terminal.version };
+    setFairness({ ...identity, status: "checking" });
+    try {
+      const proof = await client.getFairness(terminal.id);
+      const result = await verifyChickenRoadFairness(proof, terminal);
+      if (mounted.current && fairnessEpoch.current === epoch) setFairness({ ...identity, status: "verified", result, proof });
+    } catch (failure) {
+      if (mounted.current && fairnessEpoch.current === epoch) setFairness({ ...identity, status: "failed", message: errMsg(failure, "The proof could not be verified. Please try again.") });
+    }
+  };
 
   const runAction = async (type, retry = false) => {
     if (busy.current || !client || (!retry && (type === "CASH_OUT" ? !canCashOut : !ready)) || (!retry && type === "PLAY" && (!stakeValid || !selected))) return;
@@ -264,10 +292,20 @@ export default function LiveChickenRoadGame() {
     {pending && pending.kind !== "unknown" && !["loading", "submitting", "reconnecting"].includes(connection)
       && <button className="road-top-button" onClick={() => runAction(null, true)}>Retry same action</button>}
   </>;
-  const dialogContent = dialog === "help" ? <><ol><li>Choose a stake and difficulty, then press <b>Play</b> to attempt the first crossing.</li><li>Press <b>GO</b> for another crossing, or <b>CASH OUT</b> to collect the amount shown.</li><li>A collision ends the round. Reaching the final lane automatically collects the final payout.</li></ol><p>Stake and difficulty remain fixed throughout a round. Results and your balance are confirmed by the server.</p></>
+  const riskRound = snapshot?.active_round;
+  const risks = riskRound ? chancesFor(riskRound.rules_version, riskRound) : selected && chancesFor(rules.version, selected);
+  const nextLane = riskRound ? riskRound.lane + 1 : 1;
+  const nextRisk = risks?.[nextLane - 1];
+  const riskDisclosure = nextRisk ? <p>Next crossing: lane {nextLane} · Collision chance {collisionText(nextRisk)}. This is conditional on reaching this lane{riskRound ? `, under your round's locked rules (${riskRound.rules_version})` : ""}.</p> : <p>The next crossing’s collision chance is unavailable until its rules can be verified.</p>;
+  const fairnessDisclosure = <section aria-label="Round verification"><h3>Check the last settled round</h3><p>Before Play, the server commits to a seed hash; your browser then creates a client seed. The server seed is revealed only after settlement. This browser check reproduces the commitment, attempted lane outcomes and payout using the round’s locked rules. It is not independent certification, and cannot prove seed freshness, commitment timing or wallet funding.</p>
+    {proofRound ? <><p>Round: {proofRound.id} · Rules: {proofRound.rules_version}</p><button className="road-top-button" onClick={verifyLastRound} disabled={checkedFairness?.status === "checking"}>{checkedFairness?.status === "checking" ? "Checking proof…" : "Verify last round"}</button>
+      <p role="status">{checkedFairness?.status === "verified" ? `Verified mathematical consistency for ${checkedFairness.result.checkedLanes} attempted lane(s), the seed commitment and recorded payout of ${chips(checkedFairness.result.payout)} chips.` : checkedFairness?.status === "failed" ? `Not verified: ${checkedFairness.message}` : "No successful verification has been completed for this round."}</p>
+      {checkedFairness?.status === "verified" && <details><summary>Revealed proof</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(checkedFairness.proof, null, 2)}</pre></details>}</>
+      : <p>A terminal round is required. Active-round seeds are never requested or revealed here.</p>}</section>;
+  const dialogContent = dialog === "help" ? <><ol><li>Choose a stake and difficulty, then press <b>Play</b> to attempt the first crossing.</li><li>Press <b>GO</b> for another crossing, or <b>CASH OUT</b> to collect the amount shown.</li><li>A collision ends the round. Reaching the final lane automatically collects the final payout.</li></ol><p>Stake and difficulty remain fixed throughout a round. Results and your balance are confirmed by the server.</p>{riskDisclosure}{inactivityRule}{fairnessDisclosure}</>
     : dialog === "auto" ? <p>Crossings use Play, GO and Cash Out. Automatic betting is not available.</p>
       : dialog === "menu" ? <><p>Chakri.Casino · Chicken Road</p><Link className="road-top-button" to="/games">Back to lobby</Link><button className="road-top-button" onClick={() => setDialog("help")}>How to play</button><button className="road-top-button" onClick={() => setDialog("rules")}>Rules & limits</button><button className="road-top-button" onClick={toggleSound} aria-pressed={!muted} aria-label={muted ? "Turn game sounds on" : "Mute game sounds"}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}<span>Sound {muted ? "off" : "on"}</span></button><p>Animations follow your device’s reduced-motion preference.</p></>
-        : rules ? <>{snapshot.active_round?.rules_version && snapshot.active_round.rules_version !== rules.version && <p>Your current round uses its locked rules ({snapshot.active_round.rules_version}). The rules below apply only to new rounds; your current payout table and cash-out amount are unchanged.</p>}<p>Stake: {chips(rules.min_stake)}–{chips(rules.max_stake)} chips, in steps of {chips(rules.stake_step)}.</p>{Number.isFinite(rules.rtp_bps) && <p>Theoretical return to player: {rules.rtp_bps / 100}%. This is a long-run average, not a promise for an individual round.</p>}<p>Multipliers show the total amount returned, including your stake. A collision returns no payout. The displayed cash-out amount comes from the server.</p>{rules.difficulties.map((item) => <p key={item.id}><b>{item.label}:</b> {item.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}</p>)}</>
+        : rules ? <>{snapshot.active_round?.rules_version && snapshot.active_round.rules_version !== rules.version && <p>Your current round uses its locked rules ({snapshot.active_round.rules_version}). The rules below apply only to new rounds; your current payout table and cash-out amount are unchanged.</p>}{riskDisclosure}<p>Stake: {chips(rules.min_stake)}–{chips(rules.max_stake)} chips, in steps of {chips(rules.stake_step)}.</p>{Number.isFinite(rules.rtp_bps) && <p>Theoretical return to player: {rules.rtp_bps / 100}%. This is a long-run average, not a promise for an individual round.</p>}<p>Multipliers show the total amount returned, including your stake. A collision returns no payout. The displayed cash-out amount comes from the server. Collision chances below are conditional on reaching each lane, rounded to two decimals; exact fractions are included.</p>{rules.difficulties.map((item) => <div key={item.id}><p><b>{item.label}:</b> {item.multipliers_hundredths.map((value) => `${(value / 100).toFixed(2)}×`).join(" · ")}</p><p>{chancesFor(rules.version, item)?.map((chance, index) => `Lane ${index + 1}: ${collisionText(chance)}`).join(" · ") || "Collision chances unavailable for these rules."}</p></div>)}{inactivityRule}{fairnessDisclosure}</>
           : <p>The game rules are unavailable while disconnected.</p>;
 
   return <ChickenRoadView
@@ -285,7 +323,7 @@ export default function LiveChickenRoadGame() {
       title: phase === "crashed" ? "Oh, cluck!" : `${(displayRound.multiplier_hundredths / 100).toFixed(2)}x · Cashed out`,
       detail: phase === "crashed" ? "The crossing ended. Play again when you’re ready." : `+${chips(displayRound.payout)} chips`,
     } : null}
-    error={error} statusPanel={statusPanel} chanceHint="Open Game rules to see the server’s payout tables."
+    error={error} statusPanel={statusPanel} chanceHint={nextRisk ? `Next lane ${nextLane} collision: ${collisionText(nextRisk)}` : "Open Game rules for payout tables and verification."}
     historyText={snapshot?.latest_round ? `Last round: ${snapshot.latest_round.status === "CRASHED" ? "collision" : `+${chips(snapshot.latest_round.payout)} chips`}` : "18+ · Live game"}
     onStakeChange={(value) => { setStake(value); setError(""); }}
     onMinimum={() => setStake(String(rules.min_stake))}
