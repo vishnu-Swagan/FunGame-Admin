@@ -29,6 +29,28 @@
 .road-game *,
 .road-game *::before,
 .road-game *::after { box-sizing: border-box; }
+.road-game [hidden] { display: none !important; }
+
+.road-landscape-prompt {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px 24px;
+  text-align: center;
+}
+.road-landscape-prompt h2 { margin: 0; font-size: clamp(24px, 5vw, 36px); line-height: 1.2; }
+.road-landscape-prompt p { max-width: 430px; margin: 0; color: var(--road-muted); font-size: 16px; line-height: 1.55; }
+.road-rotate-icon { position: relative; width: 100px; height: 88px; color: var(--road-yellow); }
+.road-rotate-icon > svg:first-child { transform: rotate(-20deg); }
+.road-rotate-icon > svg:last-child { position: absolute; right: 0; bottom: 0; }
+.road-landscape-prompt .road-button--cash { width: min(100%, 280px); min-height: 76px; padding: 16px; font-size: 20px; }
+.road-landscape-status { display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(100%, 480px); margin-top: 8px; padding: 20px; border: 1px solid var(--road-muted); border-radius: 16px; background: var(--road-panel); }
+.road-landscape-status strong { font-size: 18px; }
+.road-landscape-status span { color: var(--road-muted); font-size: 14px; line-height: 1.5; }
+.road-landscape-status .road-top-button { white-space: normal; }
 
 .road-game.is-resetting .road-track,
 .road-game.is-resetting .road-character-layer { transition: none; }
@@ -541,7 +563,7 @@
   .road-top-button { min-height: 44px; }
   .road-balance { min-height: 38px; }
   .road-preview-banner { min-height: 21px; padding: 3px 12px; font-size: 8px; }
-  .road-viewport { flex: 1 0 230px; min-height: 230px; }
+  .road-viewport { flex: 1 1 230px; min-height: 110px; }
   .road-coin { top: 15%; width: 65%; left: 17.5%; }
   .road-door { height: 74%; min-height: 130px; }
   .road-grate { height: 72px; }
@@ -564,9 +586,10 @@
   .road-button { min-height: 83px; padding: 8px; font-size: 22px; border-radius: 9px; }
   .road-button--auto { font-size: 14px; }
   .road-button--cash { font-size: 18px; }
-  .road-footer { padding-top: 5px; font-size: 8px; }
+  .road-footer { padding-top: 0; font-size: 8px; }
   .road-history > span { min-height: 18px; font-size: 8px; }
   .road-result { top: 6%; padding: 10px 20px; }
+  .road-result.road-connection { max-height: 88%; overflow-y: auto; }
 }
 
 @media (max-width: 640px) and (max-height: 590px) and (orientation: landscape) {

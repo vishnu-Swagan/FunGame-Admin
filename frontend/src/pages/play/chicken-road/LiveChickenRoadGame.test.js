@@ -60,6 +60,9 @@ const originalMatchMedia = window.matchMedia;
 const originalHidden = Object.getOwnPropertyDescriptor(document, "hidden");
 const originalActEnvironment = global.IS_REACT_ACT_ENVIRONMENT;
 const originalCrypto = Object.getOwnPropertyDescriptor(window, "crypto");
+const originalWidth = window.innerWidth;
+const originalHeight = window.innerHeight;
+const originalOrientation = Object.getOwnPropertyDescriptor(window.screen, "orientation");
 
 beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -86,12 +89,15 @@ beforeEach(() => {
   createChickenRoadAudio.mockReturnValue(audio);
   Object.defineProperty(document, "hidden", { configurable: true, value: false });
   window.matchMedia = jest.fn(() => ({ matches: false, addEventListener: jest.fn(), removeEventListener: jest.fn() }));
+  window.innerWidth = 1024; window.innerHeight = 768;
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(() => {
   if (root) act(() => root.unmount());
   container.remove(); jest.clearAllTimers(); jest.useRealTimers();
   window.matchMedia = originalMatchMedia;
+  window.innerWidth = originalWidth; window.innerHeight = originalHeight;
+  if (originalOrientation) Object.defineProperty(window.screen, "orientation", originalOrientation); else delete window.screen.orientation;
   if (originalHidden) Object.defineProperty(document, "hidden", originalHidden); else delete document.hidden;
 });
 
@@ -109,6 +115,156 @@ const phase = () => byId("chicken-road").dataset.phase;
 const click = async (element, count = 1) => { await act(async () => { for (let i = 0; i < count; i += 1) element.dispatchEvent(new MouseEvent("click", { bubbles: true })); }); };
 const advance = (time = 480) => { act(() => jest.advanceTimersByTime(time)); };
 const pendingAction = () => JSON.parse(localStorage.getItem("cc_chicken_road_pending_v1:live-player-1") || "null");
+const orient = (width, height) => act(() => {
+  window.innerWidth = width; window.innerHeight = height;
+  window.dispatchEvent(new Event("resize"));
+});
+
+test("portrait requires rotation and returning to landscape never starts or duplicates a wager", async () => {
+  orient(390, 844);
+  await mount();
+  expect(byId("road-landscape-prompt").textContent).toContain("Rotate your device");
+  expect(container.querySelector('.road-viewport').hidden).toBe(true);
+  expect(container.querySelector('.road-dock').hidden).toBe(true);
+  expect(byId("road-play").disabled).toBe(true);
+  expect(document.activeElement.textContent).toBe("Rotate your device");
+  await click(byId("road-play"));
+  expect(financialApi.post).not.toHaveBeenCalled();
+  const reads = financialApi.get.mock.calls.length;
+
+  orient(844, 390);
+  expect(byId("road-landscape-prompt")).toBeNull();
+  expect(container.querySelector('.road-dock').hidden).toBe(false);
+  expect(byId("road-play").disabled).toBe(false);
+  orient(390, 844); orient(844, 390);
+  expect(financialApi.get).toHaveBeenCalledTimes(reads);
+  expect(financialApi.post).not.toHaveBeenCalled();
+  expect(createChickenRoadAudio).toHaveBeenCalledTimes(1);
+});
+
+test("a touch device keyboard cannot make portrait count as a physical landscape rotation", async () => {
+  const orientation = { type: "portrait-primary", addEventListener: jest.fn(), removeEventListener: jest.fn() };
+  Object.defineProperty(window.screen, "orientation", { configurable: true, value: orientation });
+  window.matchMedia = jest.fn((query) => ({ matches: query === "(pointer: coarse)", addEventListener: jest.fn(), removeEventListener: jest.fn() }));
+  orient(390, 300); // The keyboard has reduced the available height.
+  await mount();
+  expect(byId("road-landscape-prompt")).not.toBeNull();
+  expect(byId("road-play").disabled).toBe(true);
+  orientation.type = "landscape-primary";
+  orient(844, 390);
+  expect(byId("road-landscape-prompt")).toBeNull();
+  expect(byId("road-play").disabled).toBe(false);
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("rotation preserves the confirmed round and offers cash-out without a crossing in portrait", async () => {
+  server = initial({ balance: 900, active_round: round({ version: 7, cashout_amount: 137 }) });
+  await mount();
+  orient(390, 844);
+  expect(byId("road-go").disabled).toBe(true);
+  expect(byId("road-portrait-cashout").disabled).toBe(false);
+  expect(byId("road-portrait-cashout").textContent).toContain("137");
+  await click(byId("road-go"));
+  expect(financialApi.post).not.toHaveBeenCalled();
+  financialApi.post.mockImplementation(async (url, body) => {
+    expect(url).toBe("/live/chicken-road/cashout");
+    const ended = round({ status: "CASHED", version: 8, cashout_amount: 0, payout: 137 });
+    server = initial({ balance: 1037, latest_round: ended });
+    return { data: receipt(body, ended, 1037) };
+  });
+  await click(byId("road-portrait-cashout"), 2);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  expect(financialApi.post.mock.calls[0][1]).toMatchObject({ round_id: "live-round-1", expected_version: 7 });
+  expect(byId("road-portrait-cashout")).toBeNull();
+  const visibleResult = byId("road-landscape-prompt").querySelector('.road-landscape-result[role="status"]');
+  expect(visibleResult.textContent).toContain("Cashed out");
+  expect(visibleResult.textContent).toContain("+137 chips");
+  expect(container.querySelectorAll('.road-landscape-result, .road-result.success')).toHaveLength(1);
+  orient(844, 390);
+  expect(phase()).toBe("cashed_out");
+  expect(byId("road-balance").textContent).toContain("1,037");
+});
+
+test("portrait retains an uncertain crossing for GET reconciliation but cannot retry it until landscape", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  financialApi.post.mockRejectedValue(new Error("Lost crossing response"));
+  await click(byId("road-go"));
+  const saved = pendingAction();
+  orient(390, 844);
+  expect(byId("road-landscape-prompt").textContent).toContain("Pending action: one crossing");
+  expect(button("Retry same action")).toBeUndefined();
+  await click(button("Check round"));
+  expect(pendingAction()).toEqual(saved);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  orient(844, 390);
+  expect(button("Retry same action")).toBeDefined();
+  expect(pendingAction()).toEqual(saved);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+});
+
+test("portrait can retry only the original pending cashout without another wager", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  financialApi.post.mockRejectedValue(new Error("Lost cash-out response"));
+  await click(byId("road-cashout"));
+  const saved = pendingAction();
+  orient(390, 844);
+  expect(button("Retry same action")).toBeDefined();
+  expect(byId("road-portrait-cashout").disabled).toBe(true);
+  financialApi.post.mockImplementation(async (url, body) => {
+    expect(url).toBe("/live/chicken-road/cashout");
+    const ended = round({ status: "CASHED", version: 2, cashout_amount: 0, payout: 106 });
+    server = initial({ balance: 1006, latest_round: ended });
+    return { data: receipt(body, ended, 1006) };
+  });
+  await click(button("Retry same action"));
+  expect(financialApi.post).toHaveBeenCalledTimes(2);
+  expect(financialApi.post.mock.calls[1][1]).toEqual(saved.body);
+  expect(financialApi.post.mock.calls[1][2].headers["Idempotency-Key"]).toBe(saved.operationId);
+  expect(pendingAction()).toBeNull();
+  expect(byId("road-portrait-cashout")).toBeNull();
+});
+
+test("an in-flight crossing completes once after rotating without losing its receipt", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  const response = deferred(); let sent;
+  financialApi.post.mockImplementation(async (_url, body) => { sent = body; return response.promise; });
+  await click(byId("road-go"));
+  const saved = pendingAction();
+  orient(390, 844);
+  expect(pendingAction()).toEqual(saved);
+  const advanced = round({ version: 2, lane: 2, multiplier_hundredths: 113, cashout_amount: 113 });
+  server = initial({ balance: 900, active_round: advanced });
+  response.resolve({ data: receipt(sent, advanced) }); await flush(); advance();
+  expect(byId("road-portrait-cashout").textContent).toContain("113");
+  expect(pendingAction()).toBeNull();
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  orient(844, 390);
+  expect(byId("road-cashout").textContent).toContain("113");
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+});
+
+test("portrait shows a collision only after an in-flight crossing is confirmed", async () => {
+  server = initial({ balance: 900, active_round: round() });
+  await mount();
+  const response = deferred(); let sent;
+  financialApi.post.mockImplementation(async (_url, body) => { sent = body; return response.promise; });
+  await click(byId("road-go"));
+  orient(390, 844);
+  expect(byId("road-landscape-prompt").querySelector('.road-landscape-result')).toBeNull();
+  const crashed = round({ status: "CRASHED", version: 2, lane: 2, multiplier_hundredths: 0, cashout_amount: 0 });
+  server = initial({ balance: 900, latest_round: crashed });
+  response.resolve({ data: receipt(sent, crashed) }); await flush();
+  expect(byId("road-landscape-prompt").querySelector('.road-landscape-result')).toBeNull();
+  advance();
+  const result = byId("road-landscape-prompt").querySelector('.road-landscape-result[role="status"]');
+  expect(result.textContent).toContain("The crossing ended");
+  expect(result.textContent).not.toContain("Cashed out");
+  expect(byId("road-portrait-cashout")).toBeNull();
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+});
 
 test("loading never substitutes an auth-cache balance, local payouts, or simulated play", async () => {
   const response = deferred(); financialApi.get.mockReturnValue(response.promise);
@@ -454,6 +610,33 @@ test("the dormant backend's GAME_COMING_SOON response is unavailable, not a netw
   await mount();
   expect(container.textContent).toContain("Chicken Road is unavailable");
   expect(container.textContent).not.toContain("Connection interrupted");
+  expect(byId("road-play").disabled).toBe(true);
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["CHICKEN_ROAD_WALLET_UNAVAILABLE", 503, "Wallet service is temporarily unavailable"],
+  ["CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED", 409, "Your wallet needs a review"],
+  ["CHICKEN_ROAD_STORAGE_UNAVAILABLE", 409, "Chicken Road is unavailable"],
+])("%s explains the service/account problem without claiming a lost connection", async (code, status, title) => {
+  const message = "Wallet account needs support before live play.";
+  financialApi.get.mockRejectedValue({ response: { status, data: { detail: { code, message } } } });
+  await mount();
+  expect(container.textContent).toContain(title);
+  expect(container.querySelector('.road-connection').textContent).toContain(message);
+  expect(container.textContent).not.toContain("Connection interrupted");
+  expect(byId("road-play").disabled).toBe(true);
+  orient(390, 844);
+  expect(byId("road-landscape-prompt").textContent).toContain(title);
+  expect(byId("road-landscape-prompt").textContent).toContain(message);
+  expect(financialApi.post).not.toHaveBeenCalled();
+});
+
+test("a network error still reports interruption and keeps wagering disabled", async () => {
+  financialApi.get.mockRejectedValue(new Error("Network unavailable"));
+  await mount();
+  expect(container.textContent).toContain("Connection interrupted");
+  expect(container.textContent).not.toContain("Your wallet needs a review");
   expect(byId("road-play").disabled).toBe(true);
   expect(financialApi.post).not.toHaveBeenCalled();
 });

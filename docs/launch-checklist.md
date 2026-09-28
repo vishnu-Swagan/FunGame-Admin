@@ -1,5 +1,48 @@
 # Chakri.Casino staging and production launch checklist
 
+## Chicken Road landscape and startup diagnostics — 2026-09-28
+
+The existing React/FastAPI/MongoDB services on Render remain unchanged. This
+maintenance update requires no new services, subscriptions, environment flags,
+wallet movements, or changes to the approved 90% rules.
+
+- [ ] 🤖 **Verify landscape-only play and accurate startup errors** — 10 minutes.
+
+  > Prompt: “Test portrait-to-landscape rotation without unmounting the live
+  controller. Block PLAY/GO in portrait, retain read-only round checks and
+  protective cash-out, and distinguish missing wallet records from a network
+  outage. Run regression tests, production build and independent reviews.”
+
+  **You'll know it worked when:** portrait shows a rotate-device prompt;
+  landscape shows the road; rotation never creates or replays a stake.
+
+- [ ] 🤖 **Publish the reviewed maintenance release** — 5–10 minutes.
+
+  > Prompt: “Deploy the reviewed commit to the existing Render API and web
+  services. Preserve live intake, exposure limit, catalogue and payment flags.
+  Verify both deployment records, public assets and API health. Do not place a
+  production bet or change customer balances.”
+
+  **You'll know it worked when:** both services show the same reviewed commit
+  and the public site serves the landscape-only release.
+
+- [ ] 🤝 **Resolve the affected legacy account using source evidence** — pending evidence.
+
+  Match the affected player's username or ID, then reconcile real and bonus
+  chips against their original deposit, grant and settlement records. Do not
+  share passwords or OTPs. This release fixes error classification, not missing
+  historical wallet records, and does not automatically enable those accounts.
+
+  **You'll know it worked when:** an audited source-wallet record matches the
+  player's existing total and authenticated state loads without a wager.
+
+Read-only production check: Chicken Road and promotion readiness are healthy.
+Five current-policy players have source-wallet records with matching totals.
+Four legacy players have positive balances and no source-wallet account; their
+history contains stakes, settlements, payouts, refunds, deposits and three
+untyped ledger entries. Cash/bonus ownership cannot safely be inferred from
+their current totals. No accounts, balances or production bets were changed.
+
 ## Chicken Road RTP update — 2026-09-28
 
 Owner-selected change: 90% theoretical gross RTP for all four difficulties,

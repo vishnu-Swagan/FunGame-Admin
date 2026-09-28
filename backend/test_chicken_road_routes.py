@@ -1188,6 +1188,34 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
             await self.assert_error(self.prepare(), "CHICKEN_ROAD_WALLET_UNAVAILABLE", 503)
         self.assertEqual(await self.db.chicken_road_commitments.count_documents({}), 0)
 
+    async def test_wallet_runtime_failure_remains_service_unavailable_not_account_reconciliation(self):
+        with patch.object(route, "_require_wallet_user", _REAL_REQUIRE_WALLET_USER), \
+                patch.object(ledger, "_source_wallet_adapter", game_wallet.ADAPTER), \
+                patch.object(finance, "_READY", False), \
+                patch.object(bonus_policy, "_READY", False):
+            before = await self.db.snapshot()
+            await self.assert_error(route.state(self.user), "CHICKEN_ROAD_WALLET_UNAVAILABLE", 503)
+            self.assertEqual(await self.db.snapshot(), before)
+
+    async def test_legacy_account_reports_wallet_reconciliation_without_reclassifying_chips(self):
+        with patch.object(route, "_require_wallet_user", _REAL_REQUIRE_WALLET_USER), \
+                patch.object(ledger, "_source_wallet_adapter", game_wallet.ADAPTER), \
+                patch.object(finance, "_READY", False), \
+                patch.object(bonus_policy, "_READY", True), \
+                patch.dict(os.environ, {"CHAKRI_BONUS_POLICY_ENABLED": "true", "REAL_MONEY_ENABLED": "false"}):
+            before = await self.db.snapshot()
+            await self.assert_error(route.state(self.user), "CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED")
+            self.assertEqual(await self.db.snapshot(), before)
+            body = route.OperationRequest(operation_id=self.key("legacy-prepare"))
+            await self.assert_error(route.prepare_round(body, self.user), "CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED")
+            receipt = await route.operation_receipt(body.operation_id, self.user)
+            self.assertEqual(receipt["status"], "REJECTED")
+            self.assertEqual(receipt["error"]["code"], "CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED")
+            self.assertEqual(await self.balance(), before["users"][0]["chip_balance"])
+            self.assertEqual(await self.events(), [])
+            self.assertEqual(await self.db.wallet_accounts.count_documents({}), 0)
+            self.assertEqual(await self.db.chicken_road_commitments.count_documents({}), 0)
+
     async def install_source_wallet(self, *, bonus=100):
         self._patch(patch.object(route, "_require_wallet_user", _REAL_REQUIRE_WALLET_USER))
         self._patch(patch.object(ledger, "_source_wallet_adapter", game_wallet.ADAPTER))
@@ -1197,6 +1225,63 @@ class ChickenRoadRouteTests(unittest.IsolatedAsyncioTestCase):
             "id": "wallet-1", "user_id": self.user["id"], "available_cash_chips": 100000 - bonus,
             "available_bonus_chips": bonus, "held_cash_chips": 0, "version": 1,
         })
+
+    async def test_policy_wallet_can_open_and_settle_without_broad_financial_flags(self):
+        # The production operator-rail cohort has its own reviewed readiness
+        # path. The unrelated payments-v2 flags must not be needed for play.
+        await self.install_source_wallet(bonus=0)
+        await self.db.users.update_one({"id": self.user["id"]}, {"$set": {
+            "bonus_policy_version": bonus_policy.POLICY_VERSION,
+        }})
+        with patch.object(finance, "_READY", False), \
+                patch.object(bonus_policy, "_READY", True), \
+                patch.dict(os.environ, {"CHAKRI_BONUS_POLICY_ENABLED": "true", "REAL_MONEY_ENABLED": "false",
+                                        "FINANCIAL_GAME_WALLET_INTEGRATED": "false"}):
+            self.assertFalse(game_wallet.legacy_integration_enabled())
+            before = await self.db.snapshot()
+            snapshot = await route.state(self.user)
+            self.assertEqual(snapshot["mode"], "live")
+            self.assertEqual(snapshot["balance"], 100000)
+            self.assertTrue(snapshot["enabled"])
+            self.assertEqual(await self.db.snapshot(), before)
+            _, played = await self.start(amount=300)
+            allocation = (await self.events(ledger.STAKE))[0]["funding_allocation"]
+            self.assertEqual((allocation["cash_chips"], allocation["bonus_chips"]), (300, 0))
+            cashed = await route.cashout(self.action_body(played), self.user)
+            await self.assert_terminal_once(cashed)
+            account = await self.db.wallet_accounts.find_one({"user_id": self.user["id"]})
+            self.assertEqual(account["available_cash_chips"], await self.balance())
+            self.assertEqual(account["available_bonus_chips"], 0)
+
+    async def test_existing_legacy_wallet_reports_temporary_integration_outage(self):
+        await self.install_source_wallet(bonus=0)
+        with patch.object(bonus_policy, "_READY", True), \
+                patch.dict(os.environ, {"CHAKRI_BONUS_POLICY_ENABLED": "true", "REAL_MONEY_ENABLED": "false"}):
+            self.assertTrue(game_wallet.integration_enabled())
+            self.assertFalse(game_wallet.legacy_integration_enabled())
+            self.assertFalse(await bonus_policy.user_participates(self.user["id"]))
+            before = await self.db.snapshot()
+            await self.assert_error(route.state(self.user), "CHICKEN_ROAD_WALLET_UNAVAILABLE", 503)
+            self.assertEqual(await self.db.snapshot(), before)
+
+    async def test_legacy_wallet_cashout_retry_recovers_after_integration_outage(self):
+        await self.install_source_wallet(bonus=0)
+        _, played = await self.start(amount=300)
+        body = self.action_body(played)
+        with patch.object(bonus_policy, "_READY", True), \
+                patch.dict(os.environ, {"CHAKRI_BONUS_POLICY_ENABLED": "true", "REAL_MONEY_ENABLED": "false"}):
+            before = await self.db.snapshot()
+            await self.assert_error(route.cashout(body, self.user), "CHICKEN_ROAD_WALLET_UNAVAILABLE", 503)
+            self.assertEqual(await self.db.snapshot(), before)
+            self.assertFalse((await route.operation_receipt(body.operation_id, self.user))["found"])
+        self.assertTrue(game_wallet.legacy_integration_enabled())
+        cashed = await route.cashout(body, self.user)
+        self.assertEqual(await route.cashout(body, self.user), cashed)
+        await self.assert_terminal_once(cashed)
+        self.assertEqual(len(await self.events(ledger.PAYOUT)), 1)
+        account = await self.db.wallet_accounts.find_one({"user_id": self.user["id"]})
+        self.assertEqual(account["available_cash_chips"], await self.balance())
+        self.assertEqual(account["available_bonus_chips"], 0)
 
     async def test_real_source_wallet_preserves_cash_bonus_provenance_and_single_observer_delivery(self):
         await self.install_source_wallet(bonus=100)

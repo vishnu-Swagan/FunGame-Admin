@@ -144,10 +144,21 @@ async def _require_release(*, new_activity=False, session=None):
 
 async def _require_wallet_user(user_id, session=None):
     if (ledger._source_wallet_adapter is not game_wallet.ADAPTER
-            or not game_wallet.integration_enabled()
-            or not (game_wallet.legacy_integration_enabled()
-                    or await bonus_policy.user_participates(user_id, session=session))):
+            or not game_wallet.integration_enabled()):
         raise _error(503, "CHICKEN_ROAD_WALLET_UNAVAILABLE", "The shared source-aware gameplay wallet is unavailable.")
+    if not (game_wallet.legacy_integration_enabled()
+            or await bonus_policy.user_participates(user_id, session=session)):
+        account = await db.wallet_accounts.find_one({"user_id": user_id}, {"_id": 1}, session=session)
+        if account is not None:
+            # A retained legacy source wallet can be temporarily unavailable
+            # when its integration gate is down. Do not turn that outage into
+            # a final rejection receipt for an already-funded cash-out.
+            raise _error(503, "CHICKEN_ROAD_WALLET_UNAVAILABLE", "The shared source-aware gameplay wallet is unavailable.")
+        # An unclassified legacy account is not a connection outage. Keep its
+        # money untouched and expose an actionable account-specific rejection;
+        # never guess whether an existing balance is cash or promotional chips.
+        raise _error(409, "CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED",
+                     "Your account's real and bonus chips need wallet reconciliation before live play. Contact support.")
 
 
 async def _require_actor(user, session, *, new_activity=False):
