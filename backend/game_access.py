@@ -23,6 +23,7 @@ PLAYABLE_GAME_SLUGS = frozenset({
     'poker',
     'blackjack',
     'rummy',
+    'chicken-road',
 })
 
 GAME_COMING_SOON = 'GAME_COMING_SOON'

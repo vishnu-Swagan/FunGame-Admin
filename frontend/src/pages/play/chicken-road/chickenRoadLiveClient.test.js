@@ -32,6 +32,19 @@ test("initial reconciliation only reads authenticated live state and never place
   expect(transport.post).not.toHaveBeenCalled();
 });
 
+test("fairness evidence uses the authenticated read-only endpoint without changing a pending intent", async () => {
+  const { client, transport } = setup();
+  transport.post.mockRejectedValue(new Error("Pending go"));
+  await expect(client.advance("go", round())).rejects.toThrow();
+  const saved = client.readPending();
+  const proof = { round_id: "round/1", server_seed: "a".repeat(64) };
+  transport.get.mockResolvedValue({ data: proof });
+  expect(await client.getFairness("round/1")).toEqual(proof);
+  expect(transport.get).toHaveBeenCalledWith(`${CHICKEN_ROAD_API}/rounds/round%2F1/fairness`, { timeout: 15000, __noFailover: true });
+  expect(client.readPending()).toEqual(saved);
+  expect(transport.post).toHaveBeenCalledTimes(1);
+});
+
 test("Play persists both stages and generates its client seed only after the server commitment", async () => {
   const { client, transport, seedFactory } = setup();
   transport.post.mockImplementation(async (path, body, options) => {

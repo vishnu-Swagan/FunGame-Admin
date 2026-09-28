@@ -1,4 +1,4 @@
-"""Dormant, server-authoritative Chicken Road proposal; default approval is false.
+"""Approved, server-authoritative Chicken Road; live intake defaults to paused.
 
 Both the reviewed-game gate and explicit rules approval must precede activation.
 The aggregate exposure counter is an operator liability limit, not proof of
@@ -33,11 +33,12 @@ from player_account_state import lock_account_for_new_activity
 from transactions import run_game_transaction
 
 SLUG = "chicken-road"
-RULES_APPROVED = False
+RULES_APPROVED = True
 COMMITMENT_SECONDS = 300
 EXPIRY_RETRY_SECONDS = 60
 router = APIRouter(prefix="/live/chicken-road", tags=["chicken-road"])
 logger = logging.getLogger("chicken-road")
+_STORAGE_READY = False
 
 
 class OperationRequest(BaseModel):
@@ -81,14 +82,64 @@ def _exposure_limit():
     return int(raw)
 
 
-async def _require_release(*, new_activity=False):
+def _valid_exposure_counter(document):
+    value = document.get("outstanding_chips") if document else None
+    # PyMongo may decode a large whole-chip counter as an Int64 subclass.
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 9_000_000_000_000_000
+
+
+async def chicken_road_status(*, session=None):
+    """Read-only technical readiness, separate from operator intake switches.
+
+    A full reservation budget is normal operation, not an outage. Availability
+    of a particular stake is enforced atomically when Play reserves exposure.
+    User-specific wallet/account and transaction gates remain authoritative.
+    """
+    exposure_configured = True
+    try:
+        _exposure_limit()
+    except HTTPException:
+        exposure_configured = False
+    counter = await db.chicken_road_exposure.find_one({"_id": SLUG}, session=session)
+    catalogue_enabled = True
+    try:
+        await require_playable_game(SLUG)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        catalogue_enabled = False
+    requirements = {
+        "rules_approved": RULES_APPROVED,
+        "storage_prepared": _STORAGE_READY,
+        "exposure_configured": exposure_configured,
+        "exposure_counter_valid": _valid_exposure_counter(counter),
+    }
+    ready = all(requirements.values())
+    requested = _live_enabled()
+    return {"ready": ready, "intake_requested": requested,
+            "catalogue_enabled": catalogue_enabled,
+            "enabled": ready and requested and catalogue_enabled,
+            "requirements": requirements}
+
+
+async def _require_release(*, new_activity=False, session=None):
     if not RULES_APPROVED:
         raise _error(503, "CHICKEN_ROAD_DISABLED", "Chicken Road live rules are not approved.")
     if new_activity:
         if not _live_enabled():
             raise _error(409, "CHICKEN_ROAD_PAUSED", "Chicken Road is paused for new play. Existing stakes can still be cashed out.")
         await require_playable_game(SLUG)
-        _exposure_limit()
+        try:
+            _exposure_limit()
+        except HTTPException as exc:
+            # This check precedes every new mutation. Persist a final rejection
+            # so the browser can clear a pending GO and still cash out.
+            raise _error(409, "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE", "New play is paused until the operator liability limit is configured.") from exc
+        if not _STORAGE_READY:
+            raise _error(409, "CHICKEN_ROAD_STORAGE_UNAVAILABLE", "New play is paused until game storage is prepared.")
+        counter = await db.chicken_road_exposure.find_one({"_id": SLUG}, session=session)
+        if not _valid_exposure_counter(counter):
+            raise _error(409, "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE", "New play is paused until the liability counter is reconciled.")
 
 
 async def _require_wallet_user(user_id, session=None):
@@ -117,15 +168,30 @@ async def _require_actor(user, session, *, new_activity=False):
 
 async def prepare_chicken_road_storage():
     """Explicit deployment preparation only; never invoked at import/request time."""
+    global _STORAGE_READY
+    # A failed or partially completed bootstrap must not open intake just
+    # because the counter happened to exist from an earlier deployment.
+    _STORAGE_READY = False
     await db.chicken_road_rounds.create_index([("status", 1), ("expires_at", 1)])
     await db.chicken_road_rounds.create_index([("user_id", 1), ("created_at", -1)])
     await db.chicken_road_commitments.create_index([("user_id", 1), ("expires_at", 1)])
     await db.chicken_road_operations.create_index([("user_id", 1), ("created_at", 1)])
     # Mongo's intrinsic _id indexes enforce round, per-user active guard,
     # operation receipt, and commitment uniqueness without optional migrations.
+    counter = await db.chicken_road_exposure.find_one({"_id": SLUG})
+    if counter is None:
+        active_round = await db.chicken_road_rounds.find_one({"status": "PLAYING"}, {"_id": 1})
+        active_guard = await db.chicken_road_players.find_one(
+            {"active_round_id": {"$exists": True, "$ne": None}}, {"_id": 1},
+        )
+        if active_round or active_guard:
+            raise RuntimeError("Chicken Road missing liability counter requires reconciliation of retained rounds")
     await db.chicken_road_exposure.update_one(
         {"_id": SLUG}, {"$setOnInsert": {"outstanding_chips": 0}}, upsert=True,
     )
+    if not _valid_exposure_counter(await db.chicken_road_exposure.find_one({"_id": SLUG})):
+        raise RuntimeError("Chicken Road liability counter requires reconciliation")
+    _STORAGE_READY = True
 
 
 def _operation_key(user_id, operation_id):
@@ -387,7 +453,7 @@ async def prepare_round(body: OperationRequest, user: dict = Depends(auth_utils.
     expires = _stamp(_now() + timedelta(seconds=COMMITMENT_SECONDS))
 
     async def prepare(session):
-        await _require_release(new_activity=True)
+        await _require_release(new_activity=True, session=session)
         await _require_actor(user, session, new_activity=True)
         doc = {"_id": commitment_id, "user_id": user["id"], "status": "PREPARED", "server_seed": server_seed,
                "server_seed_hash": engine.seed_commitment(server_seed, commitment_id),
@@ -407,7 +473,7 @@ async def play(body: PlayRequest, user: dict = Depends(auth_utils.require_active
     round_id = str(uuid.uuid4())
 
     async def accept(session):
-        await _require_release(new_activity=True)
+        await _require_release(new_activity=True, session=session)
         await _require_actor(user, session, new_activity=True)
         if body.rules_version != engine.RULES_VERSION:
             raise _error(409, "RULES_CHANGED", "Refresh and accept the current game rules.")
@@ -449,7 +515,7 @@ async def _round_action(body, user, action):
     await _require_release()
 
     async def execute(session):
-        await _require_release(new_activity=action == "GO")
+        await _require_release(new_activity=action == "GO", session=session)
         await _require_actor(user, session, new_activity=action == "GO")
         current = await db.chicken_road_rounds.find_one({"_id": body.round_id, "user_id": user["id"]}, session=session)
         if not current:
@@ -492,16 +558,9 @@ async def state(user: dict = Depends(auth_utils.require_active_player)):
         guard = await db.chicken_road_players.find_one({"_id": user["id"]}, session=session) or {}
         async def load(key):
             return await db.chicken_road_rounds.find_one({"_id": guard.get(key), "user_id": user["id"]}, session=session) if guard.get(key) else None
-        enabled = _live_enabled()
-        if enabled:
-            try:
-                await require_playable_game(SLUG)
-            except HTTPException as exc:
-                if exc.status_code != 409:
-                    raise
-                enabled = False
+        readiness = await chicken_road_status(session=session)
         rules = {**engine.rules_payload(), "approval": "APPROVED" if RULES_APPROVED else "UNAPPROVED"}
-        return {"mode": "live", "enabled": enabled, "rules": rules,
+        return {"mode": "live", "enabled": readiness["enabled"], "rules": rules, "readiness": readiness,
                 "balance": await _balance(user["id"], session),
                 "active_round": _public_round(await load("active_round_id")),
                 "latest_round": _public_round(await load("latest_round_id"))}

@@ -122,6 +122,12 @@ export function createChickenRoadLiveClient({ userId, transport = financialApi, 
     return validateLiveState(data);
   };
 
+  const getFairness = async (roundId) => {
+    if (!identifier(roundId)) throw problem("Choose a settled round to verify.");
+    const { data } = await transport.get(`${CHICKEN_ROAD_API}/rounds/${encodeURIComponent(roundId)}/fairness`, REQUEST_OPTIONS);
+    return data;
+  };
+
   const receipt = async (operationId) => {
     const { data } = await transport.get(`${CHICKEN_ROAD_API}/operations/${encodeURIComponent(operationId)}`, REQUEST_OPTIONS);
     if (!data || data.operation_id !== operationId || typeof data.found !== "boolean") throw problem("The action receipt could not be verified.");
@@ -226,5 +232,5 @@ export function createChickenRoadLiveClient({ userId, transport = financialApi, 
     return { state, pending: readPending(), confirmed, rejection };
   };
 
-  return { getState, readPending, play, advance, retryPending, reconcile };
+  return { getState, getFairness, readPending, play, advance, retryPending, reconcile };
 }

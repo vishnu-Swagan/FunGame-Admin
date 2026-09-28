@@ -48,6 +48,15 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         self.original_lock = server._GAMEPLAY_READINESS_LOCK
         server._GAMEPLAY_READY = False
         server._GAMEPLAY_READINESS_LOCK = asyncio.Lock()
+        self.chicken_readiness = {
+            "ready": False, "intake_requested": False, "catalogue_enabled": False,
+            "enabled": False, "requirements": {"rules_approved": True, "storage_prepared": False,
+                                              "exposure_configured": False, "exposure_counter_valid": False},
+        }
+        patcher = patch.object(server.routes_chicken_road, "chicken_road_status",
+                               new_callable=AsyncMock, return_value=self.chicken_readiness)
+        self.chicken_status = patcher.start()
+        self.addCleanup(patcher.stop)
 
     async def asyncTearDown(self):
         server._GAMEPLAY_READY = self.original_ready
@@ -145,6 +154,7 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
                 "status": "ok", "gameplay_ready": True, "aviator_ready": True,
                 "crm_ready": True, "financial_ready": True,
                 "promotion_core_ready": False,
+                "chicken_road": self.chicken_readiness,
             },
         )
         self.assertTrue(server._GAMEPLAY_READY)
@@ -230,6 +240,55 @@ class GameplayReadinessTests(unittest.IsolatedAsyncioTestCase):
         database.system_config.update_one.assert_awaited_once()
         database.announcements.update_many.assert_not_awaited()
         database.notifications.update_many.assert_not_awaited()
+
+    async def _otherwise_healthy(self):
+        with (
+            patch.object(server, "db", self._database()),
+            patch.object(server, "_prepare_gameplay_core", new_callable=AsyncMock),
+            patch.object(server, "_probe_gameplay_transaction", new_callable=AsyncMock),
+            patch.object(game_engines, "aviator_return_factor", return_value=0.945),
+            patch.object(server, "_require_crm_readiness", new_callable=AsyncMock),
+            patch.object(server.financial_wallet, "financial_status", return_value={"ready": False}),
+            patch.object(server.financial_wallet, "financial_flags_requested", return_value=False),
+            patch.object(server.promotions, "feature_status", return_value={"requirements": {"feature_enabled": False}}),
+        ):
+            return await server.health()
+
+    async def test_health_reports_paused_chicken_road_without_requiring_exposure_configuration(self):
+        response = await self._otherwise_healthy()
+        self.assertEqual(response["chicken_road"], self.chicken_readiness)
+        self.assertFalse(response["chicken_road"]["enabled"])
+        self.chicken_status.assert_awaited_once_with()
+
+    async def test_health_rejects_requested_intake_after_failed_storage_or_invalid_exposure(self):
+        for requirement in ("rules_approved", "storage_prepared", "exposure_configured", "exposure_counter_valid"):
+            with self.subTest(requirement=requirement):
+                status = {**self.chicken_readiness, "intake_requested": True, "catalogue_enabled": True,
+                          "requirements": {key: key != requirement for key in self.chicken_readiness["requirements"]}}
+                self.chicken_status.return_value = status
+                with self.assertRaises(HTTPException) as raised:
+                    await self._otherwise_healthy()
+                self.assertEqual(raised.exception.status_code, 503)
+                self.assertEqual(raised.exception.detail["code"], "CHICKEN_ROAD_NOT_READY")
+                self.assertEqual(raised.exception.detail["readiness"], status)
+
+    async def test_health_distinguishes_catalogue_pause_from_technical_failure(self):
+        self.chicken_status.return_value = {
+            **self.chicken_readiness, "ready": True, "intake_requested": True,
+            "requirements": {key: True for key in self.chicken_readiness["requirements"]},
+        }
+        response = await self._otherwise_healthy()
+        self.assertTrue(response["chicken_road"]["ready"])
+        self.assertFalse(response["chicken_road"]["catalogue_enabled"])
+        self.assertFalse(response["chicken_road"]["enabled"])
+
+    async def test_health_readiness_failure_is_closed_without_leaking_database_details(self):
+        self.chicken_status.side_effect = RuntimeError("private connection detail")
+        with self.assertRaises(HTTPException) as raised:
+            await self._otherwise_healthy()
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "CHICKEN_ROAD_NOT_READY")
+        self.assertNotIn("private connection", str(raised.exception.detail))
 
 
 if __name__ == "__main__":

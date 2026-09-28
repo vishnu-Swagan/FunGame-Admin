@@ -1,12 +1,12 @@
-# Chicken Road backend integration — dormant proposal
+# Chicken Road backend integration — live-only release
 
-The engine implements [the owner-selected 90% RTP rules](chicken-road-live-rules-proposal.md), with live activation still pending the aggregate exposure budget and release verification. It is not a certified provider implementation. `backend/routes_chicken_road.py` sets `RULES_APPROVED = False`; importing the module neither registers routes nor accesses the database. Implementation and automated verification used no live wager or production database call. A dormant application deployment does not activate these routes.
+The engine implements [the owner-selected 90% RTP rules](chicken-road-live-rules-proposal.md), with an owner-approved **194,620-chip aggregate outstanding payout limit**. It is not a certified provider implementation. `backend/routes_chicken_road.py` sets `RULES_APPROVED = True` for this reviewed live-only release; server startup registers the routes, prepares storage and starts expiry settlement. New intake still defaults to paused and requires explicit production configuration and catalogue publication. Automated verification uses isolated databases and no production wagers.
 
 ## Release gates and startup
 
 New preparation, Play, and GO require all of:
 
-1. The source-controlled `RULES_APPROVED` decision, currently **False**.
+1. The source-controlled `RULES_APPROVED` decision, **True** for this release.
 2. `CHICKEN_ROAD_LIVE_ENABLED=true`, default **false**.
 3. The existing reviewed-game allow-list and an enabled catalogue record.
 4. `CHICKEN_ROAD_EXPOSURE_LIMIT`, a positive whole-chip **operator liability limit**.
@@ -14,7 +14,22 @@ New preparation, Play, and GO require all of:
 
 The exposure limit is not evidence of deposited capital or available cash. The operator remains responsible for sufficient liquidity. The module reserves the maximum gross payout for each accepted round against one atomic outstanding-liability counter and releases it only within terminal settlement. A cap is checked before intake; it never truncates an earned payout.
 
-After approval, deployment startup must call `prepare_chicken_road_storage()` before intake and schedule `settle_expired_chicken_rounds()` on the existing server worker. The intrinsic Mongo `_id` constraints protect operation receipts, commitments, round IDs, and per-player active guards; initialization adds query indexes and creates the exposure counter without resetting existing liabilities. A missing counter rejects intake. Transaction failure fails closed through `run_game_transaction`; there is no production nontransactional fallback.
+The approved production values are `CHICKEN_ROAD_EXPOSURE_LIMIT=194620` and
+`CHICKEN_ROAD_LIVE_ENABLED=true`. These are the only environment changes in this
+release. The existing cash/bonus provenance policy, eligibility restrictions and
+broader financial/payment flags remain unchanged. Four legacy production accounts
+lacked source-wallet records at read-only preflight; do not invent a cash/bonus
+classification or bypass their wallet requirement to make them playable.
+
+Deployment startup calls `prepare_chicken_road_storage()` before intake and schedules `settle_expired_chicken_rounds()` on the existing server worker. A success-only storage latch stays false after partial preparation. The intrinsic Mongo `_id` constraints protect operation receipts, commitments, round IDs, and per-player active guards; initialization adds query indexes and creates a missing exposure counter only when no active round or player reservation exists. Existing liabilities are never reset. A missing or malformed counter rejects intake. Transaction failure fails closed through `run_game_transaction`; there is no production nontransactional fallback.
+
+The health response includes `chicken_road` readiness, intake request, catalogue
+state and individual technical requirements. Requested intake with missing
+technical readiness fails health; a full exposure budget or operator catalogue
+pause is not an outage. Player state advertises `enabled` only when these intake
+requirements hold. Definitive missing-storage/configuration rejections are
+recorded before mutation, letting the client clear a rejected GO and still cash
+out. Pausing intake never suppresses retained-round settlement routes or worker.
 
 Pausing the environment flag stops new risk. Once the rules have been approved, authenticated receipt/fairness reads, current-round reads, cash-out, and the expiry worker can continue to resolve retained stakes. The worker can settle accounts that subsequently become suspended, excluded, or deleted, because settlement is not permission to place another stake. A broken round is retained and logged for reconciliation; a version-guarded 60-second retry delay lets later batches advance without releasing or modifying its financial reservation.
 
@@ -32,7 +47,7 @@ All paths below are relative to `/api/live/chicken-road`. Authentication uses th
 | `GET /operations/{operation_id}` | — | `{found:false, operation_id}` or `{found:true, ...stored_receipt}`; strictly read-only |
 | `GET /rounds/{round_id}/fairness` | — | Terminal-only seed disclosure below |
 
-Current `rules` contains `version:"chicken-road-proposal-v2"`, `approval`, `rtp_bps:9000`, `min_stake:100`, `max_stake:1000`, `stake_step:100`, `max_lanes:13`, and `difficulties:[{id,label,multipliers_hundredths,collision_fractions:[{numerator,denominator}]}]`. The pure proposal engine reports `UNAPPROVED`; a registered runtime reports `APPROVED` only after the explicit code approval gate. This flag means production-release readiness, not whether an RTP preference has been selected. The default gate returns `503 CHICKEN_ROAD_DISABLED` before any state response or mutation. Any accepted v1 rounds retain their original 97% version for outcomes, payout settlement, and fairness; new intake uses v2 only.
+Current `rules` contains `version:"chicken-road-proposal-v2"`, `approval`, `rtp_bps:9000`, `min_stake:100`, `max_stake:1000`, `stake_step:100`, `max_lanes:13`, and `difficulties:[{id,label,multipliers_hundredths,collision_fractions:[{numerator,denominator}]}]`. The pure engine reports `UNAPPROVED`; the registered runtime overrides this with `APPROVED` only under the explicit code approval gate. This is an application release decision, not certification. Any accepted v1 rounds retain their original 97% version for outcomes, payout settlement, and fairness; new intake uses v2 only. With intake paused, current-round reads and settlement remain available to authorized players.
 
 A successful mutation returns:
 
@@ -71,7 +86,7 @@ Alternative status/result strings in this illustrative JSON denote enumerations.
 
 Call Prepare first. Only **after receiving the commitment** should the browser generate a fresh 32-byte cryptographic client seed, encode it as 64 lowercase hexadecimal characters, and send Play. The committed ID is also the nonce, so the server cannot choose a new RNG nonce after seeing the client seed. A commitment expires unused after five minutes, is bound to its owner, rules version, and fairness version, and can be consumed only once. Version drift rejects it before taking a stake. Each accepted round gets a fresh server seed and a permanently locked table.
 
-The terminal fairness response returns `round_id`, `server_seed`, `server_seed_hash`, `client_seed`, `nonce`, `difficulty`, `rules_version`, `fairness_version`, and `multipliers_hundredths`. Active-round disclosure returns `409 FAIRNESS_NOT_REVEALED`. Normal state and receipt projections never contain server seeds. The exact canonical JSON/HMAC/rejection-sampling protocol is documented in `chicken_road_engine.py`; a public verifier and independent implementation review remain release work.
+The terminal fairness response returns `round_id`, `server_seed`, `server_seed_hash`, `client_seed`, `nonce`, `difficulty`, `rules_version`, `fairness_version`, and `multipliers_hundredths`. Active-round disclosure returns `409 FAIRNESS_NOT_REVEALED`. Normal state and receipt projections never contain server seeds. The exact canonical JSON/HMAC/rejection-sampling protocol is documented in `chicken_road_engine.py`. The live UI provides an independent Web Crypto verifier bound to the already received terminal round, checking its commitment, attempted lane outcomes and payout. Verification establishes mathematical consistency, not operator certification, historical seed timing or funding.
 
 ## Lost responses, retries, and rejection receipts
 
@@ -91,9 +106,25 @@ The POST itself returns the corresponding HTTP error with `detail:{code,message}
 
 Each accepted mutation atomically couples its round CAS/version transition, one-active-round guard, seed consumption, exposure movement, shared ledger/source-wallet allocation, terminal history, settlement observer event, and operation receipt. Payout is derived from the transaction's current locked lane. GO, Cash Out, expiry, and collision compete on the same round version, so a losing lane cannot remain temporarily cashable. Every losing stake also receives `ledger.record_settlement`; no direct balance updates are added.
 
-Engine tests use exact fractions and deterministic cryptographic fixtures. Route tests use isolated mock collections and a serialized snapshot/rollback transaction double with injected failures. These tests establish application invariants and hook usage, **not Mongo replica-set isolation or deployment certification**. A staging replica-set concurrency/rollback run, public verifier, approved rules/limits, and explicit release decision remain necessary before activation. Do not test by placing production wagers.
+Engine tests use exact fractions and deterministic cryptographic fixtures. Fast route tests use isolated mock collections and a serialized snapshot/rollback transaction double. The additional opt-in `test_chicken_road_mongo.py` suite uses a disposable loopback Mongo replica set and actual Motor transactions, route/ledger/source-wallet code and cash/bonus provenance. Eight tests passed twice, covering duplicate Play, GO/cash-out and expiry/GO races, 194,620-chip exposure contention, actual-HMAC collision and rollback after debit, terminal ledger mutation and receipt insertion. The local Mongo process was stopped and only its test databases were cleaned. These results are release evidence, **not deployment certification**. No production wagers are used for automated testing.
 
 Local verification (2026-09-23): `python -m pytest -q test_chicken_road_engine.py test_chicken_road_routes.py` passed **73 tests and 843 subtests**. The existing transaction and source-wallet suites passed another **27 tests**. Undefined-name checks passed. A follow-up independent Codex CLI review found no further actionable defects after fixing commitment-version binding, durable paused-intake rejection, and expiry retry starvation. A separate agent audit additionally identified and verified a fix preserving immutable terminal fairness proofs across later rules-version changes. The router-order regression assembles the actual server registrations and proves that the approved Chicken Road state endpoint precedes the generic live-state route; reversing the order fails its negative control. These results do not constitute third-party certification.
+
+Live activation verification (2026-09-28): the full backend suite passed **586
+tests and 1,765 subtests**. The opt-in Mongo suite is excluded from the default
+run and passed separately as described above. The final frontend passed
+**82 suites / 728 tests**, its production build passed, and Aviator rendering
+passed **4 suites / 27 tests**. Isolated browser checks confirmed all four
+difficulty selections, exact collision-risk and inactivity disclosures, and a
+successful independent check of a known two-lane terminal proof. No network
+wagers were possible in that local browser harness. Financial-integrity review
+found no actionable defects. General review identified a keyboard-focus issue
+in the proof disclosure; the shared dialog now includes summaries in its focus
+trap, with a regression test and a successful Chrome Tab/Enter walkthrough.
+One unrelated profile-avatar test timed out during the concurrent build; the
+complete suite passed on rerun after the build finished. Existing DepositReturn
+mock-XHR console warnings and the bundle-size advisory remain unchanged. Final
+review and deployment results are recorded in release evidence.
 
 RTP update verification (2026-09-28): current v2 is 90%; archived v1 remains 97%.
 The 86 focused engine/route tests include exact RTP checks for both versions
