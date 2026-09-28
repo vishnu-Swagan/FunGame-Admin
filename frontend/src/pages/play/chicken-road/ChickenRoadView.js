@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { CircleHelp, Maximize2, Menu, RotateCw, X } from "lucide-react";
+import { CircleHelp, Maximize2, Menu, RotateCw, Smartphone, X } from "lucide-react";
 import { FireBurst, AmbientFlame } from "./ChickenRoadEffects";
 import "./chicken-road.css";
 
@@ -101,6 +101,24 @@ function RoadBrand() {
   </h1><span className="road-brand-subtitle">CHAKRI.CASINO</span></div>;
 }
 
+function LandscapePrompt({ activeRound, cashOutDisabled, cashOutText, onAction, statusPanel, result, error }) {
+  const titleId = useId();
+  const titleRef = useRef(null);
+  useEffect(() => { titleRef.current?.focus(); }, []);
+  return <section className="road-landscape-prompt" aria-labelledby={titleId} data-testid="road-landscape-prompt">
+    <div className="road-rotate-icon" aria-hidden="true"><Smartphone size={64} /><RotateCw size={32} /></div>
+    <h2 id={titleId} ref={titleRef} tabIndex={-1}>Rotate your device</h2>
+    <p>Chicken Road plays in landscape. Turn your device sideways to play.</p>
+    {activeRound && <>
+      <p>Your round stays active. You can cash out here without another crossing.</p>
+      <button className="road-button road-button--cash" disabled={cashOutDisabled} onClick={() => onAction("CASH_OUT")} data-testid="road-portrait-cashout"><span>CASH OUT</span><strong>{cashOutText} <small>◉</small></strong></button>
+    </>}
+    {statusPanel && <div className="road-landscape-status" role="status">{statusPanel}</div>}
+    {result && <div className={`road-landscape-status road-landscape-result ${result.type}`} role="status"><strong>{result.title}</strong><span>{result.detail}</span></div>}
+    {error && <p className="road-form-error" role="alert">{error}</p>}
+  </section>;
+}
+
 /** Presentation only: money, rules, round state, and actions belong to its controller. */
 export default function ChickenRoadView({
   rootRef, phase = "idle", roundKey, lane: currentLane = 0, multipliers = [], difficulties = [],
@@ -112,6 +130,7 @@ export default function ChickenRoadView({
   result = null, error = "", banner = null, historyText = "", rulesLabel = "Game rules",
   chanceHint = "", statusPanel = null, dialog = null, animateOutcome = true, onStakeChange, onMinimum, onMaximum,
   onPreset, onDifficulty, onAction, onFullscreen, onDialogChange, escapeFromLane = 0,
+  landscapeOnly = false, activeRound = false,
 }) {
   const [endedBurst, setEndedBurst] = useState(null);
   const [escapeBurst, setEscapeBurst] = useState(null);
@@ -139,9 +158,10 @@ export default function ChickenRoadView({
       </div>
     </header>
     {banner && <div className="road-preview-banner">{banner}</div>}
+    {landscapeOnly && <LandscapePrompt activeRound={activeRound} cashOutDisabled={moving || cashOutDisabled} cashOutText={cashOutText} onAction={onAction} statusPanel={statusPanel} result={!moving ? result : null} error={error} />}
 
-    <section className="road-viewport" aria-label="Chicken Road lanes">
-      {statusPanel && <div className="road-result road-connection" role="status">{statusPanel}</div>}
+    <section className="road-viewport" aria-label="Chicken Road lanes" hidden={landscapeOnly}>
+      {statusPanel && <div className="road-result road-connection" role="status">{statusPanel}{result && !moving && !landscapeOnly && <><strong>{result.title}</strong><span>{result.detail}</span></>}</div>}
       <div className="road-track" style={{ "--camera": camera, "--lane-count": multipliers.length + 1 }}>
         <div className="road-lane road-home"><div className="road-patch road-patch--one" /><div className="road-door" /></div>
         {multipliers.map((multiplier, index) => {
@@ -170,12 +190,12 @@ export default function ChickenRoadView({
             : <ChickenCharacter />}
         </div>
       </div>
-      {result && !moving && <div className={`road-result ${result.type}`} role="status">
+      {result && !moving && !landscapeOnly && !statusPanel && <div className={`road-result ${result.type}`} role="status">
         <strong>{result.title}</strong><span>{result.detail}</span>
       </div>}
     </section>
 
-    <section className="road-dock" aria-label="Game controls">
+    <section className="road-dock" aria-label="Game controls" hidden={landscapeOnly}>
       <div className="road-controls">
         <div className="road-stake">
           <div className="road-amount">
@@ -199,7 +219,7 @@ export default function ChickenRoadView({
           </>}
         </div>
       </div>
-      {error && <p className="road-form-error" role="alert">{error}</p>}
+      {error && !landscapeOnly && <p className="road-form-error" role="alert">{error}</p>}
       <footer className="road-footer"><span>18+ · Play responsibly</span><span className="road-history">{historyText}</span><button onClick={() => onDialogChange("rules")}>{rulesLabel}</button></footer>
     </section>
 

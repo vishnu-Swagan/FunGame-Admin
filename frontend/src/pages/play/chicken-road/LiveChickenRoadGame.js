@@ -15,7 +15,20 @@ const chips = (amount) => Number.isSafeInteger(amount) ? amount.toLocaleString("
 const roundFrom = (state) => state?.active_round || state?.latest_round || null;
 const phaseOf = (round) => ({ PLAYING: "playing", CRASHED: "crashed", CASHED: "cashed_out" }[round?.status] || "idle");
 const availability = (state) => state.rules.approval !== "APPROVED" ? "unavailable" : state.enabled ? "ready" : "paused";
-const failureConnection = (failure) => ["CHICKEN_ROAD_DISABLED", "GAME_COMING_SOON"].includes(failure?.response?.data?.detail?.code) ? "unavailable" : "offline";
+const failureConnection = (failure) => {
+  const code = failure?.response?.data?.detail?.code || failure?.code;
+  if (code === "CHICKEN_ROAD_STORAGE") return "storage-unavailable";
+  if (["CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED", "GAME_WALLET_MIRROR_MISMATCH", "WALLET_SOURCE_UNRESOLVED", "WALLET_SOURCE_AMBIGUOUS", "WALLET_SOURCE_UNCERTIFIED"].includes(code)) return "wallet-reconciliation";
+  if (code === "CHICKEN_ROAD_WALLET_UNAVAILABLE") return "wallet-unavailable";
+  return ["CHICKEN_ROAD_DISABLED", "GAME_COMING_SOON", "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE", "CHICKEN_ROAD_STORAGE_UNAVAILABLE", "CHICKEN_ROAD_RULES_UNAVAILABLE"].includes(code) ? "unavailable" : "offline";
+};
+// On touch devices prefer screen orientation so the keyboard cannot imitate a
+// rotation. Desktop/resizable windows fall back to their layout dimensions.
+const isPortrait = () => {
+  const orientation = window.screen?.orientation?.type;
+  if (orientation && window.matchMedia?.("(pointer: coarse)")?.matches) return orientation.startsWith("portrait");
+  return window.innerHeight > window.innerWidth;
+};
 const savedMute = () => { try { return localStorage.getItem(SOUND_KEY) === "true"; } catch { return false; } };
 const collisionText = (chance) => `${(100 * chance.numerator / chance.denominator).toFixed(2)}% (${chance.numerator}/${chance.denominator})`;
 const chancesFor = (version, item) => {
@@ -44,6 +57,7 @@ export default function LiveChickenRoadGame() {
   const [resetting, setResetting] = useState(false);
   const [animateOutcome, setAnimateOutcome] = useState(false);
   const [compact, setCompact] = useState(() => window.innerWidth <= 600);
+  const [portrait, setPortrait] = useState(isPortrait);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [muted, setMuted] = useState(savedMute);
   const [hidden, setHidden] = useState(() => document.hidden);
@@ -100,6 +114,20 @@ export default function LiveChickenRoadGame() {
     }
   }, [client, adopt]);
   refreshRef.current = refresh;
+
+  useEffect(() => {
+    const updateOrientation = () => setPortrait(isPortrait());
+    window.addEventListener("resize", updateOrientation);
+    window.addEventListener("orientationchange", updateOrientation);
+    window.screen?.orientation?.addEventListener?.("change", updateOrientation);
+    return () => {
+      window.removeEventListener("resize", updateOrientation);
+      window.removeEventListener("orientationchange", updateOrientation);
+      window.screen?.orientation?.removeEventListener?.("change", updateOrientation);
+    };
+  }, []);
+
+  useEffect(() => { if (portrait) setDialog(null); }, [portrait]);
 
   useEffect(() => {
     mounted.current = true;
@@ -189,6 +217,9 @@ export default function LiveChickenRoadGame() {
   };
 
   const runAction = async (type, retry = false) => {
+    // Rotation never starts/replays a wager. Cash-out is a protective exit and
+    // remains available for an existing round, including its original retry.
+    if (isPortrait() && (retry ? pending?.kind !== "cashout" : type !== "CASH_OUT")) return;
     if (busy.current || !client || (!retry && (type === "CASH_OUT" ? !canCashOut : !ready)) || (!retry && type === "PLAY" && (!stakeValid || !selected))) return;
     if (!retry && type !== "PLAY" && !snapshotRef.current?.active_round) return;
     busy.current = true;
@@ -278,18 +309,20 @@ export default function LiveChickenRoadGame() {
 
   const phase = phaseOf(displayRound);
   const multipliers = (displayRound?.multipliers_hundredths || selected?.multipliers_hundredths || []).map((value) => value / 100);
-  const locked = !ready || active || moving || Boolean(pending);
+  const locked = portrait || !ready || active || moving || Boolean(pending);
   const presets = rules ? Array.from(new Set([rules.min_stake, rules.min_stake + rules.stake_step, rules.min_stake + 2 * rules.stake_step, rules.max_stake])).filter((value) => value <= rules.max_stake) : [];
   const pendingPlay = pending?.kind === "prepare" ? pending.intent : pending?.kind === "play" ? pending.body : null;
   const pendingDescription = pendingPlay ? `Pending play: ${chips(pendingPlay.amount)} chips · ${rules?.difficulties.find((item) => item.id === pendingPlay.difficulty)?.label || pendingPlay.difficulty}.`
     : pending?.kind === "go" ? "Pending action: one crossing." : pending?.kind === "cashout" ? "Pending action: cash out." : "";
   const statusPanel = connection === "ready" || moving ? null : <>
-    <strong>{connection === "auth" ? "Sign in to play" : connection === "unavailable" ? "Chicken Road is unavailable" : connection === "paused" ? "New crossings are paused" : connection === "pending" ? "Action awaiting confirmation" : connection === "submitting" ? "Confirming your action…" : connection === "offline" ? "Connection interrupted" : "Connecting to Chicken Road…"}</strong>
-    <span>{connection === "auth" ? "Use your player account to continue." : connection === "unavailable" ? "Please check back when the game is available." : connection === "paused" ? active ? "You can still cash out your active round." : "Please check back when the game resumes." : pending ? "Your original action is saved. Check its status before continuing." : connection === "submitting" ? "Waiting for the server’s result." : "Your balance and round will appear after the server confirms them."}</span>
+    <strong>{connection === "auth" ? "Sign in to play" : connection === "storage-unavailable" ? "Browser storage is unavailable" : connection === "wallet-reconciliation" ? "Your wallet needs a review" : connection === "wallet-unavailable" ? "Wallet service is temporarily unavailable" : connection === "unavailable" ? "Chicken Road is unavailable" : connection === "paused" ? "New crossings are paused" : connection === "pending" ? "Action awaiting confirmation" : connection === "submitting" ? "Confirming your action…" : connection === "offline" ? "Connection interrupted" : "Connecting to Chicken Road…"}</strong>
+    <span>{connection === "auth" ? "Use your player account to continue." : connection === "storage-unavailable" ? "Your browser’s saved action cannot be checked safely. Enable local storage, then check your round before continuing." : ["wallet-unavailable", "wallet-reconciliation"].includes(connection) ? error || "Your gameplay wallet is not ready. Please contact support." : connection === "unavailable" ? error || "Please check back when the game is available." : connection === "paused" ? active ? "You can still cash out your active round." : "Please check back when the game resumes." : pending?.kind === "unknown" ? "Your saved action could not be checked. Restore browser storage before continuing." : pending ? "Your original action is saved. Check its status before continuing." : connection === "submitting" ? "Waiting for the server’s result." : "Your balance and round will appear after the server confirms them."}</span>
+    {connection === "wallet-unavailable" && <span>Please check again shortly, or contact support if this continues.</span>}
+    {connection === "wallet-reconciliation" && <span>Please contact support to reconcile your account’s gameplay wallet. New bets remain blocked until it is ready.</span>}
     {pendingDescription && <span>{pendingDescription}</span>}
     {connection === "auth" ? <a href="/login" className="road-top-button">Sign in</a>
       : !["loading", "submitting", "reconnecting"].includes(connection) && <button className="road-top-button" onClick={refresh}>Check round</button>}
-    {pending && pending.kind !== "unknown" && !["loading", "submitting", "reconnecting"].includes(connection)
+    {pending && pending.kind !== "unknown" && (!portrait || pending.kind === "cashout") && !["loading", "submitting", "reconnecting"].includes(connection)
       && <button className="road-top-button" onClick={() => runAction(null, true)}>Retry same action</button>}
   </>;
   const riskRound = snapshot?.active_round;
@@ -310,15 +343,16 @@ export default function LiveChickenRoadGame() {
 
   return <ChickenRoadView
     rootRef={rootRef} phase={phase} roundKey={displayRound?.id} lane={displayRound?.lane || 0}
+    landscapeOnly={portrait} activeRound={active}
     multipliers={multipliers} difficulties={rules?.difficulties || []}
     balanceText={chips(snapshot?.balance)} balanceLabel={snapshot ? `Balance ${chips(snapshot.balance)} chips` : "Balance unavailable"}
     stake={stake} presets={presets} difficulty={difficulty} visibleLane={visibleLane}
     camera={Math.max(0, visibleLane - (compact ? 1 : 2))} moving={moving} resetting={resetting} hidden={hidden}
     escapeFromLane={moving && snapshot?.active_round ? visibleLane - 1 : 0}
-    locked={locked} playDisabled={!ready || !stakeValid || !selected || Boolean(pending)} actionDisabled={!ready || Boolean(pending)}
-    cashOutDisabled={!canCashOut} goDisabled={!ready || Boolean(pending)}
+    locked={locked} playDisabled={portrait || !ready || !stakeValid || !selected || Boolean(pending)} actionDisabled={portrait || !ready || Boolean(pending)}
+    cashOutDisabled={!canCashOut} goDisabled={portrait || !ready || Boolean(pending)}
     cashOutText={chips(snapshot?.active_round?.cashout_amount)} animateOutcome={animateOutcome}
-    result={displayRound && phase !== "playing" && connection === "ready" ? {
+    result={displayRound && phase !== "playing" && ["ready", "paused"].includes(connection) ? {
       type: phase === "crashed" ? "error" : "success",
       title: phase === "crashed" ? "Oh, cluck!" : `${(displayRound.multiplier_hundredths / 100).toFixed(2)}x · Cashed out`,
       detail: phase === "crashed" ? "The crossing ended. Play again when you’re ready." : `+${chips(displayRound.payout)} chips`,
