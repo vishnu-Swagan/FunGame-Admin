@@ -157,8 +157,8 @@ test("a touch device keyboard cannot make portrait count as a physical landscape
   expect(financialApi.post).not.toHaveBeenCalled();
 });
 
-test("rotation preserves the confirmed round and offers cash-out without a crossing in portrait", async () => {
-  server = initial({ balance: 900, active_round: round({ version: 7, cashout_amount: 137 }) });
+test.each([true, false])("portrait cash-out preserves the round and shows confirmed payout while intake enabled=%s", async (enabled) => {
+  server = initial({ enabled, balance: 900, active_round: round({ version: 7, cashout_amount: 137 }) });
   await mount();
   orient(390, 844);
   expect(byId("road-go").disabled).toBe(true);
@@ -169,7 +169,7 @@ test("rotation preserves the confirmed round and offers cash-out without a cross
   financialApi.post.mockImplementation(async (url, body) => {
     expect(url).toBe("/live/chicken-road/cashout");
     const ended = round({ status: "CASHED", version: 8, cashout_amount: 0, payout: 137 });
-    server = initial({ balance: 1037, latest_round: ended });
+    server = initial({ enabled, balance: 1037, latest_round: ended });
     return { data: receipt(body, ended, 1037) };
   });
   await click(byId("road-portrait-cashout"), 2);
@@ -183,6 +183,23 @@ test("rotation preserves the confirmed round and offers cash-out without a cross
   orient(844, 390);
   expect(phase()).toBe("cashed_out");
   expect(byId("road-balance").textContent).toContain("1,037");
+});
+
+test("portrait exposes actionable storage recovery without claiming an action was saved or a connection lost", async () => {
+  orient(390, 844);
+  const getItem = jest.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
+  try {
+    await mount();
+    const prompt = byId("road-landscape-prompt");
+    expect(prompt.textContent).toContain("Browser storage is unavailable");
+    expect(prompt.querySelector('[role="alert"]').textContent).toContain("Enable local storage");
+    expect(prompt.textContent).not.toContain("Your original action is saved");
+    expect(prompt.textContent).not.toContain("Connection interrupted");
+    expect(button("Retry same action")).toBeUndefined();
+    expect(byId("road-play").disabled).toBe(true);
+    expect(financialApi.post).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+  } finally { getItem.mockRestore(); }
 });
 
 test("portrait retains an uncertain crossing for GET reconciliation but cannot retry it until landscape", async () => {
@@ -526,6 +543,11 @@ test("paused new activity still allows a confirmed active round to cash out", as
   expect(phase()).toBe("cashed_out");
   expect(byId("road-play").disabled).toBe(true);
   expect(financialApi.post).toHaveBeenCalledTimes(1);
+  const statusCards = container.querySelectorAll(".road-viewport .road-result");
+  expect(statusCards).toHaveLength(1);
+  expect(statusCards[0].textContent).toContain("New crossings are paused");
+  expect(statusCards[0].textContent).toContain("Cashed out");
+  expect(statusCards[0].textContent).toContain("+106 chips");
 });
 
 test("a lost response and online reconnection never auto-submit or infer a collision", async () => {

@@ -17,6 +17,7 @@ const phaseOf = (round) => ({ PLAYING: "playing", CRASHED: "crashed", CASHED: "c
 const availability = (state) => state.rules.approval !== "APPROVED" ? "unavailable" : state.enabled ? "ready" : "paused";
 const failureConnection = (failure) => {
   const code = failure?.response?.data?.detail?.code || failure?.code;
+  if (code === "CHICKEN_ROAD_STORAGE") return "storage-unavailable";
   if (["CHICKEN_ROAD_WALLET_RECONCILIATION_REQUIRED", "GAME_WALLET_MIRROR_MISMATCH", "WALLET_SOURCE_UNRESOLVED", "WALLET_SOURCE_AMBIGUOUS", "WALLET_SOURCE_UNCERTIFIED"].includes(code)) return "wallet-reconciliation";
   if (code === "CHICKEN_ROAD_WALLET_UNAVAILABLE") return "wallet-unavailable";
   return ["CHICKEN_ROAD_DISABLED", "GAME_COMING_SOON", "CHICKEN_ROAD_EXPOSURE_UNAVAILABLE", "CHICKEN_ROAD_STORAGE_UNAVAILABLE", "CHICKEN_ROAD_RULES_UNAVAILABLE"].includes(code) ? "unavailable" : "offline";
@@ -314,8 +315,8 @@ export default function LiveChickenRoadGame() {
   const pendingDescription = pendingPlay ? `Pending play: ${chips(pendingPlay.amount)} chips · ${rules?.difficulties.find((item) => item.id === pendingPlay.difficulty)?.label || pendingPlay.difficulty}.`
     : pending?.kind === "go" ? "Pending action: one crossing." : pending?.kind === "cashout" ? "Pending action: cash out." : "";
   const statusPanel = connection === "ready" || moving ? null : <>
-    <strong>{connection === "auth" ? "Sign in to play" : connection === "wallet-reconciliation" ? "Your wallet needs a review" : connection === "wallet-unavailable" ? "Wallet service is temporarily unavailable" : connection === "unavailable" ? "Chicken Road is unavailable" : connection === "paused" ? "New crossings are paused" : connection === "pending" ? "Action awaiting confirmation" : connection === "submitting" ? "Confirming your action…" : connection === "offline" ? "Connection interrupted" : "Connecting to Chicken Road…"}</strong>
-    <span>{connection === "auth" ? "Use your player account to continue." : ["wallet-unavailable", "wallet-reconciliation"].includes(connection) ? error || "Your gameplay wallet is not ready. Please contact support." : connection === "unavailable" ? error || "Please check back when the game is available." : connection === "paused" ? active ? "You can still cash out your active round." : "Please check back when the game resumes." : pending ? "Your original action is saved. Check its status before continuing." : connection === "submitting" ? "Waiting for the server’s result." : "Your balance and round will appear after the server confirms them."}</span>
+    <strong>{connection === "auth" ? "Sign in to play" : connection === "storage-unavailable" ? "Browser storage is unavailable" : connection === "wallet-reconciliation" ? "Your wallet needs a review" : connection === "wallet-unavailable" ? "Wallet service is temporarily unavailable" : connection === "unavailable" ? "Chicken Road is unavailable" : connection === "paused" ? "New crossings are paused" : connection === "pending" ? "Action awaiting confirmation" : connection === "submitting" ? "Confirming your action…" : connection === "offline" ? "Connection interrupted" : "Connecting to Chicken Road…"}</strong>
+    <span>{connection === "auth" ? "Use your player account to continue." : connection === "storage-unavailable" ? "Your browser’s saved action cannot be checked safely. Enable local storage, then check your round before continuing." : ["wallet-unavailable", "wallet-reconciliation"].includes(connection) ? error || "Your gameplay wallet is not ready. Please contact support." : connection === "unavailable" ? error || "Please check back when the game is available." : connection === "paused" ? active ? "You can still cash out your active round." : "Please check back when the game resumes." : pending?.kind === "unknown" ? "Your saved action could not be checked. Restore browser storage before continuing." : pending ? "Your original action is saved. Check its status before continuing." : connection === "submitting" ? "Waiting for the server’s result." : "Your balance and round will appear after the server confirms them."}</span>
     {connection === "wallet-unavailable" && <span>Please check again shortly, or contact support if this continues.</span>}
     {connection === "wallet-reconciliation" && <span>Please contact support to reconcile your account’s gameplay wallet. New bets remain blocked until it is ready.</span>}
     {pendingDescription && <span>{pendingDescription}</span>}
@@ -351,7 +352,7 @@ export default function LiveChickenRoadGame() {
     locked={locked} playDisabled={portrait || !ready || !stakeValid || !selected || Boolean(pending)} actionDisabled={portrait || !ready || Boolean(pending)}
     cashOutDisabled={!canCashOut} goDisabled={portrait || !ready || Boolean(pending)}
     cashOutText={chips(snapshot?.active_round?.cashout_amount)} animateOutcome={animateOutcome}
-    result={displayRound && phase !== "playing" && connection === "ready" ? {
+    result={displayRound && phase !== "playing" && ["ready", "paused"].includes(connection) ? {
       type: phase === "crashed" ? "error" : "success",
       title: phase === "crashed" ? "Oh, cluck!" : `${(displayRound.multiplier_hundredths / 100).toFixed(2)}x · Cashed out`,
       detail: phase === "crashed" ? "The crossing ended. Play again when you’re ready." : `+${chips(displayRound.payout)} chips`,

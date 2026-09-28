@@ -101,7 +101,7 @@ function RoadBrand() {
   </h1><span className="road-brand-subtitle">CHAKRI.CASINO</span></div>;
 }
 
-function LandscapePrompt({ activeRound, cashOutDisabled, cashOutText, onAction, statusPanel, result }) {
+function LandscapePrompt({ activeRound, cashOutDisabled, cashOutText, onAction, statusPanel, result, error }) {
   const titleId = useId();
   const titleRef = useRef(null);
   useEffect(() => { titleRef.current?.focus(); }, []);
@@ -115,6 +115,7 @@ function LandscapePrompt({ activeRound, cashOutDisabled, cashOutText, onAction, 
     </>}
     {statusPanel && <div className="road-landscape-status" role="status">{statusPanel}</div>}
     {result && <div className={`road-landscape-status road-landscape-result ${result.type}`} role="status"><strong>{result.title}</strong><span>{result.detail}</span></div>}
+    {error && <p className="road-form-error" role="alert">{error}</p>}
   </section>;
 }
 
@@ -157,10 +158,10 @@ export default function ChickenRoadView({
       </div>
     </header>
     {banner && <div className="road-preview-banner">{banner}</div>}
-    {landscapeOnly && <LandscapePrompt activeRound={activeRound} cashOutDisabled={moving || cashOutDisabled} cashOutText={cashOutText} onAction={onAction} statusPanel={statusPanel} result={!moving ? result : null} />}
+    {landscapeOnly && <LandscapePrompt activeRound={activeRound} cashOutDisabled={moving || cashOutDisabled} cashOutText={cashOutText} onAction={onAction} statusPanel={statusPanel} result={!moving ? result : null} error={error} />}
 
     <section className="road-viewport" aria-label="Chicken Road lanes" hidden={landscapeOnly}>
-      {statusPanel && <div className="road-result road-connection" role="status">{statusPanel}</div>}
+      {statusPanel && <div className="road-result road-connection" role="status">{statusPanel}{result && !moving && !landscapeOnly && <><strong>{result.title}</strong><span>{result.detail}</span></>}</div>}
       <div className="road-track" style={{ "--camera": camera, "--lane-count": multipliers.length + 1 }}>
         <div className="road-lane road-home"><div className="road-patch road-patch--one" /><div className="road-door" /></div>
         {multipliers.map((multiplier, index) => {
@@ -189,7 +190,7 @@ export default function ChickenRoadView({
             : <ChickenCharacter />}
         </div>
       </div>
-      {result && !moving && !landscapeOnly && <div className={`road-result ${result.type}`} role="status">
+      {result && !moving && !landscapeOnly && !statusPanel && <div className={`road-result ${result.type}`} role="status">
         <strong>{result.title}</strong><span>{result.detail}</span>
       </div>}
     </section>
@@ -218,7 +219,7 @@ export default function ChickenRoadView({
           </>}
         </div>
       </div>
-      {error && <p className="road-form-error" role="alert">{error}</p>}
+      {error && !landscapeOnly && <p className="road-form-error" role="alert">{error}</p>}
       <footer className="road-footer"><span>18+ · Play responsibly</span><span className="road-history">{historyText}</span><button onClick={() => onDialogChange("rules")}>{rulesLabel}</button></footer>
     </section>
 

@@ -42,7 +42,8 @@
   text-align: center;
 }
 .road-landscape-prompt h2 { margin: 0; font-size: clamp(24px, 5vw, 36px); line-height: 1.2; }
-.road-landscape-prompt p { max-width: 430px; margin: 0; color: var(--road-muted); font-size: 16px; line-height: 1.55; }
+.road-landscape-prompt p { max-width: 430px; margin: 0; font-size: 16px; line-height: 1.55; }
+.road-landscape-prompt p:not(.road-form-error) { color: var(--road-muted); }
 .road-rotate-icon { position: relative; width: 100px; height: 88px; color: var(--road-yellow); }
 .road-rotate-icon > svg:first-child { transform: rotate(-20deg); }
 .road-rotate-icon > svg:last-child { position: absolute; right: 0; bottom: 0; }

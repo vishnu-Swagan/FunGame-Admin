@@ -6,7 +6,7 @@ The existing React/FastAPI/MongoDB services on Render remain unchanged. This
 maintenance update requires no new services, subscriptions, environment flags,
 wallet movements, or changes to the approved 90% rules.
 
-- [ ] 🤖 **Verify landscape-only play and accurate startup errors** — 10 minutes.
+- [x] 🤖 **Verify landscape-only play and accurate startup errors** — 10 minutes.
 
   > Prompt: “Test portrait-to-landscape rotation without unmounting the live
   controller. Block PLAY/GO in portrait, retain read-only round checks and
@@ -15,6 +15,13 @@ wallet movements, or changes to the approved 90% rules.
 
   **You'll know it worked when:** portrait shows a rotate-device prompt;
   landscape shows the road; rotation never creates or replays a stake.
+
+  Verified: 591 backend tests / 1,765 subtests (one opt-in Mongo skip),
+  82 frontend suites / 741 tests, 27 Aviator tests, and production builds.
+  General/financial reviews caught and resolved temporary-outage cash-out
+  retryability and portrait/paused feedback issues; final reviews are clean.
+  Isolated Chrome checks covered 390×844, 844×390 and 740×360 with production
+  networking and wagering disabled. No production balances changed.
 
 - [ ] 🤖 **Publish the reviewed maintenance release** — 5–10 minutes.
 
