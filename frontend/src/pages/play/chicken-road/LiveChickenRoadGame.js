@@ -9,7 +9,7 @@ import { createChickenRoadLiveClient } from "./chickenRoadLiveClient";
 import { createChickenRoadAudio } from "./chickenRoadAudio";
 import { chickenRoadCollisionChances, verifyChickenRoadFairness } from "./chickenRoadFairness";
 
-const HOP_MS = 480;
+const HOP_MS = 320;
 const SOUND_KEY = "chakri.chicken-road.sound-muted";
 const chips = (amount) => Number.isSafeInteger(amount) ? amount.toLocaleString("en-IN") : "—";
 const roundFrom = (state) => state?.active_round || state?.latest_round || null;
@@ -314,7 +314,7 @@ export default function LiveChickenRoadGame() {
   const pendingPlay = pending?.kind === "prepare" ? pending.intent : pending?.kind === "play" ? pending.body : null;
   const pendingDescription = pendingPlay ? `Pending play: ${chips(pendingPlay.amount)} chips · ${rules?.difficulties.find((item) => item.id === pendingPlay.difficulty)?.label || pendingPlay.difficulty}.`
     : pending?.kind === "go" ? "Pending action: one crossing." : pending?.kind === "cashout" ? "Pending action: cash out." : "";
-  const statusPanel = connection === "ready" || moving ? null : <>
+  const statusPanel = ["ready", "submitting"].includes(connection) || moving ? null : <>
     <strong>{connection === "auth" ? "Sign in to play" : connection === "storage-unavailable" ? "Browser storage is unavailable" : connection === "wallet-reconciliation" ? "Your wallet needs a review" : connection === "wallet-unavailable" ? "Wallet service is temporarily unavailable" : connection === "unavailable" ? "Chicken Road is unavailable" : connection === "paused" ? "New crossings are paused" : connection === "pending" ? "Action awaiting confirmation" : connection === "submitting" ? "Confirming your action…" : connection === "offline" ? "Connection interrupted" : "Connecting to Chicken Road…"}</strong>
     <span>{connection === "auth" ? "Use your player account to continue." : connection === "storage-unavailable" ? "Your browser’s saved action cannot be checked safely. Enable local storage, then check your round before continuing." : ["wallet-unavailable", "wallet-reconciliation"].includes(connection) ? error || "Your gameplay wallet is not ready. Please contact support." : connection === "unavailable" ? error || "Please check back when the game is available." : connection === "paused" ? active ? "You can still cash out your active round." : "Please check back when the game resumes." : pending?.kind === "unknown" ? "Your saved action could not be checked. Restore browser storage before continuing." : pending ? "Your original action is saved. Check its status before continuing." : connection === "submitting" ? "Waiting for the server’s result." : "Your balance and round will appear after the server confirms them."}</span>
     {connection === "wallet-unavailable" && <span>Please check again shortly, or contact support if this continues.</span>}
@@ -342,7 +342,7 @@ export default function LiveChickenRoadGame() {
           : <p>The game rules are unavailable while disconnected.</p>;
 
   return <ChickenRoadView
-    rootRef={rootRef} phase={phase} roundKey={displayRound?.id} lane={displayRound?.lane || 0}
+    rootRef={rootRef} actionPending={connection === "submitting"} hopDurationMs={HOP_MS} phase={phase} roundKey={displayRound?.id} lane={displayRound?.lane || 0}
     landscapeOnly={portrait} activeRound={active}
     multipliers={multipliers} difficulties={rules?.difficulties || []}
     balanceText={chips(snapshot?.balance)} balanceLabel={snapshot ? `Balance ${chips(snapshot.balance)} chips` : "Balance unavailable"}

@@ -789,3 +789,27 @@ test("live and neutral view modules cannot import the development simulator", ()
   expect(gameplay).toContain('"chicken-road": LiveChickenRoadGame');
   expect(gameplay).not.toMatch(/from\s+["'][^"']*\/ChickenRoadGame["']/);
 });
+
+ test("normal crossing waits without an overlay, blocks repeated taps and completes its shorter hop", async () => {
+  server = initial({balance:900, active_round:round()});
+  await mount();
+  const response=deferred(); let sent;
+  financialApi.post.mockImplementation(async (_url,body)=>{sent=body; return response.promise;});
+  await click(byId("road-go"),3);
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('.road-connection')).toBeNull();
+  expect(container.textContent).not.toContain('Confirming your action');
+  expect(byId('chicken-road').getAttribute('aria-busy')).toBe('true');
+  expect(byId('road-go').disabled).toBe(true);
+  expect(byId('road-cashout').disabled).toBe(true);
+  const next=round({version:2,lane:2,multiplier_hundredths:113,cashout_amount:113});
+  server=initial({balance:900,active_round:next});
+  response.resolve({data:receipt(sent,next)});await flush();
+  expect(phase()).toBe('hopping');
+  advance(319);expect(phase()).toBe('hopping');
+  advance(1);expect(phase()).toBe('playing');
+  expect(byId('road-go').disabled).toBe(false);
+  expect(byId('road-cashout').textContent).toContain('113');
+  expect(byId('chicken-road').style.getPropertyValue('--road-hop-duration')).toBe('320ms');
+  expect(financialApi.post).toHaveBeenCalledTimes(1);
+ });

@@ -130,7 +130,7 @@ export default function ChickenRoadView({
   result = null, error = "", banner = null, historyText = "", rulesLabel = "Game rules",
   chanceHint = "", statusPanel = null, dialog = null, animateOutcome = true, onStakeChange, onMinimum, onMaximum,
   onPreset, onDifficulty, onAction, onFullscreen, onDialogChange, escapeFromLane = 0,
-  landscapeOnly = false, activeRound = false,
+  landscapeOnly = false, activeRound = false, actionPending = false, hopDurationMs = 480,
 }) {
   const [endedBurst, setEndedBurst] = useState(null);
   const [escapeBurst, setEscapeBurst] = useState(null);
@@ -147,7 +147,7 @@ export default function ChickenRoadView({
       setEscapeBurst({ roundKey, lane: escapeFromLane });
     }
   }, [moving, escapeFromLane, roundKey, motionAllowed, phase, collisionKey]);
-  return <main className={`road-game${resetting ? " is-resetting" : ""}${hidden ? " is-background" : ""}`} ref={rootRef} data-testid="chicken-road" data-phase={moving ? "hopping" : phase} data-difficulty={difficulty}>
+  return <main className={`road-game${resetting ? " is-resetting" : ""}${hidden ? " is-background" : ""}`} ref={rootRef} style={{ "--road-hop-duration": `${hopDurationMs}ms` }} aria-busy={actionPending} data-testid="chicken-road" data-phase={moving ? "hopping" : phase} data-difficulty={difficulty}>
     <header className="road-topbar">
       <RoadBrand />
       <div className="road-toolbar">
@@ -212,7 +212,7 @@ export default function ChickenRoadView({
         <div className="road-actions">
           {phase === "playing" || moving ? <>
             <button className="road-button road-button--cash" disabled={moving || cashOutDisabled} onClick={() => onAction("CASH_OUT")} data-testid="road-cashout"><span>CASH OUT</span><strong>{cashOutText} <small>◉</small></strong></button>
-            <button className="road-button road-button--play" disabled={moving || goDisabled} onClick={() => onAction("HOP")} data-testid="road-go">{moving ? "…" : "GO"}</button>
+            <button className="road-button road-button--play" disabled={moving || goDisabled} onClick={() => onAction("HOP")} data-testid="road-go">{moving || actionPending ? "…" : "GO"}</button>
           </> : <>
             <button className="road-button road-button--auto" disabled={actionDisabled} onClick={() => onDialogChange("auto")} aria-label="Auto play information"><RotateCw size={44} /><span>Auto</span></button>
             <button className="road-button road-button--play" disabled={playDisabled || actionDisabled} onClick={() => onAction("PLAY")} data-testid="road-play">Play</button>

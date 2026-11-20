@@ -174,7 +174,7 @@
   display: flex;
   width: calc(var(--lane-count, 13) * var(--lane-width));
   transform: translate3d(calc(var(--camera, 0) * var(--lane-width) * -1), 0, 0);
-  transition: transform 480ms cubic-bezier(.22, 1, .36, 1);
+  transition: transform var(--road-hop-duration, 480ms) cubic-bezier(.22, 1, .36, 1);
   will-change: transform;
 }
 .road-lane { position: relative; flex: 0 0 var(--lane-width); height: 100%; overflow: hidden; }
@@ -290,7 +290,7 @@
   width: var(--character-width);
   height: calc(var(--character-width) * 1.15);
   pointer-events: none;
-  transition: left 450ms cubic-bezier(.22, 1, .36, 1);
+  transition: left var(--road-hop-duration, 450ms) cubic-bezier(.22, 1, .36, 1);
 }
 .road-chicken { position: relative; z-index: 2; display: block; width: 100%; height: auto; max-height: 100%; object-fit: contain; object-position: bottom; transform-origin: 50% 100%; animation: road-idle 2.8s ease-in-out infinite; }
 .road-chicken > svg { display: block; width: 100%; height: 100%; }
@@ -302,12 +302,12 @@
 .road-chicken-leg { transform-box: view-box; }
 .road-chicken-leg--near { transform-origin: 34% 81%; }
 .road-chicken-leg--far { transform-origin: 60% 81%; }
-.road-character-layer.is-hopping .road-chicken-leg--near { animation: road-step-near 450ms ease-in-out both; }
-.road-character-layer.is-hopping .road-chicken-leg--far { animation: road-step-far 450ms ease-in-out both; }
+.road-character-layer.is-hopping .road-chicken-leg--near { animation: road-step-near var(--road-hop-duration, 450ms) ease-in-out both; }
+.road-character-layer.is-hopping .road-chicken-leg--far { animation: road-step-far var(--road-hop-duration, 450ms) ease-in-out both; }
 .road-game.is-background .road-chicken, .road-game.is-background .road-chicken *, .road-game.is-background .road-coin { animation-play-state: paused !important; }
 .road-shadow { position: absolute; z-index: 1; bottom: 0; left: 17%; width: 68%; height: 14px; border-radius: 50%; background: #171b3980; filter: blur(3px); }
-.road-character-layer.is-hopping .road-chicken { animation: road-hop 450ms cubic-bezier(.3, .01, .25, 1) both; }
-.road-character-layer.is-hopping .road-shadow { animation: road-shadow-hop 450ms ease both; }
+.road-character-layer.is-hopping .road-chicken { animation: road-hop var(--road-hop-duration, 450ms) cubic-bezier(.3, .01, .25, 1) both; }
+.road-character-layer.is-hopping .road-shadow { animation: road-shadow-hop var(--road-hop-duration, 450ms) ease both; }
 .road-character-layer.is-crashed .road-chicken { animation: road-crash 480ms cubic-bezier(.25, .46, .45, .94) both; }
 
 .road-result {
