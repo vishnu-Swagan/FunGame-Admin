@@ -41,4 +41,4 @@ Eleven isolated scenario groups passed, covering eligibility, missing fee acknow
 
 ## Requested team-account handoff
 
-The user requested 50 accounts created through the Admin CRM Create user form, each with 2,000 starting chips, with generated credentials placed in a Google Sheet. At report preparation, creation through that form is waiting on Chrome enabling JavaScript from Apple Events. No accounts or credential Sheet have been created by this task yet.
+Follow-up completed: 50 users were created through the Admin CRM Create user form with randomly selected names and 2,000 starting promotional chips each. All 50 were verified ACTIVE, with unique login IDs and exactly one 2,000-chip credit each (100,000 chips total). Generated usernames and passwords were imported into a private native Google Sheet and verified as 50 complete rows. The sheet was delivered separately to the user; credentials are not stored in this repository. This account creation did not alter paid Rummy wallet eligibility or payment settings.
