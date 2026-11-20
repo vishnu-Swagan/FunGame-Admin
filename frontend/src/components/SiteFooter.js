@@ -39,12 +39,12 @@ export default function SiteFooter({ signedIn = false }) {
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] leading-relaxed text-white/50">
           <p className="font-semibold text-white/70">{OPERATOR.legalName}</p>
-          <p>Company no. {OPERATOR.companyNumber}</p>
+          <p>Business registration no. {OPERATOR.companyNumber}</p>
           {OPERATOR.addressLines.map((line) => <p key={line}>{line}</p>)}
           <p className="mt-2">
             Company site:{" "}
             <a className="text-primary underline-offset-2 hover:underline" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">
-              libertymarketsltd.uk
+              sky-amc.com
             </a>
           </p>
           <p>

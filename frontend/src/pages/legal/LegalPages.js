@@ -38,7 +38,7 @@ export function AboutPage() {
       <p>{OPERATOR.addressLines.join(", ")}</p>
       <p>
         Company website:{" "}
-        <a className="text-primary" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">libertymarketsltd.uk</a>
+        <a className="text-primary" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">sky-amc.com</a>
       </p>
     </Shell>
   );
@@ -88,11 +88,11 @@ export function ContactPage() {
     <Shell title="Contact">
       <p>Player support is inside the app. Signed-in players can message the operator from Support.</p>
       <p>{OPERATOR.legalName}</p>
-      <p>Company no. {OPERATOR.companyNumber}</p>
+      <p>Business registration no. {OPERATOR.companyNumber}</p>
       {OPERATOR.addressLines.map((line) => <p key={line}>{line}</p>)}
       <p>
         Company site:{" "}
-        <a className="text-primary" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">libertymarketsltd.uk</a>
+        <a className="text-primary" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">sky-amc.com</a>
       </p>
       <p>
         <Link className="text-primary" to="/support">Open Support</Link>

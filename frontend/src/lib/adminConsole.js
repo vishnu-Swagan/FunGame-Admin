@@ -149,7 +149,7 @@ export function apiOriginForRuntime(
   hostname = runtimeHostname,
 ) {
   return isCanonicalProductionHost(hostname)
-    ? "https://api.chakri.casino"
+    ? "https://chakri.casino"
     : defaultBackendUrl;
 }
 
@@ -158,7 +158,7 @@ export function apiOriginForRuntime(
 // financial request may use the canonical production API.
 export function financialApiOriginForRuntime(defaultBackendUrl, hostname = runtimeHostname) {
   return isCanonicalProductionHost(hostname)
-    ? "https://api.chakri.casino"
+    ? "https://chakri.casino"
     : defaultBackendUrl;
 }
 
@@ -171,7 +171,7 @@ export function apiAlternatesForRuntime(
     // A player session must never migrate between ledgers. Historical Render
     // service names can be healthy while carrying different data or code, so
     // canonical production hosts have exactly one allowed API origin.
-    return ["https://api.chakri.casino"];
+    return ["https://chakri.casino"];
   }
   return [...new Set([primaryBackendUrl, configuredBackendUrl].filter(Boolean))];
 }

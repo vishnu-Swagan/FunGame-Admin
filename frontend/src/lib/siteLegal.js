@@ -1,17 +1,17 @@
 /** Operator identity shown in the Chakri.Casino footer and legal pages. */
 export const OPERATOR = {
-  legalName: "Liberty Markets Ltd",
-  companyNumber: "16905599",
+  legalName: "SKY-AMC LIMITED",
+  companyNumber: "81331404",
   productName: "Chakri.Casino",
   tagline: "Play in the Light",
-  country: "United Kingdom",
+  country: "Hong Kong",
   addressLines: [
-    "Unit 29, Highcroft Industrial Estate",
-    "Enterprise Road, Horndean",
-    "Waterlooville, Hampshire PO8 0BT",
-    "United Kingdom",
+    "Unit 1603, 16th Floor, The L. Plaza",
+    "367–375 Queen’s Road Central",
+    "Sheung Wan",
+    "Hong Kong",
   ],
-  companyUrl: "https://libertymarketsltd.uk",
+  companyUrl: "https://sky-amc.com",
   productUrl: "https://chakri.casino",
 };
 

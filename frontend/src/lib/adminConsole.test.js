@@ -179,10 +179,10 @@ describe("isAdminConsoleHost", () => {
   it("uses the verified branded API for a fresh dedicated-console session", () => {
     expect(apiOriginForRuntime(
       "https://old-api.example", true, "crm.chakri.casino",
-    )).toBe("https://api.chakri.casino");
+    )).toBe("https://chakri.casino");
     expect(apiOriginForRuntime(
       "https://player-api.example", false, "chakri.casino",
-    )).toBe("https://api.chakri.casino");
+    )).toBe("https://chakri.casino");
   });
 
   it("never points a staging or localhost build at production APIs", () => {
@@ -203,9 +203,9 @@ describe("isAdminConsoleHost", () => {
     expect(isCanonicalProductionHost("mydgp.casino")).toBe(true);
     expect(financialApiOriginForRuntime(
       "https://configured.example", "chakri.casino",
-    )).toBe("https://api.chakri.casino");
+    )).toBe("https://chakri.casino");
     expect(apiAlternatesForRuntime(
       "https://configured.example", "https://configured.example", "chakri.casino",
-    )).toEqual(["https://api.chakri.casino"]);
+    )).toEqual(["https://chakri.casino"]);
   });
 });

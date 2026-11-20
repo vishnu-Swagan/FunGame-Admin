@@ -106,7 +106,7 @@ function LoggedOutFront({ panel, registrationSubmitted, onSwitchPanel }) {
             </p>
             <Disclaimer className="mt-3" />
             <p className="mt-3 text-[11px] leading-relaxed text-white/45">
-              Chakri.Casino is a virtual-chip digital entertainment service launched by Liberty Markets Ltd, a UK software development, sales and production company.
+              Chakri.Casino is a virtual-chip digital entertainment service launched by SKY-AMC LIMITED, a Hong Kong software development and IT services company.
             </p>
           </motion.div>
 
