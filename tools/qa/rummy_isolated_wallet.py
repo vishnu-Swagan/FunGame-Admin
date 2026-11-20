@@ -43,6 +43,18 @@ async def main():
    await db.users.insert_one(dict(u))
    await db.wallet_accounts.insert_one({'id':'wallet-'+label,'user_id':label,'available_cash_chips':cash,'available_bonus_chips':bonus,'held_cash_chips':0,'version':1})
    return u
+  for label,cash,bonus,eligible in [('elig-cash',1000,0,1000),('elig-bonus',0,2000,0),('elig-mixed',1000,100,0)]:
+   player=await fixture(label,cash,bonus)
+   status=await rr.rummy_eligibility(user=player)
+   assert status['verified'] and status['eligibleCashChips']==eligible and status['cashChips']==cash and status['bonusChips']==bonus,status
+  player=await fixture('elig-uninitialized',2000,0)
+  await db.wallet_accounts.delete_one({'user_id':player['id']})
+  status=await rr.rummy_eligibility(user=player)
+  assert status['verified'] and status['cashChips']==0 and status['bonusChips']==2000 and status['eligibleCashChips']==0
+  player=await fixture('elig-mismatch',1000,0)
+  await db.users.update_one({'id':player['id']},{'$set':{'chip_balance':999}})
+  assert not (await rr.rummy_eligibility(user=player))['verified']
+  REPORT['checks'].append({'name':'cash-only, bonus-only, mixed and unreconciled eligibility agrees with entry policy','passed':True})
   async def balances(users):
    rows=[]
    for u in users:

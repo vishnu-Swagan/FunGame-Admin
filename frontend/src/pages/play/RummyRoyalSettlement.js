@@ -204,7 +204,7 @@ function Standings({ rows, winnerSeat }) {
             <article key={`${seatIndex}:${row?.playerId || row?.displayName || index}`} className={won ? "is-winner" : ""} data-status={String(row?.status || "SETTLED").toLowerCase()}>
               <span className="rrs-standing-position" aria-label={won ? "Winner" : `Seat ${seatIndex + 1}`}>{won ? "♛" : seatIndex + 1}</span>
               <div className="rrs-standing-player">
-                <b>{visibleName(row?.displayName, row?.isBot, `Seat ${seatIndex + 1}`)}</b>
+                <b>{visibleName(row?.displayName, row?.isBot, `Seat ${seatIndex + 1}`)}{row?.isBot ? " · BOT" : ""}</b>
                 <small>SEAT {seatIndex + 1}</small>
               </div>
               <dl>

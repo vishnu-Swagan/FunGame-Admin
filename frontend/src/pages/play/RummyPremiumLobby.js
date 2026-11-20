@@ -168,11 +168,11 @@ function selectFeaturedCategory(categories, balance) {
   return { id: categories[0]?.id, badge: "START HERE" };
 }
 
-function LevelCard({ category, balance, busy, joinFailure, preview, featured, featuredBadge, onJoin }) {
+function LevelCard({ category, balance, eligibility, busy, joinFailure, preview, featured, featuredBadge, onJoin }) {
   const balanceKnown = balance !== null && balance !== "" && Number.isFinite(Number(balance));
   const commission = rummyCommissionForCategory(category);
   const liveRequiredChips = requiredLiveChips(category);
-  const enough = balanceKnown && Number(balance) >= liveRequiredChips;
+  const enough = eligibility?.verified === true && balanceKnown && Number(eligibility.eligibleCashChips) >= liveRequiredChips;
   const failedJoin = joinFailure?.categoryId === category.id ? joinFailure : null;
   const tone = categoryTone(category);
   const labelId = `rpl-level-${String(category.id).toLowerCase()}`;
@@ -242,10 +242,12 @@ function LevelCard({ category, balance, busy, joinFailure, preview, featured, fe
         {failedJoin?.message
           || (preview
             ? "Preview mode · Practice remains available"
-            : !balanceKnown
-              ? "Balance unavailable · Practice remains available"
+            : !eligibility?.verified || !balanceKnown
+              ? "Cash eligibility unavailable · Practice remains available"
+              : eligibility.bonusChips > 0
+                ? "Bonus chips cannot fund Live Rummy · Practice remains available"
               : !enough
-                ? `Live requires a ${formatChips(liveRequiredChips)} balance · Practice remains available`
+                ? `Live requires ${formatChips(liveRequiredChips)} eligible cash chips · Practice remains available`
                 : "Live entry available")}
       </small>
     </article>
@@ -259,6 +261,7 @@ function LevelCard({ category, balance, busy, joinFailure, preview, featured, fe
 export function CategoryLobby({
   categories = [],
   balance,
+  eligibility,
   busy = false,
   loading = false,
   error,
@@ -268,7 +271,7 @@ export function CategoryLobby({
   onRetry,
   onExit,
 }) {
-  const featuredCategory = selectFeaturedCategory(categories, balance);
+  const featuredCategory = selectFeaturedCategory(categories, eligibility?.verified ? eligibility.eligibleCashChips : null);
 
   return (
     <main className="rummy-premium-lobby" data-testid="rummy-category-lobby">
@@ -284,7 +287,11 @@ export function CategoryLobby({
         <div className="rpl-intro-copy">
           <span>LIVE MODE · FIVE-SEAT INDIAN RUMMY</span>
           <h1 id="rpl-lobby-title">Choose your royal table</h1>
-          <p>Thirteen cards. Two sequences. One pure sequence. Pick the table that matches your balance.</p>
+          <p>Thirteen cards. Two sequences. One pure sequence. Pick the table that matches your eligible cash.</p>
+        <div className="rpl-wallet-details" role="status" aria-live="polite">
+          <p>Cash: {eligibility?.verified ? formatChips(eligibility.cashChips) : "—"} · Restricted bonus: {eligibility?.verified ? formatChips(eligibility.bonusChips) : "—"} · Eligible for Live: {eligibility?.verified ? formatChips(eligibility.eligibleCashChips) : "—"} chips</p>
+          <p>{eligibility?.message || "Cash eligibility unavailable. Practice remains available."} Practice opponents are automated bots.</p>
+        </div>
         </div>
         <DecorativeCardFan />
       </section>
@@ -320,6 +327,7 @@ export function CategoryLobby({
               key={category.id}
               category={category}
               balance={balance}
+              eligibility={eligibility}
               busy={busy}
               joinFailure={joinFailure}
               preview={preview}

@@ -615,7 +615,7 @@ export function PlayerSeat({ seat, timer, turnDuration = 30, reducedMotion, view
         {timerText != null && <b className="rummy-only-timer" role="timer" aria-live="off" aria-label={`${timerText} seconds remaining`}>{timerText}</b>}
       </div>
       <strong>{seat.status === "EMPTY" ? "Waiting" : seatName}</strong>
-      <small>{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? "PLAYING" : seat.playerId}</small>
+      <small>{seat.isBot && seat.status === "DROPPED" ? "BOT · " : ""}{seat.status === "DROPPED" ? `Dropped · ${seat.droppedPoints ?? seat.points ?? 0} pts` : seat.isBot ? "BOT · AUTOMATED" : seat.playerId}</small>
       {seat.latestReaction && <span className="rummy-seat-reaction" aria-label={`${seatName} reacted ${seat.latestReaction.message || seat.latestReaction.emoji || ""}`}><i aria-hidden>{seat.latestReaction.emoji || seat.latestReaction.glyph || "♛"}</i>{seat.latestReaction.message || ""}</span>}
       {seat.cardCount > 0 && seat.seatIndex !== viewerSeatIndex && <CardBack count={seat.cardCount} />}
       {active && !reducedMotion && <span className="rummy-active-flare" aria-hidden />}
@@ -1159,6 +1159,7 @@ export default function RummyGame({ game }) {
     && new URLSearchParams(window.location.search).get("play") === "1";
   const [categories, setCategories] = useState([]);
   const [balance, setBalance] = useState(null);
+  const [eligibility, setEligibility] = useState(null);
   const [lobbyLoading, setLobbyLoading] = useState(true);
   const [lobbyError, setLobbyError] = useState(false);
   const [joinFailure, setJoinFailure] = useState(null);
@@ -1211,12 +1212,14 @@ export default function RummyGame({ game }) {
         toast.error(errMsg(error, "Rummy tables could not be loaded."));
       })
       .finally(() => setLobbyLoading(false));
-    const balanceRequest = api.get("/chips/balance")
+    setEligibility(null);
+    const balanceRequest = api.get("/games/rummy/eligibility")
       .then(({ data }) => {
+        setEligibility(data);
         const nextBalance = Number(data.balance);
         setBalance(Number.isFinite(nextBalance) ? nextBalance : null);
       })
-      .catch(() => setBalance(null));
+      .catch(() => { setBalance(null); setEligibility(null); });
     await Promise.allSettled([categoriesRequest, balanceRequest]);
   }, [preview]);
   useEffect(() => { loadLobby(); }, [loadLobby]);
@@ -1512,7 +1515,7 @@ export default function RummyGame({ game }) {
 
   if (!state) return (
     <RummyLandscapeGuard onExit={() => navigate(`/games/${game.slug}`)}>
-      <CategoryLobby categories={categories} balance={balance} busy={busy} loading={lobbyLoading} error={lobbyError} joinFailure={joinFailure} preview={preview} onJoin={join} onRetry={loadLobby} onExit={() => navigate(`/games/${game.slug}`)} />
+      <CategoryLobby categories={categories} eligibility={eligibility} balance={balance} busy={busy} loading={lobbyLoading} error={lobbyError} joinFailure={joinFailure} preview={preview} onJoin={join} onRetry={loadLobby} onExit={() => navigate(`/games/${game.slug}`)} />
     </RummyLandscapeGuard>
   );
   return (

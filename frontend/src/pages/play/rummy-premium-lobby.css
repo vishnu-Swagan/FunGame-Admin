@@ -679,3 +679,9 @@
 
 /* Fee terms remain readable and actions reachable in fixed-height mosaics. */
 .rpl-level-card { grid-template-rows: auto minmax(60px, 1fr) auto auto auto auto; overflow-y: auto; }
+
+.rpl-wallet-details { position: relative; z-index: 2; grid-column: 1 / -1; color: #eff9f2; font-size: 12px; line-height: 1.4; text-align: center; }
+.rpl-wallet-details p { margin: 4px 0; }
+
+.rpl-intro-copy { max-height: 100%; overflow: auto; }
+.rpl-intro .rpl-wallet-details p { white-space: normal; overflow: visible; font-size: 11px; line-height: 1.35; }

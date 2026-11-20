@@ -32,6 +32,7 @@ async function renderLobby(props = {}) {
       <CategoryLobby
         categories={categories}
         balance={1100}
+        eligibility={{verified:true,cashChips:1100,bonusChips:0,eligibleCashChips:1100}}
         busy={false}
         loading={false}
         error={false}
@@ -119,3 +120,22 @@ test("discloses the fifteen-percent live fee and net winner payout before joinin
   confirm.mockRestore();
   act(() => root.unmount());
 });
+
+for (const wallet of [
+  {verified:true,cashChips:0,bonusChips:1000,eligibleCashChips:0},
+  {verified:true,cashChips:1000,bonusChips:100,eligibleCashChips:0},
+  {verified:false,cashChips:null,bonusChips:null,eligibleCashChips:0},
+]) {
+  test(`blocks Live while preserving Practice for ${JSON.stringify(wallet)}`, async () => {
+    const onJoin=jest.fn();
+    const {container,root}=await renderLobby({eligibility:wallet,onJoin});
+    const live=[...container.querySelectorAll('button.is-live')];
+    expect(live.every(b=>b.disabled)).toBe(true);
+    expect([...container.querySelectorAll('button.is-practice')].every(b=>!b.disabled)).toBe(true);
+    await click(live[0]); expect(onJoin).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Restricted bonus:');
+    expect(container.textContent).toContain('Practice opponents are automated bots.');
+    if(wallet.bonusChips) expect(container.textContent).toContain('Bonus chips cannot fund Live Rummy');
+    act(()=>root.unmount());
+  });
+}

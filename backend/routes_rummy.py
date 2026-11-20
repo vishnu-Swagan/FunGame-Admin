@@ -28,6 +28,7 @@ from game_access import require_playable_game
 from ledger import InsufficientChips, credit_chips, debit_chips
 import ledger
 import financial_wallet
+import game_wallet
 import rummy_commission
 import rummy
 from transactions import run_game_transaction
@@ -1244,6 +1245,36 @@ def _new_bot_seat(
         "last_seen_at": _now_iso(),
         "last_seen_epoch": _epoch() if now_epoch is None else float(now_epoch),
     }
+
+
+@router.get("/games/rummy/eligibility")
+async def rummy_eligibility(user: dict = Depends(require_active_player)):
+    """Read-only preview of the same source-wallet restrictions used at entry."""
+    fresh = await db.users.find_one({"id": user["id"]})
+    account = await db.wallet_accounts.find_one({"user_id": user["id"]})
+    result = {"balance": (fresh or {}).get("chip_balance", 0),
+              "cashChips": None, "bonusChips": None, "eligibleCashChips": 0,
+              "verified": False, "message": "Cash eligibility unavailable. Practice remains available."}
+    if not fresh or not game_wallet.integration_enabled():
+        return result
+    if not account:
+        # Wallet initialization classifies any unallocated legacy balance as
+        # non-withdrawable bonus. Preview that rule without creating a wallet.
+        bonus = max(0, int(fresh.get("chip_balance", 0)))
+        result.update(cashChips=0, bonusChips=bonus, verified=True,
+                      message="No eligible cash is available. Bonus chips cannot fund Live Rummy; Practice remains available.")
+        return result
+    try:
+        await game_wallet._assert_wallet_mirror(user["id"], account)
+    except financial_wallet.FinancialError:
+        return result
+    cash = int(account.get("available_cash_chips", 0))
+    bonus = int(account.get("available_bonus_chips", 0))
+    result.update(cashChips=cash, bonusChips=bonus, verified=True,
+                  eligibleCashChips=cash if bonus == 0 else 0,
+                  message=("Restricted bonus chips cannot fund Live Rummy. Live entry is blocked while this wallet contains bonus chips; Practice remains available."
+                           if bonus else "Only eligible cash can fund Live Rummy. Practice uses no wallet chips."))
+    return result
 
 
 @router.get("/games/rummy/categories")

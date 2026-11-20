@@ -193,13 +193,13 @@ test("printed and rank wild jokers remain distinct, readable card faces", () => 
   act(() => rankRoot.unmount());
 });
 
-test("non-player seat metadata never appears as a technical badge", () => {
+test("automated seats are explicitly labelled as bots", () => {
   const bot = { seatIndex: 1, status: "ACTIVE", displayName: "Mira", avatar: "avatar-37", isBot: true, botLabel: "Expert bot", cardCount: 13 };
   const { container, root } = renderSeat(bot, 3);
   expect(container.textContent).toContain("Mira");
-  expect(container.textContent).toContain("PLAYING");
-  expect(container.textContent).not.toMatch(/\bauto\b/i);
-  expect(container.textContent).not.toMatch(/\bbots?\b/i);
+  expect(container.textContent).toContain("BOT · AUTOMATED");
+  expect(container.textContent).toContain("BOT · AUTOMATED");
+  expect(container.querySelector(".rummy-seat small")?.textContent).toContain("BOT");
   expect(container.querySelector(".rummy-seat-bot-badge")).toBeNull();
   expect(container.querySelector('[data-testid="rummy-seat-avatar-1"] img')?.getAttribute("src")).toBe("/game-art/avatars/cartoon/avatar-37.png");
   act(() => root.unmount());
@@ -392,7 +392,7 @@ test("the Rummy lobby presents all five levels without showing the gameplay tabl
   expect(lobby.querySelector("footer")?.textContent).not.toContain("Secure server shuffle");
   expect(lobby.querySelector(".rpl-footer")?.textContent).toBe("CHAKRI.CASINO · RUMMY");
   expect(lobby.textContent).not.toMatch(/\bauto\b/i);
-  expect(lobby.textContent).not.toMatch(/\bbots?\b/i);
+  expect(lobby.textContent).toContain("Practice opponents are automated bots.");
   act(() => root.unmount());
 });
 
@@ -400,7 +400,7 @@ test("only paid Live entry is balance-gated while every Practice table stays ava
   const { container, root } = await render(
     <CategoryLobby
       categories={RUMMY_DEMO_CATEGORIES}
-      balance={750}
+      balance={750} eligibility={{verified:true,cashChips:750,bonusChips:0,eligibleCashChips:750}}
       busy={false}
       loading={false}
       error={false}
@@ -427,7 +427,7 @@ test("Live entry requires the larger of the configured minimum and entry stake",
   const { container, root } = await render(
     <CategoryLobby
       categories={[category]}
-      balance={300}
+      balance={300} eligibility={{verified:true,cashChips:300,bonusChips:0,eligibleCashChips:300}}
       busy={false}
       loading={false}
       error={false}
@@ -442,7 +442,7 @@ test("Live entry requires the larger of the configured minimum and entry stake",
   const practice = [...container.querySelectorAll("button")].find((button) => button.textContent === "PRACTICE TABLE");
   expect(live.disabled).toBe(true);
   expect(practice.disabled).toBe(false);
-  expect(container.textContent).toContain("Live requires a 500 balance");
+  expect(container.textContent).toContain("Live requires 500 eligible cash chips");
   act(() => root.unmount());
 });
 
@@ -458,7 +458,7 @@ test("the deterministic preview completes draw and atomic discard-and-declare wi
   expect(container.querySelector('.rummy-sr-only[role="status"]')?.textContent).toBe("Your turn started.");
   expect(container.querySelector('.rummy-sr-only[role="status"]')?.getAttribute("aria-live")).toBe("polite");
   expect(container.querySelector('[data-testid="rummy-live-table"]')?.textContent).not.toMatch(/\bauto\b/i);
-  expect(container.querySelector('[data-testid="rummy-live-table"]')?.textContent).not.toMatch(/\bbots?\b/i);
+  expect(container.querySelector('[data-testid="rummy-live-table"]')?.textContent).toContain("BOT · AUTOMATED");
   expect(container.textContent).toContain("PURE SEQUENCE");
 
   await click(container.querySelector('button[aria-label="CLOSED DECK"]'));
@@ -594,10 +594,10 @@ test("the flagship result dialog renders a royal outcome hero and complete stand
   expect(hero?.querySelector(".rrs-payout")?.getAttribute("aria-label")).toBe("725 payout");
   expect(standings?.getAttribute("aria-labelledby")).toBe("rrs-standings-title");
   expect(standings?.querySelectorAll(".rrs-standing-rows > article")).toHaveLength(5);
-  expect(winner?.querySelector(".rrs-standing-player b")?.textContent).toBe("Mira");
+  expect(winner?.querySelector(".rrs-standing-player b")?.textContent).toBe("Mira · BOT");
   expect(winner?.textContent).toContain("SEAT 2");
   expect(winner?.textContent).not.toMatch(/\bauto\b/i);
-  expect(panel?.textContent).not.toMatch(/\bbots?\b/i);
+  expect(panel?.textContent).toContain("BOT");
   expect(actions?.querySelector("button")?.textContent).toBe("BACK TO LOBBY");
   expect(panel?.querySelectorAll(".rrs-final-hand .rrs-card")).toHaveLength(3);
   expect(panel?.querySelector(".rrs-final-hand .rrs-group-band")?.textContent).toContain("PURE SEQUENCE");
@@ -710,7 +710,7 @@ test("an older equal-version poll cannot overwrite an acknowledged private group
   let acknowledgedGroups = null;
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
-    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url === "/games/rummy/eligibility") return Promise.resolve({ data: { balance: initial.balance, verified:true, cashChips:initial.balance, bonusChips:0, eligibleCashChips:initial.balance } });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) return stalePoll.promise;
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
@@ -777,7 +777,7 @@ test("wallet-neutral Practice tables remain available when only the balance requ
   const practice = [...container.querySelectorAll("button")].find((button) => button.textContent.includes("PRACTICE TABLE"));
   expect(practice).toBeDefined();
   expect(practice.disabled).toBe(false);
-  expect(container.textContent).toContain("Balance unavailable · Practice remains available");
+  expect(container.textContent).toContain("Cash eligibility unavailable · Practice remains available");
   act(() => root.unmount());
 });
 
@@ -785,7 +785,7 @@ test("a no-response join failure shows contextual recovery and a successful retr
   const initial = createRummyDemoState("LV1");
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
-    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url === "/games/rummy/eligibility") return Promise.resolve({ data: { balance: initial.balance, verified:true, cashChips:initial.balance, bonusChips:0, eligibleCashChips:initial.balance } });
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
   api.post
@@ -825,7 +825,7 @@ test("a failed leave keeps the authoritative table visible instead of stranding 
   let roomReadCount = 0;
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
-    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url === "/games/rummy/eligibility") return Promise.resolve({ data: { balance: initial.balance, verified:true, cashChips:initial.balance, bonusChips:0, eligibleCashChips:initial.balance } });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) {
       roomReadCount += 1;
       if (roomReadCount === 1) return pendingPoll.promise;
@@ -870,7 +870,7 @@ test("a committed drop with a lost acknowledgement accepts the inactive authorit
   let actionCount = 0;
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
-    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url === "/games/rummy/eligibility") return Promise.resolve({ data: { balance: initial.balance, verified:true, cashChips:initial.balance, bonusChips:0, eligibleCashChips:initial.balance } });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) {
       roomReadCount += 1;
       return roomReadCount === 1 ? pendingPoll.promise : Promise.resolve({ data: dropped });
@@ -907,7 +907,7 @@ test("a stale leave restores the room and retries once with the same idempotent 
   const actionConfigs = [];
   api.get.mockImplementation((url) => {
     if (url === "/games/rummy/categories") return Promise.resolve({ data: { categories: [initial.category] } });
-    if (url === "/chips/balance") return Promise.resolve({ data: { balance: initial.balance } });
+    if (url === "/games/rummy/eligibility") return Promise.resolve({ data: { balance: initial.balance, verified:true, cashChips:initial.balance, bonusChips:0, eligibleCashChips:initial.balance } });
     if (url.includes(`/games/rummy/rooms/${initial.roomId}/state`)) return Promise.resolve({ data: restored });
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
@@ -1058,7 +1058,7 @@ test("the rendered practice table keeps the stable auto-fit layer hierarchy with
   expect(stage?.querySelector(".rummy-bot-table-notice")).toBeNull();
   expect(stage?.querySelector(".rummy-table-opponent-disclosure")).toBeNull();
   expect(stage?.textContent).not.toMatch(/\bauto\b/i);
-  expect(stage?.textContent).not.toMatch(/\bbots?\b/i);
+  expect(stage?.textContent).toContain("BOT · AUTOMATED");
   expect(api.get).not.toHaveBeenCalled();
   expect(api.post).not.toHaveBeenCalled();
   await act(async () => {
