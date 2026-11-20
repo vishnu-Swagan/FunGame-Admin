@@ -1611,6 +1611,7 @@ async def admin_create_user(body: AdminCreateUser, admin: dict = Depends(require
         'accepted_terms': True,
         'approved_at': _now(), 'created_at': _now(),
         'provisioned_by': admin['id'], 'admin_note': body.note,
+        **bonus_policy.signup_user_fields(),
     }
     async def commit(session):
         kwargs = {'session': session} if session is not None else {}

@@ -38,6 +38,7 @@ import compliance
 import crm
 import routes_auth
 import routes_admin
+import bonus_policy
 import routes_compliance
 import routes_player
 from models import (
@@ -362,6 +363,10 @@ async def main():
         assert operator_user['registration_source'] == 'OPERATOR'
         assert operator_user['login_verification_exempt'] is True
         assert operator_user['email_verified'] is False
+        # Operator-created accounts must enter the same source-aware wallet
+        # policy as self-registrations, so Chicken Road can classify new chips.
+        await bonus_policy.prepare()
+        assert await bonus_policy.user_participates(operator_user['id'])
         operator_login = await routes_auth.login(LoginRequest(
             identifier=operator_account['username'],
             password=operator_account['password'],
