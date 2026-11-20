@@ -445,6 +445,11 @@ export function RummyRoyalSettlement({
       aria-labelledby="rrs-title"
       aria-describedby="rrs-description"
     >
+      {Number(result.houseCommissionBps) > 0 && (
+        <p className="rrs-commission" data-testid="rummy-settlement-commission">
+          Pot: {formatChips(result.grossPotChips)} chips · House fee: {Number(result.houseCommissionBps) / 100}% ({formatChips(result.houseCommissionChips)} chips) · Winner payout: {formatChips(result.payoutChips)} chips
+        </p>
+      )}
       <p className="rrs-sr-only" role="status" aria-live="polite">
         {phase === RUMMY_ROYAL_SETTLEMENT_PHASES.CELEBRATION
           ? `Round settled. ${playerWon ? "You win" : `${winnerName} wins`}.`

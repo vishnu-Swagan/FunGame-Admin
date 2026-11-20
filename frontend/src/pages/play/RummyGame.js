@@ -1,3 +1,4 @@
+import { rummyCommissionForCategory } from "./rummyCommission";
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, Check, Coins, Hand, Layers3, LogOut, RotateCcw, ShieldCheck, Volume2, VolumeX, X } from "lucide-react";
@@ -941,6 +942,11 @@ export function RummyTable({ state, busy, reconnecting, sendAction, sendSocialEv
         </div>
       </header>
 
+      {state.mode === "LIVE" && rummyCommissionForCategory(state.category) && (
+        <p className="rummy-commission-note" data-testid="rummy-table-commission">
+          House fee: {rummyCommissionForCategory(state.category).percent}% · Winner payout: {formatChips(rummyCommissionForCategory(state.category).winnerPayout)} chips from the full five-player pot.
+        </p>
+      )}
       {state.state === "WAITING_FOR_PLAYERS" ? (
         <section className="rummy-special-state is-waiting" data-testid="rummy-waiting-room">
           <div className="rummy-matchmaking-orbit" aria-hidden><span /><span /><span /><span /><span /></div>
@@ -1229,7 +1235,10 @@ export default function RummyGame({ game }) {
       const joinRequestId = uuid();
       const data = preview
         ? createRummyDemoState(categoryId)
-        : (await api.post("/games/rummy/join", { categoryId, mode }, {
+        : (await api.post("/games/rummy/join", {
+          categoryId, mode,
+          ...(mode === "LIVE" ? { acceptedHouseCommissionBps: categories.find((c) => c.id === categoryId)?.houseCommissionBps ?? 0 } : {}),
+        }, {
           timeout: 22000,
           headers: { "Idempotency-Key": joinRequestId },
         })).data;
@@ -1241,7 +1250,7 @@ export default function RummyGame({ game }) {
       setJoinFailure({ categoryId, mode, message });
       toast.error(message);
     } finally { actionInFlightRef.current = false; setBusy(false); }
-  }, [acceptAuthoritativeState, balance, preview]);
+  }, [acceptAuthoritativeState, balance, preview, categories]);
 
   useEffect(() => {
     if (

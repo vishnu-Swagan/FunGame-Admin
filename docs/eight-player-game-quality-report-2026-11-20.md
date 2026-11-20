@@ -2,6 +2,8 @@
 
 20 November 2026 · Sky AMC installation · synthetic test chips only
 
+**Later update:** New LIVE Rummy rooms now use the user-authorized **15% house commission / 85% winner payout**. The original observations below predate that change. See the [commission implementation and verification](rummy-house-commission-2026-11-20.md).
+
 **Result:** Eight automated player accounts exercised the eleven available game services. All eight final balances reconciled with their source wallets. One confirmed application defect was found in Rummy's wallet-error handling, fixed, regression-tested and verified on the live backend. Several payout-design concerns remain. This is a bounded engineering assessment, not an independent gaming certification or a human usability panel.
 
 ## Scope and method

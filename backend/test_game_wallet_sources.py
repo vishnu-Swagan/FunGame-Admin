@@ -263,6 +263,42 @@ class GameWalletSourceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(total_mirrors, total_wallet)
 
+    async def test_rummy_commission_requires_frozen_proof_and_conserves_cash(self):
+        import rummy_commission
+        await self.database.users.delete_many({})
+        await self.database.wallet_accounts.delete_many({})
+        refs = []
+        for index in range(5):
+            uid = f"fee-player-{index}"
+            await self.database.users.insert_one({"id": uid, "chip_balance": 1000})
+            await self.database.wallet_accounts.insert_one({"id": "wallet-"+uid, "user_id": uid,
+                "available_cash_chips": 1000, "available_bonus_chips": 0, "held_cash_chips": 0, "version": 1})
+            ref = "fee-seat-"+str(index); refs.append(ref)
+            await ledger.debit_chips(uid,100,"Rummy fee QA",ref=ref,kind=ledger.STAKE,game="rummy",session=None)
+        await self.database.rummy_rooms.insert_one({"id":"fee-room","round_id":"fee-round","mode":"LIVE",
+            "category_snapshot":{"houseCommissionBps":1500}})
+        async def pay(amount=425):
+            await ledger.credit_chips("fee-player-0",amount,"Rummy net pot",ref="fee-round",
+                source_refs=refs,settlement_ref="fee-round",kind=ledger.PAYOUT,game="rummy",session=None)
+        with self.assertRaises(finance.FinancialError):
+            await pay()  # No house-fee proof must not permit a reduced payout.
+        proof={"round_id":"fee-round","room_id":"fee-room","winner_user_id":"fee-player-0",
+               "status":"RESERVED","source_refs":sorted(refs),**rummy_commission.split_pot(500,1500)}
+        await self.database.rummy_house_fees.insert_one(proof)
+        with self.assertRaises(finance.FinancialError):
+            await pay(500)  # Frozen commission cannot be bypassed with the old gross payout.
+        await self.database.rummy_house_fees.update_one({"round_id":"fee-round"},{"$set":{"fee_chips":76}})
+        with self.assertRaises(finance.FinancialError):
+            await pay()  # Altered commission evidence fails before consuming sources.
+        await self.database.rummy_house_fees.update_one({"round_id":"fee-round"},{"$set":{"fee_chips":75}})
+        await pay()
+        wallets=await self.database.wallet_accounts.find({}).to_list(None)
+        self.assertEqual(sum(w["available_cash_chips"] for w in wallets)+75,5000)
+        self.assertTrue(all(w["available_bonus_chips"]==0 for w in wallets))
+        self.assertEqual(await self.database.chip_transactions.count_documents({"kind":ledger.PAYOUT}),1)
+        with self.assertRaises(finance.FinancialError):
+            await pay()  # Consumed stake sources cannot fund a second payout.
+
     async def test_restricted_bonus_cannot_fund_peer_to_peer_rummy(self):
         with self.assertRaisesRegex(
             finance.FinancialError, "cannot fund peer-to-peer Rummy",

@@ -97,3 +97,25 @@ test("preview disables Live entry while keeping Practice available", async () =>
   });
   act(() => root.unmount());
 });
+
+test("discloses the fifteen-percent live fee and net winner payout before joining", async () => {
+  const onJoin = jest.fn();
+  const { container, root } = await renderLobby({
+    categories: categories.map((c) => ({ ...c, houseCommissionBps: 1500 })), onJoin,
+  });
+  const first = container.querySelector('[data-category-id="LV1"]');
+  expect(first.querySelector('[data-testid="rummy-commission-disclosure"]').textContent).toContain("House fee: 15% (75 chips)");
+  expect(first.textContent).toContain("Live pot: 500 chips");
+  expect(first.textContent).toContain("Winner payout: 425 chips");
+  const button = [...first.querySelectorAll('button')].find((b) => b.textContent.includes('JOIN LIVE'));
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+  await click(button);
+  expect(onJoin).not.toHaveBeenCalled();
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('House commission: 15% (75 chips)'));
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Winner payout: 425 chips'));
+  confirm.mockReturnValue(true);
+  await click(button);
+  expect(onJoin).toHaveBeenCalledWith('LV1', 'LIVE');
+  confirm.mockRestore();
+  act(() => root.unmount());
+});

@@ -674,3 +674,8 @@
   .rpl-state > i::after { animation: none; transform: translateX(36px); }
   .rpl-mosaic { scroll-behavior: auto; }
 }
+
+.rpl-commission { margin: 12px 0; font-size: .875rem; line-height: 1.5; color: #e2d4b5; }
+
+/* Fee terms remain readable and actions reachable in fixed-height mosaics. */
+.rpl-level-card { grid-template-rows: auto minmax(60px, 1fr) auto auto auto auto; overflow-y: auto; }

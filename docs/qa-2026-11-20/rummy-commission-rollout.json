@@ -1,0 +1,52 @@
+{
+  "previous_rates_bps": {
+    "LV1": 0,
+    "LV2": 0,
+    "LV3": 0,
+    "LV4": 0,
+    "LV5": 0
+  },
+  "existing_room_snapshots_unchanged": true,
+  "crm": {
+    "summary": {
+      "settledRounds": 0,
+      "houseCommissionChips": 0,
+      "grossPotChips": 0,
+      "winnerPayoutChips": 0
+    },
+    "unit": "chips",
+    "categories": [
+      {
+        "id": "LV1",
+        "houseCommissionBps": 1500
+      },
+      {
+        "id": "LV2",
+        "houseCommissionBps": 1500
+      },
+      {
+        "id": "LV3",
+        "houseCommissionBps": 1500
+      },
+      {
+        "id": "LV4",
+        "houseCommissionBps": 1500
+      },
+      {
+        "id": "LV5",
+        "houseCommissionBps": 1500
+      }
+    ]
+  },
+  "public_checks": {
+    "categories_http": 200,
+    "all_five_rates_bps": 1500,
+    "missing_acknowledgement_http": 409,
+    "zero_balance_guard_http": 409,
+    "funded_bets_placed": 0
+  },
+  "qa_account_disabled": true,
+  "financial_ready": false,
+  "frontend_release": "20261120-rummy-commission",
+  "code_hashes_verified": true
+}

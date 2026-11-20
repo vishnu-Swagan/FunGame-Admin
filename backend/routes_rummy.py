@@ -28,6 +28,7 @@ from game_access import require_playable_game
 from ledger import InsufficientChips, credit_chips, debit_chips
 import ledger
 import financial_wallet
+import rummy_commission
 import rummy
 from transactions import run_game_transaction
 
@@ -99,7 +100,7 @@ BOT_SOCIAL_BEATS = (
 CATEGORY_SNAPSHOT_FIELDS = (
     "id", "displayName", "entryChips", "pointsValue", "minChipBalance",
     "maxChipBalance", "turnDurationSeconds", "reconnectAllowanceSeconds",
-    "practiceBotDifficulty",
+    "practiceBotDifficulty", "houseCommissionBps",
     "firstDropPoints", "middleDropPoints", "invalidDeclarationPoints",
     "maxPlayers", "enabled", "displayOrder", "accent",
 )
@@ -237,6 +238,7 @@ class JoinRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     categoryId: str = Field(default="LV1", pattern=r"^LV[1-5]$")
+    acceptedHouseCommissionBps: Optional[int] = Field(default=None, ge=0, le=9999, strict=True)
     mode: Literal["LIVE", "PRACTICE", "BOT_TABLE"] = "LIVE"
 
 
@@ -282,6 +284,7 @@ class RummyChatCreate(BaseModel):
 class CategoryPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    houseCommissionBps: Optional[int] = Field(default=None, ge=0, le=9999, strict=True)
     displayName: Optional[str] = Field(default=None, min_length=2, max_length=30)
     entryChips: Optional[int] = Field(default=None, ge=1, le=10_000_000)
     pointsValue: Optional[int] = Field(default=None, ge=1, le=10_000)
@@ -363,6 +366,7 @@ class RummyChatRequest(BaseModel):
 async def _ensure_rummy_core_unchecked():
     """Create Rummy indexes and the five idempotent centrally managed categories."""
     await db.rummy_rooms.create_index("id", unique=True)
+    await db.rummy_house_fees.create_index("round_id", unique=True, name="rummy_commission_round_unique")
     await db.rummy_rooms.create_index([("category_id", 1), ("mode", 1), ("state", 1), ("seat_count", 1)])
     await db.rummy_rooms.create_index([
         ("mode", 1), ("state", 1), ("scheduled_start_at_epoch", 1),
@@ -492,6 +496,10 @@ def _freeze_category(category: dict) -> dict:
         for field in CATEGORY_SNAPSHOT_FIELDS
         if field in category
     }
+    try:
+        snapshot["houseCommissionBps"] = rummy_commission.commission_bps(snapshot.get("houseCommissionBps", 0))
+    except ValueError:
+        _fail(503, "RUMMY_CATEGORY_INVALID", "The commission configuration is unavailable.")
     if not snapshot.get("id") or int(snapshot.get("maxPlayers", 0)) != rummy.MAX_PLAYERS:
         _fail(503, "RUMMY_CATEGORY_INVALID", "The table configuration is unavailable.")
     if int(snapshot.get("entryChips", 0)) <= 0:
@@ -509,7 +517,7 @@ async def _room_category(room: dict, session=None) -> dict:
     if snapshot:
         return _freeze_category(snapshot)
     category = await _category(room["category_id"], session, require_enabled=False)
-    return _freeze_category(category)
+    return _freeze_category({**category, "houseCommissionBps": 0})
 
 
 def _iso_to_epoch(value) -> float:
@@ -1370,6 +1378,13 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
                 await db.rummy_rooms.replace_one({"id": existing_room["id"]}, existing_room, **kwargs)
 
         current_category = await _category(body.categoryId, session)
+        current_bps = _freeze_category(current_category)["houseCommissionBps"]
+        if body.mode == "LIVE" and (
+            (current_bps and body.acceptedHouseCommissionBps != current_bps)
+            or (body.acceptedHouseCommissionBps is not None and body.acceptedHouseCommissionBps != current_bps)
+        ):
+            _fail(409, "RUMMY_COMMISSION_CONFIRMATION_REQUIRED",
+                  "The table commission changed. Refresh the lobby and review the fee before joining.")
 
         room = None
         scheduled_start = _next_live_start_epoch() if body.mode == "LIVE" else None
@@ -1379,6 +1394,10 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
                     "category_id": body.categoryId, "mode": "LIVE",
                     "state": "WAITING_FOR_PLAYERS", "seat_count": {"$lt": rummy.MAX_PLAYERS},
                     "scheduled_start_at_epoch": scheduled_start,
+                    "$or": ([{"category_snapshot.houseCommissionBps": 0},
+                             {"category_snapshot.houseCommissionBps": {"$exists": False}}]
+                            if current_category.get("houseCommissionBps", 0) == 0
+                            else [{"category_snapshot.houseCommissionBps": current_category["houseCommissionBps"]}]),
                 }, {"_id": 0}, sort=[("created_at", 1)], **kwargs,
             )
         if not room:
@@ -1746,6 +1765,19 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
     )
     pot = amounts["pot"]
     winner_payout = amounts["humanPayout"]
+    fee_bps = category.get("houseCommissionBps", 0) if room.get("mode") == "LIVE" else 0
+    commission = rummy_commission.split_pot(amounts["realStakeTotal"], fee_bps)
+    if room.get("mode") == "LIVE":
+        if not human_winner:
+            _fail(409, "RUMMY_STAKE_INVALID", "An automated seat cannot receive a funded pot.")
+        winner_payout = commission["winner_payout_chips"]
+    if fee_bps:
+        await db.rummy_house_fees.insert_one({
+            "round_id": room["round_id"], "room_id": room["id"],
+            "winner_user_id": winner_user_id, "category_id": category["id"],
+            "source_refs": sorted(seat.get("stake_ref") or f"rummy-seat:{room['id']}:{seat['user_id']}" for seat in seats),
+            **commission, "status": "RESERVED", "created_at": _now_iso(),
+        }, **kwargs)
     if winner_payout:
         pot_source_refs = [
             seat.get("stake_ref") or f"rummy-seat:{room['id']}:{seat['user_id']}"
@@ -1757,6 +1789,13 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
             ref=room["round_id"], kind=ledger.PAYOUT, game="rummy", session=session,
             source_refs=pot_source_refs, settlement_ref=room["round_id"],
         )
+    if fee_bps:
+        posted = await db.rummy_house_fees.update_one(
+            {"round_id": room["round_id"], "status": "RESERVED"},
+            {"$set": {"status": "POSTED", "posted_at": _now_iso()}}, **kwargs,
+        )
+        if posted.modified_count != 1:
+            raise RuntimeError("Rummy commission could not be posted atomically")
     for seat in seats:
         # Practice/bot seats never debit the authoritative wallet, so there is
         # no wager to settle.  Emitting a settlement for those synthetic refs
@@ -1858,6 +1897,10 @@ async def _settle_room(room: dict, winner_user_id: str, reason: str, session):
                 if winner_seat.get("is_bot") else winner_seat.get("display_name") or "Player"
             ),
             "payoutChips": winner_payout, "virtualPotChips": pot,
+            "grossPotChips": amounts["realStakeTotal"],
+            "houseCommissionBps": fee_bps,
+            "houseCommissionChips": commission["fee_chips"],
+            "commissionPolicyVersion": rummy_commission.POLICY_VERSION,
             "reason": reason, "rows": rows,
             "settledAt": _now_iso(),
         },
@@ -2852,3 +2895,21 @@ async def admin_rummy_category_update(
     await db.rummy_categories.update_one({"id": category_id}, {"$set": updates}, upsert=True)
     updated = await _category(category_id, require_enabled=False)
     return {"message": "Rummy category updated", "category": serialize_doc(updated)}
+
+
+@router.get("/admin/rummy/commission-summary")
+async def admin_rummy_commission_summary(admin: dict = Depends(require_admin)):
+    rows = await db.rummy_house_fees.aggregate([
+        {"$match": {"status": "POSTED"}},
+        {"$group": {"_id": None, "settledRounds": {"$sum": 1},
+                    "houseCommissionChips": {"$sum": "$fee_chips"},
+                    "grossPotChips": {"$sum": "$gross_pot_chips"},
+                    "winnerPayoutChips": {"$sum": "$winner_payout_chips"}}},
+    ]).to_list(1)
+    summary = rows[0] if rows else {"settledRounds": 0, "houseCommissionChips": 0,
+                                  "grossPotChips": 0, "winnerPayoutChips": 0}
+    summary.pop("_id", None)
+    categories = await _categories()
+    return {"summary": summary, "unit": "chips", "categories": [
+        {"id": c["id"], "houseCommissionBps": c.get("houseCommissionBps", 0)} for c in categories
+    ]}

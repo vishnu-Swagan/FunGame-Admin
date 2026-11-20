@@ -15,6 +15,7 @@ export default function AdminGames() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [rummyCommission, setRummyCommission] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -30,6 +31,10 @@ export default function AdminGames() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    api.get("/admin/rummy/commission-summary").then(({ data }) => setRummyCommission(data)).catch(() => setRummyCommission(null));
+  }, []);
 
   const update = async (slug, patch) => {
     // optimistic
@@ -64,6 +69,15 @@ export default function AdminGames() {
         <span className="source-indicator" />
         <div><strong>Server-enforced availability</strong><p>Only reviewed games can be made live. Every locked-game play attempt is rejected by the API.</p></div>
       </div>
+
+      {rummyCommission && (
+        <div className="crm-inline-notice" data-testid="rummy-house-commission-summary">
+          <div><strong>Rummy house commission</strong><p>
+            New-table rates: {rummyCommission.categories.map((c) => `${c.id}: ${c.houseCommissionBps / 100}%`).join(" · ")}.<br />
+            Collected: {rummyCommission.summary.houseCommissionChips.toLocaleString()} chips across {rummyCommission.summary.settledRounds} settled rounds. Player payouts: {rummyCommission.summary.winnerPayoutChips.toLocaleString()} chips.
+          </p></div>
+        </div>
+      )}
 
       <div className="crm-filter-bar">
         <label className="crm-search-control">

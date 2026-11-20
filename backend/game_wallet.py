@@ -9,6 +9,7 @@ from db import db
 import financial_wallet as finance
 import ledger
 import bonus_policy
+import rummy_commission
 from pymongo.errors import DuplicateKeyError
 
 
@@ -241,6 +242,33 @@ def _payout_bonus_lot_changes(
     return changes
 
 
+async def _validate_rummy_payout(user_id, amount, sources, settlement_ref, session=None):
+    kwargs = _session_kwargs(session)
+    source_total = sources["cash_chips"] + sources["bonus_chips"]
+    room = await db.rummy_rooms.find_one({"round_id": settlement_ref}, **kwargs) if settlement_ref else None
+    frozen_bps = ((room or {}).get("category_snapshot") or {}).get("houseCommissionBps", 0)
+    fee = await db.rummy_house_fees.find_one({"round_id": settlement_ref}, **kwargs) if settlement_ref else None
+    if not fee:
+        if frozen_bps or source_total != amount:
+            raise finance.FinancialError("PAYOUT_SOURCE_MISMATCH", "The Rummy payout does not match the certified source pot and commission.", 409)
+        return
+    try:
+        split = rummy_commission.split_pot(source_total, frozen_bps)
+    except ValueError as exc:
+        raise finance.FinancialError("PAYOUT_SOURCE_MISMATCH", "Rummy commission evidence is invalid.", 409) from exc
+    refs = sorted(row["ref"] for row in sources["source_transactions"])
+    if (
+        not room or room.get("mode") != "LIVE" or not frozen_bps
+        or fee.get("room_id") != room.get("id")
+        or fee.get("winner_user_id") != user_id or fee.get("status") != "RESERVED"
+        or len(refs) != 5 or len({r["user_id"] for r in sources["source_transactions"]}) != 5
+        or sources["bonus_chips"] != 0 or fee.get("source_refs") != refs
+        or any(fee.get(key) != value for key, value in split.items())
+        or amount != split["winner_payout_chips"]
+    ):
+        raise finance.FinancialError("PAYOUT_SOURCE_MISMATCH", "The Rummy payout does not match its frozen commission and certified stake sources.", 409)
+
+
 class SourceWalletAdapter:
     async def debit(
         self, *, event_id: str, user_id: str, amount: int, kind: str,
@@ -346,6 +374,8 @@ class SourceWalletAdapter:
                 aggregate_owners=aggregate_owners,
             )
             source_total = sources["cash_chips"] + sources["bonus_chips"]
+            if aggregate_owners:
+                await _validate_rummy_payout(user_id, int(amount), sources, ref, session)
             source_bonus_lots = list(sources.get("bonus_lots", []))
             await _reserve_source_consumptions(
                 credited_user_id=user_id, credit_kind=kind, event_id=event_id,
@@ -365,12 +395,6 @@ class SourceWalletAdapter:
                     "lot_id": item["lot_id"], "delta_chips": int(item["chips"]),
                 } for item in source_bonus_lots]
             else:
-                if aggregate_owners and source_total != int(amount):
-                    raise finance.FinancialError(
-                        "PAYOUT_SOURCE_MISMATCH",
-                        "The Rummy payout does not match the certified source pot.",
-                        409,
-                    )
                 # Cash receives floor(proportion). Any indivisible remainder
                 # stays restricted in bonus, the safer deterministic rounding.
                 cash = int(amount) * sources["cash_chips"] // source_total

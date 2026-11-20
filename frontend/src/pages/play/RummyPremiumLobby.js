@@ -1,3 +1,4 @@
+import { rummyCommissionForCategory } from "./rummyCommission";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Clock3, Coins, Crown, ShieldCheck } from "lucide-react";
 
@@ -169,6 +170,7 @@ function selectFeaturedCategory(categories, balance) {
 
 function LevelCard({ category, balance, busy, joinFailure, preview, featured, featuredBadge, onJoin }) {
   const balanceKnown = balance !== null && balance !== "" && Number.isFinite(Number(balance));
+  const commission = rummyCommissionForCategory(category);
   const liveRequiredChips = requiredLiveChips(category);
   const enough = balanceKnown && Number(balance) >= liveRequiredChips;
   const failedJoin = joinFailure?.categoryId === category.id ? joinFailure : null;
@@ -204,15 +206,24 @@ function LevelCard({ category, balance, busy, joinFailure, preview, featured, fe
         </dl>
       </div>
 
+      <p className="rpl-commission" data-testid="rummy-commission-disclosure">
+        {commission ? <>Live pot: {formatChips(commission.grossPot)} chips · House fee: {commission.percent}% ({formatChips(commission.fee)} chips) · Winner payout: {formatChips(commission.winnerPayout)} chips. Fractional fee chips round down.</> : "Commission unavailable. Refresh the tables before joining Live."}
+      </p>
       <PremiumSchedule category={category} />
 
       <div className="rpl-level-actions">
         <button
           type="button"
           className="is-live"
-          disabled={busy || preview || !enough}
+          disabled={busy || preview || !enough || !commission}
           aria-describedby={statusId}
-          onClick={() => onJoin(category.id, "LIVE")}
+          onClick={() => {
+            if (!commission) return;
+            if (commission.bps > 0 && !window.confirm(
+              `Join this five-player Live table?\nEntry stake: ${formatChips(category.entryChips)} chips\nFull pot: ${formatChips(commission.grossPot)} chips\nHouse commission: ${commission.percent}% (${formatChips(commission.fee)} chips)\nWinner payout: ${formatChips(commission.winnerPayout)} chips\nFractional fee chips are rounded down.`,
+            )) return;
+            onJoin(category.id, "LIVE");
+          }}
         >
           {liveLabel}
         </button>

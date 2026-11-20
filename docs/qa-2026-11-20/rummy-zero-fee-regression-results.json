@@ -1,0 +1,85 @@
+{
+  "isolation": "disposable MongoDB database; dedicated readWrite credential scoped only to that database",
+  "real_mongo_transactions": true,
+  "commission_bps": 0,
+  "checks": [
+    {
+      "name": "five funded accounts; four drops; pooled settlement and exact-action retry",
+      "passed": true,
+      "entry_each": 100,
+      "pot": 500,
+      "wallets": [
+        {
+          "user": "funded-0",
+          "cash": 900,
+          "bonus": 0,
+          "mirror": 900
+        },
+        {
+          "user": "funded-1",
+          "cash": 900,
+          "bonus": 0,
+          "mirror": 900
+        },
+        {
+          "user": "funded-2",
+          "cash": 900,
+          "bonus": 0,
+          "mirror": 900
+        },
+        {
+          "user": "funded-3",
+          "cash": 900,
+          "bonus": 0,
+          "mirror": 900
+        },
+        {
+          "user": "funded-4",
+          "cash": 1400,
+          "bonus": 0,
+          "mirror": 1400
+        }
+      ],
+      "total_before": 5000,
+      "total_after": 5000,
+      "payout_count": 1,
+      "house_fee": 0,
+      "winner_payout": 500
+    },
+    {
+      "name": "waiting-table refund and duplicate leave",
+      "passed": true,
+      "restored_cash": 1000,
+      "refund_count": 1
+    },
+    {
+      "name": "bonus-only wallet rejection rolls back",
+      "passed": true,
+      "expected_error": "RESTRICTED_BONUS_P2P_NOT_ALLOWED",
+      "cash": 0,
+      "bonus": 1000
+    },
+    {
+      "name": "mixed wallet rejection rolls back",
+      "passed": true,
+      "expected_error": "RESTRICTED_BONUS_P2P_NOT_ALLOWED",
+      "cash": 1000,
+      "bonus": 100
+    },
+    {
+      "name": "underfunded wallet rejection rolls back",
+      "passed": true,
+      "expected_error": "RUMMY_BALANCE_TOO_LOW",
+      "cash": 50,
+      "bonus": 0
+    },
+    {
+      "name": "real Mongo transaction rollback after wallet debit",
+      "passed": true,
+      "cash_restored": 1000,
+      "orphan_ledger_rows": 0,
+      "orphan_seats": 0
+    }
+  ],
+  "temporary_database_removed": true
+}
