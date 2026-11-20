@@ -1,0 +1,842 @@
+{
+  "rounds_per_strategy": 20000,
+  "players": 8,
+  "stake": 100,
+  "aviator_factor": 0.945,
+  "games": {
+    "seven-up-down": [
+      {
+        "profile": "up",
+        "rtp_percent": 82.65,
+        "ci95_percent": [
+          81.2851,
+          84.0149
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "down",
+        "rtp_percent": 83.5,
+        "ci95_percent": [
+          82.133,
+          84.867
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "seven",
+        "rtp_percent": 84.625,
+        "ci95_percent": [
+          82.0265,
+          87.2235
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "t2",
+        "rtp_percent": 76.41,
+        "ci95_percent": [
+          70.2045,
+          82.6155
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "t3",
+        "rtp_percent": 72.28,
+        "ci95_percent": [
+          68.1513,
+          76.4087
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "t4",
+        "rtp_percent": 76.77,
+        "ci95_percent": [
+          73.2858,
+          80.2542
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "t5",
+        "rtp_percent": 77.56,
+        "ci95_percent": [
+          74.5148,
+          80.6052
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "t6",
+        "rtp_percent": 82.5,
+        "ci95_percent": [
+          79.6363,
+          85.3637
+        ],
+        "bets": 20000
+      }
+    ],
+    "andar-bahar": [
+      {
+        "profile": "andar",
+        "rtp_percent": 95.99,
+        "ci95_percent": [
+          94.6052,
+          97.3748
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "bahar",
+        "rtp_percent": 98.8095,
+        "ci95_percent": [
+          97.4939,
+          100.1251
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_1_5",
+        "rtp_percent": 93.625,
+        "ci95_percent": [
+          91.4777,
+          95.7723
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_6_10",
+        "rtp_percent": 98.6625,
+        "ci95_percent": [
+          96.0821,
+          101.2429
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_11_15",
+        "rtp_percent": 94.9025,
+        "ci95_percent": [
+          92.0222,
+          97.7828
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_16_25",
+        "rtp_percent": 95.715,
+        "ci95_percent": [
+          93.1628,
+          98.2672
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_26_30",
+        "rtp_percent": 90.9,
+        "ci95_percent": [
+          85.9397,
+          95.8603
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "count_41_49",
+        "rtp_percent": 100.8,
+        "ci95_percent": [
+          85.6211,
+          115.9789
+        ],
+        "bets": 20000
+      }
+    ],
+    "keno": [
+      {
+        "profile": 1,
+        "rtp_percent": 70.0667,
+        "ci95_percent": [
+          68.5061,
+          71.6272
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 2,
+        "rtp_percent": 70.1706,
+        "ci95_percent": [
+          68.8549,
+          71.4863
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 3,
+        "rtp_percent": 70.1176,
+        "ci95_percent": [
+          68.8853,
+          71.3499
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 4,
+        "rtp_percent": 70.4512,
+        "ci95_percent": [
+          68.839,
+          72.0634
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 5,
+        "rtp_percent": 71.3858,
+        "ci95_percent": [
+          69.0677,
+          73.7039
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 6,
+        "rtp_percent": 70.8001,
+        "ci95_percent": [
+          68.7736,
+          72.8265
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 9,
+        "rtp_percent": 70.9903,
+        "ci95_percent": [
+          69.0609,
+          72.9197
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 10,
+        "rtp_percent": 98.6235,
+        "ci95_percent": [
+          96.3062,
+          100.9408
+        ],
+        "bets": 20000
+      }
+    ],
+    "pappu-pictures": [
+      {
+        "profile": "umbrella",
+        "rtp_percent": 87.64,
+        "ci95_percent": [
+          82.3169,
+          92.9631
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "football",
+        "rtp_percent": 89.18,
+        "ci95_percent": [
+          82.9649,
+          95.3951
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "sun",
+        "rtp_percent": 87.69,
+        "ci95_percent": [
+          81.8879,
+          93.4921
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "diya",
+        "rtp_percent": 88.47,
+        "ci95_percent": [
+          82.2307,
+          94.7093
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "cow",
+        "rtp_percent": 89.25,
+        "ci95_percent": [
+          83.7199,
+          94.7801
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "bucket",
+        "rtp_percent": 90.95,
+        "ci95_percent": [
+          84.8976,
+          97.0024
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "blanket",
+        "rtp_percent": 91.82,
+        "ci95_percent": [
+          85.7981,
+          97.8419
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "top",
+        "rtp_percent": 91.92,
+        "ci95_percent": [
+          86.2131,
+          97.6269
+        ],
+        "bets": 20000
+      }
+    ],
+    "teen-patti": [
+      {
+        "profile": "player",
+        "rtp_percent": 70.364,
+        "ci95_percent": [
+          69.3938,
+          71.3342
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.377,
+        "ci95_percent": [
+          68.4069,
+          70.3471
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "tie",
+        "rtp_percent": 1.11,
+        "ci95_percent": [
+          0.7527,
+          1.4673
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "player",
+        "rtp_percent": 70.364,
+        "ci95_percent": [
+          69.3938,
+          71.3342
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.377,
+        "ci95_percent": [
+          68.4069,
+          70.3471
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "tie",
+        "rtp_percent": 1.11,
+        "ci95_percent": [
+          0.7527,
+          1.4673
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "player",
+        "rtp_percent": 70.364,
+        "ci95_percent": [
+          69.3938,
+          71.3342
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.377,
+        "ci95_percent": [
+          68.4069,
+          70.3471
+        ],
+        "bets": 20000
+      }
+    ],
+    "poker": [
+      {
+        "profile": "player",
+        "rtp_percent": 70.224,
+        "ci95_percent": [
+          69.2538,
+          71.1942
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.776,
+        "ci95_percent": [
+          68.8058,
+          70.7462
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "tie",
+        "rtp_percent": 0.0,
+        "ci95_percent": [
+          0.0,
+          0.0
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "player",
+        "rtp_percent": 70.224,
+        "ci95_percent": [
+          69.2538,
+          71.1942
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.776,
+        "ci95_percent": [
+          68.8058,
+          70.7462
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "tie",
+        "rtp_percent": 0.0,
+        "ci95_percent": [
+          0.0,
+          0.0
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "player",
+        "rtp_percent": 70.224,
+        "ci95_percent": [
+          69.2538,
+          71.1942
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "dealer",
+        "rtp_percent": 69.776,
+        "ci95_percent": [
+          68.8058,
+          70.7462
+        ],
+        "bets": 20000
+      }
+    ],
+    "aviator": [
+      {
+        "profile": 1.1,
+        "rtp_percent": 94.1435,
+        "ci95_percent": [
+          93.608,
+          94.679
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 1.25,
+        "rtp_percent": 93.8438,
+        "ci95_percent": [
+          93.0943,
+          94.5932
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 1.5,
+        "rtp_percent": 94.005,
+        "ci95_percent": [
+          92.9995,
+          95.0105
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 2.0,
+        "rtp_percent": 93.31,
+        "ci95_percent": [
+          91.9271,
+          94.6929
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 3.0,
+        "rtp_percent": 92.505,
+        "ci95_percent": [
+          90.5848,
+          94.4252
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 5.0,
+        "rtp_percent": 93.15,
+        "ci95_percent": [
+          90.4519,
+          95.8481
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 10.0,
+        "rtp_percent": 91.75,
+        "ci95_percent": [
+          87.7491,
+          95.7509
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": 20.0,
+        "rtp_percent": 90.4,
+        "ci95_percent": [
+          84.6415,
+          96.1585
+        ],
+        "bets": 20000
+      }
+    ],
+    "fun-roulette": [
+      {
+        "profile": [
+          "color",
+          "red"
+        ],
+        "rtp_percent": 95.03,
+        "ci95_percent": [
+          93.6457,
+          96.4143
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "color",
+          "black"
+        ],
+        "rtp_percent": 94.46,
+        "ci95_percent": [
+          93.0762,
+          95.8438
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "parity",
+          "even"
+        ],
+        "rtp_percent": 94.75,
+        "ci95_percent": [
+          93.3659,
+          96.1341
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "parity",
+          "odd"
+        ],
+        "rtp_percent": 94.74,
+        "ci95_percent": [
+          93.356,
+          96.124
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "straight",
+          "1"
+        ],
+        "rtp_percent": 99.54,
+        "ci95_percent": [
+          91.3589,
+          107.7211
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "straight",
+          "0"
+        ],
+        "rtp_percent": 88.02,
+        "ci95_percent": [
+          80.3142,
+          95.7258
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "straight",
+          "00"
+        ],
+        "rtp_percent": 101.16,
+        "ci95_percent": [
+          92.9145,
+          109.4055
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "color",
+          "red"
+        ],
+        "rtp_percent": 95.03,
+        "ci95_percent": [
+          93.6457,
+          96.4143
+        ],
+        "bets": 20000
+      }
+    ],
+    "blackjack": [
+      {
+        "profile": "hit below 12; no split/double/insurance",
+        "rtp_percent": 92.235,
+        "ci95_percent": [
+          90.8596,
+          93.6104
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 13; no split/double/insurance",
+        "rtp_percent": 93.375,
+        "ci95_percent": [
+          92.0006,
+          94.7494
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 14; no split/double/insurance",
+        "rtp_percent": 93.5575,
+        "ci95_percent": [
+          92.1861,
+          94.9289
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 15; no split/double/insurance",
+        "rtp_percent": 93.5925,
+        "ci95_percent": [
+          92.2284,
+          94.9566
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 16; no split/double/insurance",
+        "rtp_percent": 94.0975,
+        "ci95_percent": [
+          92.7357,
+          95.4593
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 17; no split/double/insurance",
+        "rtp_percent": 92.545,
+        "ci95_percent": [
+          91.1934,
+          93.8966
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 18; no split/double/insurance",
+        "rtp_percent": 91.29,
+        "ci95_percent": [
+          89.9282,
+          92.6518
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": "hit below 19; no split/double/insurance",
+        "rtp_percent": 81.555,
+        "ci95_percent": [
+          80.1979,
+          82.9121
+        ],
+        "bets": 20000
+      }
+    ],
+    "chicken-road": [
+      {
+        "profile": [
+          "easy",
+          1
+        ],
+        "rtp_percent": 90.3279,
+        "ci95_percent": [
+          89.8064,
+          90.8494
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "easy",
+          5
+        ],
+        "rtp_percent": 89.3579,
+        "ci95_percent": [
+          88.4825,
+          90.2333
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "medium",
+          1
+        ],
+        "rtp_percent": 90.1264,
+        "ci95_percent": [
+          89.511,
+          90.7418
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "medium",
+          5
+        ],
+        "rtp_percent": 91.0998,
+        "ci95_percent": [
+          89.7321,
+          92.4675
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "hard",
+          1
+        ],
+        "rtp_percent": 90.693,
+        "ci95_percent": [
+          89.8144,
+          91.5716
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "hard",
+          5
+        ],
+        "rtp_percent": 91.5735,
+        "ci95_percent": [
+          89.0661,
+          94.081
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "hardcore",
+          1
+        ],
+        "rtp_percent": 89.9325,
+        "ci95_percent": [
+          88.9138,
+          90.9512
+        ],
+        "bets": 20000
+      },
+      {
+        "profile": [
+          "hardcore",
+          5
+        ],
+        "rtp_percent": 88.426,
+        "ci95_percent": [
+          85.0486,
+          91.8034
+        ],
+        "bets": 20000
+      }
+    ],
+    "rummy": {
+      "rtp": "Not estimated: multiplayer skill and settlement rules require a separate full-hand study; practice rounds do not measure paid RTP."
+    }
+  },
+  "exact": {
+    "keno": {
+      "1": 69.72222222222223,
+      "2": 69.85714285714285,
+      "3": 69.89075630252101,
+      "4": 69.80112044817928,
+      "5": 69.77559205500383,
+      "6": 69.86513036299564,
+      "7": 69.93906330860791,
+      "8": 69.93167294220754,
+      "9": 69.77507688281098,
+      "10": 97.01075888833527
+    },
+    "roulette_standard_bets": 94.73684210526315,
+    "seven_up_down": {
+      "down": 83.33333333333333,
+      "seven": 83.33333333333334,
+      "up": 83.33333333333333
+    },
+    "pappu_pictures": 92.30902777777779,
+    "chicken_road": 90.0,
+    "andar_bahar": {
+      "andar": 96.99879951980793,
+      "bahar": 97.85114045618243
+    },
+    "andar_bahar_card_count": {
+      "1-5": 94.87394957983193,
+      "6-10": 97.67106842737095,
+      "11-15": 92.96518607442977,
+      "16-25": 98.10324129651859,
+      "26-30": 91.4765906362545,
+      "31-35": 92.43697478991596,
+      "36-40": 94.83793517406963,
+      "41-49": 95.07803121248502
+    }
+  },
+  "notes": [
+    "Offline engine outcomes and live account tests are different experiments.",
+    "Eight profiles share each generated round in several games; pooled bets are correlated. Confidence intervals are per profile, approximate normal intervals, and unreliable for rare or zero-hit events.",
+    "Blackjack policies are simple thresholds without split/double/insurance; results are not optimal-strategy theoretical RTP.",
+    "Rummy was not included in Monte Carlo RTP.",
+    "No independent lab certification or human usability panel."
+  ]
+}

@@ -1883,3 +1883,32 @@ def test_atomic_invalid_declaration_discards_once_and_applies_configured_penalty
             _restore_practice_action_database(originals)
 
     asyncio.run(scenario())
+
+
+def test_join_returns_wallet_restriction_without_committing_or_exposing_a_server_error():
+    from unittest.mock import AsyncMock, patch
+    import financial_wallet
+
+    async def scenario():
+        error = financial_wallet.FinancialError(
+            "RESTRICTED_BONUS_P2P_NOT_ALLOWED",
+            "Restricted bonus chips cannot fund peer-to-peer Rummy stakes.",
+            409,
+        )
+        transaction = AsyncMock(side_effect=error)
+        with patch.object(routes_rummy, "_require_rummy_core_ready", AsyncMock()), \
+             patch.object(routes_rummy, "require_playable_game", AsyncMock()), \
+             patch.object(routes_rummy, "run_game_transaction", transaction):
+            try:
+                await routes_rummy.rummy_join(
+                    routes_rummy.JoinRequest(categoryId="LV1", mode="LIVE"),
+                    {"id": "restricted-qa-player"},
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 409
+                assert exc.detail == {"code": error.code, "message": error.message}
+            else:
+                raise AssertionError("Restricted wallet join must remain blocked")
+        transaction.assert_awaited_once()
+
+    asyncio.run(scenario())

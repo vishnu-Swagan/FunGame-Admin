@@ -27,6 +27,7 @@ from db import client, db, serialize_doc
 from game_access import require_playable_game
 from ledger import InsufficientChips, credit_chips, debit_chips
 import ledger
+import financial_wallet
 import rummy
 from transactions import run_game_transaction
 
@@ -1475,6 +1476,10 @@ async def rummy_join(body: JoinRequest, user: dict = Depends(require_active_play
 
     try:
         return await run_game_transaction(client, join_transaction)
+    except financial_wallet.FinancialError as exc:
+        # Preserve wallet eligibility rules while returning an actionable API
+        # response after the transaction has rolled back.
+        _fail(exc.status_code, exc.code, exc.message)
     except DuplicateKeyError:
         # A concurrent join may have won the unique active-player lock. Return
         # that authoritative membership instead of creating a second seat.
