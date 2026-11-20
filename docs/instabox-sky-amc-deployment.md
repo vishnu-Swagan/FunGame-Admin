@@ -33,3 +33,9 @@ Ten-minute activity checks do not override provider runtime caps or guarantee up
 - API health reports gameplay_ready and crm_ready true; financial_ready false.
 - Fresh administrator login and authenticated CRM dashboard, games and users endpoints passed, including the public-domain proxy.
 - Existing Render and Atlas services and data were left untouched.
+
+## Embedded game follow-up
+
+The separately built Aviator micro-app is pinned to https://chakri.casino, matching every other player game and the CRM. Its runtime isolation tests cover production, staging and localhost. Promotional artwork uses bundled assets rather than a Render fallback. GAME_ART_BASE_URL also defaults to the branded origin in source.
+
+A zero-balance QA player was created through the administrator API for migration checks. All 11 available game detail endpoints succeeded over the public domain; the other 12 returned the expected coming-soon response. No deposits, withdrawals or funded bets were made during these checks.

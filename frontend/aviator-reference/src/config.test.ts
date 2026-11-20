@@ -14,11 +14,11 @@ describe("Aviator API runtime isolation", () => {
   });
 
   it("pins canonical production hosts to the single ledger API", () => {
-    expect(apiOriginsForRuntime("https://api.chakri.casino", "Crm.Chakri.Casino")).toEqual([
-      "https://api.chakri.casino",
+    expect(apiOriginsForRuntime("https://chakri.casino", "Crm.Chakri.Casino")).toEqual([
+      "https://chakri.casino",
     ]);
     expect(apiOriginsForRuntime("https://old-api.example", "mydgp.casino")).toEqual([
-      "https://api.chakri.casino",
+      "https://chakri.casino",
     ]);
   });
 });

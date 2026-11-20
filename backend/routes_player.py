@@ -49,7 +49,7 @@ _avatar_storage_lock = asyncio.Lock()
 
 PUBLIC_GAME_STATUSES = ('ENABLED', 'COMING_SOON', 'MAINTENANCE', 'UPDATE_REQUIRED')
 GAME_ART_BASE_URL = os.environ.get(
-    'GAME_ART_BASE_URL', 'https://fungame-web.onrender.com/game-art'
+    'GAME_ART_BASE_URL', 'https://chakri.casino/game-art'
 ).rstrip('/')
 
 

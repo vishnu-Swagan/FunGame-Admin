@@ -19,13 +19,13 @@ export const apiOriginsForRuntime = (configuredUrl: string, hostname: string) =>
   // Never let a live Aviator session cross between API hosts/ledgers. Preview,
   // staging, and local builds remain pinned to their explicitly configured API.
   return isCanonicalProduction
-    ? ["https://api.chakri.casino"]
+    ? ["https://chakri.casino"]
     : Array.from(new Set([configuredUrl].filter(Boolean)));
 };
 
 const knownApiUrls = apiOriginsForRuntime(configuredApiUrl, window.location.hostname);
 
-// The game is a same-site micro-app, but the API is deployed separately. Only
+// The game and API share the branded production origin. Only
 // accept a remembered host that is safe for this runtime hostname. Preview,
 // staging, and local builds must never fall back to a production ledger.
 export const apiBaseUrl = knownApiUrls.includes(rememberedApiUrl)

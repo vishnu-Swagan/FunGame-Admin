@@ -2,8 +2,8 @@
     "development": true,
     "debug": true,
     "appKey": "crash-0.1.0",
-    "production_api": "https://api.chakri.casino/api",
-    "production_wss": "https://api.chakri.casino",
+    "production_api": "https://chakri.casino/api",
+    "production_wss": "https://chakri.casino",
     "development_api": "http://localhost:5001/api",
     "development_wss": "http://localhost:5001"
 }

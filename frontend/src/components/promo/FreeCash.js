@@ -8,35 +8,16 @@ import coinsImg from "@/assets/promo/free-cash-coins.webp";
 import fabImg from "@/assets/promo/free-cash-fab.webp";
 import "./freeCashArt.css";
 
-const RENDER_PROMO = "https://fungame-web.onrender.com/promo";
-
 function formatInr(paise) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 }).format((Number(paise) || 0) / 100);
 }
 
-function onChakriCasino() {
-  try {
-    return /(?:^|\.)chakri\.casino$/.test(window.location.hostname);
-  } catch (_error) {
-    return false;
-  }
-}
-
-function promoSrc(imported, filename) {
-  if (onChakriCasino()) return `${RENDER_PROMO}/${filename}`;
-  return imported;
-}
-
 function PromoImg({ imported, file, alt = "", ...props }) {
-  const fallback = `${RENDER_PROMO}/${file}`;
   return (
     <img
       alt={alt}
       {...props}
-      src={promoSrc(imported, file)}
-      onError={(event) => {
-        if (event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-      }}
+      src={imported}
     />
   );
 }
