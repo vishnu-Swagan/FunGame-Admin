@@ -94,3 +94,7 @@ For the final 88 local API probes: median **64.17 ms**, p95 **118.77 ms**, maxim
 - Evidence: [RTP profiles and mathematical calculations](qa-2026-11-20/rtp-results.json), [final game-service/settlement checks](qa-2026-11-20/final-verification.json), [live Rummy fix verification](qa-2026-11-20/rummy-fix-verification.json), [QA cleanup and reconciliation](qa-2026-11-20/cleanup.json).
 
 The raw initial harness logs also contain a wrong Chicken Road test URL and Blackjack stand requests sent before an insurance decision. Those harness issues were corrected; they are not counted as application defects. Rummy's live paid-join failure is retained in the evidence and superseded by the separate post-fix verification.
+
+## Follow-up: isolated funded Rummy accounting now verified
+
+After the original live bonus-funded audit, a dedicated real-Mongo test verified five cash-funded synthetic accounts, exact pooled payout, duplicate-action protection, waiting-table refunds, bonus/insufficient-balance rejection and rollback after a debit. All six scenario groups passed and the temporary database/credential were removed. This closes the isolated funded-accounting test gap; a complete public-browser valid-declaration hand remains unverified. See [funded-wallet follow-up](rummy-funded-wallet-verification-2026-11-20.md).
