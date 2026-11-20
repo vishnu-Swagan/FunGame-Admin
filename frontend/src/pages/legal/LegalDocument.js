@@ -74,7 +74,6 @@ function CompanyInformation() {
 
   const fields = [
     ["Legal operator", operatorValue(config.legalName)],
-    ["Company number", operatorValue(config.companyNumber)],
     ["Registered office", operatorValue(config.registeredOffice)],
     ["Regulator", operatorValue(config.regulatorName)],
     ["Licence number", operatorValue(config.licenceNumber)],

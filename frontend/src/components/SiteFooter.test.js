@@ -49,11 +49,11 @@ test("site footer lists legal links and explains separate playing and real chips
   const disclaimer = footer.querySelector('[data-testid="site-footer-disclaimer"]');
   expect(disclaimer).not.toBeNull();
   expect(disclaimer.textContent).toMatch(/BONUS AND WITHDRAWAL TERMS APPLY/);
-  expect(footer.textContent).toContain("Playing Chips are non-withdrawable bonus chips.");
+  expect(footer.textContent).toContain("Chakri.Casino is designed and developed by SKY-AMC LIMITED, incorporated in Hong Kong with limited liability.");
   expect(disclaimer.textContent).toBe(AGE_AND_CHIPS);
 
   expect(footer.textContent).toContain(OPERATOR.legalName);
-  expect(footer.textContent).toContain(`Company no. ${OPERATOR.companyNumber}`);
+  expect(footer.textContent).not.toMatch(/company no\.|business registration|81331404|UK company/i);
 
   act(() => root.unmount());
 });

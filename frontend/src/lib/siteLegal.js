@@ -1,7 +1,6 @@
 /** Operator identity shown in the Chakri.Casino footer and legal pages. */
 export const OPERATOR = {
   legalName: "SKY-AMC LIMITED",
-  companyNumber: "81331404",
   productName: "Chakri.Casino",
   tagline: "Play in the Light",
   country: "Hong Kong",

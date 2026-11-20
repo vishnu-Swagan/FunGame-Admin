@@ -10,9 +10,7 @@ export default function SiteFooter({ signedIn = false }) {
         <div>
           <BrandWordmark logoClassName="h-auto w-[min(72vw,220px)]" />
           <p className="mt-3 text-xs leading-relaxed text-white/55">
-            {OPERATOR.productName} is a digital entertainment product of {OPERATOR.legalName},
-            a UK company. Playing Chips are non-withdrawable bonus chips. Eligible Real Chips
-            are withdrawable through your wallet, subject to the displayed terms and limits.
+            Chakri.Casino is designed and developed by SKY-AMC LIMITED, incorporated in Hong Kong with limited liability.
           </p>
         </div>
 
@@ -37,20 +35,6 @@ export default function SiteFooter({ signedIn = false }) {
           ))}
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-[11px] leading-relaxed text-white/50">
-          <p className="font-semibold text-white/70">{OPERATOR.legalName}</p>
-          <p>Business registration no. {OPERATOR.companyNumber}</p>
-          {OPERATOR.addressLines.map((line) => <p key={line}>{line}</p>)}
-          <p className="mt-2">
-            Company site:{" "}
-            <a className="text-primary underline-offset-2 hover:underline" href={OPERATOR.companyUrl} target="_blank" rel="noreferrer">
-              sky-amc.com
-            </a>
-          </p>
-          <p>
-            Player support is in the app under Support. We do not publish a public inbox on this page.
-          </p>
-        </div>
 
         <p data-testid="site-footer-disclaimer" className="text-[10px] tracking-[0.14em] uppercase text-white/45">
           {AGE_AND_CHIPS}

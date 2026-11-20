@@ -139,6 +139,53 @@ async def main():
   assert await db.chip_transactions.count_documents({'user_id':u['id']})==0
   assert await db.rummy_seats.count_documents({'user_id':u['id']})==0
   REPORT['checks'].append({'name':'real Mongo transaction rollback after wallet debit','passed':True,'cash_restored':1000,'orphan_ledger_rows':0,'orphan_seats':0})
+  if os.environ.get('QA_DECLARATION_REVIEW') == '1':
+   # Deterministic, physically distinct cards in this disposable DB only.
+   # This exercises declaration settlement; it is not a random-deal fairness audit.
+   import rummy
+   players=[await fixture('declare-'+str(i),1000,0) for i in range(5)]
+   for player in players:
+    joined=await rr.rummy_join(join_request(),user=player)
+   rid=joined['roomId'];target=joined['scheduledStartAtEpoch']
+   while clock[0] < target-1:
+    clock[0]=min(clock[0]+5,target-1)
+    for player in players:
+     current=await rr.rummy_room_state(rid,user=player)
+     await act(player,current,'HEARTBEAT')
+   clock[0]=target+.1
+   await rr._activate_scheduled_room(rid)
+   room=await db.rummy_rooms.find_one({'id':rid});assert room['state']=='TURN_ACTIVE'
+   winning_index=room['current_seat'];winner=players[winning_index]
+   cards={c['id']:c for c in rummy.new_deck()}
+   ids=[['D1-H-2','D1-H-3','D1-H-4'],['D1-S-5','D1-PJ','D1-S-7'],['D1-D-9','D1-C-9','D1-S-9'],['D1-D-10','D1-D-11','D1-D-12','D1-D-13']]
+   hand=[cards[x] for group in ids for x in group];extra=cards['D2-C-8'];indicator=cards['D2-H-13']
+   excluded={c['id'] for c in hand+[extra,indicator]}
+   deck=[c for c in cards.values() if c['id'] not in excluded]
+   for player in players:
+    deal=hand if player is winner else [deck.pop() for _ in range(13)]
+    await db.rummy_hands.update_one({'room_id':rid,'user_id':player['id']},{'$set':{'cards':deal,'groups':[], 'drawn':False,'drawn_card_id':None,'draw_source':None}})
+   discard=deck.pop()
+   await db.rummy_rooms.update_one({'id':rid},{'$set':{'wild_rank':13,'wild_joker':indicator,'closed_deck':deck+[extra],'discard_pile':[discard]}})
+   d=await rr.rummy_room_state(rid,user=winner);assert len(d['privateState']['cards'])==13
+   other=next(p for p in players if p is not winner)
+   private=await rr.rummy_room_state(rid,user=other)
+   assert not ({c['id'] for c in hand}&{c['id'] for c in private['privateState']['cards']})
+   assert all('cards' not in row for row in private['seats'])
+   await rr.rummy_action(rid,rr.RummyAction(roomId=rid,roundId=d['roundId'],actionId=uuid.uuid4().hex,expectedVersion=d['version'],actionType='DRAW_CLOSED',actionPayload={},clientTimestamp=clock[0]),user=winner)
+   d=await rr.rummy_room_state(rid,user=winner);assert len(d['privateState']['cards'])==14
+   body=rr.RummyAction(roomId=rid,roundId=d['roundId'],actionId=uuid.uuid4().hex,expectedVersion=d['version'],actionType='DISCARD_AND_DECLARE',actionPayload={'cardId':extra['id'],'groups':ids},clientTimestamp=clock[0])
+   result=await rr.rummy_action(rid,body,user=winner)
+   assert result['code']=='VALID_DECLARATION'
+   assert await rr.rummy_action(rid,body,user=winner)==result
+   settled=await db.rummy_rooms.find_one({'id':rid});assert settled['state']=='ROUND_SETTLED'
+   fee=500*FEE_BPS//10000;payout=500-fee
+   assert settled['result']['payoutChips']==payout and settled['result']['houseCommissionChips']==fee
+   balances_after=await balances(players)
+   assert sum(row['cash'] for row in balances_after)+fee==5000
+   assert balances_after[winning_index]['cash']==900+payout
+   assert await db.chip_transactions.count_documents({'user_id':winner['id'],'ref':d['roundId'],'kind':ledger.PAYOUT})==1
+   if FEE_BPS:assert await db.rummy_house_fees.count_documents({'round_id':d['roundId'],'status':'POSTED','fee_chips':fee})==1
+   REPORT['checks'].append({'name':'five-player funded valid-declaration settlement after draw/discard; private hands and exact retry','passed':True,'fixture':'authored valid hand in disposable DB, not natural random gameplay','cards_before_draw':13,'cards_after_draw':14,'cards_after_discard':13,'gross_pot':500,'house_fee':fee,'winner_payout':payout,'balances':balances_after,'initial_player_total':5000,'final_player_total':5000-fee,'house_total':fee,'payout_count':1,'winner_card_privacy_before_result':True})
   client.close()
  finally:
   if NAME.startswith('qa_rummy_'):

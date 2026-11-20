@@ -14,7 +14,6 @@ export const LEGAL_POLICY_STATUS = policyStatus === "PUBLISHED" ? "PUBLISHED" : 
 export const LEGAL_OPERATOR_CONFIG = Object.freeze({
   brandName: envValue("REACT_APP_OPERATOR_BRAND_NAME") || "Chakri.Casino",
   legalName: envValue("REACT_APP_OPERATOR_LEGAL_NAME"),
-  companyNumber: envValue("REACT_APP_OPERATOR_COMPANY_NUMBER"),
   registeredOffice: envValue("REACT_APP_OPERATOR_REGISTERED_OFFICE"),
   regulatorName: envValue("REACT_APP_OPERATOR_REGULATOR_NAME"),
   licenceNumber: envValue("REACT_APP_OPERATOR_LICENCE_NUMBER"),
@@ -29,7 +28,6 @@ export const LEGAL_OPERATOR_CONFIG = Object.freeze({
 
 export const REQUIRED_PUBLIC_OPERATOR_FIELDS = Object.freeze([
   "legalName",
-  "companyNumber",
   "registeredOffice",
   "regulatorName",
   "licenceNumber",

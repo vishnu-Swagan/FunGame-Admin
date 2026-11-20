@@ -26,8 +26,8 @@ export function AboutPage() {
   return (
     <Shell title="About Chakri.Casino">
       <p>
-        {OPERATOR.productName} is a virtual-chip entertainment lobby operated by {OPERATOR.legalName}
-        (company no. {OPERATOR.companyNumber}), a United Kingdom private limited company.
+        {OPERATOR.productName} is designed and developed by {OPERATOR.legalName},
+        incorporated in Hong Kong with limited liability.
         The company develops, sells and produces software and digital entertainment.
       </p>
       <p>
@@ -88,7 +88,6 @@ export function ContactPage() {
     <Shell title="Contact">
       <p>Player support is inside the app. Signed-in players can message the operator from Support.</p>
       <p>{OPERATOR.legalName}</p>
-      <p>Business registration no. {OPERATOR.companyNumber}</p>
       {OPERATOR.addressLines.map((line) => <p key={line}>{line}</p>)}
       <p>
         Company site:{" "}
